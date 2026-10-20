@@ -374,18 +374,13 @@ function updateTotals() {
   if (!state.draft) return;
   const sum = round2(lineSum());
   const header = round2(num($("evTotal")?.value));
-  const read = round2(state.draft.event.total_cost || 0);   // what the bill itself said, as first read
+  // The header total follows the line items (see linesChanged), so the only
+  // time the two differ is the moment the page opens -- the total the model
+  // read hasn't been replaced yet; the top warning box already explains that
+  // mismatch -- or after you type your own total. Show it only then.
   const parts = [el("span", {}, "ผลรวมรายการ ", el("span", { class: "big", text: fmtMoney(sum) }))];
-  if (read > 0) {
-    const ok = Math.abs(sum - read) <= 1;
-    parts.push(
-      el("span", {}, "ยอดที่อ่านได้จากบิล ", el("span", { class: "big", text: fmtMoney(read) })),
-      el("span", { class: ok ? "good" : "bad", text: ok ? "✓ ตรงกับบิล" : `ต่างจากบิล ${fmtMoney(sum - read)} บาท` }),
-    );
-  } else {
-    parts.push(el("span", { class: "muted", text: "ไม่พบยอดรวมในบิล" }));
-  }
   if (Math.abs(header - sum) > 0.005) {
+    parts.push(el("span", {}, "ยอดรวมที่ตั้งไว้ ", el("span", { class: "big", text: fmtMoney(header) })));
     parts.push(el("button", {
       class: "btn", text: "ตั้งยอดรวม = ผลรวมรายการ",
       onclick: () => { state.totalManual = false; linesChanged(); },
