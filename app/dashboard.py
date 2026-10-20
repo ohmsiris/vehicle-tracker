@@ -9,6 +9,13 @@ Definitions worth knowing (they are also shown on the page):
     without a cost (e.g. a manual entry) counts as a repair but adds 0.
   * Spend by category comes from the bill's LINE items, which can differ a
     little from event totals (VAT, discounts), so it is labelled as such.
+  * "Repairs done" counts every repair ONCE, however it was recorded. A saved
+    bill or manual entry is one repair, on its own date; a board request that
+    is linked to one is the SAME repair and adds nothing. Only requests with
+    no record behind them (closed with no bill, or fixed and still waiting for
+    a bill) are counted on top, by the date they were fixed -- and they drop
+    out of that group the moment a bill links to them. Drivers don't always
+    write a problem on the FOH sheet, so the count can't depend on requests.
   * "Not serviced lately" is only a prompt to look, not a maintenance due
     date -- the system has no service intervals yet.
 """
@@ -73,6 +80,26 @@ def build_dashboard(*, events: list[dict], lines: list[dict], vehicles: list[dic
         by_month[m][0] += _num(e.get("total_cost"))
         by_month[m][1] += 1
     monthly = [{"month": m.strftime("%Y-%m"), "spend": _money(by_month[m][0]), "count": by_month[m][1]} for m in month_keys]
+
+    # ---- repairs done, each counted once (see the module docstring)
+    done = defaultdict(lambda: {"records": 0, "no_bill": 0, "awaiting": 0})
+    for e in ev_period:
+        done[_d(e.get("event_month"))]["records"] += 1
+    for r in req:
+        fixed = _d(r.get("fixed_date"))
+        if not fixed or r.get("has_record") or r.get("status") not in ("awaiting_bill", "completed"):
+            continue          # open / cancelled, or already counted through its bill or manual entry
+        if month_start(fixed) >= first_month:
+            done[month_start(fixed)]["awaiting" if r["status"] == "awaiting_bill" else "no_bill"] += 1
+    for m in monthly:
+        d_ = done[date.fromisoformat(m["month"] + "-01")]
+        m["repairs"] = d_["records"] + d_["no_bill"] + d_["awaiting"]
+
+    def done_total(months_: list) -> dict:
+        t = {"records": sum(done[m]["records"] for m in months_), "no_bill": sum(done[m]["no_bill"] for m in months_),
+             "awaiting": sum(done[m]["awaiting"] for m in months_)}
+        t["total"] = t["records"] + t["no_bill"] + t["awaiting"]
+        return t
 
     spend_this = by_month[this_month][0]
     spend_last = by_month[add_months(this_month, -1)][0] if months > 1 else 0.0
@@ -152,7 +179,10 @@ def build_dashboard(*, events: list[dict], lines: list[dict], vehicles: list[dic
         "kpis": {
             "spend_this_month": _money(spend_this), "spend_last_month": _money(spend_last),
             "spend_period": _money(sum(m["spend"] for m in monthly)),
+            # bills / manual entries only (what the spend figures are built from)
             "repairs_this_month": by_month[this_month][1], "repairs_period": sum(m["count"] for m in monthly),
+            # every repair once, however it was recorded
+            "done_this_month": done_total([this_month]), "done_period": done_total(month_keys),
             "open_requests": sum(1 for r in active if r["status"] == "open"),
             "awaiting_bill": len(awaiting),
             "oldest_awaiting_days": max((r.get("days_in_status") or 0 for r in awaiting), default=0),

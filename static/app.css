@@ -252,6 +252,7 @@ dialog label { margin: 14px 0 5px; }
 .kpi-value { font-size: 28px; font-weight: 700; margin: 3px 0 2px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .kpi.bad .kpi-value { color: var(--bad); }
 .kpi-sub { color: var(--muted); font-size: 13px; }
+.nowrap { white-space: nowrap; }
 .dashgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 16px; }
 .dashgrid .card { margin: 0; }
 .dashgrid .card.wide { grid-column: 1 / -1; }

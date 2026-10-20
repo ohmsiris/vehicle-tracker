@@ -217,3 +217,70 @@ def test_dashboard_endpoint_maps_database_errors(monkeypatch):
     monkeypatch.setattr(main.supabase, "select_all", boom)
     r = client.get("/api/dashboard?token=secret")
     assert r.status_code == 502 and "internals" not in r.text
+
+
+# --------------------------------------- "repairs done": every repair counted ONCE
+def rq(status, fixed="2026-10-10", *, has_record=False, no_bill=False, branch="สระบุรี"):
+    return {"status": status, "branch": branch, "fixed_date": fixed, "has_record": has_record, "no_bill": no_bill,
+            "days_to_fix": 1, "days_in_status": 1, "status_changed_date": fixed or "2026-10-10"}
+
+
+def done(requests, events=(), **kw):
+    return build(events=list(events), requests=requests, **kw)["kpis"]["done_this_month"]
+
+
+def test_a_bill_and_the_request_it_closed_are_one_repair_not_two():
+    d = done([rq("completed", has_record=True)], events=[ev("e1", "2026-10-10", 3000)])
+    assert d == {"records": 1, "no_bill": 0, "awaiting": 0, "total": 1}
+
+
+def test_one_bill_closing_two_requests_is_still_one_repair():
+    d = done([rq("completed", has_record=True), rq("completed", has_record=True)], events=[ev("e1", "2026-10-10", 3000)])
+    assert d["total"] == 1
+
+
+def test_a_repair_nobody_wrote_on_the_foh_sheet_still_counts():
+    assert done([], events=[ev("e1", "2026-10-10", 3000), ev("e2", "2026-10-12", 500, source="manual")])["total"] == 2
+
+
+def test_closed_with_no_bill_counts_on_top_of_the_records():
+    d = done([rq("completed", no_bill=True)], events=[ev("e1", "2026-10-10", 3000)])
+    assert d == {"records": 1, "no_bill": 1, "awaiting": 0, "total": 2}
+
+
+def test_fixed_and_waiting_for_a_bill_counts_now_and_not_again_when_the_bill_arrives():
+    before = done([rq("awaiting_bill")])
+    assert before == {"records": 0, "no_bill": 0, "awaiting": 1, "total": 1}
+    # the bill is saved: the request links to it (has_record) and the event exists -> still ONE repair
+    after = done([rq("completed", has_record=True)], events=[ev("e1", "2026-10-14", 2500)])
+    assert after == {"records": 1, "no_bill": 0, "awaiting": 0, "total": 1}
+
+
+def test_open_and_cancelled_requests_never_count_as_done():
+    # a request cancelled from 'awaiting bill' keeps its fixed date -- it must still not count
+    assert done([rq("open", fixed=None), rq("cancelled", fixed="2026-10-10"), rq("cancelled", fixed=None)])["total"] == 0
+
+
+def test_a_completed_request_whose_bill_was_deleted_still_counts_as_a_repair():
+    assert done([rq("completed", has_record=False, no_bill=False)])["total"] == 1
+
+
+def test_no_record_repairs_are_counted_in_the_month_they_were_fixed():
+    requests = [rq("completed", fixed="2026-09-20", no_bill=True), rq("completed", fixed="2026-10-02", no_bill=True)]
+    d = build(requests=requests, months=3)
+    by_month = {m["month"]: m["repairs"] for m in d["monthly"]}
+    assert by_month == {"2026-08": 0, "2026-09": 1, "2026-10": 1}
+    assert d["kpis"]["done_this_month"]["total"] == 1 and d["kpis"]["done_period"]["total"] == 2
+
+
+def test_monthly_repairs_series_adds_records_and_no_record_repairs():
+    d = build(events=[ev("a", "2026-10-03", 100), ev("b", "2026-10-04", 100)], requests=[rq("completed", no_bill=True)], months=2)
+    assert [m["repairs"] for m in d["monthly"]] == [0, 3]
+    assert [m["count"] for m in d["monthly"]] == [0, 2]       # `count` stays "bills / entries" (what spend is made of)
+
+
+def test_done_count_respects_branch_and_window():
+    requests = [rq("completed", no_bill=True, branch="สระบุรี"), rq("completed", no_bill=True, branch="แก่งคอย"),
+                rq("completed", fixed="2024-01-01", no_bill=True)]
+    assert build(requests=requests, branch="แก่งคอย", months=6)["kpis"]["done_period"]["total"] == 1
+    assert build(requests=requests, months=6)["kpis"]["done_period"]["total"] == 2     # the 2024 one is outside the window

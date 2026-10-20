@@ -312,7 +312,7 @@ def get_dashboard(
                     "select": "line_item_id,event_month,category,category_en,line_total,vehicle_branch", "order": "line_item_id.asc"}),
                 "vehicles": supabase.select_all("v_vehicle_status", {"select": "*", "order": "vehicle_id.asc"}),
                 "requests": supabase.select_all("v_requests", {
-                    "select": "request_id,status,branch,days_in_status,days_to_fix,fixed_date,no_bill,status_changed_date", "order": "request_no.asc"}),
+                    "select": "request_id,status,branch,days_in_status,days_to_fix,fixed_date,no_bill,has_record,status_changed_date", "order": "request_no.asc"}),
             }
         except supabase.SupabaseError:
             logger.exception("dashboard query failed")

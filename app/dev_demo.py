@@ -52,10 +52,10 @@ def rows(today: date) -> dict:
     requests = [
         {"status": "open", "branch": "สระบุรี", "days_in_status": 4}, {"status": "open", "branch": "สระบุรี", "days_in_status": 11},
         {"status": "open", "branch": "สระบุรี", "days_in_status": 2},
-        {"status": "awaiting_bill", "branch": "สระบุรี", "days_in_status": 2, "days_to_fix": 3, "fixed_date": today.replace(day=1).isoformat()},
-        {"status": "awaiting_bill", "branch": "แก่งคอย", "days_in_status": 8, "days_to_fix": 5, "fixed_date": today.replace(day=1).isoformat()},
-        {"status": "awaiting_bill", "branch": "แก่งคอย", "days_in_status": 15, "days_to_fix": 1, "fixed_date": add_months(today.replace(day=1), -1).isoformat()},
-        {"status": "completed", "branch": "สระบุรี", "no_bill": True, "days_to_fix": 2, "fixed_date": today.replace(day=1).isoformat(), "status_changed_date": today.replace(day=1).isoformat()},
-        {"status": "completed", "branch": "สระบุรี", "no_bill": False, "days_to_fix": 6, "fixed_date": today.replace(day=1).isoformat(), "status_changed_date": today.replace(day=1).isoformat()},
+        {"status": "awaiting_bill", "branch": "สระบุรี", "days_in_status": 2, "days_to_fix": 3, "fixed_date": today.replace(day=1).isoformat(), "has_record": False},
+        {"status": "awaiting_bill", "branch": "แก่งคอย", "days_in_status": 8, "days_to_fix": 5, "fixed_date": today.replace(day=1).isoformat(), "has_record": False},
+        {"status": "awaiting_bill", "branch": "แก่งคอย", "days_in_status": 15, "days_to_fix": 1, "fixed_date": add_months(today.replace(day=1), -1).isoformat(), "has_record": False},
+        {"status": "completed", "branch": "สระบุรี", "no_bill": True, "has_record": False, "days_to_fix": 2, "fixed_date": today.replace(day=1).isoformat(), "status_changed_date": today.replace(day=1).isoformat()},
+        {"status": "completed", "branch": "สระบุรี", "no_bill": False, "has_record": True, "days_to_fix": 6, "fixed_date": today.replace(day=1).isoformat(), "status_changed_date": today.replace(day=1).isoformat()},
     ]
     return {"events": events, "lines": lines, "vehicles": vehicles, "requests": requests}
