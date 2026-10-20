@@ -35,8 +35,8 @@ call spends API credit), `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`. The
 service key bypasses row-level security: server-side only, never in a page.
 
 **Database** (Supabase SQL Editor, in this order): `schema.sql`, then
-`schema_v2.sql`. Replace `<PROJECT_REF>` in `schema.sql` first. Then seed the
-fleet:
+`schema_v2.sql`, then `schema_v3_dashboard.sql`. Replace `<PROJECT_REF>` in
+`schema.sql` first. Then seed the fleet:
 
 ```bash
 .venv/Scripts/python.exe scripts/seed_vehicles.py
@@ -78,3 +78,26 @@ Open `http://localhost:8000/?token=<APP_TOKEN>`.
   choosing among Thai enum labels directly gave wrong picks for items it had
   identified correctly.
 - Truck numbers are NOT unique across branches; lookups are by plate.
+
+## Dashboard (Looker Studio)
+
+`schema_v3_dashboard.sql` creates a read-only database login, `looker_ro`,
+that can SELECT six views and nothing else (no writes, 20 s query limit, 5
+connections). Looker Studio connects as that user -- never with the service
+key. Set the password **in the Supabase SQL editor, not in the saved file**
+(the script refuses the placeholder and anything under 20 characters; a real
+password must never be committed).
+
+Connect Looker Studio to the Supabase **session pooler** (IPv4; the direct
+`db.<ref>.supabase.co` host is IPv6-only on the free plan): Supabase ->
+Connect -> Session pooler gives the host and port; the username is
+`looker_ro.<project_ref>`. One data source per view:
+
+| View | One row per | Use it for |
+|---|---|---|
+| `v_events` | confirmed repair (bill or manual) | spend by month / truck / vendor / branch, data-quality rate |
+| `v_line_items` | line on a bill | spend by category (`category_en` for English labels), parts and labour |
+| `v_vehicle_status` | active truck | last service, open requests, bills outstanding |
+| `v_active_requests` | open or awaiting-bill request | the live queue and its ageing |
+| `v_requests` | every request ever | time-to-fix, requests per truck, closed-without-bill count |
+| `v_attachments` | photo / PDF | links to open a bill's file |
