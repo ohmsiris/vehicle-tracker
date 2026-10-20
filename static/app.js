@@ -212,7 +212,7 @@ function render(draft, pickedVehicle) {
   const form = $("eventForm");
   form.replaceChildren(
     eventField("รถ", vSel),
-    eventField("วันที่", flagInput(inp("evDate", "date", ev.event_date), flags.has("event_date"))),
+    eventField("วันที่ (ในบิลเป็น พ.ศ.)", el("div", {}, flagInput(inp("evDate", "date", ev.event_date), flags.has("event_date")), el("div", { id: "evDateCap", class: "datecap" }))),
     eventField("ร้าน / อู่", flagInput(inp("evVendor", "text", ev.vendor), flags.has("vendor"))),
     eventField("สาขา", flagInput(inp("evBranch", "text", ev.branch), flags.has("branch"))),
     eventField("เลขไมล์", flagInput(inp("evMileage", "number", ev.mileage, { inputmode: "numeric" }), flags.has("mileage"))),
@@ -224,6 +224,7 @@ function render(draft, pickedVehicle) {
   setCatStatus("");
   form.querySelectorAll("input,select").forEach((n) => n.addEventListener("input", updateTotals));
   $("evTotal").addEventListener("input", () => { state.totalManual = true; });
+  bindDateField($("evDate"), $("evDateCap"));
   vSel.addEventListener("change", renderFixes);   // the "which repairs does this close" list follows the truck
   renderFixes();
 
@@ -456,7 +457,7 @@ async function confirmSave() {
     let res = await postEvent(p, false);
     if (res.status === 409) {
       const dup = (await res.json()).duplicates || [];
-      const names = dup.map((d) => `${d.filename} (บันทึกไว้เมื่อ ${new Date(d.saved_at).toLocaleDateString("th-TH")})`).join("\n");
+      const names = dup.map((d) => `${d.filename} (บันทึกไว้เมื่อ ${beDateOf(new Date(d.saved_at))})`).join("\n");
       if (!confirm(`บิลนี้เคยบันทึกไว้แล้ว:\n${names}\n\nต้องการบันทึกซ้ำอีกครั้งไหม?`)) return;
       res = await postEvent(p, true);
     }
@@ -469,7 +470,7 @@ async function confirmSave() {
     const saved = await res.json();
     const veh = selectedVehicle($("evVehicle"));
     $("doneText").textContent =
-      `${veh ? vehicleLabel(veh) : ""} · ${p.event.event_date} · ${p.line_items.length} รายการ · ${state.billFiles.length + state.refFiles.length} ไฟล์ (รหัส ${saved.event_id.slice(0, 8)})`;
+      `${veh ? vehicleLabel(veh) : ""} · ${beDate(p.event.event_date)} · ${p.line_items.length} รายการ · ${state.billFiles.length + state.refFiles.length} ไฟล์ (รหัส ${saved.event_id.slice(0, 8)})`;
     const closed = p.fixes_request_ids.length;
     $("doneClosed").hidden = closed === 0;
     $("doneClosed").textContent = closed ? `ปิดงานซ่อมให้แล้ว ${closed} งาน` : "";

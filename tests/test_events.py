@@ -283,3 +283,14 @@ def test_fixes_request_ids_must_be_uuids(fake, bad):
     with pytest.raises(events.InvalidEvent):
         events.save_event(payload(fixes_request_ids=bad), FILES)
     assert fake.uploads == [] and fake.rpcs == []
+
+
+# ------------------------------------------------ พ.ศ. typed where ค.ศ. is expected
+def test_buddhist_year_in_the_event_date_gets_a_specific_message(fake):
+    p = payload()
+    p["event"]["event_date"] = "2569-10-20"        # พ.ศ. 2569 = ค.ศ. 2026
+    with pytest.raises(events.InvalidEvent) as exc:
+        events.save_event(p, FILES)
+    msg = str(exc.value)
+    assert "พ.ศ." in msg and "2026" in msg and "อนาคต" not in msg      # says what's wrong, not just "future date"
+    assert fake.uploads == [] and fake.rpcs == []

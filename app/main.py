@@ -54,6 +54,22 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.middleware("http")
+async def static_cache_policy(request, call_next):
+    """The page is several script/style files that must stay in step: after a
+    deploy, a browser that kept an OLD board.js next to a NEW dashboard.js
+    breaks the page. So the app's own files (and the page itself) are always
+    re-checked with the server -- a cheap "304 not modified" when nothing
+    changed -- while the fonts, which never change, are cached for a week."""
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/fonts/"):
+        response.headers["Cache-Control"] = "public, max-age=604800"
+    elif path == "/" or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}

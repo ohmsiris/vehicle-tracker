@@ -142,7 +142,7 @@ def test_create_cleans_and_defaults(db):
 @pytest.mark.parametrize("data, fragment", [
     ({"vehicle_id": None, "problem": "x"}, "เลือกรถ"),
     ({"vehicle_id": "v1", "problem": "   "}, "ปัญหา"),
-    ({"vehicle_id": "v1", "problem": "x", "request_date": "2999-01-01"}, "อนาคต"),
+    ({"vehicle_id": "v1", "problem": "x", "request_date": "2030-01-01"}, "อนาคต"),
 ])
 def test_create_validation(db, data, fragment):
     with pytest.raises(rr.InvalidRequest) as exc:
@@ -242,3 +242,9 @@ def test_board_503_when_supabase_unconfigured():
     from app import main
     object.__setattr__(main.settings, "app_token", "secret")
     assert TestClient(main.app).get("/api/requests?token=secret").status_code == 503
+
+
+def test_buddhist_year_in_the_fixed_date_gets_a_specific_message():
+    with pytest.raises(rr.InvalidRequest) as exc:
+        act(req(), "fixed_awaiting_bill", fixed_by="ช่างเอ๋", fixed_date="2569-10-15")
+    assert "พ.ศ." in str(exc.value) and "2026" in str(exc.value)

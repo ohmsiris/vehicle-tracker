@@ -27,8 +27,50 @@ function daysSince(iso) {
   return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
 }
 
-const thDate = (iso) => new Date(iso.length === 10 ? `${iso}T00:00:00` : iso)
-  .toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+// ---- Dates. The database and every <input type=date> value use the standard
+// (ค.ศ.) ISO form, e.g. 2026-10-20. Everything shown to a person uses the
+// Buddhist year in full -- "20 ต.ค. 2569" -- like the bills themselves, never
+// a 2-digit year. Done by hand, not with Intl, so it reads the same on every
+// phone and browser regardless of its language settings.
+const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+
+function beDate(iso) {                       // "2026-10-20" (or an ISO timestamp's date part) -> "20 ต.ค. 2569"
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
+  return m ? `${+m[3]} ${TH_MONTHS[+m[2] - 1]} ${+m[1] + 543}` : "";
+}
+
+function beDateOf(dateObj) {                 // a JS Date, in the viewer's own timezone
+  return `${dateObj.getDate()} ${TH_MONTHS[dateObj.getMonth()]} ${dateObj.getFullYear() + 543}`;
+}
+
+const beMonth = (ym) => `${TH_MONTHS[+ym.slice(5, 7) - 1]} ${+ym.slice(0, 4) + 543}`;   // "2026-10" -> "ต.ค. 2569"
+
+// Typed a พ.ศ. year into a ค.ศ. field (2569 instead of 2026)? Fix it. Returns the ISO date to use.
+function fixBuddhistYear(iso) {
+  const m = /^(\d{4})-(\d{2}-\d{2})$/.exec(iso || "");
+  return m && +m[1] >= 2400 ? `${+m[1] - 543}-${m[2]}` : iso;
+}
+
+// The line under a date field that spells out both calendars, so there is never any doubt which year it is.
+function dateCaption(iso) {
+  const m = /^(\d{4})-/.exec(iso || "");
+  return m && +m[1] >= 1900 ? `${beDate(iso)} (พ.ศ.) · ค.ศ. ${+m[1]}` : "";
+}
+
+// Wires a date input + its caption: auto-corrects a พ.ศ. year, keeps the caption live. Returns true if it corrected.
+function bindDateField(input, captionEl) {
+  const refresh = () => {
+    const fixed = fixBuddhistYear(input.value);
+    const corrected = fixed !== input.value;
+    if (corrected) input.value = fixed;
+    captionEl.textContent = dateCaption(input.value) + (corrected ? " — แปลงจาก พ.ศ. เป็น ค.ศ. ให้แล้ว" : "");
+  };
+  input.addEventListener("input", refresh);
+  input.addEventListener("change", refresh);
+  captionEl.textContent = dateCaption(input.value);
+}
+
+const thDate = beDate;
 
 function truckLabel(r) {
   return [r.truck_number ? `#${r.truck_number}` : null, r.plate].filter(Boolean).join(" ") || "ไม่ระบุรถ";
@@ -187,6 +229,7 @@ function openFixDialog(r) {
   $("fixDate").value = todayISO();
   $("fixDate").min = r.request_date;
   $("fixDate").max = todayISO();
+  $("fixDateCap").textContent = dateCaption($("fixDate").value);
   $("fixReason").value = "";
   $("fixError").hidden = true;
   $("fixerList").replaceChildren(...board.fixers.map((n) => el("option", { value: n })));
@@ -301,6 +344,7 @@ const selectedFixIds = () => [...document.querySelectorAll("#fixesList input:che
 function initBoard() {
   fillVehicleSelect($("addVehicle"));
   $("addForm").addEventListener("submit", submitNewRequest);
+  bindDateField($("fixDate"), $("fixDateCap"));
   $("fixCancel").addEventListener("click", () => $("fixDialog").close());
   $("fixHasBill").addEventListener("click", () => submitFix("fixed_awaiting_bill"));
   $("fixNoBill").addEventListener("click", () => submitFix("fixed_no_bill"));

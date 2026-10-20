@@ -17,7 +17,6 @@ function compactBaht(n) {
   return String(Math.round(n));
 }
 
-const thMonth = (ym) => new Date(`${ym}-01T00:00:00`).toLocaleDateString("th-TH", { month: "short", year: "2-digit" });
 
 const FLAG_LABELS = {
   open_requests: ["มีงานรอซ่อม", "warn"],
@@ -57,7 +56,7 @@ function fillBranchFilter() {
 // --------------------------------------------------------------- rendering
 function renderDashboard() {
   const d = dash.data;
-  $("dashAsOf").textContent = `ข้อมูล ณ ${new Date(`${d.as_of}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}`;
+  $("dashAsOf").textContent = `ข้อมูล ณ ${beDate(d.as_of)}`;
   const hasData = d.kpis.repairs_period > 0 || d.fleet.length > 0;
 
   renderKpis(d);
@@ -67,7 +66,7 @@ function renderDashboard() {
   })), "ยังไม่มีรายการในบิลช่วงนี้");
   renderBars("chartTrucks", d.top_trucks.map((t) => ({
     label: [t.truck_number ? `#${t.truck_number}` : null, t.plate].filter(Boolean).join(" "),
-    sub: `${t.count} ครั้ง${t.last_date ? ` · ล่าสุด ${thDateShort(t.last_date)}` : ""}`, value: t.amount, text: baht(t.amount),
+    sub: `${t.count} ครั้ง${t.last_date ? ` · ล่าสุด ${beDate(t.last_date)}` : ""}`, value: t.amount, text: baht(t.amount),
   })), "ยังไม่มีข้อมูลรถ");
   renderBars("chartVendors", d.top_vendors.map((v) => ({
     label: v.vendor, sub: `${v.count} ครั้ง`, value: v.amount, text: baht(v.amount),
@@ -79,11 +78,10 @@ function renderDashboard() {
   if (d.notes.events_without_cost) notes.push(`${d.notes.events_without_cost} รายการยังไม่มียอดเงิน (นับเป็นครั้งที่ซ่อม แต่ไม่รวมในค่าซ่อม)`);
   notes.push("ซ่อมเสร็จ = นับครั้งซ่อมละ 1 จากทุกที่มา (บิล/บันทึกที่บันทึกแล้ว + ปิดโดยไม่มีบิล + ซ่อมแล้วรอบิล) งานที่มีบิลแล้วไม่นับซ้ำกับใบแจ้งซ่อม · \"งานรอซ่อม/รอบิล\" นับจากใบแจ้งซ่อมที่ใส่ในระบบเท่านั้น");
   notes.push("ค่าซ่อม = ยอดรวมของบิลที่บันทึกแล้ว ตามวันที่ในบิล · แยกตามหมวดคิดจากรายการในบิล จึงอาจต่างจากยอดรวมเล็กน้อย (VAT/ส่วนลด)");
+  notes.push("ปีที่แสดงทั้งหมดเป็น พ.ศ. (ระบบเก็บเป็น ค.ศ. ภายใน)");
   notes.push(`"ไม่เข้าซ่อมนาน" = ไม่มีบันทึกซ่อมเกิน ${d.notes.stale_days} วัน — เป็นแค่ตัวช่วยให้ไปดู ไม่ใช่กำหนดเข้าศูนย์`);
   $("dashNotes").replaceChildren(...notes.map((t) => el("div", { text: t })));
 }
-
-const thDateShort = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
 
 function kpi(label, value, sub, tone = "", hint = "") {
   return el("div", { class: `kpi ${tone}`.trim(), title: hint || null },
@@ -134,10 +132,11 @@ function renderMonthly(d) {
   }
   box.replaceChildren(el("div", { class: "cols" }, ...d.monthly.map((m, i) => {
     const current = i === d.monthly.length - 1;
-    return el("div", { class: "col", title: `${thMonth(m.month)}: ${baht(m.spend)} บาท · ซ่อม ${m.repairs} ครั้ง` },
+    return el("div", { class: "col", title: `${beMonth(m.month)}: ${baht(m.spend)} บาท · ซ่อม ${m.repairs} ครั้ง` },
       el("span", { class: "col-val", text: m.spend ? compactBaht(m.spend) : "" }),
       el("div", { class: "col-track" }, el("div", { class: `col-bar${current ? " current" : ""}`, style: `height:${Math.max(m.spend ? 3 : 0, (m.spend / max) * 100)}%` })),
-      el("span", { class: "col-label", text: thMonth(m.month) }));
+      // month over the full พ.ศ. year, on two lines so the year is never cut or ambiguous
+      el("span", { class: "col-label" }, TH_MONTHS[+m.month.slice(5, 7) - 1], el("br"), String(+m.month.slice(0, 4) + 543)));
   })));
 }
 
@@ -152,7 +151,7 @@ function renderBars(id, items, emptyText) {
   box.replaceChildren(...items.map((i) =>
     el("div", { class: "hbar" },
       el("div", { class: "hbar-head" },
-        el("span", {}, el("strong", { text: i.label }), i.sub ? el("span", { class: "muted small", text: ` ${i.sub}` }) : null),
+        el("span", {}, el("strong", { text: i.label }), i.sub ? el("span", { class: "hbar-sub muted small", text: ` ${i.sub}` }) : null),
         el("span", { class: "hbar-text", text: i.text })),
       el("div", { class: "hbar-track" }, el("div", { class: "hbar-fill", style: `width:${Math.max(1, (i.value / max) * 100)}%` })))));
 }
@@ -171,7 +170,7 @@ function renderFleet(d) {
     el("tbody", {}, ...rows.map((f) => el("tr", {},
       el("td", {}, el("strong", { text: f.truck_number ? `#${f.truck_number} ` : "" }), f.plate),
       el("td", { text: f.branch || "" }),
-      el("td", { text: f.last_service_date ? `${thDateShort(f.last_service_date)} (${f.days_since_service} วันก่อน)` : "–" }),
+      el("td", { text: f.last_service_date ? `${beDate(f.last_service_date)} (${f.days_since_service} วันก่อน)` : "–" }),
       el("td", { text: f.last_known_mileage ? `${baht(f.last_known_mileage)}${f.next_service_mileage ? ` → ${baht(f.next_service_mileage)}` : ""}` : "–" }),
       el("td", { text: [f.open_requests ? `รอซ่อม ${f.open_requests}` : null, f.awaiting_bill_requests ? `รอบิล ${f.awaiting_bill_requests}` : null].filter(Boolean).join(" · ") || "–" }),
       el("td", { class: "num", text: f.spend_period ? baht(f.spend_period) : "–" }),

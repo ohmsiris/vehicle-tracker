@@ -49,6 +49,8 @@ def _parse_date(raw, *, default: date, what: str) -> date:
         d = date.fromisoformat(str(raw))
     except ValueError:
         raise InvalidRequest(f"{what}ไม่ถูกต้อง")
+    if d.year >= 2400:      # a พ.ศ. year typed where ค.ศ. is expected (2569 for 2026)
+        raise InvalidRequest(f"{what}: ปี {d.year} ดูเหมือนเป็น พ.ศ. แต่ช่องนี้ต้องเป็น ค.ศ. (ปี {d.year - 543})")
     if d > today_bangkok() + timedelta(days=1):
         raise InvalidRequest(f"{what}เป็นวันในอนาคต")
     return d

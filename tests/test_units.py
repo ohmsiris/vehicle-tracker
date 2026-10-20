@@ -355,3 +355,16 @@ def test_categorize_endpoint(monkeypatch):
         raise RuntimeError("down")
     monkeypatch.setattr(main, "categorize", boom)
     assert client.post("/api/categorize?token=secret", json=body).status_code == 502
+
+
+def test_app_files_are_always_revalidated_but_fonts_are_cached():
+    from fastapi.testclient import TestClient
+
+    from app import main
+    c = TestClient(main.app)
+    for path in ("/", "/static/app.js", "/static/board.js", "/static/dashboard.js", "/static/app.css", "/static/index.html"):
+        r = c.get(path)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache", path
+    font = c.get("/static/fonts/fonts.css")
+    assert font.headers["cache-control"] == "public, max-age=604800"
+    assert "cache-control" not in c.get("/health").headers          # API responses are untouched

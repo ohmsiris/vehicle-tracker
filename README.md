@@ -124,3 +124,15 @@ and remembers the choice on that device (`localStorage`). Colours are tokens
 at the top of `static/app.css` -- change a palette there, not per component.
 Fonts are self-hosted in `static/fonts/` (Inter for Latin and numbers, Noto
 Sans Thai for Thai; both SIL OFL) so the page loads nothing from the internet.
+
+## Dates and years (พ.ศ. / ค.ศ.)
+
+Bills are written in the Buddhist year (19/8/2569); databases and date
+inputs use the standard year (2026-08-19). The rule here: **everything is
+stored as ค.ศ. (ISO), and everything shown to a person uses the full พ.ศ.
+year** -- "20 ต.ค. 2569", never a 2-digit year. Formatting is done by hand
+(`beDate` in `static/board.js`), not with the browser's locale, so it reads
+the same on every device. Date inputs show a line under them spelling out both
+calendars, a พ.ศ. year typed into one is converted automatically, and the
+server rejects a year >= 2400 with an explicit message. The bill reader
+already corrects a พ.ศ. year the model read off a bill (`app/batch.py`).

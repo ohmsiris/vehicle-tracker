@@ -201,8 +201,9 @@
   <input id="fixBy" list="fixerList" type="text" maxlength="100" autocomplete="off">
   <datalist id="fixerList"></datalist>
   <div id="fixChips" class="chips"></div>
-  <label for="fixDate">วันที่ซ่อมเสร็จ</label>
+  <label for="fixDate">วันที่ซ่อมเสร็จ <span class="muted small">(ปีที่แสดงใต้ช่อง เป็น พ.ศ.)</span></label>
   <input id="fixDate" type="date">
+  <div id="fixDateCap" class="datecap"></div>
   <label for="fixReason">เหตุผลที่ไม่มีบิล (ไม่บังคับ — ใช้เมื่อกด "ไม่มีบิล")</label>
   <input id="fixReason" type="text" maxlength="200" placeholder="เช่น งานเล็กน้อย / ร้านไม่ให้บิล">
   <p class="error" id="fixError" hidden></p>

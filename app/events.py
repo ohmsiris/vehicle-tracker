@@ -25,6 +25,7 @@ logger = logging.getLogger("vehicle_tracker.events")
 
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf"}
 SOURCES = ("bill", "manual")
+BUDDHIST_YEAR_FLOOR = 2400      # no real repair is dated in the 25th century; a year this high is a พ.ศ. typed as ค.ศ.
 ATTACHMENT_TYPES = ("bill", "reference_photo")
 
 
@@ -45,6 +46,8 @@ def _parse_date(raw) -> date:
         d = date.fromisoformat(str(raw))
     except ValueError:
         raise InvalidEvent("วันที่ไม่ถูกต้อง")
+    if d.year >= BUDDHIST_YEAR_FLOOR:      # 2569 typed where 2026 is expected
+        raise InvalidEvent(f"ปี {d.year} ดูเหมือนเป็น พ.ศ. แต่ช่องนี้ต้องเป็น ค.ศ. (ปี {d.year - 543}) — เลือกจากปฏิทินหรือแก้ปี")
     if d > date.today() + timedelta(days=1):
         raise InvalidEvent("วันที่เป็นวันในอนาคต")
     return d
