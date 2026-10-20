@@ -12,6 +12,7 @@
   <nav class="nav" aria-label="เมนู">
     <button id="navBoard" class="navbtn active" type="button">งานซ่อม</button>
     <button id="navBills" class="navbtn" type="button">บันทึกบิล</button>
+    <button id="navDash" class="navbtn" type="button">ภาพรวม</button>
   </nav>
   <span class="step-hint" id="stepHint"></span>
 </header>
@@ -51,6 +52,44 @@
       <summary>ปิดแล้วล่าสุด</summary>
       <div id="recentList" class="reqlist"></div>
     </details>
+  </section>
+
+  <!-- ============ Dashboard ============ -->
+  <section id="dashView" hidden>
+    <div class="dash-filters">
+      <label>ช่วงเวลา
+        <select id="dashMonths">
+          <option value="3">3 เดือน</option>
+          <option value="6">6 เดือน</option>
+          <option value="12" selected>12 เดือน</option>
+          <option value="24">24 เดือน</option>
+        </select>
+      </label>
+      <label>สาขา
+        <select id="dashBranch"><option value="">ทุกสาขา</option></select>
+      </label>
+      <button id="dashRefresh" class="btn small" type="button">รีเฟรช</button>
+      <span id="dashAsOf" class="muted small"></span>
+    </div>
+    <p class="error" id="dashError" hidden></p>
+
+    <div id="kpiRow" class="kpis"></div>
+
+    <div class="dashgrid">
+      <div class="card wide"><h2>ค่าซ่อมรายเดือน <span class="muted small">(บาท)</span></h2><div id="chartMonthly"></div></div>
+      <div class="card"><h2>แยกตามหมวด <span class="muted small">(ตามรายการในบิล)</span></h2><div id="chartCategory"></div></div>
+      <div class="card"><h2>รถที่ค่าซ่อมสูงสุด</h2><div id="chartTrucks"></div></div>
+      <div class="card"><h2>ร้าน / อู่ ที่จ่ายมากสุด</h2><div id="chartVendors"></div></div>
+    </div>
+
+    <div class="card">
+      <div class="fleet-head">
+        <h2>สถานะรถแต่ละคัน</h2>
+        <label class="inline"><input id="fleetAttention" type="checkbox"> เฉพาะคันที่ควรดู</label>
+      </div>
+      <div class="tablewrap"><table class="fleet" id="fleetTable"></table></div>
+    </div>
+    <div id="dashNotes" class="muted small notes"></div>
   </section>
 
   <!-- ============ Bills: step 1, capture ============ -->
@@ -180,6 +219,7 @@
 </dialog>
 
 <script src="/static/board.js"></script>
+<script src="/static/dashboard.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

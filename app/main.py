@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import events, repair_requests, supabase
+from app import dashboard, events, repair_requests, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -282,3 +282,39 @@ def request_action(request_id: str, body: RequestAction, x_app_token: str = Head
         repair_requests.act, request_id, body.action,
         fixed_by=body.fixed_by, fixed_date=body.fixed_date, reason=body.reason,
     )
+
+
+# --------------------------------------------------------------- dashboard
+@app.get("/api/dashboard")
+def get_dashboard(
+    months: int = 12,
+    branch: str = "",
+    x_app_token: str = Header(default=""),
+    token: str = Query(default=""),
+) -> dict:
+    """Spend, categories, trucks, shops, fleet status and request stats for
+    the dashboard page. Read-only; computed from the dashboard views (so it
+    needs schema_v3_dashboard.sql applied)."""
+    _check_token(x_app_token, token)
+    today = repair_requests.today_bangkok()
+    if os.environ.get("DEV_DASHBOARD_DEMO"):       # dev only -- made-up data, no database
+        from app import dev_demo
+        data = dev_demo.rows(today)
+    else:
+        if not supabase.configured():
+            raise HTTPException(503, "Supabase is not configured on the server")
+        try:
+            data = {
+                "events": supabase.select_all("v_events", {
+                    "select": "event_id,event_date,event_month,vehicle_id,plate_number,vehicle_number,vehicle_branch,vendor,total_cost,source",
+                    "order": "event_date.desc,event_id.asc"}),
+                "lines": supabase.select_all("v_line_items", {
+                    "select": "line_item_id,event_month,category,category_en,line_total,vehicle_branch", "order": "line_item_id.asc"}),
+                "vehicles": supabase.select_all("v_vehicle_status", {"select": "*", "order": "vehicle_id.asc"}),
+                "requests": supabase.select_all("v_requests", {
+                    "select": "request_id,status,branch,days_in_status,days_to_fix,fixed_date,no_bill,status_changed_date", "order": "request_no.asc"}),
+            }
+        except supabase.SupabaseError:
+            logger.exception("dashboard query failed")
+            raise HTTPException(502, "โหลดข้อมูลภาพรวมไม่สำเร็จ ลองอีกครั้ง")
+    return dashboard.build_dashboard(**data, today=today, months=months, branch=branch or None)

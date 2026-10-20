@@ -79,7 +79,22 @@ Open `http://localhost:8000/?token=<APP_TOKEN>`.
   identified correctly.
 - Truck numbers are NOT unique across branches; lookups are by plate.
 
-## Dashboard (Looker Studio)
+## Dashboard
+
+**In the app** ("ภาพรวม" tab, `GET /api/dashboard`): KPI cards (spend this
+month / period, open requests, bills outstanding, average days to fix),
+spend by month, by category, by truck and by shop, and a per-truck status
+table that puts trucks needing attention first. Filters: period and branch.
+Every figure is computed in `app/dashboard.py` (pure functions, unit-tested)
+from the views below. `DEV_DASHBOARD_DEMO=1` swaps in made-up rows
+(`app/dev_demo.py`) so the page can be tried with no data -- dev only.
+
+Definitions: spend = confirmed events' `total_cost` by event date; category
+spend comes from bill line items (can differ slightly from totals: VAT,
+discounts); "not serviced lately" = no record for 90 days, a prompt to look
+and not a service due date (the system has no intervals yet).
+
+### Looker Studio (optional, for fancier charts)
 
 `schema_v3_dashboard.sql` creates a read-only database login, `looker_ro`,
 that can SELECT six views and nothing else (no writes, 20 s query limit, 5

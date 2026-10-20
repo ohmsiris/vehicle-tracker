@@ -57,6 +57,19 @@ def select(table: str, params: Optional[dict] = None) -> list[dict]:
     return _check(resp, f"select {table}").json()
 
 
+def select_all(table: str, params: dict, page: int = 1000) -> list[dict]:
+    """Every row, paging past PostgREST's per-request cap. `params` must
+    include a stable `order` or pages can overlap/skip."""
+    if "order" not in params:
+        raise SupabaseError("select_all needs an order for stable paging")
+    out: list[dict] = []
+    while True:
+        chunk = select(table, {**params, "limit": str(page), "offset": str(len(out))})
+        out.extend(chunk)
+        if len(chunk) < page:
+            return out
+
+
 def insert(table: str, rows: list[dict], *, on_conflict: Optional[str] = None, ignore_duplicates: bool = False) -> list[dict]:
     prefer = ["return=representation"]
     params = {}

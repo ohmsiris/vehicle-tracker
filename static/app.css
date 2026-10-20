@@ -168,3 +168,43 @@ dialog label { margin: 12px 0 4px; }
   .addgrid select, .addgrid input[type=text] { grid-column: 1 / -1; }
   .nav { margin-left: 0; }
 }
+
+/* ---------------------------------------------------------- dashboard */
+.dash-filters { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.dash-filters label { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 0; }
+.dash-filters select { width: auto; padding: 6px 10px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.kpi.warn { border-color: var(--flag-line); }
+.kpi.bad { border-color: var(--bad); }
+.kpi-label { color: var(--muted); font-size: 13px; }
+.kpi-value { font-size: 26px; font-weight: 700; margin: 2px 0; }
+.kpi.bad .kpi-value { color: var(--bad); }
+.kpi-sub { color: var(--muted); font-size: 13px; }
+.dashgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.dashgrid .card { margin: 0; }
+.dashgrid .card.wide { grid-column: 1 / -1; }
+
+.cols { display: flex; gap: 6px; align-items: flex-end; height: 210px; overflow-x: auto; padding-top: 4px; }
+.col { flex: 1 0 34px; display: flex; flex-direction: column; align-items: center; height: 100%; min-width: 34px; }
+.col-track { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+.col-bar { width: 100%; background: var(--accent); opacity: .55; border-radius: 4px 4px 0 0; }
+.col-bar.current { opacity: 1; }
+.col-val { font-size: 11px; color: var(--muted); height: 16px; }
+.col-label { font-size: 11px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+
+.hbar { margin-bottom: 11px; }
+.hbar-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.hbar-text { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.hbar-track { background: var(--bg); border-radius: 4px; height: 8px; margin-top: 4px; overflow: hidden; }
+.hbar-fill { background: var(--accent); height: 100%; border-radius: 4px; }
+
+.fleet-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.fleet-head h2 { margin-bottom: 10px; }
+table.fleet { width: 100%; border-collapse: collapse; min-width: 760px; }
+table.fleet th { text-align: left; font-size: 12px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); font-weight: 600; }
+table.fleet td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.fleet td.num { text-align: right; white-space: nowrap; }
+table.fleet .badge { margin-right: 4px; }
+.badge.warn { color: var(--flag-line); border-color: var(--flag-line); }
+.notes div { margin: 3px 2px; }

@@ -46,12 +46,13 @@ async function api(path, opts = {}) {
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
 function showView(name) {
-  for (const v of ["board", "capture", "busy", "review", "done"]) $(v + "View").hidden = v !== name;
-  if (name !== "board") lastBillView = name === "busy" ? "capture" : name;
+  for (const v of ["board", "dash", "capture", "busy", "review", "done"]) $(v + "View").hidden = v !== name;
+  if (name !== "board" && name !== "dash") lastBillView = name === "busy" ? "capture" : name;
   $("navBoard").classList.toggle("active", name === "board");
-  $("navBills").classList.toggle("active", name !== "board");
+  $("navDash").classList.toggle("active", name === "dash");
+  $("navBills").classList.toggle("active", name !== "board" && name !== "dash");
   $("stepHint").textContent = {
-    board: "", capture: "1 · เลือกรถและอัปโหลดไฟล์", busy: "กำลังอ่านบิล…", review: "2 · ตรวจสอบและยืนยัน", done: "บันทึกแล้ว",
+    board: "", dash: "", capture: "1 · เลือกรถและอัปโหลดไฟล์", busy: "กำลังอ่านบิล…", review: "2 · ตรวจสอบและยืนยัน", done: "บันทึกแล้ว",
   }[name];
   window.scrollTo(0, 0);
 }
@@ -505,6 +506,7 @@ async function init() {
   $("toBoardBtn").addEventListener("click", () => showView("board"));
   $("navBoard").addEventListener("click", () => showView("board"));
   $("navBills").addEventListener("click", () => showView(lastBillView));
+  $("navDash").addEventListener("click", () => { showView("dash"); loadDashboard(); });
   // The button only re-checks lines where it can help: ones whose wording the
   // user edited, or whose category the model flagged as unsure. Everything else
   // was categorized from the PHOTO at extraction time, which a text-only
@@ -523,6 +525,8 @@ async function init() {
   showView("board");
   await loadMeta();
   await initBoard();
+  initDashboard();
+  if (params.get("tab") === "dash") { showView("dash"); loadDashboard(); }
   if (params.get("sample")) {
     state.draft = await api("/api/dev/sample-draft");
     render(state.draft, null);
