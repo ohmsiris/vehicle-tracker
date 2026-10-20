@@ -116,3 +116,11 @@ Connect -> Session pooler gives the host and port; the username is
 | `v_active_requests` | open or awaiting-bill request | the live queue and its ageing |
 | `v_requests` | every request ever | time-to-fix, requests per truck, closed-without-bill count |
 | `v_attachments` | photo / PDF | links to open a bill's file |
+
+## Look and feel
+
+Light off-white by default; a moon/sun button in the top bar switches to dark
+and remembers the choice on that device (`localStorage`). Colours are tokens
+at the top of `static/app.css` -- change a palette there, not per component.
+Fonts are self-hosted in `static/fonts/` (Inter for Latin and numbers, Noto
+Sans Thai for Thai; both SIL OFL) so the page loads nothing from the internet.

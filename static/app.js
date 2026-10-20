@@ -43,6 +43,19 @@ async function api(path, opts = {}) {
 }
 
 // --------------------------------------------------------------- views
+// Light is the default; the toggle in the top bar switches to dark and remembers the choice on this device.
+function initTheme() {
+  const btn = $("themeBtn");
+  const paint = () => { btn.textContent = document.documentElement.dataset.theme === "dark" ? "☀" : "☾"; };
+  btn.addEventListener("click", () => {
+    const dark = document.documentElement.dataset.theme !== "dark";
+    if (dark) document.documentElement.dataset.theme = "dark"; else delete document.documentElement.dataset.theme;
+    try { localStorage.setItem("vt_theme", dark ? "dark" : "light"); } catch (e) { /* storage blocked: applies for this visit only */ }
+    paint();
+  });
+  paint();
+}
+
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
 function showView(name) {
@@ -507,6 +520,7 @@ async function init() {
   $("navBoard").addEventListener("click", () => showView("board"));
   $("navBills").addEventListener("click", () => showView(lastBillView));
   $("navDash").addEventListener("click", () => { showView("dash"); loadDashboard(); });
+  initTheme();
   // The button only re-checks lines where it can help: ones whose wording the
   // user edited, or whose category the model flagged as unsure. Everything else
   // was categorized from the PHOTO at extraction time, which a text-only

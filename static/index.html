@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>งานซ่อมรถ</title>
+<script>
+  // Apply the saved theme before first paint (light unless the user chose dark) -- no flash.
+  try { if (localStorage.getItem("vt_theme") === "dark") document.documentElement.dataset.theme = "dark"; } catch (e) { /* storage blocked: stay light */ }
+</script>
+<link rel="preload" href="/static/fonts/noto-sans-thai-thai.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts/fonts.css">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -15,6 +22,7 @@
     <button id="navDash" class="navbtn" type="button">ภาพรวม</button>
   </nav>
   <span class="step-hint" id="stepHint"></span>
+  <button id="themeBtn" class="themebtn" type="button" aria-label="สลับธีมสว่าง/มืด" title="สลับธีมสว่าง/มืด">☾</button>
 </header>
 
 <main>
