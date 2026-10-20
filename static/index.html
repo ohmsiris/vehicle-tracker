@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>บันทึกบิลซ่อมรถ</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>บันทึกบิลซ่อมรถ</h1>
+  <span class="step-hint" id="stepHint">1 · เลือกรถและอัปโหลดไฟล์</span>
+</header>
+
+<main>
+  <!-- ============ Step 1: capture ============ -->
+  <section id="captureView">
+    <div id="tokenBox" class="card" hidden>
+      <label for="tokenInput">รหัสเข้าใช้งาน</label>
+      <div class="row">
+        <input id="tokenInput" type="password" autocomplete="off">
+        <button id="tokenSave" class="btn">ตกลง</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <label for="vehicleSelect">รถคันที่ซ่อม</label>
+      <select id="vehicleSelect"><option value="">กำลังโหลดรายชื่อรถ…</option></select>
+      <p class="muted small" id="vehicleNote">ไม่แน่ใจ? ข้ามไปได้ ระบบจะเดาจากป้ายทะเบียนในบิล</p>
+    </div>
+
+    <div class="card">
+      <h2>บิล / ใบเสร็จ <span class="muted small">(รูปภาพหรือ PDF — ระบบจะอ่านข้อมูลให้)</span></h2>
+      <div class="drop" id="billDrop" tabindex="0" role="button">
+        <span>แตะเพื่อเลือกไฟล์ หรือลากมาวางที่นี่</span>
+        <input id="billInput" type="file" accept="image/*,application/pdf" multiple hidden>
+      </div>
+      <ul class="filelist" id="billList"></ul>
+    </div>
+
+    <div class="card">
+      <h2>รูปอื่นๆ <span class="muted small">(รถ จุดที่เสีย อะไหล่ — เก็บไว้เฉยๆ ไม่ต้องอ่านข้อมูล)</span></h2>
+      <div class="drop" id="refDrop" tabindex="0" role="button">
+        <span>แตะเพื่อเลือกรูป หรือลากมาวางที่นี่</span>
+        <input id="refInput" type="file" accept="image/*" multiple hidden>
+      </div>
+      <div class="thumbs" id="refThumbs"></div>
+    </div>
+
+    <button id="extractBtn" class="btn primary big" disabled>อ่านบิล</button>
+    <p class="error" id="captureError" hidden></p>
+  </section>
+
+  <!-- ============ Reading ============ -->
+  <section id="busyView" hidden>
+    <div class="card center">
+      <div class="spinner" aria-hidden="true"></div>
+      <p id="busyText">กำลังอ่านบิล…</p>
+      <p class="muted small">ปกติใช้เวลา 30–70 วินาที อย่าปิดหน้านี้</p>
+    </div>
+  </section>
+
+  <!-- ============ Step 2: review ============ -->
+  <section id="reviewView" hidden>
+    <div id="warnings" class="warnings" hidden></div>
+
+    <div class="legend small muted">
+      <span class="chip flagged">สีเหลือง</span> = ระบบไม่แน่ใจ ช่วยตรวจ — แก้หรือแตะช่องนั้นแล้วสีจะหายไป
+    </div>
+
+    <div class="cat-tools">
+      <button id="recatBtn" class="btn" type="button">🔄 จัดหมวดรายการใหม่ด้วย AI</button>
+      <span id="catStatus" class="small muted" aria-live="polite"></span>
+    </div>
+
+    <div class="card">
+      <h2>ข้อมูลการซ่อม</h2>
+      <div class="grid" id="eventForm"></div>
+    </div>
+
+    <div id="billBlocks"></div>
+
+    <div class="card totals" id="totalsBox"></div>
+
+    <div class="actions">
+      <button id="backBtn" class="btn">← กลับไปแก้ไฟล์</button>
+      <button id="confirmBtn" class="btn primary big">ยืนยันและบันทึก</button>
+    </div>
+    <p class="error" id="reviewError" hidden></p>
+
+  </section>
+
+  <!-- ============ Saved ============ -->
+  <section id="doneView" hidden>
+    <div class="card center">
+      <div class="check" aria-hidden="true">✓</div>
+      <h2>บันทึกเรียบร้อย</h2>
+      <p id="doneText" class="muted"></p>
+      <button id="newBtn" class="btn primary big">บันทึกบิลถัดไป</button>
+    </div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
