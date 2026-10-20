@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import events, supabase
+from app import events, repair_requests, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -72,7 +72,13 @@ def meta(x_app_token: str = Header(default=""), token: str = Query(default="")) 
     the fleet (for the vehicle picker). Reads data/vehicle_roster.csv for
     now; becomes the vehicles table once Supabase is wired in."""
     _check_token(x_app_token, token)
-    return {"categories": CATEGORIES, "vehicles": load_roster()}
+    fixers = ["ช่างเอ๋"]   # the internal mechanic is always a one-tap choice
+    if supabase.configured():
+        try:
+            fixers += [f for f in repair_requests.known_fixers() if f not in fixers]
+        except supabase.SupabaseError:
+            logger.exception("could not load fixer suggestions")
+    return {"categories": CATEGORIES, "vehicles": load_roster(), "fixers": fixers}
 
 
 # Dev-only: serves a saved extraction response so the review UI can be
@@ -210,3 +216,69 @@ def save_event(
     except supabase.SupabaseError:
         logger.exception("saving event failed")
         raise HTTPException(502, "บันทึกไม่สำเร็จ ลองอีกครั้ง (ข้อมูลที่กรอกยังอยู่)")
+
+
+# ------------------------------------------------------------ repair board
+class NewRequest(BaseModel):
+    vehicle_id: str | None = None
+    problem: str = Field(default="", max_length=600)
+    reported_by: str | None = Field(default=None, max_length=150)
+    urgent: bool = False
+    request_date: str | None = None
+
+
+class EditRequest(BaseModel):
+    problem: str | None = Field(default=None, max_length=600)
+    reported_by: str | None = Field(default=None, max_length=150)
+    urgent: bool | None = None
+
+
+class RequestAction(BaseModel):
+    action: str
+    fixed_by: str = Field(default="", max_length=150)
+    fixed_date: str | None = None
+    reason: str = Field(default="", max_length=600)
+
+
+def _board_call(fn, *args, **kwargs):
+    """Runs a repair_requests operation and maps its errors to HTTP."""
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return fn(*args, **kwargs)
+    except repair_requests.InvalidRequest as exc:
+        raise HTTPException(422, str(exc))
+    except repair_requests.StaleRequest:
+        raise HTTPException(409, "งานนี้ถูกเปลี่ยนสถานะไปแล้ว หน้าจอกำลังรีเฟรช")
+    except supabase.SupabaseError:
+        logger.exception("repair board call failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/requests")
+def list_requests(scope: str = "active", x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    if scope not in ("active", "recent"):
+        raise HTTPException(400, "scope must be active or recent")
+    return _board_call(repair_requests.list_active if scope == "active" else repair_requests.list_recent)
+
+
+@app.post("/api/requests")
+def create_request(body: NewRequest, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _board_call(repair_requests.create, body.model_dump())
+
+
+@app.patch("/api/requests/{request_id}")
+def edit_request(request_id: str, body: EditRequest, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _board_call(repair_requests.edit, request_id, body.model_dump(exclude_unset=True))
+
+
+@app.post("/api/requests/{request_id}/action")
+def request_action(request_id: str, body: RequestAction, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _board_call(
+        repair_requests.act, request_id, body.action,
+        fixed_by=body.fixed_by, fixed_date=body.fixed_date, reason=body.reason,
+    )

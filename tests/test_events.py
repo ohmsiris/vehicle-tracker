@@ -251,3 +251,35 @@ def test_same_file_twice_in_one_batch_is_a_clear_error_not_a_db_failure(fake):
         events.save_event(p, [("a.jpg", same), ("b.jpg", same)])
     assert "b.jpg" in str(exc.value) and "a.jpg" in str(exc.value)
     assert fake.uploads == [] and fake.rpcs == []
+
+
+# ------------------------------------------- closing repair requests with a bill
+def test_bill_can_close_requests_of_its_own_truck(fake, monkeypatch):
+    rid = str(uuid.uuid4())
+    original = fake.select
+
+    def select(table, params=None):
+        if table == "repair_requests":
+            assert params["vehicle_id"] == f"eq.{VEHICLE}"          # scoped to THIS truck
+            return [{"id": rid}]
+        return original(table, params)
+    monkeypatch.setattr(events.supabase, "select", select)
+    events.save_event(payload(fixes_request_ids=[rid]), FILES)
+    assert fake.rpcs[0][1]["p"]["fixes_request_ids"] == [rid]
+
+
+def test_bill_cannot_close_another_trucks_request(fake, monkeypatch):
+    rid = str(uuid.uuid4())
+    original = fake.select
+    monkeypatch.setattr(events.supabase, "select", lambda t, p=None: [] if t == "repair_requests" else original(t, p))
+    with pytest.raises(events.InvalidEvent) as exc:
+        events.save_event(payload(fixes_request_ids=[rid]), FILES)
+    assert "ไม่ใช่ของรถคันนี้" in str(exc.value)
+    assert fake.uploads == [] and fake.rpcs == []
+
+
+@pytest.mark.parametrize("bad", ["not-a-list", ["not-a-uuid"], ["x'; drop table"]])
+def test_fixes_request_ids_must_be_uuids(fake, bad):
+    with pytest.raises(events.InvalidEvent):
+        events.save_event(payload(fixes_request_ids=bad), FILES)
+    assert fake.uploads == [] and fake.rpcs == []

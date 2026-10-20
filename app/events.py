@@ -75,6 +75,15 @@ def _validate(payload: dict, n_files: int) -> None:
     _num(ev.get("next_service_mileage"), "ไมล์ครั้งต่อไป", integer=True)
     _num(ev.get("total_cost"), "ยอดรวม")
 
+    fixes = payload.get("fixes_request_ids") or []
+    if not isinstance(fixes, list):
+        raise InvalidEvent("รายการงานซ่อมที่ปิดไม่ถูกต้อง")
+    for rid in fixes:
+        try:
+            uuid.UUID(str(rid))
+        except ValueError:
+            raise InvalidEvent("รายการงานซ่อมที่ปิดไม่ถูกต้อง")
+
     atts = payload.get("attachments") or []
     if len(atts) != n_files:
         raise InvalidEvent("จำนวนไฟล์ไม่ตรงกับรายการที่ส่งมา")
@@ -111,6 +120,12 @@ def save_event(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicate
 
     if not supabase.select("vehicles", {"select": "id", "id": f"eq.{payload['vehicle_id']}", "limit": "1"}):
         raise InvalidEvent("ไม่พบรถคันนี้ในระบบ")
+
+    fixes = payload.get("fixes_request_ids") or []
+    if fixes:
+        mine = supabase.select("repair_requests", {"select": "id", "vehicle_id": f"eq.{payload['vehicle_id']}", "id": f"in.({','.join(fixes)})"})
+        if len(mine) != len(set(fixes)):
+            raise InvalidEvent("มีงานซ่อมที่เลือกปิด ที่ไม่ใช่ของรถคันนี้")
 
     # Normalize every file (type check, resize/rotate if needed) and hash the
     # bytes that will actually be stored.

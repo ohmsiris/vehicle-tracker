@@ -3,24 +3,61 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>บันทึกบิลซ่อมรถ</title>
+<title>งานซ่อมรถ</title>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <header class="topbar">
-  <h1>บันทึกบิลซ่อมรถ</h1>
-  <span class="step-hint" id="stepHint">1 · เลือกรถและอัปโหลดไฟล์</span>
+  <h1>งานซ่อมรถ</h1>
+  <nav class="nav" aria-label="เมนู">
+    <button id="navBoard" class="navbtn active" type="button">งานซ่อม</button>
+    <button id="navBills" class="navbtn" type="button">บันทึกบิล</button>
+  </nav>
+  <span class="step-hint" id="stepHint"></span>
 </header>
 
 <main>
-  <!-- ============ Step 1: capture ============ -->
-  <section id="captureView">
-    <div id="tokenBox" class="card" hidden>
-      <label for="tokenInput">รหัสเข้าใช้งาน</label>
-      <div class="row">
-        <input id="tokenInput" type="password" autocomplete="off">
-        <button id="tokenSave" class="btn">ตกลง</button>
-      </div>
+  <div id="tokenBox" class="card" hidden>
+    <label for="tokenInput">รหัสเข้าใช้งาน</label>
+    <div class="row">
+      <input id="tokenInput" type="password" autocomplete="off">
+      <button id="tokenSave" class="btn">ตกลง</button>
+    </div>
+  </div>
+
+  <!-- ============ Repair board ============ -->
+  <section id="boardView">
+    <div class="card">
+      <h2>เพิ่มงานซ่อมที่ต้องติดตาม <span class="muted small">(ใบแจ้งซ่อมกระดาษยังเป็นต้นฉบับ — ใส่เฉพาะงานที่อยากให้เตือน)</span></h2>
+      <form id="addForm" class="addgrid" autocomplete="off">
+        <select id="addVehicle" aria-label="รถ"><option value="">กำลังโหลดรายชื่อรถ…</option></select>
+        <input id="addProblem" type="text" placeholder="ปัญหา เช่น เบรกหลังมีเสียง" maxlength="500" aria-label="ปัญหา">
+        <input id="addReporter" type="text" placeholder="ผู้แจ้ง (ไม่บังคับ)" maxlength="100" aria-label="ผู้แจ้ง">
+        <label class="inline"><input id="addUrgent" type="checkbox"> ด่วน</label>
+        <button class="btn primary" type="submit">เพิ่ม</button>
+      </form>
+      <p class="error" id="addError" hidden></p>
+    </div>
+
+    <p class="error" id="boardError" hidden></p>
+
+    <h2 class="section-title">รอซ่อม <span class="count" id="countOpen"></span></h2>
+    <div id="openList" class="reqlist"></div>
+
+    <h2 class="section-title">ซ่อมแล้ว — รอบิล <span class="count" id="countAwaiting"></span></h2>
+    <div id="awaitingList" class="reqlist"></div>
+
+    <details id="recentBox" class="card">
+      <summary>ปิดแล้วล่าสุด</summary>
+      <div id="recentList" class="reqlist"></div>
+    </details>
+  </section>
+
+  <!-- ============ Bills: step 1, capture ============ -->
+  <section id="captureView" hidden>
+    <div id="attachNote" class="card note" hidden>
+      <span id="attachText"></span>
+      <button id="attachClear" class="btn" type="button">เลิกผูกกับงานนี้</button>
     </div>
 
     <div class="card">
@@ -60,7 +97,7 @@
     </div>
   </section>
 
-  <!-- ============ Step 2: review ============ -->
+  <!-- ============ Bills: step 2, review ============ -->
   <section id="reviewView" hidden>
     <div id="warnings" class="warnings" hidden></div>
 
@@ -78,6 +115,11 @@
       <div class="grid" id="eventForm"></div>
     </div>
 
+    <div class="card" id="fixesCard" hidden>
+      <h2>บิลนี้ปิดงานซ่อมไหน? <span class="muted small">(ติ๊กงานที่บิลนี้เป็นของ — บันทึกแล้วระบบปิดงานให้เอง)</span></h2>
+      <div id="fixesList"></div>
+    </div>
+
     <div id="billBlocks"></div>
 
     <div class="card totals" id="totalsBox"></div>
@@ -87,7 +129,6 @@
       <button id="confirmBtn" class="btn primary big">ยืนยันและบันทึก</button>
     </div>
     <p class="error" id="reviewError" hidden></p>
-
   </section>
 
   <!-- ============ Saved ============ -->
@@ -96,11 +137,49 @@
       <div class="check" aria-hidden="true">✓</div>
       <h2>บันทึกเรียบร้อย</h2>
       <p id="doneText" class="muted"></p>
-      <button id="newBtn" class="btn primary big">บันทึกบิลถัดไป</button>
+      <p id="doneClosed" class="small" hidden></p>
+      <div class="row center-row">
+        <button id="newBtn" class="btn primary big">บันทึกบิลถัดไป</button>
+        <button id="toBoardBtn" class="btn big">กลับไปงานซ่อม</button>
+      </div>
     </div>
   </section>
 </main>
 
+<!-- "Who fixed it?" -- shown when a request on the board is ticked as done -->
+<dialog id="fixDialog">
+  <h3>ซ่อมแล้ว</h3>
+  <p id="fixSummary" class="muted small"></p>
+  <label for="fixBy">ใครซ่อม / ร้านไหน</label>
+  <input id="fixBy" list="fixerList" type="text" maxlength="100" autocomplete="off">
+  <datalist id="fixerList"></datalist>
+  <div id="fixChips" class="chips"></div>
+  <label for="fixDate">วันที่ซ่อมเสร็จ</label>
+  <input id="fixDate" type="date">
+  <label for="fixReason">เหตุผลที่ไม่มีบิล (ไม่บังคับ — ใช้เมื่อกด "ไม่มีบิล")</label>
+  <input id="fixReason" type="text" maxlength="200" placeholder="เช่น งานเล็กน้อย / ร้านไม่ให้บิล">
+  <p class="error" id="fixError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="fixCancel">ยกเลิก</button>
+    <button type="button" class="btn" id="fixNoBill">ไม่มีบิล — ปิดงานเลย</button>
+    <button type="button" class="btn primary" id="fixHasBill">มีบิล — รอเพิ่มบิล</button>
+  </div>
+</dialog>
+
+<!-- "No bill" for something already waiting on one -->
+<dialog id="noBillDialog">
+  <h3>ปิดงานแบบไม่มีบิล</h3>
+  <p id="noBillSummary" class="muted small"></p>
+  <label for="noBillReason">เหตุผล (ไม่บังคับ)</label>
+  <input id="noBillReason" type="text" maxlength="200" placeholder="เช่น ร้านไม่ให้บิล / งานเล็กน้อย">
+  <p class="error" id="noBillError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="noBillCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="noBillOk">ปิดงาน</button>
+  </div>
+</dialog>
+
+<script src="/static/board.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

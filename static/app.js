@@ -43,9 +43,16 @@ async function api(path, opts = {}) {
 }
 
 // --------------------------------------------------------------- views
+let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
+
 function showView(name) {
-  for (const v of ["capture", "busy", "review", "done"]) $(v + "View").hidden = v !== name;
-  $("stepHint").textContent = { capture: "1 · เลือกรถและอัปโหลดไฟล์", busy: "กำลังอ่านบิล…", review: "2 · ตรวจสอบและยืนยัน", done: "บันทึกแล้ว" }[name];
+  for (const v of ["board", "capture", "busy", "review", "done"]) $(v + "View").hidden = v !== name;
+  if (name !== "board") lastBillView = name === "busy" ? "capture" : name;
+  $("navBoard").classList.toggle("active", name === "board");
+  $("navBills").classList.toggle("active", name !== "board");
+  $("stepHint").textContent = {
+    board: "", capture: "1 · เลือกรถและอัปโหลดไฟล์", busy: "กำลังอ่านบิล…", review: "2 · ตรวจสอบและยืนยัน", done: "บันทึกแล้ว",
+  }[name];
   window.scrollTo(0, 0);
 }
 
@@ -203,6 +210,8 @@ function render(draft, pickedVehicle) {
   setCatStatus("");
   form.querySelectorAll("input,select").forEach((n) => n.addEventListener("input", updateTotals));
   $("evTotal").addEventListener("input", () => { state.totalManual = true; });
+  vSel.addEventListener("change", renderFixes);   // the "which repairs does this close" list follows the truck
+  renderFixes();
 
   // one block per bill file, photo beside its own rows
   const blocks = $("billBlocks");
@@ -407,6 +416,7 @@ function buildPayload() {
       ...state.refFiles.map((f) => ({ type: "reference_photo", filename: f.name })),
     ],
     bill_extractions,
+    fixes_request_ids: selectedFixIds(),
   };
 }
 
@@ -451,6 +461,9 @@ async function confirmSave() {
     const veh = selectedVehicle($("evVehicle"));
     $("doneText").textContent =
       `${veh ? vehicleLabel(veh) : ""} · ${p.event.event_date} · ${p.line_items.length} รายการ · ${state.billFiles.length + state.refFiles.length} ไฟล์ (รหัส ${saved.event_id.slice(0, 8)})`;
+    const closed = p.fixes_request_ids.length;
+    $("doneClosed").hidden = closed === 0;
+    $("doneClosed").textContent = closed ? `ปิดงานซ่อมให้แล้ว ${closed} งาน` : "";
     resetAfterSave();
     showView("done");
   } catch (err) {
@@ -478,6 +491,8 @@ function resetAfterSave() {
   showReviewError("");
   renderPicked();
   $("vehicleSelect").value = "";
+  clearAttachment();
+  loadBoard();            // the requests this bill closed move off the board
 }
 
 // --------------------------------------------------------------- init
@@ -492,6 +507,9 @@ async function init() {
   $("backBtn").addEventListener("click", () => showView("capture"));
   $("confirmBtn").addEventListener("click", confirmSave);
   $("newBtn").addEventListener("click", () => showView("capture"));
+  $("toBoardBtn").addEventListener("click", () => showView("board"));
+  $("navBoard").addEventListener("click", () => showView("board"));
+  $("navBills").addEventListener("click", () => showView(lastBillView));
   // The button only re-checks lines where it can help: ones whose wording the
   // user edited, or whose category the model flagged as unsure. Everything else
   // was categorized from the PHOTO at extraction time, which a text-only
@@ -505,9 +523,11 @@ async function init() {
     }
     recategorize(eligible);
   });
-  $("tokenSave").addEventListener("click", () => { state.token = $("tokenInput").value.trim(); sessionStorage.setItem("vt_token", state.token); loadMeta(); });
+  $("tokenSave").addEventListener("click", () => { state.token = $("tokenInput").value.trim(); sessionStorage.setItem("vt_token", state.token); loadMeta().then(loadBoard); });
 
+  showView("board");
   await loadMeta();
+  await initBoard();
   if (params.get("sample")) {
     state.draft = await api("/api/dev/sample-draft");
     render(state.draft, null);
@@ -520,8 +540,10 @@ async function loadMeta() {
     const meta = await api("/api/meta");
     state.categories = meta.categories;
     state.vehicles = meta.vehicles;
+    board.fixers = meta.fixers || [];
     $("tokenBox").hidden = true;
     fillVehicleSelect($("vehicleSelect"));
+    fillVehicleSelect($("addVehicle"));
   } catch (err) {
     $("tokenBox").hidden = false;
     $("vehicleSelect").replaceChildren(el("option", { value: "", text: err.status === 403 || err.status === 503 ? "ต้องใส่รหัสเข้าใช้งานก่อน" : "โหลดรายชื่อรถไม่สำเร็จ" }));
