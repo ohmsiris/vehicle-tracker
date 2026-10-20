@@ -151,7 +151,7 @@ function renderBars(id, items, emptyText) {
   box.replaceChildren(...items.map((i) =>
     el("div", { class: "hbar" },
       el("div", { class: "hbar-head" },
-        el("span", {}, el("strong", { text: i.label }), i.sub ? el("span", { class: "hbar-sub muted small", text: ` ${i.sub}` }) : null),
+        el("span", {}, el("strong", { text: i.label }), i.sub ? el("span", { class: "hbar-sub muted small", text: i.sub }) : null),
         el("span", { class: "hbar-text", text: i.text })),
       el("div", { class: "hbar-track" }, el("div", { class: "hbar-fill", style: `width:${Math.max(1, (i.value / max) * 100)}%` })))));
 }
