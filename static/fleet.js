@@ -364,7 +364,9 @@ function startEdit() {
       field("เลขไมล์", input("edMileage", "number", e.mileage, { inputmode: "numeric" })),
       field("ไมล์ครั้งต่อไป", input("edNext", "number", e.next_service_mileage, { inputmode: "numeric" })),
       field("ยอดรวม (บาท)", input("edTotal", "number", e.total_cost, { step: "0.01", inputmode: "decimal" })),
-      field("สรุปสั้นๆ ว่าซ่อมอะไร (ไม่บังคับ — แสดงในรายการประวัติ)", input("edSummary", "text", e.summary, { maxlength: "500", placeholder: "เช่น ถ่ายน้ำมันเครื่อง + เปลี่ยนผ้าเบรกหลัง" }), true),
+      field("สรุปสั้นๆ ว่าซ่อมอะไร (ไม่บังคับ — แสดงในรายการประวัติ)", el("div", { class: "row" },
+        input("edSummary", "text", e.summary, { maxlength: "500", placeholder: "เช่น ถ่ายน้ำมันเครื่อง + เปลี่ยนผ้าเบรกหลัง" }),
+        el("button", { class: "btn", id: "edAiSummary", type: "button", text: "✨ ให้ AI เขียนให้", onclick: draftSummary })), true),
       field("หมายเหตุ", el("textarea", { id: "edNotes", text: e.notes || "" }), true)),
     el("h2", { class: "edit-h2", text: "รายการในบิล" }),
     el("div", { class: "tablewrap" }, el("table", { class: "lines", id: "editLines" }, el("thead", {}, head), tbody)),
@@ -381,6 +383,29 @@ function startEdit() {
   editHooks.renumber();
   editTotalsBar();
   form.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Drafts the summary from the lines as they are on the form right now (so it follows your edits).
+// Fills the box only -- nothing is saved until "บันทึกการแก้ไข".
+async function draftSummary() {
+  const btn = $("edAiSummary"), box = $("edSummary");
+  if (box.value.trim() && !confirm("ช่องสรุปมีข้อความอยู่แล้ว ให้ AI เขียนใหม่ทับไหม?")) return;
+  const lines = readEdit().line_items.map((l) => ({ description: l.description, category: l.category, quantity: l.quantity, unit: l.unit }));
+  if (!lines.length) { showErr("eventError", "ยังไม่มีรายการให้สรุป"); return; }
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "กำลังเขียน…";
+  showErr("eventError", "");
+  try {
+    const res = await api("/api/summarize", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lines, performed_by: $("edPerformedBy").value.trim() || null }) });
+    box.value = res.summary;
+  } catch (err) {
+    showErr("eventError", `ให้ AI สรุปไม่สำเร็จ: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
 }
 
 function readEdit() {

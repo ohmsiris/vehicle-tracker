@@ -166,3 +166,18 @@ shown in the history list in place of the automatic preview (the biggest line
 items by cost, labour last). It is only requested from the database once the
 column exists (`app/history.py` probes for it), so the history pages work
 before and after `schema_v4.sql`.
+
+### AI summary of each repair
+
+`app/summarize.py` writes the one-line "what was done" from a bill's lines
+(text only; prices are never sent). Three ways it gets filled:
+1. **On save** -- after a bill is saved the app writes a summary in the
+   background (the save never waits for it, and never fails because of it).
+2. **"✨ ให้ AI เขียนให้"** in the edit form drafts one from the lines as they
+   are on the form right now; nothing is saved until you press save.
+3. **Backfill** for bills saved before this existed:
+   `scripts/backfill_summaries.py` (dry run) / `--write`.
+
+It only ever writes into an EMPTY summary (a conditional update), so a summary
+a person typed is never overwritten. All of it is a no-op until
+`schema_v4.sql` has been run.

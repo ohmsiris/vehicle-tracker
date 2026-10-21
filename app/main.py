@@ -21,12 +21,12 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, history, repair_requests, supabase
+from app import dashboard, events, history, repair_requests, summarize, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -184,8 +184,16 @@ def categorize_lines(
         raise HTTPException(502, "categorization failed, try again")
 
 
+def _summarize_quietly(event_id: str) -> None:
+    try:
+        summarize.fill_summary(event_id)
+    except Exception:
+        logger.exception("could not write the summary for event %s", event_id)
+
+
 @app.post("/api/events")
 def save_event(
+    background: BackgroundTasks,
     payload: str = Form(...),
     files: list[UploadFile] = File(default=[]),
     allow_duplicates: bool = Form(False),
@@ -224,7 +232,12 @@ def save_event(
         raws.append((f.filename or "upload", raw))
 
     try:
-        return events.save_event(data, raws, allow_duplicates=allow_duplicates)
+        saved = events.save_event(data, raws, allow_duplicates=allow_duplicates)
+        # Write the one-line "what was done" AFTER replying, so saving never waits on the AI and
+        # never fails because of it. (No-op until schema_v4.sql has been run.)
+        if settings.anthropic_api_key:
+            background.add_task(_summarize_quietly, saved["event_id"])
+        return saved
     except events.InvalidEvent as exc:
         raise HTTPException(422, str(exc))
     except events.DuplicateBill as exc:
@@ -388,3 +401,27 @@ def api_update_event(event_id: str, body: dict = Body(...), x_app_token: str = H
         logger.exception("updating event failed")
         raise HTTPException(502, "บันทึกการแก้ไขไม่สำเร็จ ลองอีกครั้ง (ข้อมูลที่แก้ยังอยู่ในหน้านี้)")
     return {"ok": True}
+
+
+class SummarizeLine(BaseModel):
+    description: str = Field(default="", max_length=500)
+    category: str | None = Field(default=None, max_length=50)
+    quantity: float | None = None
+    unit: str | None = Field(default=None, max_length=50)
+
+
+class SummarizeRequest(BaseModel):
+    lines: list[SummarizeLine] = Field(max_length=80)
+    performed_by: str | None = Field(default=None, max_length=200)
+
+
+@app.post("/api/summarize")
+def api_summarize(body: SummarizeRequest, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Drafts the one-line summary from the lines currently on the edit form. Nothing is saved."""
+    _check_token(x_app_token, token)
+    if not settings.anthropic_api_key:
+        raise HTTPException(503, "ANTHROPIC_API_KEY is not configured on the server")
+    text = summarize.summarize([l.model_dump() for l in body.lines], {"performed_by": body.performed_by})
+    if not text:
+        raise HTTPException(502, "ให้ AI สรุปไม่สำเร็จ พิมพ์เองหรือลองอีกครั้ง")
+    return {"summary": text}
