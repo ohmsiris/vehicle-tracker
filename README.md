@@ -181,3 +181,43 @@ before and after `schema_v4.sql`.
 It only ever writes into an EMPTY summary (a conditional update), so a summary
 a person typed is never overwritten. All of it is a no-op until
 `schema_v4.sql` has been run.
+
+## Hosting (Railway)
+
+The app is one Python process with no local state (all data is in Supabase), so
+any host that runs `uvicorn` works. `railway.json` has the start command and the
+health check (`/health`); `.python-version` pins Python 3.12.
+
+1. railway.com -> **New Project -> Deploy from GitHub repo** -> `ohmsiris/vehicle-tracker`,
+   branch `main`. Make it a SEPARATE project from NongTick.
+2. **Variables** (exactly these four; Railway sets `PORT` itself):
+   `ANTHROPIC_API_KEY`, `APP_TOKEN` (a long random string), `SUPABASE_URL`,
+   `SUPABASE_SERVICE_KEY`. Never set any `DEV_*` variable there (it would swap
+   the dashboard for made-up data; the app logs an error at start-up if it sees one).
+3. **Settings -> Networking -> Generate Domain.** Open `https://<domain>/?token=<APP_TOKEN>`
+   once; the token is stored for that browser tab and removed from the address bar.
+4. Check: `/health` returns `{"ok": true}`; a wrong or missing token is refused;
+   then record one real multi-page bill end to end (extraction takes 30-70 s, so
+   this also proves the host doesn't cut long requests).
+
+The app logs `MISSING SETTINGS: ...` at start-up if a variable is absent.
+Pages are served over HTTPS with `Referrer-Policy: no-referrer`, `nosniff` and
+`X-Frame-Options: DENY`; there are no public API docs.
+
+## Backups
+
+Supabase's own backups don't exist on the Free plan, and on Pro they cover the
+database but NOT the photos (Storage). So take your own:
+
+```bash
+.venv/Scripts/python.exe scripts/backup.py
+```
+
+Writes `backups/files/` (every photo/PDF, downloaded once, never again) and
+`backups/<date_time>/data/*.json` (every table, a full copy each run) plus a
+`MANIFEST.json`. Each run is verified (rows read back, every file's size
+compared with the database). Read-only against Supabase; `backups/` is
+gitignored because it is business data -- copy it somewhere other than this
+computer (a USB drive, Google Drive). Restoring = re-inserting these JSON rows
+and re-uploading `files/` into a Supabase project that has schemas 1-4 applied;
+the `was_low_confidence` column is not saved because the database recomputes it.

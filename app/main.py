@@ -15,6 +15,7 @@ Refuses everything if APP_TOKEN isn't configured -- each call spends real
 money, so there's no open-by-default mode.
 """
 import hmac
+from contextlib import asynccontextmanager
 import json
 import logging
 import os
@@ -37,7 +38,14 @@ from app.roster import load_roster, roster_prompt_text
 logger = logging.getLogger("vehicle_tracker")
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="Vehicle Tracker")
+# No public API docs: every endpoint is token-gated, but there is no reason to publish a map of them.
+@asynccontextmanager
+async def lifespan(_app):
+    _startup_checks()
+    yield
+
+
+app = FastAPI(title="Vehicle Tracker", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
 MAX_PARALLEL_EXTRACTIONS = 4
 
@@ -62,12 +70,28 @@ async def static_cache_policy(request, call_next):
     re-checked with the server -- a cheap "304 not modified" when nothing
     changed -- while the fonts, which never change, are cached for a week."""
     response = await call_next(request)
+    # The page is opened with ?token=... once; make sure that URL is never sent on to another site
+    # (photos load from Supabase), the browser can't be talked into guessing content types, and the
+    # app can't be shown inside someone else's page.
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
     path = request.url.path
     if path.startswith("/static/fonts/"):
         response.headers["Cache-Control"] = "public, max-age=604800"
     elif path == "/" or path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+def _startup_checks() -> None:
+    """Say plainly in the log what is missing, instead of failing mysteriously on the first request."""
+    missing = [name for name, val in (("APP_TOKEN", settings.app_token), ("ANTHROPIC_API_KEY", settings.anthropic_api_key),
+                                      ("SUPABASE_URL", settings.supabase_url), ("SUPABASE_SERVICE_KEY", settings.supabase_service_key)) if not val]
+    if missing:
+        logger.error("MISSING SETTINGS: %s -- the app will start but the related features will refuse to work", ", ".join(missing))
+    if os.environ.get("DEV_DASHBOARD_DEMO") or os.environ.get("DEV_FIXTURE_PATH"):
+        logger.error("DEV_* variables are set: the dashboard would show MADE-UP data. Remove them from the environment.")
 
 
 @app.get("/health")

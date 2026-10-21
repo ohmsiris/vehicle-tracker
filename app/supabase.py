@@ -108,6 +108,12 @@ def storage_upload(path: str, data: bytes, content_type: str) -> None:
     _check(resp, f"storage upload {path}")
 
 
+def storage_download(path: str) -> bytes:
+    """One stored file, via the authenticated endpoint (works whether the bucket is public or not)."""
+    resp = _client().get(f"/storage/v1/object/{STORAGE_BUCKET}/{quote(path)}")
+    return _check(resp, f"storage download {path}").content
+
+
 def storage_delete(paths: list[str]) -> None:
     """Best-effort cleanup (used when a save fails after photos were uploaded)."""
     if not paths:

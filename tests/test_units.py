@@ -368,3 +368,23 @@ def test_app_files_are_always_revalidated_but_fonts_are_cached():
     font = c.get("/static/fonts/fonts.css")
     assert font.headers["cache-control"] == "public, max-age=604800"
     assert "cache-control" not in c.get("/health").headers          # API responses are untouched
+
+
+def test_production_hardening_headers_and_no_public_docs():
+    from fastapi.testclient import TestClient
+
+    from app import main
+    c = TestClient(main.app)
+    for path in ("/", "/static/app.js", "/health"):
+        h = c.get(path).headers
+        assert h["referrer-policy"] == "no-referrer" and h["x-content-type-options"] == "nosniff" and h["x-frame-options"] == "DENY", path
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert c.get(path).status_code == 404, path
+
+
+def test_railway_config_is_valid_and_points_at_the_health_check():
+    import json
+    cfg = json.loads((ROOT / "railway.json").read_text(encoding="utf-8"))
+    assert cfg["deploy"]["startCommand"] == "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    assert cfg["deploy"]["healthcheckPath"] == "/health"
+    assert (ROOT / ".python-version").read_text().strip() == "3.12"
