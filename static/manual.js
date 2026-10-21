@@ -44,6 +44,7 @@ function setMode(mode) {
   $("modeManual").setAttribute("aria-selected", String(man));
   $("captureError").hidden = true;
   showErrorIn("manualError", "");
+  setCatStatus("");
   if (man) prepareManual();
 }
 
@@ -181,6 +182,7 @@ function resetManualForm() {
   for (const id of ["mMileage", "mSummary", "mNotes"]) $(id).value = "";
   $("mDate").value = todayISO();
   showErrorIn("manualError", "");
+  setCatStatus("");
 }
 
 // ------------------------------------- from the board's "ช่างทำเอง" button
@@ -207,6 +209,13 @@ function initManual() {
   $("modeBill").addEventListener("click", () => setMode("bill"));
   $("modeManual").addEventListener("click", () => setMode("manual"));
   $("mAddRow").addEventListener("click", () => addManualRow({}));
+  // Typed names get a category automatically when you leave the box; this does every row at once (or retries).
+  // Rows whose category came from a shortcut button, or that you picked yourself, are left alone.
+  $("mRecat").addEventListener("click", () => {
+    const rows = mRows().filter((tr) => tr.querySelector("[data-f=description]").value.trim());
+    if (!rows.length) { setCatStatus("ยังไม่มีรายการให้จัดหมวด — พิมพ์ว่าทำอะไรก่อน"); return; }
+    recategorize(rows);
+  });
   $("manualSaveBtn").addEventListener("click", saveManual);
   $("mPresets").replaceChildren(...PRESETS.map((p) => el("button", { class: "chipbtn", type: "button", text: p[0], onclick: () => addPreset(p) })));
   bindDateField($("mDate"), $("mDateCap"));

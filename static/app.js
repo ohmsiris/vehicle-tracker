@@ -360,10 +360,14 @@ function readLines() {
 // --------------------------------------------------------------- re-categorize
 let catSeq = 0;
 
+// The status line sits next to the re-categorize button: one on the review page, one on the manual form.
 function setCatStatus(text, isError = false) {
-  const n = $("catStatus");
-  n.textContent = text;
-  n.classList.toggle("err", isError);
+  for (const id of ["catStatus", "mCatStatus"]) {
+    const n = $(id);
+    if (!n) continue;
+    n.textContent = text;
+    n.classList.toggle("err", isError);
+  }
 }
 
 // Re-decide categories from the CURRENT description text (server: /api/categorize).
