@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, repair_requests, supabase
+from app import dashboard, events, history, repair_requests, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -334,3 +334,37 @@ def get_dashboard(
             logger.exception("dashboard query failed")
             raise HTTPException(502, "โหลดข้อมูลภาพรวมไม่สำเร็จ ลองอีกครั้ง")
     return dashboard.build_dashboard(**data, today=today, months=months, branch=branch or None)
+
+
+# ---------------------------------------------------- vehicle history (read-only)
+def _history_call(fn, *args):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return fn(*args)
+    except history.NotFound:
+        raise HTTPException(404, "ไม่พบข้อมูลนี้")
+    except supabase.SupabaseError:
+        logger.exception("history query failed")
+        raise HTTPException(502, "โหลดข้อมูลไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/vehicles")
+def api_vehicles(x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    """Every active truck with its status and lifetime repair count / spend."""
+    _check_token(x_app_token, token)
+    return _history_call(history.list_vehicles)
+
+
+@app.get("/api/vehicles/{vehicle_id}/events")
+def api_vehicle_events(vehicle_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    """One truck's confirmed repair events, newest first, each with a one-line preview."""
+    _check_token(x_app_token, token)
+    return _history_call(history.vehicle_events, vehicle_id)
+
+
+@app.get("/api/events/{event_id}")
+def api_event(event_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """One confirmed event in full: header, every line, files, and the board requests it closed."""
+    _check_token(x_app_token, token)
+    return _history_call(history.event_detail, event_id)

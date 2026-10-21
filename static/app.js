@@ -58,16 +58,57 @@ function initTheme() {
 
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
+const VIEW_NAMES = ["board", "dash", "capture", "busy", "review", "done", "search", "vehicle", "event", "machinery"];
+// which sidebar entry lights up for each view
+const NAV_OF = {
+  board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
+  search: "navSearch", vehicle: "navSearch", event: "navSearch", machinery: "navMachinery",
+};
+
 function showView(name) {
-  for (const v of ["board", "dash", "capture", "busy", "review", "done"]) $(v + "View").hidden = v !== name;
-  if (name !== "board" && name !== "dash") lastBillView = name === "busy" ? "capture" : name;
-  $("navBoard").classList.toggle("active", name === "board");
-  $("navDash").classList.toggle("active", name === "dash");
-  $("navBills").classList.toggle("active", name !== "board" && name !== "dash");
+  for (const v of VIEW_NAMES) $(v + "View").hidden = v !== name;
+  if (["capture", "busy", "review", "done"].includes(name)) lastBillView = name === "busy" ? "capture" : name;
+  for (const id of new Set(Object.values(NAV_OF))) $(id).classList.toggle("active", id === NAV_OF[name]);
   $("stepHint").textContent = {
-    board: "", dash: "", capture: "1 · เลือกรถและอัปโหลดไฟล์", busy: "กำลังอ่านบิล…", review: "2 · ตรวจสอบและยืนยัน", done: "บันทึกแล้ว",
-  }[name];
+    capture: "1 · เลือกรถและอัปโหลดไฟล์", busy: "กำลังอ่านบิล…", review: "2 · ตรวจสอบและยืนยัน", done: "บันทึกแล้ว",
+  }[name] || "";
+  // The truck pages are addressed by the URL hash (so Back works); every other page clears it.
+  if (!FLEET_VIEWS.includes(name) && location.hash) history.replaceState(null, "", location.pathname + location.search);
+  closeSidebarIfDrawer();
   window.scrollTo(0, 0);
+}
+
+// ---- Sidebar: open by default on a wide screen (the toggle collapses it and remembers),
+// a slide-in drawer on a phone. It never takes room from the page unless you want it to.
+const isNarrow = () => window.matchMedia("(max-width: 900px)").matches;
+
+function closeSidebarIfDrawer() {
+  if (isNarrow()) { document.body.classList.remove("side-open"); $("menuBtn").setAttribute("aria-expanded", "false"); }
+}
+
+function initSidebar() {
+  const body = document.body, btn = $("menuBtn");
+  let stored = null;
+  try { stored = localStorage.getItem("vt_side"); } catch (e) { /* storage blocked */ }
+  if (!isNarrow() && stored === "closed") body.classList.add("side-collapsed");
+  const sync = () => btn.setAttribute("aria-expanded", String(isNarrow() ? body.classList.contains("side-open") : !body.classList.contains("side-collapsed")));
+  btn.addEventListener("click", () => {
+    if (isNarrow()) body.classList.toggle("side-open");
+    else {
+      body.classList.toggle("side-collapsed");
+      try { localStorage.setItem("vt_side", body.classList.contains("side-collapsed") ? "closed" : "open"); } catch (e) { /* ignore */ }
+    }
+    sync();
+  });
+  $("sideScrim").addEventListener("click", () => { body.classList.remove("side-open"); sync(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && body.classList.contains("side-open")) { body.classList.remove("side-open"); sync(); } });
+  window.addEventListener("resize", sync);
+  document.querySelectorAll(".side-head[aria-controls]").forEach((h) => h.addEventListener("click", () => {
+    const open = h.getAttribute("aria-expanded") !== "true";
+    h.setAttribute("aria-expanded", String(open));
+    $(h.getAttribute("aria-controls")).hidden = !open;
+  }));
+  sync();
 }
 
 // --------------------------------------------------------------- vehicles
@@ -507,9 +548,10 @@ function resetAfterSave() {
 
 // --------------------------------------------------------------- init
 async function init() {
+  const bootHash = location.hash;       // a bookmarked / reloaded truck or bill page: kept through start-up, routed to once the data is loaded
   const params = new URLSearchParams(location.search);
   state.token = params.get("token") || sessionStorage.getItem("vt_token") || "";
-  if (params.get("token")) { sessionStorage.setItem("vt_token", state.token); history.replaceState(null, "", location.pathname + (params.get("sample") ? "?sample=1" : "")); }
+  if (params.get("token")) { sessionStorage.setItem("vt_token", state.token); history.replaceState(null, "", location.pathname + (params.get("sample") ? "?sample=1" : "") + location.hash); }
 
   wireDrop("billDrop", "billInput", state.billFiles, true);
   wireDrop("refDrop", "refInput", state.refFiles, false);
@@ -521,6 +563,9 @@ async function init() {
   $("navBoard").addEventListener("click", () => showView("board"));
   $("navBills").addEventListener("click", () => showView(lastBillView));
   $("navDash").addEventListener("click", () => { showView("dash"); loadDashboard(); });
+  $("navSearch").addEventListener("click", goSearch);
+  $("navMachinery").addEventListener("click", () => showView("machinery"));
+  initSidebar();
   initTheme();
   // The button only re-checks lines where it can help: ones whose wording the
   // user edited, or whose category the model flagged as unsure. Everything else
@@ -537,10 +582,13 @@ async function init() {
   });
   $("tokenSave").addEventListener("click", () => { state.token = $("tokenInput").value.trim(); sessionStorage.setItem("vt_token", state.token); loadMeta().then(loadBoard); });
 
-  showView("board");
+  showView("board");                    // (clears the hash, as every non-truck page does)
+  if (bootHash) history.replaceState(null, "", location.pathname + location.search + bootHash);
   await loadMeta();
   await initBoard();
   initDashboard();
+  initFleet();
+  if (location.hash) route();
   if (params.get("tab") === "dash") { showView("dash"); loadDashboard(); }
   if (params.get("sample")) {
     state.draft = await api("/api/dev/sample-draft");

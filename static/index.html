@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>งานซ่อมรถ</title>
+<title>ระบบซ่อมบำรุง</title>
 <script>
   // Apply the saved theme before first paint (light unless the user chose dark) -- no flash.
   try { if (localStorage.getItem("vt_theme") === "dark") document.documentElement.dataset.theme = "dark"; } catch (e) { /* storage blocked: stay light */ }
@@ -15,15 +15,37 @@
 </head>
 <body>
 <header class="topbar">
-  <h1>งานซ่อมรถ</h1>
-  <nav class="nav" aria-label="เมนู">
-    <button id="navBoard" class="navbtn active" type="button">งานซ่อม</button>
-    <button id="navBills" class="navbtn" type="button">บันทึกบิล</button>
-    <button id="navDash" class="navbtn" type="button">ภาพรวม</button>
-  </nav>
+  <button id="menuBtn" class="menubtn" type="button" aria-label="เปิด/ปิดเมนู" aria-controls="sidebar" aria-expanded="true">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
+  <h1>ระบบซ่อมบำรุง</h1>
   <span class="step-hint" id="stepHint"></span>
   <button id="themeBtn" class="themebtn" type="button" aria-label="สลับธีมสว่าง/มืด" title="สลับธีมสว่าง/มืด">☾</button>
 </header>
+
+<div class="shell">
+<div id="sideScrim" class="scrim"></div>
+<aside id="sidebar" class="sidebar" aria-label="เมนูหลัก">
+  <!-- Cars: everything that exists today lives here -->
+  <div class="side-group" id="groupCars">
+    <button class="side-head" type="button" aria-expanded="true" aria-controls="sideCars">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg><span>รถ</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <nav class="side-items" id="sideCars">
+      <button id="navBoard" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>งานซ่อม</span></button>
+      <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกบิล</span></button>
+      <button id="navSearch" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg><span>ค้นหารถ / ประวัติ</span></button>
+      <button id="navDash" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>ภาพรวม</span></button>
+    </nav>
+  </div>
+
+  <!-- Machinery: placeholder for now -->
+  <div class="side-group" id="groupMachinery">
+    <button id="navMachinery" class="side-head" type="button" aria-expanded="false">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>เครื่องจักร</span><em class="soon">เร็วๆ นี้</em>
+    </button>
+  </div>
+</aside>
 
 <main>
   <div id="tokenBox" class="card" hidden>
@@ -191,7 +213,60 @@
       </div>
     </div>
   </section>
+
+  <!-- ============ Vehicle search ============ -->
+  <section id="searchView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">ค้นหารถ / ประวัติการซ่อม</h2>
+      <p class="muted small">พิมพ์ทะเบียน เบอร์รถ หรือรุ่น แล้วกดเข้าไปดูประวัติการซ่อมของคันนั้น</p>
+    </div>
+    <div class="card searchbar">
+      <input id="vehSearch" type="search" placeholder="เช่น 84-4786, 36, D-Max, แก่งคอย" autocomplete="off" aria-label="ค้นหารถ">
+      <select id="vehBranch" aria-label="สาขา"><option value="">ทุกสาขา</option></select>
+      <select id="vehSort" aria-label="เรียงตาม">
+        <option value="number">เรียงตามเบอร์รถ</option>
+        <option value="recent">ซ่อมล่าสุดก่อน</option>
+        <option value="spend">ค่าซ่อมรวมสูงสุด</option>
+        <option value="count">ซ่อมบ่อยสุด</option>
+        <option value="stale">ไม่ได้ซ่อมนานสุด</option>
+      </select>
+    </div>
+    <p class="error" id="searchError" hidden></p>
+    <p class="muted small" id="searchCount"></p>
+    <div id="vehList" class="vehgrid"></div>
+  </section>
+
+  <!-- ============ One vehicle: its history ============ -->
+  <section id="vehicleView" hidden>
+    <button id="vehBack" class="btn small" type="button">← ค้นหารถ</button>
+    <div class="card vehhead" id="vehHead"></div>
+    <p class="error" id="vehicleError" hidden></p>
+    <h2 class="section-title">ประวัติการซ่อม <span class="count" id="vehEventCount"></span></h2>
+    <div id="vehEvents" class="evlist"></div>
+  </section>
+
+  <!-- ============ One repair event: the "bill" ============ -->
+  <section id="eventView" hidden>
+    <div class="evbar">
+      <button id="evBack" class="btn small" type="button">← ประวัติรถ</button>
+      <span class="grow"></span>
+      <button id="evEdit" class="btn" type="button">แก้ไข</button>
+    </div>
+    <p class="error" id="eventError" hidden></p>
+    <div id="evPaper"></div>
+  </section>
+
+  <!-- ============ Machinery placeholder ============ -->
+  <section id="machineryView" hidden>
+    <div class="card center soonpage">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>
+      <h2>เครื่องจักร</h2>
+      <p class="muted">ส่วนนี้กำลังจะมา — ฟรีซ คูลลิ่ง คอนเดนเซอร์ ตารางบำรุงรักษา และประวัติซ่อมของเครื่องจักรจะมาอยู่ตรงนี้</p>
+      <p class="muted small">ตอนนี้ยังใช้น้องติ๊กใน LINE ตามเดิม ไม่มีอะไรเปลี่ยน</p>
+    </div>
+  </section>
 </main>
+</div>
 
 <!-- "Who fixed it?" -- shown when a request on the board is ticked as done -->
 <dialog id="fixDialog">
@@ -229,6 +304,7 @@
 
 <script src="/static/board.js"></script>
 <script src="/static/dashboard.js"></script>
+<script src="/static/fleet.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
