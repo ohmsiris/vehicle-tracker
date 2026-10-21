@@ -297,7 +297,9 @@ function billBlock(bill, items) {
   return el("div", { class: "card bill" }, preview, right);
 }
 
-function lineRow(it) {
+// `hooks` lets another page (the bill editor on the truck history) reuse this exact row with its own
+// totals and numbering; the review page uses the defaults.
+function lineRow(it, hooks = { changed: () => linesChanged(), renumber: () => renumber() }) {
   const flags = new Set(it.low_confidence_fields || []);
   const cell = (cls, node) => el("td", { class: cls }, node);
   const text = (name, v, fl) => flagInput(el("input", { type: "text", "data-f": name, value: v ?? "" }), fl);
@@ -315,7 +317,7 @@ function lineRow(it) {
     cell("price", numIn("unit_cost", it.unit_cost, false, "0.01")),
     cell("total", numIn("line_total", it.line_total, flags.has("cost"), "0.01")),
     cell("cat", cat),
-    cell("", el("button", { class: "btn danger", title: "ลบแถว", text: "✕", onclick: () => { tr.remove(); renumber(); linesChanged(); } })),
+    cell("", el("button", { class: "btn danger", title: "ลบแถว", text: "✕", onclick: () => { tr.remove(); hooks.renumber(); hooks.changed(); } })),
   );
   const f = (n) => tr.querySelector(`[data-f=${n}]`);
   // Corrected the wording -> the old category belonged to the OLD wording; re-decide it.
@@ -323,10 +325,11 @@ function lineRow(it) {
   f("description").addEventListener("change", () => recategorize([tr]));
   if (flags.has("category")) tr.dataset.catUncertain = "1";   // the model itself wasn't sure of this one
   const setIfFinite = (node, v) => { node.value = Number.isFinite(v) && v > 0 ? String(Math.round(v * 100) / 100) : node.value; };
-  f("quantity").addEventListener("input", () => { if (num(f("unit_cost").value) > 0) setIfFinite(f("line_total"), num(f("quantity").value) * num(f("unit_cost").value)); linesChanged(); });
-  f("unit_cost").addEventListener("input", () => { if (num(f("quantity").value) > 0) setIfFinite(f("line_total"), num(f("quantity").value) * num(f("unit_cost").value)); linesChanged(); });
-  f("line_total").addEventListener("input", () => { if (num(f("quantity").value) > 0) setIfFinite(f("unit_cost"), num(f("line_total").value) / num(f("quantity").value)); linesChanged(); });
-  queueMicrotask(renumber);
+  f("quantity").addEventListener("input", () => { if (num(f("unit_cost").value) > 0) setIfFinite(f("line_total"), num(f("quantity").value) * num(f("unit_cost").value)); hooks.changed(); });
+  f("unit_cost").addEventListener("input", () => { if (num(f("quantity").value) > 0) setIfFinite(f("line_total"), num(f("quantity").value) * num(f("unit_cost").value)); hooks.changed(); });
+  f("line_total").addEventListener("input", () => { if (num(f("quantity").value) > 0) setIfFinite(f("unit_cost"), num(f("line_total").value) / num(f("quantity").value)); hooks.changed(); });
+  tr.addEventListener("input", () => { tr.dataset.edited = "1"; });      // any touch: the AI-uncertainty flags no longer apply to this line
+  queueMicrotask(() => hooks.renumber());
   return tr;
 }
 

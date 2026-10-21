@@ -21,7 +21,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -368,3 +368,23 @@ def api_event(event_id: str, x_app_token: str = Header(default=""), token: str =
     """One confirmed event in full: header, every line, files, and the board requests it closed."""
     _check_token(x_app_token, token)
     return _history_call(history.event_detail, event_id)
+
+
+@app.patch("/api/events/{event_id}")
+def api_update_event(event_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Edits a saved event (header, truck, and a full replacement of its lines) atomically."""
+    _check_token(x_app_token, token)
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        events.update_event(event_id, body)
+    except events.InvalidEvent as exc:
+        raise HTTPException(422, str(exc))
+    except events.EventNotFound:
+        raise HTTPException(404, "ไม่พบรายการนี้")
+    except events.MigrationMissing:
+        raise HTTPException(503, "ยังแก้ไขไม่ได้ — ต้องรันไฟล์ schema_v4.sql ใน Supabase ก่อน")
+    except supabase.SupabaseError:
+        logger.exception("updating event failed")
+        raise HTTPException(502, "บันทึกการแก้ไขไม่สำเร็จ ลองอีกครั้ง (ข้อมูลที่แก้ยังอยู่ในหน้านี้)")
+    return {"ok": True}

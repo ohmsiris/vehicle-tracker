@@ -7,6 +7,7 @@ Everything that decides what the page shows (the one-line preview of an
 event, the totals per truck) is a pure function so it is unit-tested; the
 database calls are thin.
 """
+import time
 import uuid
 from typing import Optional
 
@@ -19,6 +20,25 @@ NON_DESCRIPTIVE = {"ค่าแรง"}   # labour says little about WHAT was d
 
 class NotFound(Exception):
     pass
+
+
+# maintenance_events.summary arrives with schema_v4.sql. Until that has been run the
+# column does not exist, and asking for it would break every history page, so it is
+# probed (and re-probed every 30 s) and only requested once it is there.
+_summary_probe = {"at": 0.0, "ok": False}
+
+
+def _has_summary() -> bool:
+    now = time.time()
+    if now - _summary_probe["at"] < 30:
+        return _summary_probe["ok"]
+    try:
+        supabase.select("maintenance_events", {"select": "summary", "limit": "1"})
+        ok = True
+    except supabase.SupabaseError:
+        ok = False
+    _summary_probe.update(at=now, ok=ok)
+    return ok
 
 
 def _uuid_or_404(value: str) -> str:
@@ -88,7 +108,7 @@ def event_rows(events: list[dict], lines: list[dict], attachments: list[dict]) -
         out.append({
             "event_id": e["id"], "event_date": e["event_date"], "vendor": e.get("vendor"), "performed_by": e.get("performed_by"),
             "source": e.get("source") or "bill", "total_cost": e.get("total_cost"), "mileage": e.get("mileage"),
-            "preview": preview(ls), "line_count": len(ls), "file_count": files.get(e["id"], 0),
+            "summary": (e.get("summary") or "").strip() or None, "preview": preview(ls), "line_count": len(ls), "file_count": files.get(e["id"], 0),
             "needs_review": bool(e.get("low_confidence_fields")),
         })
     return out
@@ -109,7 +129,7 @@ def list_vehicles() -> list[dict]:
 def vehicle_events(vehicle_id: str) -> list[dict]:
     vid = _uuid_or_404(vehicle_id)
     events = supabase.select_all("maintenance_events", {
-        "select": "id,event_date,vendor,performed_by,source,total_cost,mileage,low_confidence_fields,created_at",
+        "select": "id,event_date,vendor,performed_by,source,total_cost,mileage,low_confidence_fields,created_at" + (",summary" if _has_summary() else ""),
         "vehicle_id": f"eq.{vid}", "status": "eq.confirmed", "order": "event_date.desc,created_at.desc,id.asc"})
     ids = [e["id"] for e in events]
     lines, attachments = [], []
@@ -126,14 +146,15 @@ def event_detail(event_id: str) -> dict:
     eid = _uuid_or_404(event_id)
     rows = supabase.select("maintenance_events", {
         "select": "id,event_date,vendor,performed_by,source,branch,mileage,next_service_mileage,total_cost,notes,low_confidence_fields,"
-                  "extraction_model,created_at,confirmed_at,vehicle_id,vehicles(plate_number,plate_province,vehicle_number,branch,make,model)",
+                  "extraction_model,created_at,confirmed_at,vehicle_id," + ("summary," if _has_summary() else "")
+                  + "vehicles(plate_number,plate_province,vehicle_number,branch,make,model)",
         "id": f"eq.{eid}", "status": "eq.confirmed", "limit": "1"})
     if not rows:
         raise NotFound()
     e = rows[0]
     v = e.pop("vehicles", None) or {}
     lines = supabase.select_all("bill_line_items", {
-        "select": "line_number,description,category,quantity,unit,unit_cost,line_total,was_low_confidence,attachment_id",
+        "select": "line_number,description,category,quantity,unit,unit_cost,line_total,was_low_confidence,low_confidence_fields,attachment_id",
         "event_id": f"eq.{eid}", "order": "line_number.asc"})
     atts = supabase.select_all("event_attachments", {
         "select": "id,type,mime_type,storage_path,sort_order", "event_id": f"eq.{eid}", "order": "sort_order.asc,id.asc"})

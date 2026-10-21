@@ -221,3 +221,89 @@ def save_event(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicate
         "event_id": event_id,
         "attachments": [{"id": p["id"], "type": p["type"], "url": supabase.public_url(p["path"])} for p in prepared],
     }
+
+
+# ------------------------------------------------------------ editing a saved event
+class EventNotFound(Exception):
+    """No confirmed event with that id."""
+
+
+class MigrationMissing(Exception):
+    """schema_v4.sql (the update function) has not been run in Supabase yet."""
+
+
+def _validate_edit(payload: dict) -> None:
+    ev = payload.get("event") or {}
+    _parse_date(ev.get("event_date"))
+    _num(ev.get("mileage"), "เลขไมล์", integer=True)
+    _num(ev.get("next_service_mileage"), "ไมล์ครั้งต่อไป", integer=True)
+    _num(ev.get("total_cost"), "ยอดรวม")
+    for field, limit in (("vendor", 200), ("performed_by", 200), ("branch", 100), ("notes", 2000), ("summary", 500)):
+        if len(str(ev.get(field) or "")) > limit:
+            raise InvalidEvent(f"ข้อความในช่อง {field} ยาวเกินไป")
+    vid = payload.get("vehicle_id")
+    if vid:
+        try:
+            uuid.UUID(str(vid))
+        except ValueError:
+            raise InvalidEvent("รถที่เลือกไม่ถูกต้อง")
+    lines = payload.get("line_items") or []
+    if not lines:
+        raise InvalidEvent("ต้องมีรายการอย่างน้อย 1 รายการ")
+    for ln in lines:
+        if not (ln.get("description") or "").strip():
+            raise InvalidEvent("มีรายการที่ยังไม่ได้ใส่ชื่อ")
+        if ln.get("category") and ln["category"] not in CATEGORIES:
+            raise InvalidEvent(f"หมวด '{ln['category']}' ไม่ถูกต้อง")
+        if ln.get("attachment_id"):
+            try:
+                uuid.UUID(str(ln["attachment_id"]))
+            except ValueError:
+                raise InvalidEvent("รายการอ้างอิงไฟล์ที่ไม่ถูกต้อง")
+        _num(ln.get("quantity"), "จำนวน")
+        _num(ln.get("unit_cost"), "ราคา/หน่วย")
+        _num(ln.get("line_total"), "ราคารวมของรายการ")
+
+
+def update_event(event_id: str, payload: dict) -> None:
+    """
+    Edits a SAVED event: header fields (and, if given, the truck) plus a full
+    replacement of its line items, in one database transaction
+    (update_maintenance_event() in schema_v4.sql). Photos, the AI's raw
+    extraction and the board requests the event closed are left alone.
+    """
+    try:
+        eid = str(uuid.UUID(str(event_id)))
+    except ValueError:
+        raise EventNotFound()
+    _validate_edit(payload)
+    vid = payload.get("vehicle_id")
+    if vid and not supabase.select("vehicles", {"select": "id", "id": f"eq.{vid}", "limit": "1"}):
+        raise InvalidEvent("ไม่พบรถคันนี้ในระบบ")
+    ev = payload["event"]
+    try:
+        supabase.rpc("update_maintenance_event", {"p": {
+            "event_id": eid,
+            "vehicle_id": vid or None,
+            "event_date": ev["event_date"],
+            "mileage": ev.get("mileage"), "next_service_mileage": ev.get("next_service_mileage"), "total_cost": ev.get("total_cost"),
+            "vendor": ev.get("vendor"), "performed_by": ev.get("performed_by"), "branch": ev.get("branch"),
+            "notes": ev.get("notes"), "summary": ev.get("summary"),
+            "line_items": [
+                {
+                    "attachment_id": ln.get("attachment_id") or None,
+                    "description": ln["description"].strip(), "category": ln.get("category"),
+                    "quantity": ln.get("quantity"), "unit": ln.get("unit"),
+                    "unit_cost": ln.get("unit_cost"), "line_total": ln.get("line_total"),
+                    "low_confidence_fields": ln.get("low_confidence_fields") or [],
+                }
+                for ln in payload["line_items"]
+            ],
+        }})
+    except supabase.SupabaseError as exc:
+        text = str(exc)
+        if "PGRST202" in text or "Could not find the function" in text:
+            raise MigrationMissing() from exc
+        if "P0002" in text:
+            raise EventNotFound() from exc
+        raise

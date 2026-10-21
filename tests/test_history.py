@@ -100,6 +100,7 @@ def db(monkeypatch):
     monkeypatch.setattr(history.supabase, "select_all", d.select_all)
     monkeypatch.setattr(history.supabase, "select", d.select)
     monkeypatch.setattr(history.supabase, "public_url", lambda path: f"https://x/{path}")
+    monkeypatch.setattr(history, "_has_summary", lambda: True)      # the probe has its own tests below
     return d
 
 

@@ -35,8 +35,9 @@ call spends API credit), `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`. The
 service key bypasses row-level security: server-side only, never in a page.
 
 **Database** (Supabase SQL Editor, in this order): `schema.sql`, then
-`schema_v2.sql`, then `schema_v3_dashboard.sql`. Replace `<PROJECT_REF>` in
-`schema.sql` first. Then seed the fleet:
+`schema_v2.sql`, then `schema_v3_dashboard.sql` (only needed for Looker), then
+`schema_v4.sql` (editing saved bills + the written summary). Replace
+`<PROJECT_REF>` in `schema.sql` first. Then seed the fleet:
 
 ```bash
 .venv/Scripts/python.exe scripts/seed_vehicles.py
@@ -136,3 +137,32 @@ the same on every device. Date inputs show a line under them spelling out both
 calendars, a พ.ศ. year typed into one is converted automatically, and the
 server rejects a year >= 2400 with an explicit message. The bill reader
 already corrects a พ.ศ. year the model read off a bill (`app/batch.py`).
+
+## Navigation: sidebar, cars, machinery
+
+A left sidebar groups the app. Everything built so far lives under **รถ**
+(repair board, record a bill, vehicle search / history, dashboard);
+**เครื่องจักร** is a placeholder page for the future machinery section. The
+sidebar collapses with the menu button (remembered per device) and is a
+slide-in drawer on a phone.
+
+## Vehicle search and history ("ค้นหารถ / ประวัติ")
+
+Search by plate, truck number, make/model or branch; open a truck to see its
+repair events newest first, each with a one-line "what was done"; open an
+event to read it as a bill (read-only), with its photos/PDFs and the board
+requests it closed. Pages are addressed by URL hash (`#search`,
+`#vehicle=<id>`, `#event=<id>`), so Back and bookmarks work.
+
+**Editing a saved bill** ("แก้ไข" on the bill page): header fields, the
+truck, a short summary, and the line items (same row as the review page, with
+the same AI category re-check). Saving replaces the lines in one transaction
+(`update_maintenance_event()` in `schema_v4.sql`); photos and the requests the
+bill closed are untouched; lines you did not touch keep their "AI was unsure"
+flags. Until `schema_v4.sql` has been run, the page says so instead of failing.
+
+**Summary:** `maintenance_events.summary` is an optional written one-liner,
+shown in the history list in place of the automatic preview (the biggest line
+items by cost, labour last). It is only requested from the database once the
+column exists (`app/history.py` probes for it), so the history pages work
+before and after `schema_v4.sql`.

@@ -452,3 +452,10 @@ table.ro tr.lowconf td.d { box-shadow: inset 3px 0 0 var(--flag-line); }
   .paper-date { text-align: left; }
   .vehhead-title { font-size: 22px; }
 }
+
+.paper-summary { margin-top: 6px; font-size: 15px; color: var(--text-2); }
+.evsummary { font-weight: 550; margin: 3px 0 2px; }
+.edit-banner { background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; }
+.edit-banner strong { color: var(--warn); }
+.edit-h2 { margin-top: 20px; }
+.paper.editing { border-color: var(--warn-line); }
