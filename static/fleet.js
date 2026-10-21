@@ -208,7 +208,8 @@ function evRow(e) {
     el("div", { class: "evmain" },
       el("div", { class: "evtitle" }, el("strong", { text: who }),
         el("span", { class: `badge${e.source === "manual" ? " nobill" : ""}`, text: srcLabel[e.source] || e.source }),
-        e.needs_review ? el("span", { class: "badge warn", text: "ควรตรวจ" }) : null),
+        e.needs_review ? el("span", { class: "badge warn", text: "ควรตรวจ", title: e.review_reasons.join("\n") }) : null),
+      e.needs_review ? el("div", { class: "reviewwhy small", text: e.review_reasons[0] }) : null,
       el("div", { class: e.summary ? "evsummary" : "evpreview", text: e.summary || e.preview || "(ไม่มีรายการ)" }),
       el("div", { class: "muted small", text: meta })),
     el("div", { class: "evtotal", text: e.total_cost ? `${baht(e.total_cost)} ฿` : "–" }),
@@ -260,6 +261,7 @@ function renderPaper(d) {
   fleet.editing = false;
   $("evEdit").disabled = false;
   fill($("evPaper"),
+    e.needs_review ? el("div", { class: "warnings" }, el("strong", { text: "ควรตรวจบิลนี้" }), el("ul", {}, ...e.review_reasons.map((r) => el("li", { text: r })))) : null,
     (fleet.paperCard = el("div", { class: "card paper" },
       el("div", { class: "paper-head" },
         el("div", {},

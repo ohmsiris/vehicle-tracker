@@ -459,3 +459,4 @@ table.ro tr.lowconf td.d { box-shadow: inset 3px 0 0 var(--flag-line); }
 .edit-banner strong { color: var(--warn); }
 .edit-h2 { margin-top: 20px; }
 .paper.editing { border-color: var(--warn-line); }
+.reviewwhy { color: var(--warn); margin: 1px 0 2px; }

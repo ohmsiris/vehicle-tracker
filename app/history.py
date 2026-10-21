@@ -9,6 +9,7 @@ database calls are thin.
 """
 import time
 import uuid
+from datetime import date, timedelta
 from typing import Optional
 
 from app import supabase
@@ -71,6 +72,36 @@ def preview(lines: list[dict]) -> str:
     return ", ".join(shown) + (f" +{rest}" if rest else "")
 
 
+MONEY_TOLERANCE = 1.0          # baht: VAT rounding, not a real difference
+DATE_SLACK_BEFORE = 366        # a bill dated more than a year before it was entered is probably a misread year
+DATE_SLACK_AFTER = 1
+
+
+def review_reasons(event: dict, lines: list[dict]) -> list[str]:
+    """
+    Why a saved bill deserves another look, judged from the bill AS IT IS NOW --
+    so fixing the problem makes the badge go away. (The AI's own "I wasn't sure
+    of this field" flags are an audit trail from reading time; they are kept in
+    the database but are NOT used here: nearly every bill carries one, and they
+    never cleared after a person had checked the bill.)
+    """
+    reasons = []
+    total = float(event.get("total_cost") or 0)
+    line_sum = sum(float(l.get("line_total") or 0) for l in lines)
+    if not lines:
+        reasons.append("ไม่มีรายการในบิล")
+    elif total and abs(line_sum - total) > MONEY_TOLERANCE:
+        reasons.append(f"ยอดรวมไม่ตรงกับรายการ (รายการรวม {line_sum:,.2f} / ยอดรวม {total:,.2f})")
+    try:
+        d = date.fromisoformat(str(event.get("event_date"))[:10])
+        saved = date.fromisoformat(str(event.get("created_at") or event.get("event_date"))[:10])
+        if d < saved - timedelta(days=DATE_SLACK_BEFORE) or d > saved + timedelta(days=DATE_SLACK_AFTER):
+            reasons.append("วันที่ในบิลห่างจากวันที่บันทึกผิดปกติ (ตรวจปี พ.ศ./ค.ศ.)")
+    except ValueError:
+        reasons.append("วันที่ไม่ถูกต้อง")
+    return reasons
+
+
 def vehicle_rows(vehicles: list[dict], status: dict[str, dict], events: list[dict]) -> list[dict]:
     """One row per truck: identity + live status + lifetime repair count / spend."""
     spend: dict[str, list] = {}
@@ -109,7 +140,7 @@ def event_rows(events: list[dict], lines: list[dict], attachments: list[dict]) -
             "event_id": e["id"], "event_date": e["event_date"], "vendor": e.get("vendor"), "performed_by": e.get("performed_by"),
             "source": e.get("source") or "bill", "total_cost": e.get("total_cost"), "mileage": e.get("mileage"),
             "summary": (e.get("summary") or "").strip() or None, "preview": preview(ls), "line_count": len(ls), "file_count": files.get(e["id"], 0),
-            "needs_review": bool(e.get("low_confidence_fields")),
+            "review_reasons": (reasons := review_reasons(e, ls)), "needs_review": bool(reasons),
         })
     return out
 
@@ -161,7 +192,7 @@ def event_detail(event_id: str) -> dict:
     requests = supabase.select("repair_requests", {
         "select": "seq,problem,reported_by,fixed_by,request_date", "fixed_event_id": f"eq.{eid}", "order": "seq.asc"})
     return {
-        "event": {**e, "needs_review": bool(e.get("low_confidence_fields"))},
+        "event": {**e, "review_reasons": (reasons := review_reasons(e, lines)), "needs_review": bool(reasons)},
         "vehicle": {"vehicle_id": e["vehicle_id"], "plate": v.get("plate_number"), "province": v.get("plate_province") or "",
                     "truck_number": v.get("vehicle_number") or "", "branch": v.get("branch") or "",
                     "make": v.get("make") or "", "model": v.get("model") or ""},

@@ -137,9 +137,9 @@ def test_malformed_ids_are_not_found_and_never_reach_the_database(db, bad):
 
 def test_event_detail_shape(db):
     eid = str(uuid.uuid4())
-    db.event_row = {"id": eid, "event_date": "2026-10-03", "vendor": "ชมรม", "source": "bill", "total_cost": 3000, "vehicle_id": "v1",
-                    "low_confidence_fields": [], "vehicles": {"plate_number": "84-4786", "plate_province": None, "vehicle_number": "36", "branch": "สระบุรี", "make": "Hino", "model": None}}
-    db.lines = [{"event_id": eid, "line_number": 1, "description": "ผ้าเบรก"}, {"event_id": eid, "line_number": 2, "description": "ค่าแรง"}]
+    db.event_row = {"id": eid, "event_date": "2026-10-03", "created_at": "2026-10-03T05:00:00+00:00", "vendor": "ชมรม", "source": "bill", "total_cost": 3000, "vehicle_id": "v1",
+                    "low_confidence_fields": ["event_date", "vendor"], "vehicles": {"plate_number": "84-4786", "plate_province": None, "vehicle_number": "36", "branch": "สระบุรี", "make": "Hino", "model": None}}
+    db.lines = [{"event_id": eid, "line_number": 1, "description": "ผ้าเบรก", "line_total": 2000}, {"event_id": eid, "line_number": 2, "description": "ค่าแรง", "line_total": 1000}]
     db.atts = [{"event_id": eid, "id": "a1", "type": "bill", "mime_type": "image/jpeg", "storage_path": f"{eid}/a1.jpg"}]
     db.requests = [{"seq": 12, "problem": "เบรกหลังมีเสียง"}]
     d = history.event_detail(eid)
@@ -188,3 +188,44 @@ def test_history_endpoints_auth_and_error_mapping(monkeypatch):
 def test_history_endpoints_503_when_unconfigured(monkeypatch):
     main, client = _client(monkeypatch, configured=False)
     assert client.get("/api/vehicles?token=secret").status_code == 503
+
+
+# ------------------------------------------------------------ review reasons
+def ev_(**o):
+    return {"event_date": "2026-10-10", "created_at": "2026-10-20T05:00:00+00:00", "total_cost": 3000, "low_confidence_fields": [], **o}
+
+
+def test_a_consistent_bill_needs_no_review_even_if_the_ai_once_doubted_it():
+    lines = [{"line_total": 2000}, {"line_total": 1000}]
+    assert history.review_reasons(ev_(low_confidence_fields=["event_date", "total_cost", "vendor", "branch"]), lines) == []
+
+
+def test_total_that_disagrees_with_the_lines_is_flagged_and_clears_when_fixed():
+    r = history.review_reasons(ev_(total_cost=4000), [{"line_total": 2000}, {"line_total": 1000}])
+    assert len(r) == 1 and "ยอดรวมไม่ตรงกับรายการ" in r[0] and "3,000.00" in r[0] and "4,000.00" in r[0]
+    assert history.review_reasons(ev_(total_cost=3000), [{"line_total": 2000}, {"line_total": 1000}]) == []
+
+
+def test_a_rounding_difference_is_not_a_problem():
+    assert history.review_reasons(ev_(total_cost=3000.6), [{"line_total": 2000}, {"line_total": 1000}]) == []
+
+
+def test_missing_total_or_missing_lines():
+    assert history.review_reasons(ev_(total_cost=None), [{"line_total": 500}]) == []          # nothing to compare against
+    assert any("ไม่มีรายการ" in r for r in history.review_reasons(ev_(), []))
+
+
+def test_a_date_far_from_when_it_was_saved_is_flagged():
+    lines = [{"line_total": 3000}]
+    assert history.review_reasons(ev_(event_date="2024-10-18"), lines) != []                  # the "2567 read as 2024" case
+    assert history.review_reasons(ev_(event_date="2026-10-23"), lines) != []                  # days in the future
+    assert history.review_reasons(ev_(event_date="2025-10-21"), lines) == []                  # a year old: plausible (late bill)
+    assert history.review_reasons(ev_(event_date="2026-10-21", created_at="2026-10-21T01:00:00+00:00"), lines) == []   # same day
+    assert history.review_reasons(ev_(event_date="garbage"), lines) == ["วันที่ไม่ถูกต้อง"]
+
+
+def test_event_rows_expose_the_reasons():
+    rows = history.event_rows([{"id": "e1", "event_date": "2026-10-10", "created_at": "2026-10-20T00:00:00+00:00", "total_cost": 500, "low_confidence_fields": ["x"]},
+                               {"id": "e2", "event_date": "2026-10-10", "created_at": "2026-10-20T00:00:00+00:00", "total_cost": 500, "low_confidence_fields": ["x"]}],
+                              [{"event_id": "e1", "line_total": 100, "description": "a"}, {"event_id": "e2", "line_total": 500, "description": "b"}], [])
+    assert [(r["needs_review"], len(r["review_reasons"])) for r in rows] == [(True, 1), (False, 0)]
