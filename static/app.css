@@ -50,6 +50,8 @@
 }
 
 * { box-sizing: border-box; }
+/* An element that sets its own `display` would otherwise ignore the hidden attribute. */
+[hidden] { display: none !important; }
 
 body {
   margin: 0; background: var(--bg); color: var(--text);
@@ -460,3 +462,13 @@ table.ro tr.lowconf td.d { box-shadow: inset 3px 0 0 var(--flag-line); }
 .edit-h2 { margin-top: 20px; }
 .paper.editing { border-color: var(--warn-line); }
 .reviewwhy { color: var(--warn); margin: 1px 0 2px; }
+
+/* ---------------------------------------------------- record: bill / manual */
+.modeswitch { display: inline-flex; gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; margin-bottom: 16px; flex-wrap: wrap; }
+.modebtn { font: inherit; font-size: 14px; font-weight: 500; padding: 8px 18px; border-radius: 999px; border: 0; background: transparent; color: var(--text-2); cursor: pointer; transition: background .15s, color .15s; }
+.modebtn:hover:not(.active) { background: var(--bg); color: var(--text); }
+.modebtn.active { background: var(--accent); color: var(--accent-text); font-weight: 600; box-shadow: 0 1px 3px rgba(47, 91, 234, .35); }
+.presets .chipbtn { padding: 6px 14px; font-size: 14px; }
+#mTotals { margin-top: 10px; }
+#mTotals .big { font-size: 17px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+

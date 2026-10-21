@@ -388,3 +388,29 @@ def test_railway_config_is_valid_and_points_at_the_health_check():
     assert cfg["deploy"]["startCommand"] == "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     assert cfg["deploy"]["healthcheckPath"] == "/health"
     assert (ROOT / ".python-version").read_text().strip() == "3.12"
+
+
+def test_hidden_attribute_always_wins_over_a_components_own_display():
+    # `.card.note { display: flex }` used to override [hidden], so a banner that should have been
+    # hidden showed on every visit. One global rule makes `hidden` mean hidden everywhere.
+    css = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
+    assert "[hidden] { display: none !important; }" in css
+
+
+def test_the_page_has_the_manual_entry_pieces_and_no_top_bar_step_text():
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    for needle in ('id="modeBill"', 'id="modeManual"', 'id="manualMode"', 'id="manualSaveBtn"', 'id="fixSelf"', "/static/manual.js"):
+        assert needle in html, needle
+    assert 'id="stepHint"' not in html
+    # every id the scripts look up with $("...") exists (a typo here is a silent crash in the browser)
+    import re
+    ids = set(re.findall(r'id="([^"]+)"', html))
+    for js in ("manual.js", "board.js", "app.js", "fleet.js", "dashboard.js"):
+        src = (ROOT / "static" / js).read_text(encoding="utf-8")
+        missing = {i for i in re.findall(r'\$\("([A-Za-z][A-Za-z0-9_]*)"\)', src) if i not in ids}
+        # ids that are created by the scripts themselves (edit form, review form) are not in the static HTML
+        created = set(re.findall(r'id: "([^"]+)"', src)) | set(re.findall(r'input\("([A-Za-z0-9_]+)"', src)) | set(re.findall(r'field\([^)]*?\bid: "([^"]+)"', src))
+        dynamic = {"evVehicle", "evDate", "evDateCap", "evVendor", "evBranch", "evMileage", "evNext", "evTotal", "evNotes", "evJobType",
+                   "edVehicle", "edDate", "edDateCap", "edVendor", "edPerformedBy", "edBranch", "edMileage", "edNext", "edTotal", "edSummary", "edNotes",
+                   "edTotals", "edSave", "edAiSummary", "editLines"}
+        assert not (missing - created - dynamic), (js, sorted(missing - created - dynamic))

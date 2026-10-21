@@ -19,7 +19,6 @@
     <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
   </button>
   <h1>ระบบซ่อมบำรุง</h1>
-  <span class="step-hint" id="stepHint"></span>
   <button id="themeBtn" class="themebtn" type="button" aria-label="สลับธีมสว่าง/มืด" title="สลับธีมสว่าง/มืด">☾</button>
 </header>
 
@@ -33,7 +32,7 @@
     </button>
     <nav class="side-items" id="sideCars">
       <button id="navBoard" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>งานซ่อม</span></button>
-      <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกบิล</span></button>
+      <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกซ่อม</span></button>
       <button id="navSearch" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg><span>ค้นหารถ / ประวัติ</span></button>
       <button id="navDash" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>ภาพรวม</span></button>
     </nav>
@@ -124,9 +123,19 @@
 
   <!-- ============ Bills: step 1, capture ============ -->
   <section id="captureView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">บันทึกซ่อม</h2>
+      <p class="muted small">มีบิลจากร้าน → อัปโหลดให้ระบบอ่าน · ช่างทำเองไม่มีบิล → กรอกเอง</p>
+    </div>
+
     <div id="attachNote" class="card note" hidden>
       <span id="attachText"></span>
       <button id="attachClear" class="btn" type="button">เลิกผูกกับงานนี้</button>
+    </div>
+
+    <div class="modeswitch" role="tablist" aria-label="ประเภทการบันทึก">
+      <button id="modeBill" class="modebtn active" type="button" role="tab" aria-selected="true">🧾 มีบิล / ใบเสร็จ</button>
+      <button id="modeManual" class="modebtn" type="button" role="tab" aria-selected="false">🔧 ช่างทำเอง (กรอกเอง)</button>
     </div>
 
     <div class="card">
@@ -135,13 +144,65 @@
       <p class="muted small" id="vehicleNote">ไม่แน่ใจ? ข้ามไปได้ ระบบจะเดาจากป้ายทะเบียนในบิล</p>
     </div>
 
-    <div class="card">
-      <h2>บิล / ใบเสร็จ <span class="muted small">(รูปภาพหรือ PDF — ระบบจะอ่านข้อมูลให้)</span></h2>
-      <div class="drop" id="billDrop" tabindex="0" role="button">
-        <span>แตะเพื่อเลือกไฟล์ หรือลากมาวางที่นี่</span>
-        <input id="billInput" type="file" accept="image/*,application/pdf" multiple hidden>
+    <!-- ---- mode: bill ---- -->
+    <div id="billMode">
+      <div class="card">
+        <h2>บิล / ใบเสร็จ <span class="muted small">(รูปภาพหรือ PDF — ระบบจะอ่านข้อมูลให้)</span></h2>
+        <div class="drop" id="billDrop" tabindex="0" role="button">
+          <span>แตะเพื่อเลือกไฟล์ หรือลากมาวางที่นี่</span>
+          <input id="billInput" type="file" accept="image/*,application/pdf" multiple hidden>
+        </div>
+        <ul class="filelist" id="billList"></ul>
       </div>
-      <ul class="filelist" id="billList"></ul>
+    </div>
+
+    <!-- ---- mode: manual (the mechanic's own work: no bill, no AI reading) ---- -->
+    <div id="manualMode" hidden>
+      <div class="card">
+        <h2>ใครทำ เมื่อไหร่</h2>
+        <div class="grid">
+          <label class="field"><span>ผู้ซ่อม</span>
+            <input id="mWho" type="text" list="mWhoList" maxlength="200" autocomplete="off" placeholder="เช่น ช่างเอ๋">
+            <datalist id="mWhoList"></datalist>
+            <div id="mWhoChips" class="chips"></div>
+          </label>
+          <label class="field"><span>วันที่ทำเสร็จ (ปีที่แสดงใต้ช่อง เป็น พ.ศ.)</span>
+            <div><input id="mDate" type="date"><div id="mDateCap" class="datecap"></div></div>
+          </label>
+          <label class="field"><span>เลขไมล์ (ไม่บังคับ)</span>
+            <input id="mMileage" type="number" inputmode="numeric" min="0">
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>ทำอะไรบ้าง <span class="muted small">(แตะปุ่มลัดเพิ่มรายการ หรือพิมพ์เอง · ราคาไม่บังคับ)</span></h2>
+        <div id="mPresets" class="chips presets"></div>
+        <div class="tablewrap">
+          <table class="lines" id="manualLines">
+            <thead><tr><th>#</th><th>รายการ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>รวม</th><th>หมวด</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button id="mAddRow" class="btn addrow" type="button">+ เพิ่มรายการ</button>
+        <div class="muted small" id="mTotals"></div>
+      </div>
+
+      <div class="card" id="manualFixesCard" hidden>
+        <h2>งานซ่อมที่บันทึกนี้ปิด <span class="muted small">(ติ๊กงานที่ทำเสร็จแล้ว — บันทึกแล้วระบบปิดงานให้เอง)</span></h2>
+        <div id="manualFixesList"></div>
+      </div>
+
+      <div class="card">
+        <div class="grid">
+          <label class="field wide"><span>สรุปสั้นๆ ว่าซ่อมอะไร (ไม่บังคับ — ว่างไว้ระบบเขียนให้เอง)</span>
+            <input id="mSummary" type="text" maxlength="500" placeholder="เช่น ถ่ายน้ำมันเครื่อง + เปลี่ยนกรอง">
+          </label>
+          <label class="field wide"><span>หมายเหตุ (ไม่บังคับ)</span>
+            <textarea id="mNotes"></textarea>
+          </label>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -154,7 +215,9 @@
     </div>
 
     <button id="extractBtn" class="btn primary big" disabled>อ่านบิล</button>
+    <button id="manualSaveBtn" class="btn primary big" type="button" hidden>บันทึก</button>
     <p class="error" id="captureError" hidden></p>
+    <p class="error" id="manualError" hidden></p>
   </section>
 
   <!-- ============ Reading ============ -->
@@ -168,6 +231,10 @@
 
   <!-- ============ Bills: step 2, review ============ -->
   <section id="reviewView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">ตรวจสอบก่อนบันทึก</h2>
+      <p class="muted small">แก้ช่องที่ไฮไลต์สีเหลืองให้ถูกต้อง แล้วกด “ยืนยันและบันทึก” ด้านล่าง</p>
+    </div>
     <div id="warnings" class="warnings" hidden></div>
 
     <div class="legend small muted">
@@ -208,7 +275,7 @@
       <p id="doneText" class="muted"></p>
       <p id="doneClosed" class="small" hidden></p>
       <div class="row center-row">
-        <button id="newBtn" class="btn primary big">บันทึกบิลถัดไป</button>
+        <button id="newBtn" class="btn primary big">บันทึกซ่อมถัดไป</button>
         <button id="toBoardBtn" class="btn big">กลับไปงานซ่อม</button>
       </div>
     </div>
@@ -285,6 +352,7 @@
   <div class="dialog-actions">
     <button type="button" class="btn" id="fixCancel">ยกเลิก</button>
     <button type="button" class="btn" id="fixNoBill">ไม่มีบิล — ปิดงานเลย</button>
+    <button type="button" class="btn" id="fixSelf">ช่างทำเอง → กรอกบันทึก</button>
     <button type="button" class="btn primary" id="fixHasBill">มีบิล — รอเพิ่มบิล</button>
   </div>
 </dialog>
@@ -305,6 +373,7 @@
 <script src="/static/board.js"></script>
 <script src="/static/dashboard.js"></script>
 <script src="/static/fleet.js"></script>
+<script src="/static/manual.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

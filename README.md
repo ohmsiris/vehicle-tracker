@@ -221,3 +221,16 @@ gitignored because it is business data -- copy it somewhere other than this
 computer (a USB drive, Google Drive). Restoring = re-inserting these JSON rows
 and re-uploading `files/` into a Supabase project that has schemas 1-4 applied;
 the `was_low_confidence` column is not saved because the database recomputes it.
+
+## Recording: bill or mechanic's own work ("บันทึกซ่อม")
+
+One page, two modes (switch at the top):
+- **มีบิล / ใบเสร็จ** -- upload the shop's bill; the AI reads it; you review and confirm.
+- **ช่างทำเอง (กรอกเอง)** -- for the internal mechanic's work, no bill and no AI reading:
+  who did it, the date, optional mileage, what was done (shortcut buttons for the
+  common jobs, or type it; price optional), optional photos, an optional summary
+  (left empty, the AI writes one after saving) and notes. Saved through the same
+  `POST /api/events` with `source = "manual"`, so it appears in the same history,
+  dashboard and board. It can close the truck's waiting repair requests, and the
+  board's "ซ่อมแล้ว" dialog has a **ช่างทำเอง → กรอกบันทึก** button that opens this
+  form with the request already ticked.

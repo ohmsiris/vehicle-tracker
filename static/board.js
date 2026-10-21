@@ -105,6 +105,7 @@ async function loadBoard() {
   }
   renderBoard();
   renderFixes();
+  if (typeof renderManualFixes === "function") renderManualFixes();
 }
 
 // --------------------------------------------------------------- rendering
@@ -313,13 +314,14 @@ function startBillFor(r) {
 function renderAttachNote() {
   const r = board.attachedInfo;
   $("attachNote").hidden = !r || board.attached.length === 0;
-  if (r) $("attachText").textContent = `กำลังเพิ่มบิลของงานซ่อม #${r.request_no} · ${truckLabel(r)} · ${r.problem} — บันทึกบิลแล้วงานนี้จะถูกปิดให้เอง`;
+  if (r) $("attachText").textContent = `กำลังบันทึกงานซ่อม #${r.request_no} · ${truckLabel(r)} · ${r.problem} — บันทึกแล้วงานนี้จะถูกปิดให้เอง`;
 }
 
 function clearAttachment() {
   board.attached = [];
   board.attachedInfo = null;
   renderAttachNote();
+  if (typeof renderManualFixes === "function") renderManualFixes();
 }
 
 // On the review page: which waiting repairs of THIS truck does the bill close?

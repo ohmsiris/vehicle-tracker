@@ -17,7 +17,7 @@ import uuid
 from datetime import date, timedelta
 from typing import Optional
 
-from app import supabase
+from app import history, supabase
 from app.extraction import CATEGORIES
 from app.files import UnsupportedFile, prepare_file
 
@@ -77,6 +77,9 @@ def _validate(payload: dict, n_files: int) -> None:
     _num(ev.get("mileage"), "เลขไมล์", integer=True)
     _num(ev.get("next_service_mileage"), "ไมล์ครั้งต่อไป", integer=True)
     _num(ev.get("total_cost"), "ยอดรวม")
+
+    if len(str(ev.get("summary") or "")) > 500:
+        raise InvalidEvent("สรุปยาวเกินไป")
 
     fixes = payload.get("fixes_request_ids") or []
     if not isinstance(fixes, list):
@@ -216,6 +219,16 @@ def save_event(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicate
     except Exception:
         supabase.storage_delete(uploaded)   # don't leave orphaned photos behind
         raise
+
+    # A summary typed on the form (the manual-entry page has one). save_maintenance_event() doesn't take
+    # it, so it is written right after; best effort -- the repair itself is already saved.
+    typed = str(ev.get("summary") or "").strip()
+    if typed:
+        try:
+            if history._has_summary():
+                supabase.update("maintenance_events", {"id": f"eq.{event_id}"}, {"summary": typed})
+        except supabase.SupabaseError:
+            logger.exception("could not save the typed summary for event %s", event_id)
 
     return {
         "event_id": event_id,

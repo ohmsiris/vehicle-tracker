@@ -294,3 +294,75 @@ def test_buddhist_year_in_the_event_date_gets_a_specific_message(fake):
     msg = str(exc.value)
     assert "พ.ศ." in msg and "2026" in msg and "อนาคต" not in msg      # says what's wrong, not just "future date"
     assert fake.uploads == [] and fake.rpcs == []
+
+
+# ------------------------------------------------- manual entries (no bill) + typed summary
+def manual_payload(**over):
+    p = {"vehicle_id": VEHICLE, "source": "manual",
+         "event": {"event_date": date.today().isoformat(), "performed_by": "ช่างเอ๋", "mileage": 480000, "total_cost": None, "summary": "ถ่ายน้ำมันเครื่อง"},
+         "line_items": [{"description": "ถ่ายน้ำมันเครื่อง", "category": "ไส้กรองและของเหลว"}, {"description": "เปลี่ยนกรองเครื่อง", "category": "ไส้กรองและของเหลว", "line_total": 250}],
+         "attachments": [], "bill_extractions": {}}
+    p.update(over)
+    return p
+
+
+def test_manual_entry_saves_with_no_files_and_no_prices(fake, monkeypatch):
+    updates = []
+    monkeypatch.setattr(events.supabase, "update", lambda t, m, v: updates.append((t, m, v)) or [{}])
+    monkeypatch.setattr(events.history, "_has_summary", lambda: True)
+    r = events.save_event(manual_payload(), [])
+    sent = fake.rpcs[0][1]["p"]
+    assert sent["source"] == "manual" and sent["performed_by"] == "ช่างเอ๋" and sent["attachments"] == [] and sent["vendor"] is None
+    assert [l["line_total"] for l in sent["line_items"]] == [None, 250]            # prices are optional for the mechanic's work
+    assert all(l["attachment_id"] is None for l in sent["line_items"])
+    # the summary typed on the form is stored (the save function itself doesn't take one)
+    assert updates == [("maintenance_events", {"id": f"eq.{r['event_id']}"}, {"summary": "ถ่ายน้ำมันเครื่อง"})]
+
+
+def test_manual_entry_can_carry_reference_photos_only(fake, monkeypatch):
+    monkeypatch.setattr(events.supabase, "update", lambda *a: [{}])
+    monkeypatch.setattr(events.history, "_has_summary", lambda: True)
+    p = manual_payload(attachments=[{"type": "reference_photo", "filename": "a.jpg"}])
+    events.save_event(p, [("a.jpg", jpeg("white"))])
+    assert [a["type"] for a in fake.rpcs[0][1]["p"]["attachments"]] == ["reference_photo"]
+    assert len(fake.uploads) == 1
+
+
+def test_manual_entry_can_close_a_requests_of_that_truck(fake, monkeypatch):
+    rid = str(uuid.uuid4())
+    original = fake.select
+    monkeypatch.setattr(events.supabase, "select", lambda t, p=None: [{"id": rid}] if t == "repair_requests" else original(t, p))
+    monkeypatch.setattr(events.supabase, "update", lambda *a: [{}])
+    monkeypatch.setattr(events.history, "_has_summary", lambda: True)
+    events.save_event(manual_payload(fixes_request_ids=[rid]), [])
+    assert fake.rpcs[0][1]["p"]["fixes_request_ids"] == [rid]
+
+
+def test_no_summary_typed_means_no_extra_write(fake, monkeypatch):
+    def nope(*a): raise AssertionError("must not write a summary when none was typed")
+    monkeypatch.setattr(events.supabase, "update", nope)
+    p = manual_payload()
+    p["event"]["summary"] = "   "
+    events.save_event(p, [])
+    assert len(fake.rpcs) == 1
+
+
+def test_summary_write_failure_never_loses_the_saved_repair(fake, monkeypatch):
+    def boom(*a): raise supabase.SupabaseError("column missing")
+    monkeypatch.setattr(events.supabase, "update", boom)
+    monkeypatch.setattr(events.history, "_has_summary", lambda: True)
+    assert events.save_event(manual_payload(), [])["event_id"]                     # saved; the summary just didn't stick
+
+
+def test_no_summary_write_before_schema_v4(fake, monkeypatch):
+    monkeypatch.setattr(events.history, "_has_summary", lambda: False)
+    monkeypatch.setattr(events.supabase, "update", lambda *a: (_ for _ in ()).throw(AssertionError("column doesn't exist yet")))
+    events.save_event(manual_payload(), [])
+
+
+def test_overlong_summary_is_refused_before_anything_is_written(fake):
+    p = manual_payload()
+    p["event"]["summary"] = "ก" * 501
+    with pytest.raises(events.InvalidEvent):
+        events.save_event(p, [])
+    assert fake.rpcs == [] and fake.uploads == []

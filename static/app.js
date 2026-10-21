@@ -69,9 +69,6 @@ function showView(name) {
   for (const v of VIEW_NAMES) $(v + "View").hidden = v !== name;
   if (["capture", "busy", "review", "done"].includes(name)) lastBillView = name === "busy" ? "capture" : name;
   for (const id of new Set(Object.values(NAV_OF))) $(id).classList.toggle("active", id === NAV_OF[name]);
-  $("stepHint").textContent = {
-    capture: "1 · เลือกรถและอัปโหลดไฟล์", busy: "กำลังอ่านบิล…", review: "2 · ตรวจสอบและยืนยัน", done: "บันทึกแล้ว",
-  }[name] || "";
   // The truck pages are addressed by the URL hash (so Back works); every other page clears it.
   if (!FLEET_VIEWS.includes(name) && location.hash) history.replaceState(null, "", location.pathname + location.search);
   closeSidebarIfDrawer();
@@ -529,11 +526,11 @@ async function confirmSave() {
   }
 }
 
-function postEvent(payload, allowDuplicates) {
+function postEvent(payload, allowDuplicates, files = [...state.billFiles, ...state.refFiles]) {
   const fd = new FormData();
   fd.append("payload", JSON.stringify(payload));
   fd.append("allow_duplicates", allowDuplicates ? "true" : "false");
-  [...state.billFiles, ...state.refFiles].forEach((f) => fd.append("files", f.blob, f.name));
+  files.forEach((f) => fd.append("files", f.blob, f.name));
   return fetch("/api/events", { method: "POST", body: fd, headers: { "X-App-Token": state.token } });
 }
 
@@ -591,6 +588,7 @@ async function init() {
   await initBoard();
   initDashboard();
   initFleet();
+  initManual();
   if (location.hash) route();
   if (params.get("tab") === "dash") { showView("dash"); loadDashboard(); }
   if (params.get("sample")) {
