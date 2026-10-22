@@ -42,7 +42,7 @@ service key bypasses row-level security: server-side only, never in a page.
 `schema_v7.sql` (the rest of the master vehicle list: size class, registration papers, driver nickname), then
 `schema_v8.sql` (the truck's own nickname), then
 `schema_v9.sql` (machinery: machines, parts index, maintenance reports), then
-`schema_v10.sql` (the vehicle maintenance programme). Replace
+`schema_v10.sql` and `schema_v11.sql` (the vehicle maintenance programme). Replace
 `<PROJECT_REF>` in `schema.sql` first. Then seed the fleet:
 
 ```bash
@@ -376,27 +376,34 @@ the truck page. The import fills it from the nickname column of "หน้าโ
 
 ## Maintenance programme ("แผนซ่อมบำรุง", `#plan`)
 
-`schema_v10.sql`, `app/service_plan.py`, `static/plan.js`, `scripts/seed_gps.py`. When is each truck's next oil change,
-filter, gearbox oil ... due?
+`schema_v10.sql`, `schema_v11.sql`, `app/service_plan.py`, `static/plan.js`, `scripts/seed_gps.py`, `scripts/seed_plan_groups.py`.
+When is each truck's next oil change, filter, gearbox oil ... due -- and what did the last service do, what is missing,
+what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outside git).
 
-- **The plan** is in code (`DEFAULT_PLAN`), per size class: **รถเล็ก** (D-Max, Revo) and **รถใหญ่** (NLR/NMR/NPR,
-  6- and 10-wheelers). The km are the dealership's rules; the months are the "6 months per step" of the Isuzu / Toyota /
-  Hino guides. Every item is **whichever comes first, km or months**. Two deliberate differences from the dealership:
-  small trucks change the engine filter with every oil change (10,000, the owner's choice; dealership 20,000), and the
-  plan lists coolant / valve adjustment / injector washers per the dealership although the official D-Max 1.9 table
-  has no valve or injector item. The second tab, **ตั้งค่าระยะ**, changes any interval per class (saved in
-  `service_intervals`; "คืนค่าเริ่มต้น" removes the change).
-- **When it was last done** comes from two places, newest wins: confirmed repair bills (a line such as "กรองเครื่อง" on
-  a bill counts as that truck's engine filter that day -- `classify_line`; a top-up "(เติม)" and parts such as
-  "สกรูแรงดันน้ำมันเครื่อง" are ignored; the bill's mileage is used when it has one) and what people record
-  (**+ บันทึกว่าทำแล้ว**, several items at once, date + odometer). **เริ่มนับจากวันนี้** gives every item with no
-  history today's date as a starting point.
-- **How far a truck drives** is estimated: odometer readings (two at least 30 days apart), else the GPS distance entered
-  for the last 120 days (**+ ระยะทาง**: a period + the km the GPS app shows), else a class average (130 km/day small, 70
-  big, flagged "ประมาณ"). `scripts/seed_gps.py` loaded the 12 trucks from the Sep-Oct 2026 GPS screenshots.
-  From it: km since the last service, the date the km interval runs out, and the earlier of that and the months deadline
-  is the due date. "Due soon" = within 14 days.
-- **Pages**: `#plan` -- trucks that are overdue / due soon first, with filters (branch, size, search; "ทุกคัน" and "ที่ยังไม่มีประวัติเลย");
-  each truck's page has its own table (last done, km used, next due, state), the history (bills link to the bill)
-  and the distance data.
-- Until `schema_v10.sql` has been run the page shows a banner and writes explain what is missing (`service_plan.has_v10()`).
+- **The plan** has two rule sets of km per item (`DEFAULT_KM`): **รถเล็ก** (D-Max, Revo) and **รถใหญ่** (NLR/NMR/NPR,
+  6- and 10-wheelers). Oil and engine filter 10,000 / 20,000; diesel filter 40,000 / 20,000 (+ water trap on big); air
+  filter 40,000 / 80,000; gearbox, differential, brake/clutch, power steering and coolant 40,000; wheel grease 30,000 /
+  60,000; valve adjustment 40,000 (big only); valve cover gasket + injector seal 80,000 (big only); injector washers
+  100,000 (small only).
+- **Every item is "whichever comes first, km or months".** The months come from the truck's **group**
+  (`service_groups`, `vehicle_plans`): how many months one base step of km (10,000 small / 20,000 big) is worth for that
+  truck. S2 = route pickups, 2 months per 10,000 km (so the 40,000 items every 8 months); S3 factory pickups, 3; S6 the
+  repair truck, 6; B4 NLR on big-truck rules, 4 per 20,000; B5 route trucks, 5; B6 factory / CP trucks, 6; KK1 Kaeng
+  Khoi #1, worked out from its own 242 km/day. `scripts/seed_plan_groups.py` put the 65 trucks in their groups
+  (#41 and #54 have none = no schedule). The group of a truck is chosen on its page; the months of a group and the km
+  of an item are changed on the second tab of `#plan` (`service_groups`, `service_intervals`).
+- **A truck's page** shows its group and an Isuzu-style **chart**: the first column is the latest event (what it did,
+  ✓), then "ครั้งถัดไป", "2 ครั้งถัดไป" ... one base step apart, each with its date. A dot means the item falls due in
+  that round (red = already overdue, shown in the next round), "?" = never recorded. Each item is counted from the date
+  it was last done, so it lines up like the Isuzu chart. With no odometer known the columns only say which round;
+  once there is a mileage (on a bill, a record or a reading) the km of each round appears. A truck with no history
+  shows "ยังไม่มีประวัติ". Everything is recomputed from the records every time, so it moves on by itself.
+- **When it was last done** comes from confirmed repair bills (a line such as "กรองเครื่อง" counts as that truck's engine
+  filter that day -- `classify_line`; a top-up "(เติม)" and parts such as "สกรูแรงดันน้ำมันเครื่อง" are ignored; the
+  bill's mileage is used when it has one) and what people record (**+ บันทึกว่าทำแล้ว**: items, date, odometer).
+  **เริ่มนับจากวันนี้** gives every item with no history today's date as a starting point.
+- **Real driving** only matters when it is known: odometer readings, GPS distance for a period (**+ ระยะทาง**, 12
+  trucks seeded by `scripts/seed_gps.py`) -- then a truck that drives more than its group assumes gets its due date
+  brought forward. Otherwise the months decide.
+- **`#plan`** lists the trucks that are overdue / due soon first (filters: branch, size, search; "ทุกคัน", "ที่ยังไม่มีประวัติเลย").
+- Until the two schema files have been run the page shows a banner and writes explain what is missing (`service_plan.has_v10()`).

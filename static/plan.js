@@ -1,15 +1,16 @@
 "use strict";
 
 // แผนซ่อมบำรุงรถ: the vehicle maintenance programme.
-//   #plan        every truck: what is overdue / due soon, and (second tab) the intervals the plan uses
-//   a truck page shows that truck's own plan underneath its details (renderTruckPlan, called from roster.js)
+//   #plan        every truck: what is overdue / due soon, and (second tab) the settings: months per group, km per item
+//   a truck page shows that truck's own plan underneath its details (renderTruckPlan, called from roster.js):
+//   its group, an Isuzu-style chart (what the latest event did, what is overdue / unknown, the next rounds) and its history
 // Lists are read-only; recording that something was done, or how far a truck drives, happens in a dialog.
 // Data: /api/plan/* (app/service_plan.py). Loaded BEFORE app.js: nothing here runs at load time.
 
 const pl = {
-  opts: { ready: true, classes: [], items: [], soon_days: 14 },
-  overview: null, tab: "due", intervals: null,
-  detail: null, detailFor: null,
+  opts: { ready: true, rule_sets: [], items: [], soon_days: 14 },
+  overview: null, tab: "due", settings: null,
+  detail: null,
   dlg: null,                       // what the open dialog is doing: { kind, vehicle, draft }
 };
 
@@ -17,6 +18,7 @@ const PL_STATE_TEXT = { overdue: "เลยกำหนด", soon: "ใกล้
 const PL_BADGE = { overdue: "urgent", soon: "warn", ok: "ok", unknown: "" };
 const plToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const plKm = (n) => (n === null || n === undefined ? "–" : `${baht(n)} กม.`);
+const plMonths = (m) => (m === null || m === undefined ? "–" : `${Number.isInteger(m) ? m : (Math.round(m * 10) / 10)} เดือน`);
 
 function plDueText(i) {
   if (i.state === "unknown") return "ยังไม่มีประวัติ";
@@ -27,12 +29,10 @@ function plDueText(i) {
   return `${by} อีก ${i.days_left} วัน`;
 }
 
-const plDueDate = (i) => (i.due_date ? beDate(i.due_date) : "–");
-
 function plKmPerDay(k) {
   if (!k || !k.value) return "ยังไม่มีข้อมูลระยะทาง";
   const base = `${Math.round(k.value)} กม./วัน`;
-  return k.source === "default" ? `ประมาณ ${base} (ค่าเฉลี่ย — ยังไม่มีข้อมูลของคันนี้)` : `${base} (${k.note})`;
+  return k.source === "default" ? `ประมาณ ${base} (ตามกลุ่มของรถคันนี้ — ยังไม่มีข้อมูลระยะทางจริง)` : `${base} (${k.note})`;
 }
 
 const plLabel = (v) => [v.vehicle_number ? `#${v.vehicle_number}` : null, v.plate_number, v.nickname].filter(Boolean).join(" · ");
@@ -59,7 +59,9 @@ async function openPlan() {
   const keep = $("plBranch").value;
   $("plBranch").replaceChildren(el("option", { value: "", text: "ทุกสาขา" }), ...branches.map((b) => el("option", { value: b, text: b })));
   $("plBranch").value = keep;
-  $("plClass").replaceChildren(el("option", { value: "", text: "รถทุกขนาด" }), ...pl.opts.classes.map((c) => el("option", { value: c, text: c })));
+  const keepClass = $("plClass").value;
+  $("plClass").replaceChildren(el("option", { value: "", text: "รถทุกขนาด" }), ...pl.opts.rule_sets.map((c) => el("option", { value: c, text: c })));
+  $("plClass").value = keepClass;
   setPlanTab(pl.tab);
 }
 
@@ -69,7 +71,7 @@ function setPlanTab(tab) {
   $("plTabSet").classList.toggle("active", tab === "set");
   $("plDuePane").hidden = tab !== "due";
   $("plSetPane").hidden = tab !== "set";
-  if (tab === "due") loadOverview(); else loadIntervals();
+  if (tab === "due") loadOverview(); else loadSettings();
 }
 
 async function loadOverview() {
@@ -103,7 +105,7 @@ function renderOverview() {
     return true;
   });
   const nothing = show === "due" && !rows.length;
-  fill($("plCount"), `${rows.length} คัน${nothing ? ` — ไม่มีรถที่ต้องทำตอนนี้${k.no_history ? ` · แต่ยังมี ${k.no_history} คันที่ไม่มีประวัติเลย (เลือก “ที่ยังไม่มีประวัติเลย” เพื่อดู)` : ""}` : ""}`);
+  fill($("plCount"), `${rows.length} คัน${nothing ? ` — ไม่มีรถที่ต้องทำตอนนี้${k.no_history ? ` · แต่ยังมี ${k.no_history} คันที่ไม่มีประวัติเลย (เลือก “ที่ยังไม่มีประวัติเลย” เพื่อดู)` : ""}` : ""}${k.no_group ? ` · ${k.no_group} คันยังไม่ได้เลือกกลุ่มแผน (เปิดหน้ารถเพื่อเลือก)` : ""}`);
   fill($("plList"), ...(rows.length ? rows.map(planCard) : [el("p", { class: "muted empty", text: "ไม่พบรถที่ตรงกับตัวกรอง" })]));
 }
 
@@ -117,57 +119,78 @@ function planCard(v) {
   return el("div", { class: `card plcard ${v.counts.overdue ? "overdue" : v.counts.soon ? "soon" : ""}`.trim() },
     el("div", { class: "pl-top" },
       el("a", { class: "pl-title", href: `#truck=${v.id}` }, el("strong", { text: plLabel(v) || "–" }), v.branch ? el("span", { class: "muted small", text: ` ${v.branch}` }) : null),
-      el("span", { class: "badge", text: v.vehicle_class || "ยังไม่ระบุขนาดรถ" }),
+      el("span", { class: "badge", title: v.group ? v.group.label : "", text: v.group ? `${v.group.code} · ${plMonths(v.group.months)} ต่อ ${baht(v.group.step_km)} กม.` : "ยังไม่ได้เลือกกลุ่มแผน" }),
       el("span", { class: "grow" }),
       v.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, attention.map((i) => i.key)) }) : null),
-    !v.has_plan ? el("p", { class: "muted small", text: "ยังไม่ได้ระบุว่าเป็นรถเล็กหรือรถใหญ่ — เปิดหน้ารถแล้วกด “แก้ไข” เพื่อเลือก" })
+    !v.has_plan ? el("p", { class: "muted small", text: "ยังไม่ได้เลือกกลุ่มแผน — เปิดหน้ารถแล้วเลือกกลุ่ม (หรือปล่อยว่างถ้าไม่ต้องทำตาราง)" })
       : attention.length ? el("div", { class: "pl-chips" }, ...attention.map(plChip))
       : el("p", { class: "muted small", text: known ? `ปกติทุกรายการที่มีประวัติ (${known}/${v.items.length} รายการ)` : "ยังไม่มีประวัติเลย — กด “บันทึกว่าทำแล้ว” เพื่อเริ่มนับ" }),
-    el("div", { class: "muted small", text: plKmPerDay(v.km_per_day) }));
+    v.has_plan ? el("div", { class: "muted small", text: plKmPerDay(v.km_per_day) }) : null);
 }
 
-// ================================================================== the intervals (second tab)
-async function loadIntervals() {
+// ================================================================== the settings (second tab)
+async function loadSettings() {
   try {
-    pl.intervals = await api("/api/plan/intervals");
+    pl.settings = await api("/api/plan/intervals");
   } catch (err) {
     showErr("plError", `โหลดตั้งค่าไม่สำเร็จ: ${err.message}`);
     return;
   }
-  renderIntervals();
+  renderSettings();
 }
 
-function renderIntervals() {
-  const data = pl.intervals;
+function plSettingMsg(msg, text) { msg.textContent = text; msg.className = "error small"; }
+
+function renderSettings() {
+  const data = pl.settings;
   if (!data) return;
-  fill($("plSetList"), ...Object.entries(data.classes).map(([cls, items]) =>
+  const groups = el("section", { class: "card plset" },
+    el("h3", { text: "กลุ่มของรถ: ระยะกม. หนึ่งรอบ เท่ากับกี่เดือน" }),
+    el("p", { class: "muted small", text: "รถแต่ละคันอยู่ในหนึ่งกลุ่ม (เลือกที่หน้ารถ) เดือนของทุกรายการคำนวณจากตรงนี้ เช่น 2 เดือน ต่อ 10,000 กม. แปลว่ารายการ 40,000 กม. ทำทุก 8 เดือน ใส่เดือน หรือ กม./วัน อย่างใดอย่างหนึ่ง (ถ้าใส่ทั้งสองอย่างใช้เดือน)" }),
+    el("div", { class: "pl-grp-head small muted" }, el("span", { text: "กลุ่ม" }), el("span", { text: "เดือนต่อรอบ" }), el("span", { text: "หรือ กม./วัน" }), el("span", {})),
+    ...data.groups.map(groupRow));
+  const rules = Object.entries(data.rule_sets).map(([rule, items]) =>
     el("section", { class: "card plset" },
-      el("h3", { text: cls }),
-      el("p", { class: "muted small", text: cls === "รถเล็ก" ? "D-Max, Revo" : "NLR / NMR / NPR, รถ 6 ล้อ, รถ 10 ล้อ (Hino / Isuzu)" }),
-      el("div", { class: "pl-set-head small muted" }, el("span", { text: "รายการ" }), el("span", { text: "ทุกๆ (กม.)" }), el("span", { text: "หรือทุกๆ (เดือน)" }), el("span", {})),
-      ...items.map((it) => intervalRow(cls, it)))));
+      el("h3", { text: `${rule}: ระยะกม. ของแต่ละรายการ` }),
+      el("p", { class: "muted small", text: rule === "รถเล็ก" ? "D-Max, Revo" : "NLR / NMR / NPR, รถ 6 ล้อ, รถ 10 ล้อ (Hino / Isuzu)" }),
+      ...items.map((it) => kmRow(rule, it))));
+  fill($("plSetList"), groups, ...rules);
 }
 
-function intervalRow(cls, it) {
-  const km = el("input", { type: "number", inputmode: "numeric", min: "0", step: "1000", value: it.interval_km ?? "", "aria-label": `${it.label} กม.` });
-  const mo = el("input", { type: "number", inputmode: "numeric", min: "0", step: "1", value: it.interval_months ?? "", "aria-label": `${it.label} เดือน` });
+function groupRow(g) {
+  const mo = el("input", { type: "number", inputmode: "decimal", min: "0", step: "0.5", value: g.months_per_step ?? "", "aria-label": `${g.code} เดือน` });
+  const kd = el("input", { type: "number", inputmode: "decimal", min: "0", step: "1", value: g.km_per_day ?? "", "aria-label": `${g.code} กม./วัน` });
   const msg = el("span", { class: "muted small" });
   const save = async () => {
     try {
-      pl.intervals = await api("/api/plan/intervals", jsonOpts("PUT", { vehicle_class: cls, item_key: it.key, interval_km: km.value, interval_months: mo.value }));
-    } catch (err) { msg.textContent = err.message; msg.className = "error small"; return; }
-    renderIntervals();
+      pl.settings = await api("/api/plan/groups", jsonOpts("PUT", { code: g.code, months_per_step: mo.value, km_per_day: kd.value }));
+    } catch (err) { plSettingMsg(msg, err.message); return; }
+    renderSettings();
+  };
+  return el("div", { class: "pl-grp-row" },
+    el("div", {}, el("strong", { text: `${g.code}` }), el("span", { text: ` ${g.label}` }),
+      el("div", { class: "muted small", text: `${g.trucks} คัน · ตอนนี้ ${plMonths(g.months)} ต่อ ${baht(g.step_km)} กม. ≈ ${g.implied_km_per_day ? Math.round(g.implied_km_per_day) : "–"} กม./วัน` })),
+    mo, kd, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }), msg));
+}
+
+function kmRow(rule, it) {
+  const km = el("input", { type: "number", inputmode: "numeric", min: "0", step: "1000", value: it.interval_km ?? "", "aria-label": `${it.label} กม.` });
+  const msg = el("span", { class: "muted small" });
+  const save = async () => {
+    try {
+      pl.settings = await api("/api/plan/intervals", jsonOpts("PUT", { vehicle_class: rule, item_key: it.key, interval_km: km.value }));
+    } catch (err) { plSettingMsg(msg, err.message); return; }
+    renderSettings();
   };
   const reset = async () => {
     try {
-      pl.intervals = await api(`/api/plan/intervals?vehicle_class=${encodeURIComponent(cls)}&item_key=${it.key}`, { method: "DELETE" });
-    } catch (err) { msg.textContent = err.message; msg.className = "error small"; return; }
-    renderIntervals();
+      pl.settings = await api(`/api/plan/intervals?vehicle_class=${encodeURIComponent(rule)}&item_key=${it.key}`, { method: "DELETE" });
+    } catch (err) { plSettingMsg(msg, err.message); return; }
+    renderSettings();
   };
-  return el("div", { class: `pl-set-row${it.customised ? " custom" : ""}` },
-    el("div", {}, el("strong", { text: it.label }), el("div", { class: "muted small", text: `ค่าเริ่มต้น ${baht(it.default_km)} กม. / ${it.default_months} เดือน` })),
-    km, mo,
-    el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }),
+  return el("div", { class: `pl-km-row${it.customised ? " custom" : ""}` },
+    el("div", {}, el("strong", { text: it.label }), el("div", { class: "muted small", text: `ค่าเริ่มต้น ${baht(it.default_km)} กม.` })),
+    km, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }),
       it.customised ? el("button", { class: "btn small", type: "button", text: "คืนค่าเริ่มต้น", onclick: reset }) : null, msg));
 }
 
@@ -191,25 +214,33 @@ async function renderTruckPlan(v, editing) {
 
 const plRefreshTruck = () => (tk.v ? renderTruckPlan(tk.v, tk.editing) : null);
 
+function groupSelect(d) {
+  const sel = el("select", { "aria-label": "กลุ่มแผนซ่อมบำรุง" },
+    el("option", { value: "", text: "— ไม่ทำตาราง —" }),
+    ...d.groups.map((g) => el("option", { value: g.code, text: `${g.code} · ${g.label}` })));
+  sel.value = d.group_code || "";
+  sel.addEventListener("change", async () => {
+    try {
+      await api(`/api/plan/vehicles/${d.vehicle.id}/group`, jsonOpts("PUT", { group_code: sel.value }));
+    } catch (err) { alert(err.message); sel.value = d.group_code || ""; return; }
+    await plRefreshTruck();
+  });
+  return sel;
+}
+
 function truckPlanNodes(d) {
-  const v = { id: d.vehicle.id, plate_number: d.vehicle.plate_number, vehicle_number: d.vehicle.vehicle_number, vehicle_class: d.vehicle.vehicle_class, items: d.items };
+  const v = { id: d.vehicle.id, plate_number: d.vehicle.plate_number, vehicle_number: d.vehicle.vehicle_number, items: d.items };
   const head = el("div", { class: "mchead" }, el("h3", { class: "section-title", text: "แผนซ่อมบำรุง" }), el("span", { class: "grow" }),
     d.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, d.items.filter((i) => i.state === "overdue" || i.state === "soon").map((i) => i.key)) }) : null,
     d.has_plan && d.items.some((i) => i.state === "unknown") ? el("button", { class: "btn small", type: "button", text: "เริ่มนับจากวันนี้", title: "รายการที่ยังไม่มีประวัติ จะถือว่าเพิ่งทำวันนี้", onclick: () => startCounting(v, d) }) : null,
     el("button", { class: "btn small", type: "button", text: "+ ระยะทาง (GPS / เลขไมล์)", onclick: () => openReadingDialog(v) }));
+  const groupBar = el("div", { class: "card pl-groupbar" },
+    el("label", { text: "กลุ่มของรถคันนี้" }), groupSelect(d),
+    d.group ? el("span", { class: "muted small", text: `ทุกรายการนับ ${plMonths(d.group.months)} ต่อ ${baht(d.group.step_km)} กม. (อย่างไหนถึงก่อน)` }) : null);
   if (!d.has_plan) {
-    return [head, el("p", { class: "muted", text: "ยังไม่ได้ระบุว่าเป็นรถเล็กหรือรถใหญ่ จึงยังไม่มีแผน — กด “แก้ไข” แล้วเลือกขนาดรถ" })];
+    return [head, groupBar, el("p", { class: "muted", text: "ยังไม่ได้เลือกกลุ่ม จึงยังไม่มีตาราง — เลือกกลุ่มด้านบน (หรือปล่อยว่างถ้ารถคันนี้ไม่ต้องทำตาราง)" })];
   }
   const odo = d.odometer ? ` · เลขไมล์ล่าสุด ${plKm(d.odometer.km)} (${beDate(d.odometer.date)})` : "";
-  const table = el("div", { class: "card pltable" },
-    el("div", { class: "pl-row pl-th small muted" }, el("span", { text: "รายการ" }), el("span", { text: "ทำล่าสุด" }), el("span", { text: "ระยะที่ใช้ไป" }), el("span", { text: "ครั้งต่อไป" }), el("span", { text: "" })),
-    ...d.items.map((i) => el("div", { class: `pl-row ${i.state}` },
-      el("span", { class: "pl-item" }, el("strong", { text: i.label }), el("span", { class: "muted small", text: `ทุก ${[i.interval_km ? plKm(i.interval_km) : null, i.interval_months ? `${i.interval_months} เดือน` : null].filter(Boolean).join(" หรือ ")}${i.customised ? " (ปรับแล้ว)" : ""}` })),
-      el("span", { class: "pl-last" }, i.last_date ? beDate(i.last_date) : "–", i.last_source === "bill" ? el("span", { class: "muted small", text: " จากบิล" }) : i.last_source === "baseline" ? el("span", { class: "muted small", text: " เริ่มนับ" }) : null),
-      el("span", { class: "pl-km", text: i.km_since === null ? "–" : `${i.km_basis === "estimate" ? "≈ " : ""}${plKm(i.km_since)}` }),
-      el("span", { class: "pl-next" }, el("span", { text: plDueDate(i) }), el("span", { class: "muted small", text: i.km_left !== null && i.state !== "unknown" ? ` · ${i.km_left >= 0 ? `เหลือ ≈ ${plKm(i.km_left)}` : `เกิน ≈ ${plKm(-i.km_left)}`}` : "" })),
-      el("span", { class: "pl-state" }, el("span", { class: `badge ${PL_BADGE[i.state]}`.trim(), text: i.state === "unknown" ? PL_STATE_TEXT.unknown : i.state === "ok" ? `อีก ${i.days_left} วัน` : plDueText(i) }))))
-  );
   const history = d.history.length ? el("details", { class: "card pl-hist" }, el("summary", { text: `ประวัติที่ทำแล้ว (${d.history.length})` }),
     ...d.history.map((h) => el("div", { class: "pl-hrow" },
       el("span", { text: beDate(h.done_date) }), el("strong", { text: h.label }),
@@ -222,7 +253,42 @@ function truckPlanNodes(d) {
       el("strong", { text: r.kind === "gps" ? `GPS ${plKm(r.km)}` : `เลขไมล์ ${plKm(r.km)}` }),
       el("span", { class: "muted small", text: r.notes || "" }),
       el("button", { class: "btn small danger", type: "button", text: "ลบ", onclick: () => deleteReading(r) })))) : null;
-  return [head, el("p", { class: "muted small", text: `ระยะทางที่ใช้คำนวณ: ${plKmPerDay(d.km_per_day)}${odo}` }), table, history, readings];
+  return [head, groupBar, el("p", { class: "muted small", text: `ระยะทางต่อวัน: ${plKmPerDay(d.km_per_day)}${odo}` }), planChart(d), history, readings];
+}
+
+// The Isuzu-style chart: columns = the latest event, then the next rounds; rows = the items.
+const PL_CELL = { done: ["✓", "pl-done", "ทำไปแล้วในครั้งล่าสุด"], due: ["●", "pl-due", "ถึงกำหนดในรอบนี้"], overdue: ["●", "pl-over", "เลยกำหนดแล้ว ควรทำในครั้งถัดไป"], unknown: ["?", "pl-unk", "ไม่ทราบว่าเคยทำเมื่อไหร่ ควรตรวจ"] };
+
+function planChart(d) {
+  const c = d.chart;
+  if (!c) {
+    return el("div", { class: "card pl-empty" },
+      el("strong", { text: "ยังไม่มีประวัติ" }),
+      el("p", { class: "muted", text: "ยังไม่ได้ทำ / ยังไม่มีบันทึกของรถคันนี้ — พอมีบิลหรือกด “บันทึกว่าทำแล้ว” ตารางจะขึ้นเองและขยับตามทุกครั้งที่บันทึกเพิ่ม" }));
+  }
+  const heads = c.columns.map((col) => el("th", { class: `pl-ch${col.n === 0 ? " latest" : ""}` },
+    el("div", { class: "pl-ch-label", text: col.label }),
+    el("div", { class: "pl-ch-date small", text: beDate(col.date) }),
+    el("div", { class: "pl-ch-km small", text: col.km !== null && col.km !== undefined ? `${baht(col.km)} กม.` : (col.n === 0 ? "ไม่ทราบเลขไมล์" : "") })));
+  const body = c.rows.map((r) => el("tr", { class: r.state },
+    el("th", { class: "pl-rowh", scope: "row" }, el("div", { class: "pl-rowname", text: r.label }),
+      el("div", { class: "muted small", text: `ทุก ${[r.interval_km ? plKm(r.interval_km) : null, r.interval_months ? plMonths(r.interval_months) : null].filter(Boolean).join(" / ")}` })),
+    el("td", { class: "pl-last" }, r.last_date ? beDate(r.last_date) : "–", r.last_source === "bill" ? el("div", { class: "muted small", text: "จากบิล" }) : r.last_source === "baseline" ? el("div", { class: "muted small", text: "เริ่มนับ" }) : null),
+    ...r.cells.map((cell) => {
+      const spec = cell ? PL_CELL[cell] : null;
+      return el("td", { class: `pl-cell${spec ? ` ${spec[1]}` : ""}`, title: spec ? `${r.label}: ${spec[2]}` : "", text: spec ? spec[0] : "" });
+    })));
+  return el("div", { class: "card pl-chartbox" },
+    el("div", { class: "pl-chartscroll" },
+      el("table", { class: "pl-chart" },
+        el("thead", {}, el("tr", {}, el("th", { class: "pl-rowh", text: "รายการ" }), el("th", { class: "pl-ch", text: "ทำล่าสุด" }), ...heads)),
+        el("tbody", {}, ...body))),
+    el("div", { class: "pl-legend small muted" },
+      el("span", {}, el("b", { class: "pl-done", text: "✓" }), " ทำในครั้งล่าสุด"),
+      el("span", {}, el("b", { class: "pl-due", text: "●" }), " ถึงกำหนดในรอบนั้น"),
+      el("span", {}, el("b", { class: "pl-over", text: "●" }), " เลยกำหนดแล้ว"),
+      el("span", {}, el("b", { class: "pl-unk", text: "?" }), " ไม่ทราบประวัติ"),
+      el("span", { text: "แต่ละรอบห่างกันตามกลุ่มของรถ · พอใส่เลขไมล์ จะขึ้นกม. ของแต่ละรอบให้" })));
 }
 
 async function deleteRecord(h) {
@@ -285,7 +351,7 @@ function openReadingDialog(v) {
     $("mf_km").previousSibling.textContent = d.kind === "gps" ? "ระยะทางที่วิ่งในช่วงนี้ (กม.)" : "เลขไมล์ (กม.)";
   };
   fill($("pdlgBody"),
-    el("p", { class: "muted small", text: `${plLabel(v)} — ระยะทางจากแอป GPS (รวมทั้งช่วง) หรือเลขไมล์จากหน้าปัด ใช้คำนวณว่าถึงรอบเมื่อไหร่` }),
+    el("p", { class: "muted small", text: `${plLabel(v)} — ระยะทางจากแอป GPS (รวมทั้งช่วง) หรือเลขไมล์จากหน้าปัด ถ้ามี ระบบจะใช้บอกกม. ของแต่ละรอบ และเตือนก่อนถ้ารถวิ่งมากกว่าที่กลุ่มสมมติไว้` }),
     el("div", { class: "mfields" }, mselect(d, "kind", "ชนิดข้อมูล", [["gps", "ระยะทางจาก GPS (ทั้งช่วง)"], ["odometer", "เลขไมล์จากหน้าปัด"]], { blank: "—", onChange: draw })),
     gpsOnly,
     el("div", { class: "mfields" }, mfield(d, "end_date", "ถึงวันที่", { type: "date", caption: true }), mfield(d, "km", "ระยะทาง (กม.)", { type: "number" }), mfield(d, "notes", "หมายเหตุ", { wide: true })));
