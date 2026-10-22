@@ -792,3 +792,5 @@ a.btn.call .callnum { font-weight: 400; color: var(--muted); }
 .shopcalls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; }
 .shopcalls:empty { display: none; }
 .driverline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0; }
+.plbar input[type=search] { width: 100%; font: inherit; font-size: 16px; padding: 12px 14px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.plbar input[type=search]:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
