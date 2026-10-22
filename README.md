@@ -323,10 +323,14 @@ Trucks and drivers under one roof (`app/fleet.py`, `static/roster.js`).
 The site is the master for trucks and drivers; `Drivers.xlsx` (sheet 1 the roster, sheet 2
 the registration papers) was the source and is imported once.
 
-- **Click a truck's box** (left side of its row) to see everything: plate, number, branch, size
+- **The list is read-only:** each truck is one card and the whole card is a link to its page, so nothing
+  can be changed by accident from the list.
+- **The truck page** (`#truck=<id>`) shows everything laid out in the open: plate, number, branch, size
   class (รถเล็ก / รถใหญ่), usage, make / model, colour, the main driver with nickname and a tap-to-call
-  phone number, the registration papers (date, type, engine and chassis numbers, owner, holder) and its
-  repair totals. "แก้ไข" edits all of it; "ประวัติซ่อม" opens the log for that truck.
+  phone number, the registration papers (date, type, engine and chassis numbers, owner, holder), repair
+  totals, notes. "แก้ไข" turns the same page into a form (unsaved changes are kept if the page redraws,
+  and leaving with unsaved changes asks first); "บันทึก" saves, "ยกเลิก" discards. Retiring a truck and
+  choosing / creating its main driver happen there too. "+ เพิ่มรถ" opens `#truck=new`.
 - **"ดาวน์โหลด Excel (CSV)"** on the roster exports the trucks currently shown with every column, so
   the master list can still go into a spreadsheet.
 - **Import:** `scripts/import_roster.py` (dry run) / `--write`. It creates drivers, links each to their

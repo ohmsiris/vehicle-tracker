@@ -58,11 +58,11 @@ function initTheme() {
 
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
-const VIEW_NAMES = ["board", "dash", "capture", "busy", "review", "done", "roster", "event", "log", "where", "machinery"];
+const VIEW_NAMES = ["board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "machinery"];
 // which sidebar entry lights up for each view
 const NAV_OF = {
   board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
-  roster: "navRoster", event: "navLog", log: "navLog", where: "navWhere", machinery: "navMachinery",
+  roster: "navRoster", truck: "navRoster", event: "navLog", log: "navLog", where: "navWhere", machinery: "navMachinery",
 };
 
 function showView(name) {

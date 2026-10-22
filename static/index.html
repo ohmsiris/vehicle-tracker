@@ -405,6 +405,18 @@
     </div>
   </section>
 
+  <!-- ============ One truck: everything about it, and its edit form ============ -->
+  <section id="truckView" hidden>
+    <div class="evbar">
+      <button id="tkBack" class="btn small" type="button">← ทะเบียนรถ</button>
+      <span class="grow"></span>
+      <div id="tkActions" class="tk-actions"></div>
+    </div>
+    <p class="error" id="tkError" hidden></p>
+    <div class="card tkhead" id="tkHead"></div>
+    <div class="tkgrid" id="tkBody"></div>
+  </section>
+
   <!-- ============ One repair event: the "bill" ============ -->
   <section id="eventView" hidden>
     <div class="evbar">
@@ -447,59 +459,6 @@
     <button type="button" class="btn" id="fixNoBill">ไม่มีบิล — ปิดงานเลย</button>
     <button type="button" class="btn" id="fixSelf">ช่างทำเอง → กรอกบันทึก</button>
     <button type="button" class="btn primary" id="fixHasBill">มีบิล — รอเพิ่มบิล</button>
-  </div>
-</dialog>
-
-<!-- Everything about one truck, read-only (edit from here) -->
-<dialog id="vehInfoDialog">
-  <div class="vihead">
-    <div>
-      <div class="req-head" id="viTitle"></div>
-      <div class="muted" id="viSub"></div>
-      <div class="rr-badges" id="viBadges"></div>
-    </div>
-  </div>
-  <div id="viBody" class="vibody"></div>
-  <div class="dialog-actions">
-    <button type="button" class="btn" id="viClose">ปิด</button>
-    <button type="button" class="btn" id="viHistory">ประวัติซ่อม</button>
-    <button type="button" class="btn primary" id="viEdit">แก้ไข</button>
-  </div>
-</dialog>
-
-<!-- Add or edit a truck -->
-<dialog id="vehDialog">
-  <h3 id="vdTitle">เพิ่มรถใหม่</h3>
-  <div class="vdgrid">
-    <div><label for="vdPlate">ทะเบียน</label><input id="vdPlate" type="text" maxlength="30" autocomplete="off" placeholder="เช่น 1กข 4267"></div>
-    <div><label for="vdProvince">จังหวัดป้ายทะเบียน <span class="muted small">(ไม่บังคับ)</span></label><input id="vdProvince" type="text" maxlength="40" autocomplete="off" placeholder="เช่น กรุงเทพมหานคร"></div>
-    <div><label for="vdNumber">เบอร์รถ <span class="muted small">(เบอร์ในบริษัท)</span></label><input id="vdNumber" type="text" maxlength="40" autocomplete="off" placeholder="เช่น 36"></div>
-    <div><label for="vdBranch">สาขา</label><select id="vdBranch"></select></div>
-    <div><label for="vdMake">ยี่ห้อ</label><input id="vdMake" type="text" maxlength="40" autocomplete="off" placeholder="เช่น ISUZU"></div>
-    <div><label for="vdModel">รุ่น</label><input id="vdModel" type="text" maxlength="40" autocomplete="off" placeholder="เช่น D-Max 2.5"></div>
-    <div><label for="vdUsage">ประเภทการใช้งาน</label><input id="vdUsage" list="vdUsageList" type="text" maxlength="40" autocomplete="off" placeholder="เช่น รถสาย / รถหน้าโรง"><datalist id="vdUsageList"></datalist></div>
-    <div><label for="vdDriver">คนขับหลัก</label><select id="vdDriver"></select></div>
-  </div>
-  <div id="vdMore">
-    <h4 class="vdsection">ข้อมูลทะเบียน</h4>
-    <div class="vdgrid">
-      <div><label for="vdClass">ประเภทรถ</label><select id="vdClass"></select></div>
-      <div><label for="vdColor">สี</label><input id="vdColor" type="text" maxlength="80" autocomplete="off" placeholder="เช่น ขาว-เขียว"></div>
-      <div><label for="vdEngine">เลขเครื่อง</label><input id="vdEngine" type="text" maxlength="80" autocomplete="off"></div>
-      <div><label for="vdChassis">เลขตัวรถ</label><input id="vdChassis" type="text" maxlength="80" autocomplete="off"></div>
-      <div><label for="vdRegDate">วันจดทะเบียน</label><input id="vdRegDate" type="date"><div id="vdRegDateCap" class="datecap"></div></div>
-      <div><label for="vdRegType">ประเภทตามทะเบียน</label><input id="vdRegType" type="text" maxlength="80" autocomplete="off" placeholder="เช่น รถบรรทุกส่วนบุคคลตู้บรรทุก"></div>
-      <div><label for="vdOwner">ชื่อกรรมสิทธิ์ (เจ้าของ)</label><input id="vdOwner" type="text" maxlength="80" autocomplete="off"></div>
-      <div><label for="vdHolder">ชื่อผู้ครอบครอง</label><input id="vdHolder" type="text" maxlength="80" autocomplete="off"></div>
-    </div>
-  </div>
-  <label for="vdNotes">หมายเหตุ <span class="muted small">(ไม่บังคับ)</span></label>
-  <input id="vdNotes" type="text" maxlength="300" autocomplete="off">
-  <div id="vdActiveRow"><label class="check vdactive"><input id="vdActive" type="checkbox"> ใช้งานอยู่ <span class="muted small">(เอาติ๊กออก = เลิกใช้ เช่น ขายแล้ว รถจะไม่ขึ้นในตัวเลือก แต่ประวัติซ่อมยังอยู่)</span></label></div>
-  <p class="error" id="vdError" hidden></p>
-  <div class="dialog-actions">
-    <button type="button" class="btn" id="vdCancel">ยกเลิก</button>
-    <button type="button" class="btn primary" id="vdSave">บันทึก</button>
   </div>
 </dialog>
 

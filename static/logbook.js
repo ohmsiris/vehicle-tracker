@@ -160,7 +160,7 @@ async function renderTruckHeader() {
       el("div", { class: "lgtruck-actions" },
         el("button", { class: "btn small primary", type: "button", text: "+ บันทึกบิล", onclick: () => billForVehicle(v) }),
         el("button", { class: "btn small", type: "button", text: "+ แจ้งซ่อม", onclick: () => requestForVehicle(v) }),
-        el("button", { class: "btn small", type: "button", text: "แก้ไขข้อมูลรถ", onclick: () => openVehicleDialog(v) }))),
+        el("button", { class: "btn small", type: "button", text: "ข้อมูลรถทั้งหมด", onclick: () => goTruck(v.vehicle_id) }))),
     el("div", { class: "vstats" },
       stat("ซ่อมล่าสุด", v.last_service_date ? `${beDate(v.last_service_date)} · ${ago(v.days_since_service)}` : "ยังไม่มีประวัติ"),
       stat("ซ่อมทั้งหมด", `${v.repairs_total} ครั้ง`),
