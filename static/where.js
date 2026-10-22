@@ -50,7 +50,6 @@ function truckRow(r) {
         ...truckHead(r),
         r.branch ? el("span", { class: "muted small", text: r.branch }) : null,
         r.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null,
-        r.on_paper === false ? el("span", { class: "badge nobill", text: "ไม่มีในใบแจ้ง" }) : null,
         overdue ? el("span", { class: "badge urgent", text: `เลยกำหนด ${overdue} วัน` }) : null),
       el("div", { class: "truckproblem", text: r.problem }),
       el("div", { class: "muted small", text: `${when} · อยู่มา ${days === 0 ? "วันนี้" : `${days} วัน`}` })),

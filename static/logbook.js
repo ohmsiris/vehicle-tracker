@@ -162,7 +162,6 @@ function logRow(r) {
         who ? el("span", { class: "badge shop", text: who }) : null,
         el("span", { class: `badge ${LOG_STATUS_BADGE[r.status]}`.trim(), text: r.status_label }),
         r.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null,
-        r.on_paper === false ? el("span", { class: "badge nobill", text: "ไม่มีในใบแจ้ง" }) : null,
         r.needs_review ? el("span", { class: "badge warn", text: "ควรตรวจ", title: r.review_reasons.join("\n") }) : null),
       el("div", { class: isEvent && r.summary ? "evsummary" : "evpreview", text: what }),
       el("div", { class: "muted small", text: meta.filter(Boolean).join(" · ") }),
@@ -221,7 +220,7 @@ async function downloadLog() {
 function requestSteps(r) {
   const steps = [];
   const mk = (done, title, when, detail) => steps.push({ done, title, when, detail });
-  mk(true, "แจ้งซ่อม", r.request_date, [r.reported_by ? `ผู้แจ้ง ${r.reported_by}` : null, r.urgent ? "ด่วน" : null, r.on_paper === false ? "ไม่ได้ลงใบแจ้งซ่อม (ฉุกเฉิน)" : null].filter(Boolean).join(" · "));
+  mk(true, "แจ้งซ่อม", r.request_date, [r.reported_by ? `ผู้แจ้ง ${r.reported_by}` : null, r.urgent ? "ด่วน" : null].filter(Boolean).join(" · "));
   const sent = !!r.sent_date;
   mk(sent, "ส่งซ่อม", r.sent_date, sent ? [r.shop_raw || r.shop, r.expected_return ? `คาดว่ากลับ ${beDate(r.expected_return)}` : null].filter(Boolean).join(" · ") : "ยังไม่ได้ส่ง (หรือซ่อมเอง)");
   const back = !!r.fixed_date;

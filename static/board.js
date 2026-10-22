@@ -201,7 +201,6 @@ function requestCard(r, kind) {
       ...truckHead(r),
       r.branch ? el("span", { class: "muted small", text: r.branch }) : null,
       r.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null,
-      r.on_paper === false ? el("span", { class: "badge nobill", title: "ไม่ได้ลงใบแจ้งซ่อมกระดาษ", text: "ไม่มีในใบแจ้ง" }) : null,
       overdue ? el("span", { class: "badge urgent", text: `เลยกำหนด ${overdue} วัน` }) : null,
       ageChip(days, kind)),
     el("p", { class: "req-problem", text: r.problem }),
