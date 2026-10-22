@@ -783,3 +783,12 @@ table.pl-chart { border-collapse: separate; border-spacing: 0; width: 100%; min-
   .pl-grp-row > :first-child, .pl-grp-row .pl-set-actions { grid-column: 1 / -1; }
   .plsetgrid { grid-template-columns: 1fr; }
 }
+
+/* the sidebar is grouped by what you do: overview / input / output / editing */
+.side-sep { height: 1px; background: var(--line); margin: 6px 0 6px 6px; }
+/* tap-to-call buttons: drivers and shops */
+a.btn.call { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; white-space: nowrap; }
+a.btn.call .callnum { font-weight: 400; color: var(--muted); }
+.shopcalls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; }
+.shopcalls:empty { display: none; }
+.driverline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0; }

@@ -153,6 +153,14 @@ fleet roster, dashboard);
 sidebar collapses with the menu button (remembered per device) and is a
 slide-in drawer on a phone.
 
+The **รถ** group is ordered by what you do, with a line between each part: **ภาพรวม** (overview) · **งานซ่อม**, **บันทึกซ่อม**
+(input) · **รถอยู่ที่ไหน**, **สมุดงานซ่อม** (output) · **ทะเบียนรถ**, **แผนซ่อมบำรุง** (editing).
+
+**Who to call**: a driver's number is a tap-to-call button (`tel:`) on the truck's page, the drivers list, the board cards
+and "รถอยู่ที่ไหน". The shops' numbers are kept in `app/shops.py` (`DIRECTORY`: full name + one or more contacts, e.g. the
+Isuzu service centre and its body shop) and shown as call buttons under each shop on "รถอยู่ที่ไหน" and in the "ส่งซ่อมที่…"
+dialog. A shop with no number yet (ฮีโน่ เอเซีย หนองแค) shows "ยังไม่มีเบอร์".
+
 ## One repair event, read like a bill
 
 The log (`#log`) is where history is found: choose one truck in its picker to see

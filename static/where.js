@@ -38,14 +38,25 @@ function shopSection(s) {
       el("span", { class: "badge shop", text: `${s.rows.length} คัน` }),
       el("span", { class: "grow" }),
       ageChip(longest, "at_shop")),
+    shopCallsFor(s.name),
     ...s.rows.map(whereRow));
+}
+
+// who to call at this shop (numbers live in app/shops.py)
+function shopCallsFor(name) {
+  const info = (board.shopContacts || {})[name];
+  if (!info) return null;
+  return el("div", { class: "shopcalls" }, el("span", { class: "muted small", text: info.full_name }),
+    ...(info.contacts.length ? info.contacts.map((c) => callLink(c.phone, c.label)) : [el("span", { class: "muted small", text: "ยังไม่มีเบอร์" })]));
 }
 
 // who normally drives it (and their number), from the fleet list
 function driverLine(r) {
   const v = (fleet.vehicles || []).find((x) => x.vehicle_id === r.vehicle_id);
   if (!v || !v.driver) return null;
-  return el("div", { class: "muted small", text: `คนขับหลัก ${v.driver}${v.driver_nickname ? ` (${v.driver_nickname})` : ""}${v.driver_phone ? ` · ${v.driver_phone}` : ""}` });
+  return el("div", { class: "driverline" },
+    el("span", { class: "muted small", text: `คนขับหลัก ${v.driver}${v.driver_nickname ? ` (${v.driver_nickname})` : ""}${v.driver_phone ? ` · ${v.driver_phone}` : ""}` }),
+    v.driver_phone ? callLink(v.driver_phone, "โทรคนขับ", true) : null);
 }
 
 function whereRow(r) {

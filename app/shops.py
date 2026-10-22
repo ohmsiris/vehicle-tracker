@@ -33,10 +33,10 @@ ALIASES: list[tuple[str, str]] = [
     ("เก่งเจริญ", "อู่ช่างเก่ง"),
     ("โชคพัฒนา", "โชคพัฒนา"),
     ("โชค", "โชคพัฒนา"),
+    ("ช่างลิ้ม", "อู่ช่างลิ้ม"),                 # before "ไดนาโม": the shop is called "ช่างลิ้ม 24 ไดนาโม"
+    ("ลิ้ม", "อู่ช่างลิ้ม"),
     ("มงคล", "มงคลไดนาโม"),
     ("ไดนาโม", "มงคลไดนาโม"),
-    ("ช่างลิ้ม", "อู่ช่างลิ้ม"),
-    ("ลิ้ม", "อู่ช่างลิ้ม"),
     ("isuzu", "ศูนย์ Isuzu"),
     ("อีซูซุ", "ศูนย์ Isuzu"),
     ("อิซูซุ", "ศูนย์ Isuzu"),
@@ -44,6 +44,17 @@ ALIASES: list[tuple[str, str]] = [
     ("ฮีโน่", "ศูนย์ Hino"),
     ("ฮีโน", "ศูนย์ Hino"),
 ]
+
+# Who to call. canonical shop -> its full name and phone numbers (a shop can have several: a service centre and a body shop).
+# A shop with no number yet simply shows no call button.
+DIRECTORY: dict[str, dict] = {
+    "อู่ชมรม": {"full_name": "ชมรมย์การช่าง (อู่ชมรม)", "contacts": [{"label": "ช่างลม", "phone": "081-928-5474"}]},
+    "อู่ช่างลิ้ม": {"full_name": "ช่างลิ้ม 24 ไดนาโม", "contacts": [{"label": "ช่างลิ้ม", "phone": "081-374-0394"}]},
+    IN_HOUSE: {"full_name": "ช่างเอ๋", "contacts": [{"label": "ช่างเอ๋", "phone": "085-967-4875"}]},
+    "ศูนย์ Isuzu": {"full_name": "อิซูซุจึงกงเฮงแก่งคอย", "contacts": [
+        {"label": "ศูนย์บริการ", "phone": "086-391-0548"}, {"label": "ศูนย์ซ่อมสีและตัวถัง", "phone": "081-581-3465"}]},
+    "ศูนย์ Hino": {"full_name": "ฮีโน่ เอเซีย หนองแค", "contacts": []},
+}
 
 _STRIP = re.compile(r"[\s\-_.]")
 

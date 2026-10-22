@@ -115,6 +115,20 @@ function truckLabel(r) {
   return [hasNumber ? `#${r.truck_number}` : nicknameOf(r), r.plate].filter(Boolean).join(" ") || "ไม่ระบุรถ";
 }
 
+// A phone number as a tap-to-call button (tel: link). `label` is the short text; the number is shown after it unless compact.
+const telHref = (phone) => `tel:${String(phone || "").replace(/[^\d+]/g, "")}`;
+
+function callLink(phone, label = "โทร", compact = false) {
+  return el("a", { class: "btn small call", href: telHref(phone), title: `โทร ${phone}` },
+    el("span", { text: `📞 ${label}` }), compact ? null : el("span", { class: "callnum", text: phone }));
+}
+
+// The main driver of a truck (with a number to call), from the fleet list -- null when there is none or it has no number.
+function driverFor(vehicleId) {
+  const v = (fleet.vehicles || []).find((x) => x.vehicle_id === vehicleId);
+  return v && v.driver && v.driver_phone ? { name: v.driver, nickname: v.driver_nickname, phone: v.driver_phone } : null;
+}
+
 function jsonOpts(method, body) {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
@@ -134,7 +148,7 @@ function showBoardError(text) {
 // --------------------------------------------------------------- loading
 async function loadBoard() {
   try {
-    const [active, recent] = await Promise.all([api("/api/requests?scope=active"), api("/api/requests?scope=recent")]);
+    const [active, recent] = await Promise.all([api("/api/requests?scope=active"), api("/api/requests?scope=recent"), ensureVehicles()]);
     board.active = active;
     board.recent = recent;
     showBoardError("");
@@ -224,9 +238,14 @@ function requestCard(r, kind) {
     el("p", { class: "req-problem", text: r.problem }),
     el("p", { class: "muted small", text: meta.filter(Boolean).join(" · ") }),
     stageRail(kind),
-    el("div", { class: "req-actions" }, ...actions, story));
+    el("div", { class: "req-actions" }, ...actions, story, callDriver(r)));
   wireDrag(card, r);
   return card;
+}
+
+function callDriver(r) {
+  const d = driverFor(r.vehicle_id);
+  return d ? callLink(d.phone, `โทร ${d.nickname || d.name}`, true) : null;
 }
 
 // The timeline dialog lives with the maintenance log (logbook.js); a board row has the same fields.
@@ -410,12 +429,24 @@ function openSendDialog(r) {
   $("shopError").hidden = true;
   const names = [...new Set([...board.shops, ...board.fixers])];
   $("shopList").replaceChildren(...names.map((n) => el("option", { value: n })));
-  $("shopChips").replaceChildren(...board.shops.map((n) => el("button", { class: "chipbtn", type: "button", text: n, onclick: () => { $("shopName").value = n; } })));
+  $("shopChips").replaceChildren(...board.shops.map((n) => el("button", { class: "chipbtn", type: "button", text: n, onclick: () => { $("shopName").value = n; renderShopCalls(); } })));
+  renderShopCalls();
   $("shopBackChips").replaceChildren(...[3, 7, 14].map((n) => el("button", { class: "chipbtn", type: "button", text: `อีก ${n} วัน`, onclick: () => {
     $("shopBack").value = addDaysISO($("shopDate").value || todayISO(), n);
     $("shopBackCap").textContent = dateCaption($("shopBack").value);
   } })));
   $("shopDialog").showModal();
+}
+
+// Under the shop name: who to call there (the numbers are kept in app/shops.py).
+function renderShopCalls() {
+  const typed = $("shopName").value.trim().toLowerCase().replace(/\s+/g, "");
+  const dir = board.shopContacts || {};
+  const key = Object.keys(dir).find((k) => k.toLowerCase().replace(/\s+/g, "") === typed)
+    || (typed.length >= 3 ? Object.keys(dir).find((k) => k.toLowerCase().replace(/\s+/g, "").includes(typed)) : null);
+  const info = key ? dir[key] : null;
+  fill($("shopCalls"), ...(info ? [el("span", { class: "muted small", text: info.contacts.length ? `โทรหา ${info.full_name}:` : `${info.full_name} — ยังไม่มีเบอร์` }),
+    ...info.contacts.map((c) => callLink(c.phone, c.label))] : []));
 }
 
 async function submitShop() {

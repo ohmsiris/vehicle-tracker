@@ -216,7 +216,7 @@ function viewCards(v) {
       kvAll("สถานะ", v.active === false ? "เลิกใช้แล้ว" : "ใช้งานอยู่")),
     tkCard("คนขับหลัก",
       kvAll("ชื่อ", d && d.name), kvAll("ชื่อเล่น", d && d.nickname),
-      kvAll("เบอร์โทร", "", d && d.phone ? el("a", { class: "kv-v link", href: `tel:${d.phone}`, text: d.phone }) : null),
+      kvAll("เบอร์โทร", "", d && d.phone ? el("span", { class: "kv-v" }, el("span", { text: `${d.phone} ` }), callLink(d.phone, "โทร", true)) : null),
       kvAll("สาขา", d && d.branch), kvAll("หมายเหตุ", d && d.notes),
       d ? null : el("p", { class: "muted small", text: "ยังไม่มีคนขับหลัก — กด “แก้ไข” เพื่อเลือก" })),
     tkCard("ข้อมูลทะเบียน",
@@ -385,6 +385,7 @@ function driverRow(d) {
       ...(d.trucks.length ? d.trucks.map((t) => el("button", { class: "chipbtn", type: "button", title: "เปิดหน้าข้อมูลรถคันนี้", text: truckLabel({ truck_number: t.truck_number, plate: t.plate }),
         onclick: () => goTruck(t.vehicle_id) })) : [el("span", { class: "muted small", text: d.active ? "ยังไม่ได้เป็นคนขับหลักของคันไหน" : "" })])),
     el("div", { class: "rr-actions" },
+      d.phone ? callLink(d.phone, "โทร", true) : null,
       el("button", { class: "btn small", type: "button", text: "แก้ไข", onclick: () => openDriverDialog(d) }),
       el("button", { class: `btn small${d.active ? " danger" : ""}`, type: "button", text: d.active ? "เลิกขับ" : "กลับมาขับ", onclick: () => toggleDriver(d) })));
 }

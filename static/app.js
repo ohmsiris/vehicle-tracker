@@ -617,6 +617,7 @@ async function loadMeta() {
     state.vehicles = meta.vehicles;
     board.fixers = meta.fixers || [];
     board.shops = meta.shops || [];
+    board.shopContacts = meta.shop_contacts || {};
     state.usages = meta.usages || [];
     state.branches = meta.branches || [];
     state.fleetReady = meta.fleet_ready;
