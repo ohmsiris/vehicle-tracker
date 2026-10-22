@@ -84,6 +84,15 @@ function bindDateField(input, captionEl) {
 
 const thDate = beDate;
 
+// The truck, as the heading of a card: its fleet number stands out as a chip so it is never mistaken for anything else.
+function truckHead(r) {
+  const same = r.truck_number && r.plate && r.plate.includes(r.truck_number);
+  return [
+    r.truck_number && !same ? el("span", { class: "truckno", title: "เบอร์รถ", text: `#${r.truck_number}` }) : null,
+    el("strong", { class: "truckplate", text: r.plate || (r.truck_number && same ? r.truck_number : "ไม่ระบุรถ") }),
+  ].filter(Boolean);
+}
+
 // Some trucks have no separate fleet number (it is just their plate): don't print it twice.
 function truckLabel(r) {
   const same = r.truck_number && r.plate && r.plate.includes(r.truck_number);
@@ -189,8 +198,7 @@ function requestCard(r, kind) {
 
   const card = el("div", { class: `req${r.urgent ? " urgent" : ""}${overdue ? " late" : ""}`, "data-id": r.request_id },
     el("div", { class: "req-head" },
-      el("span", { class: "req-no", text: `#${r.request_no}` }),
-      el("strong", { text: truckLabel(r) }),
+      ...truckHead(r),
       r.branch ? el("span", { class: "muted small", text: r.branch }) : null,
       r.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null,
       r.on_paper === false ? el("span", { class: "badge nobill", title: "ไม่ได้ลงใบแจ้งซ่อมกระดาษ", text: "ไม่มีในใบแจ้ง" }) : null,
@@ -270,8 +278,7 @@ function recentCard(r) {
   ].filter(Boolean).join(" · ");
   return el("div", { class: "req done" },
     el("div", { class: "req-head" },
-      el("span", { class: "req-no", text: `#${r.request_no}` }),
-      el("strong", { text: truckLabel(r) }),
+      ...truckHead(r),
       ...badges),
     el("p", { class: "req-problem", text: r.problem }),
     meta ? el("p", { class: "muted small", text: meta }) : null,
@@ -309,13 +316,13 @@ async function editProblem(r) {
 }
 
 async function cancelRequest(r) {
-  if (!confirm(`ยกเลิกงาน #${r.request_no} (${truckLabel(r)}) ใช่ไหม?\n${r.problem}`)) return;
+  if (!confirm(`ยกเลิกงาน (${truckLabel(r)}) ใช่ไหม?\n${r.problem}`)) return;
   const err = await runAction(r.request_id, { action: "cancel" });
   if (err) showBoardError(err);
 }
 
 async function reopenRecent(r) {
-  if (!confirm(`ย้อนงาน #${r.request_no} กลับไป${r.sent_date ? "เป็นอยู่ที่อู่" : "เป็นรอซ่อม"}ใช่ไหม?`)) return;
+  if (!confirm(`ย้อนงานนี้กลับไป${r.sent_date ? "เป็นอยู่ที่อู่" : "เป็นรอซ่อม"}ใช่ไหม?`)) return;
   const err = await runAction(r.request_id, { action: "reopen" });
   if (err) showBoardError(err);
 }
@@ -328,7 +335,7 @@ async function stepBack(r) {
 
 // "we haven't actually sent it" / the shop sent it back unfixed
 async function recallFromShop(r) {
-  if (!confirm(`เรียก #${r.request_no} (${truckLabel(r)}) คืนจาก ${r.shop} กลับไปเป็นรอซ่อมใช่ไหม?`)) return;
+  if (!confirm(`เรียกรถ (${truckLabel(r)}) คืนจาก ${r.shop} กลับไปเป็นรอซ่อมใช่ไหม?`)) return;
   const err = await runAction(r.request_id, { action: "reopen" });
   if (err) showBoardError(err);
 }
@@ -340,7 +347,7 @@ function openSendDialog(r) {
   shopTarget = r;
   $("shopTitle").textContent = r.status === "at_shop" ? "แก้ไขการส่งซ่อม" : "ส่งซ่อมที่…";
   $("shopOk").textContent = r.status === "at_shop" ? "บันทึก" : "ส่งซ่อม";
-  $("shopSummary").textContent = `#${r.request_no} · ${truckLabel(r)} · ${r.problem}`;
+  $("shopSummary").textContent = `${truckLabel(r)} · ${r.problem}`;
   $("shopName").value = r.shop || "";
   $("shopDate").min = r.request_date;
   $("shopDate").max = todayISO();
@@ -384,7 +391,7 @@ function updateReturnDays() {
 
 function openReturnDialog(r) {
   returnTarget = r;
-  $("returnSummary").textContent = `#${r.request_no} · ${truckLabel(r)} · ${r.problem} — ที่ ${r.shop}`;
+  $("returnSummary").textContent = `${truckLabel(r)} · ${r.problem} — ที่ ${r.shop}`;
   $("returnDate").min = r.sent_date;
   $("returnDate").max = todayISO();
   $("returnDate").value = todayISO();
@@ -410,7 +417,7 @@ let fixTarget = null;
 
 function openFixDialog(r) {
   fixTarget = r;
-  $("fixSummary").textContent = `#${r.request_no} · ${truckLabel(r)} · ${r.problem}`;
+  $("fixSummary").textContent = `${truckLabel(r)} · ${r.problem}`;
   $("fixBy").value = "";
   $("fixDate").value = todayISO();
   $("fixDate").min = r.request_date;
@@ -444,7 +451,7 @@ let noBillTarget = null;
 
 function openNoBillDialog(r) {
   noBillTarget = r;
-  $("noBillSummary").textContent = `#${r.request_no} · ${truckLabel(r)} · ${r.problem}`;
+  $("noBillSummary").textContent = `${truckLabel(r)} · ${r.problem}`;
   $("noBillReason").value = "";
   $("noBillError").hidden = true;
   $("noBillDialog").showModal();
@@ -461,6 +468,19 @@ async function submitNoBill() {
 }
 
 // --------------------------------------------------------------- adding
+// A clean slate after every add: a second report for the same truck straight away is rare, so the truck is
+// cleared too and the cursor goes back to the truck picker.
+function resetAddForm() {
+  $("addVehicle").value = "";
+  $("addProblem").value = "";
+  $("addReporter").value = "";
+  $("addUrgent").checked = false;
+  $("addShop").value = "";
+  $("addDate").value = todayISO();
+  $("addDateCap").textContent = dateCaption($("addDate").value);
+  $("addVehicle").focus();
+}
+
 async function submitNewRequest(e) {
   e.preventDefault();
   const veh = selectedVehicle($("addVehicle"));
@@ -472,13 +492,9 @@ async function submitNewRequest(e) {
   try {
     await api("/api/requests", jsonOpts("POST", {
       vehicle_id: veh.id, problem, reported_by: $("addReporter").value.trim() || null, urgent: $("addUrgent").checked,
-      shop: $("addShop").value || null,
+      shop: $("addShop").value || null, request_date: $("addDate").value || null,
     }));
-    $("addProblem").value = "";
-    $("addReporter").value = "";
-    $("addUrgent").checked = false;
-    $("addShop").value = "";
-    $("addProblem").focus();
+    resetAddForm();
     await loadBoard();
   } catch (e2) {
     err.textContent = e2.message;
@@ -501,7 +517,7 @@ function startBillFor(r) {
 function renderAttachNote() {
   const r = board.attachedInfo;
   $("attachNote").hidden = !r || board.attached.length === 0;
-  if (r) $("attachText").textContent = `กำลังบันทึกงานซ่อม #${r.request_no} · ${truckLabel(r)} · ${r.problem} — บันทึกแล้วงานนี้จะถูกปิดให้เอง`;
+  if (r) $("attachText").textContent = `กำลังบันทึกงานซ่อม · ${truckLabel(r)} · ${r.problem} — บันทึกแล้วงานนี้จะถูกปิดให้เอง`;
 }
 
 function clearAttachment() {
@@ -522,7 +538,7 @@ function renderFixes() {
     const box = el("input", { type: "checkbox", "data-id": r.request_id });
     box.checked = board.attached.includes(r.request_id);
     return el("label", { class: "fixrow" }, box,
-      el("span", {}, el("strong", { text: `#${r.request_no} ` }), `${r.problem} `,
+      el("span", {}, `${r.problem} `,
         el("span", { class: "muted small", text: r.status === "awaiting_bill" ? "(ซ่อมแล้ว รอบิล)" : r.status === "at_shop" ? `(อยู่ที่ ${r.shop})` : `(ยังไม่ได้ซ่อม · แจ้ง ${thDate(r.request_date)})` })));
   }));
 }
@@ -533,6 +549,10 @@ const selectedFixIds = () => [...document.querySelectorAll("#fixesList input:che
 function initBoard() {
   fillVehicleSelect($("addVehicle"));
   $("addForm").addEventListener("submit", submitNewRequest);
+  $("addDate").max = todayISO();
+  bindDateField($("addDate"), $("addDateCap"));
+  $("addDate").value = todayISO();
+  $("addDateCap").textContent = dateCaption($("addDate").value);
   bindDateField($("fixDate"), $("fixDateCap"));
   $("fixCancel").addEventListener("click", () => $("fixDialog").close());
   $("fixHasBill").addEventListener("click", () => submitFix("fixed_awaiting_bill"));

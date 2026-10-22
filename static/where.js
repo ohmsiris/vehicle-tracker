@@ -47,7 +47,7 @@ function truckRow(r) {
   return el("div", { class: `truckrow${overdue ? " late" : ""}` },
     el("div", { class: "truckmain" },
       el("div", { class: "req-head" },
-        el("strong", { text: truckLabel(r) }),
+        ...truckHead(r),
         r.branch ? el("span", { class: "muted small", text: r.branch }) : null,
         r.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null,
         r.on_paper === false ? el("span", { class: "badge nobill", text: "ไม่มีในใบแจ้ง" }) : null,

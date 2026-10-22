@@ -565,3 +565,11 @@ label.check { display: inline-flex; align-items: center; gap: 8px; margin: 0; fo
 .truckmain { min-width: 0; flex: 1 1 320px; }
 .truckproblem { margin: 4px 0 2px; font-size: 16px; }
 .truckbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+
+/* the truck on a card: its fleet number is a chip, so nothing else on the card looks like it */
+.truckno { font-weight: 700; font-size: 15px; background: var(--accent-soft); color: var(--accent); border-radius: 8px; padding: 1px 10px; font-variant-numeric: tabular-nums; }
+.truckplate { font-size: 17px; font-weight: 650; }
+.adddate { display: grid; gap: 4px; }
+.adddate label { margin: 0; font-size: 13px; color: var(--muted); }
+.adddate input { width: auto; }

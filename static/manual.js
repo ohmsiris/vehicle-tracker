@@ -105,7 +105,7 @@ function renderManualFixes() {
     const box = el("input", { type: "checkbox", "data-id": r.request_id });
     box.checked = board.attached.includes(r.request_id);
     return el("label", { class: "fixrow" }, box,
-      el("span", {}, el("strong", { text: `#${r.request_no} ` }), `${r.problem} `,
+      el("span", {}, `${r.problem} `,
         el("span", { class: "muted small", text: r.status === "awaiting_bill" ? "(ซ่อมแล้ว รอบิล)" : r.status === "at_shop" ? `(อยู่ที่ ${r.shop})` : `(ยังไม่ได้ซ่อม · แจ้ง ${thDate(r.request_date)})` })));
   }));
 }

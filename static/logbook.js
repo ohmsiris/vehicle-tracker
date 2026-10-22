@@ -166,7 +166,7 @@ function logRow(r) {
         r.needs_review ? el("span", { class: "badge warn", text: "ควรตรวจ", title: r.review_reasons.join("\n") }) : null),
       el("div", { class: isEvent && r.summary ? "evsummary" : "evpreview", text: what }),
       el("div", { class: "muted small", text: meta.filter(Boolean).join(" · ") }),
-      r.from_requests && r.from_requests.length ? el("div", { class: "muted small", text: `จากงานแจ้งซ่อม: ${r.from_requests.map((q) => `#${q.no} ${q.problem}`).join(" · ")}` }) : null),
+      r.from_requests && r.from_requests.length ? el("div", { class: "muted small", text: `จากงานแจ้งซ่อม: ${r.from_requests.map((q) => q.problem).join(" · ")}` }) : null),
     el("div", { class: "evtotal", text: r.total_cost ? `${baht(r.total_cost)} ฿` : "–" }));
 }
 
@@ -236,7 +236,7 @@ function requestSteps(r) {
 function showRequestDialog(r) {
   const dlg = $("reqDialog");
   const truck = truckLabel(r);
-  $("reqDlgTitle").textContent = `งานซ่อม #${r.request_no || ""} · ${truck}`;
+  $("reqDlgTitle").textContent = `งานซ่อม · ${truck}`;
   $("reqDlgProblem").textContent = r.problem || r.preview || "";
   const steps = requestSteps(r);
   $("reqDlgSteps").replaceChildren(...steps.map((s) => el("li", { class: s.done ? "done" : "" },

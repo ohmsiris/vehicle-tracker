@@ -176,7 +176,7 @@ function renderVehHead(v) {
       el("div", { class: "vstat-label", text: "งานที่ยังค้างของรถคันนี้" }),
       ...open.map((r) => el("div", { class: "vehopen-row small" },
         reqStatusBadge(r.status),
-        el("span", { text: ` #${r.request_no} ${r.problem}` })))) : null);
+        el("span", { text: ` ${r.problem}` })))) : null);
 }
 
 function billForVehicle(v) {
