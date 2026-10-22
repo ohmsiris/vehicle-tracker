@@ -640,7 +640,7 @@ dialog#vehInfoDialog { max-width: 640px; width: calc(100vw - 32px); }
 
 
 /* roster list: the whole card is one link */
-a.rlink { text-decoration: none; color: inherit; grid-template-columns: minmax(0, 1.6fr) minmax(0, .9fr) minmax(0, 1.2fr) auto 18px; cursor: pointer; transition: box-shadow .15s, border-color .15s; }
+a.rlink { text-decoration: none; color: inherit; grid-template-columns: minmax(0, 1.6fr) minmax(0, .9fr) minmax(0, 1.2fr) 150px 18px; cursor: pointer; transition: box-shadow .15s, border-color .15s; }
 a.rlink:hover, a.rlink:focus-visible { border-color: var(--accent); box-shadow: var(--shadow-md); outline: none; }
 .rr-cell { display: grid; gap: 2px; align-content: center; }
 .rr-label { font-size: 12px; color: var(--muted); }
