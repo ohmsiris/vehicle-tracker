@@ -172,7 +172,7 @@ def test_history_endpoints_auth_and_error_mapping(monkeypatch):
     for path in ("/api/vehicles", f"/api/vehicles/{uuid.uuid4()}/events", f"/api/events/{uuid.uuid4()}"):
         assert client.get(path).status_code == 403, path
 
-    monkeypatch.setattr(main.history, "list_vehicles", lambda: [{"plate": "A"}])
+    monkeypatch.setattr(main.history, "list_vehicles", lambda include_inactive=False: [{"plate": "A"}])
     assert client.get("/api/vehicles?token=secret").json() == [{"plate": "A"}]
 
     def missing(*a): raise main.history.NotFound()

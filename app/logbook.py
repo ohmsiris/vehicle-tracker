@@ -232,8 +232,20 @@ def facets(rows: list[dict]) -> dict:
     for name in shops.choices():                      # the shops you use are always offered, even before any work is logged
         if name not in known:
             shop_counts.append({"value": name, "count": 0})
+    trucks: dict[str, dict] = {}
+    for r in rows:
+        if r.get("vehicle_id"):
+            t = trucks.setdefault(r["vehicle_id"], {"value": r["vehicle_id"], "plate": r.get("plate") or "", "truck_number": r.get("truck_number") or "",
+                                                    "branch": r.get("branch") or "", "model": r.get("model") or "", "count": 0})
+            t["count"] += 1
+
+    def number_key(t):
+        digits = "".join(ch for ch in t["truck_number"] if ch.isdigit())
+        return (t["branch"], int(digits) if digits and t["truck_number"].strip().isdigit() else 10 ** 9, t["plate"])
+
     return {
         "shops": shop_counts,
+        "vehicles": sorted(trucks.values(), key=number_key),
         "categories": count(c for r in rows for c in r["categories"]),
         "branches": count(r["branch"] for r in rows),
         "statuses": [{"value": s, "label": STATUS_LABELS[s], "count": sum(1 for r in rows if r["status"] == s)} for s in STATUS_LABELS],

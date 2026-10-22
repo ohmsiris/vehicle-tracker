@@ -219,6 +219,17 @@ def test_facets_offer_every_shop_even_ones_with_no_work_yet(rows):
     assert {s["value"]: s["count"] for s in f["statuses"]}["at_shop"] == 1
 
 
+def test_facets_list_each_truck_with_history_in_fleet_order(rows):
+    trucks = logbook.facets(rows)["vehicles"]
+    assert [(t["truck_number"], t["plate"], t["count"]) for t in trucks] == [("1", "1ฒถ 8966", 2), ("36", "84-4786", 4), ("7", "81-3195", 3)]
+    assert trucks[0]["value"] == "v3" and trucks[0]["branch"] == "สระบุรี"
+
+
+def test_one_truck_filter_gives_its_whole_history(rows):
+    res = q(rows, vehicle_id="v1")
+    assert sorted(keys(res)) == ["event:e1", "event:e3", "request:r1", "request:r4"] and res["stats"]["trucks"] == 1
+
+
 # --------------------------------------------------------------- CSV
 def test_csv_has_both_year_systems_and_thai_text_survives():
     rows = build(events=[ev("e1", "v1", "2026-10-10", vendor="ชมรมย์การช่าง", total=3000, summary="ถ่ายน้ำมัน")], lines=[ln("e1", "น้ำมัน", "ไส้กรองและของเหลว", 3000)])

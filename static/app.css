@@ -573,3 +573,52 @@ label.check { display: inline-flex; align-items: center; gap: 8px; margin: 0; fo
 .adddate { display: grid; gap: 4px; }
 .adddate label { margin: 0; font-size: 13px; color: var(--muted); }
 .adddate input { width: auto; }
+
+
+/* log: one-truck picker and the truck's header card */
+.lgtop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 300px); gap: 10px; }
+.lgtruck { margin: 0 0 14px; display: grid; gap: 14px; }
+.lgtruck-top { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+.lgtruck-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 700px) { .lgtop { grid-template-columns: 1fr; } }
+
+
+/* ------------------------------------------------------------ roster */
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px; margin: 0 0 14px; }
+.segbtn { font: inherit; font-size: 14px; font-weight: 550; padding: 6px 22px; border: 0; border-radius: 999px; background: transparent; color: var(--text-2); cursor: pointer; }
+.segbtn.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); }
+.rosterbar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto; gap: 10px; padding: 14px 16px; }
+.rosterbar input[type=search] {
+  width: 100%; font: inherit; font-size: 16px; padding: 12px 14px; color: var(--text); background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+}
+.rosterbar input[type=search]:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.rosterbar select { width: auto; }
+.rosterdrvbar { margin-bottom: 12px; }
+.rostergrid { display: grid; gap: 10px; margin-top: 8px; }
+.rrow {
+  display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 16px; align-items: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px; box-shadow: var(--shadow-sm);
+}
+.rrow.off { opacity: .6; background: var(--surface-2); }
+.drow { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.6fr) auto; }
+.rr-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.rr-badges:empty { display: none; }
+.rr-field { display: grid; gap: 3px; margin: 0; font-weight: 400; }
+.rr-field span { font-size: 12px; color: var(--muted); }
+.rr-field select { width: 100%; }
+.rr-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.rr-trucks { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.vdgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.vdgrid input, .vdgrid select { width: 100%; }
+.vdactive { margin-top: 14px; align-items: flex-start; }
+dialog#vehDialog { max-width: 620px; width: calc(100vw - 32px); }
+@media (max-width: 900px) {
+  .rosterbar { grid-template-columns: 1fr 1fr; }
+  .rosterbar input[type=search] { grid-column: 1 / -1; }
+  .rrow, .drow { grid-template-columns: 1fr 1fr; }
+  .rr-id { grid-column: 1 / -1; }
+  .rr-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .rr-trucks { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) { .vdgrid { grid-template-columns: 1fr; } }

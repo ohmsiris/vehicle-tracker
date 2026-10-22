@@ -12,7 +12,7 @@ import uuid
 from datetime import date, timedelta
 from typing import Optional
 
-from app import repair_requests, supabase
+from app import fleet, repair_requests, supabase
 
 PREVIEW_LINES = 4          # how many line descriptions the one-line preview names
 CHUNK = 50                 # ids per `in.(...)` filter, to keep request URLs short
@@ -102,8 +102,9 @@ def review_reasons(event: dict, lines: list[dict]) -> list[str]:
     return reasons
 
 
-def vehicle_rows(vehicles: list[dict], status: dict[str, dict], events: list[dict]) -> list[dict]:
-    """One row per truck: identity + live status + lifetime repair count / spend."""
+def vehicle_rows(vehicles: list[dict], status: dict[str, dict], events: list[dict], drivers: Optional[dict] = None) -> list[dict]:
+    """One row per truck: identity + live status + lifetime repair count / spend (+ usage and main driver once schema_v6 is in)."""
+    drivers = drivers or {}
     spend: dict[str, list] = {}
     for e in events:
         s = spend.setdefault(e["vehicle_id"], [0, 0.0])
@@ -117,6 +118,8 @@ def vehicle_rows(vehicles: list[dict], status: dict[str, dict], events: list[dic
             "vehicle_id": v["id"], "plate": v["plate_number"], "province": v.get("plate_province") or "",
             "truck_number": v.get("vehicle_number") or "", "branch": v.get("branch") or "",
             "make": v.get("make") or "", "model": v.get("model") or "",
+            "active": v.get("active", True) is not False, "usage": v.get("usage") or "", "notes": v.get("notes") or "",
+            "driver_id": v.get("main_driver_id") or "", "driver": (drivers.get(v.get("main_driver_id")) or {}).get("name", ""),
             "open_requests": int(st.get("open_requests") or 0), "awaiting_bill_requests": int(st.get("awaiting_bill_requests") or 0),
             "at_shop_requests": int(st.get("at_shop_requests") or 0),
             "last_service_date": st.get("last_service_date"), "days_since_service": st.get("days_since_service"),
@@ -147,16 +150,19 @@ def event_rows(events: list[dict], lines: list[dict], attachments: list[dict]) -
 
 
 # --------------------------------------------------------------- database
-def list_vehicles() -> list[dict]:
-    vehicles = supabase.select_all("vehicles", {
-        "select": "id,plate_number,plate_province,vehicle_number,make,model,branch", "active": "eq.true",
-        "order": "branch.asc,vehicle_number.asc,id.asc"})
+def list_vehicles(include_inactive: bool = False) -> list[dict]:
+    v6 = fleet.has_v6()
+    params = {"select": "id,plate_number,plate_province,vehicle_number,make,model,branch,active" + (",usage,main_driver_id,notes" if v6 else ""),
+              "order": "branch.asc,vehicle_number.asc,id.asc"}
+    if not include_inactive:
+        params["active"] = "eq.true"
+    vehicles = supabase.select_all("vehicles", params)
     status = {r["vehicle_id"]: r for r in supabase.select_all("v_vehicle_status", {
         "select": "vehicle_id,open_requests,awaiting_bill_requests,last_service_date,days_since_service,last_known_mileage,next_service_mileage"
                   + (",at_shop_requests" if repair_requests.has_v5() else ""),
         "order": "vehicle_id.asc"})}
     events = supabase.select_all("v_events", {"select": "vehicle_id,total_cost", "order": "event_id.asc"})
-    return vehicle_rows(vehicles, status, events)
+    return vehicle_rows(vehicles, status, events, fleet.drivers_by_id() if v6 else None)
 
 
 def vehicle_events(vehicle_id: str) -> list[dict]:

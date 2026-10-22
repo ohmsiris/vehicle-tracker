@@ -37,7 +37,8 @@ service key bypasses row-level security: server-side only, never in a page.
 **Database** (Supabase SQL Editor, in this order): `schema.sql`, then
 `schema_v2.sql`, then `schema_v3_dashboard.sql` (only needed for Looker), then
 `schema_v4.sql` (editing saved bills + the written summary), then
-`schema_v5.sql` (the "at the shop" step of the repair flow). Replace
+`schema_v5.sql` (the "at the shop" step of the repair flow), then
+`schema_v6.sql` (drivers, truck usage, main driver). Replace
 `<PROJECT_REF>` in `schema.sql` first. Then seed the fleet:
 
 ```bash
@@ -142,18 +143,20 @@ already corrects a พ.ศ. year the model read off a bill (`app/batch.py`).
 ## Navigation: sidebar, cars, machinery
 
 A left sidebar groups the app. Everything built so far lives under **รถ**
-(repair board, record a bill, vehicle search / history, dashboard);
+(repair board, where the trucks are, record a bill, the maintenance log, the
+fleet roster, dashboard);
 **เครื่องจักร** is a placeholder page for the future machinery section. The
 sidebar collapses with the menu button (remembered per device) and is a
 slide-in drawer on a phone.
 
-## Vehicle search and history ("ค้นหารถ / ประวัติ")
+## One repair event, read like a bill
 
-Search by plate, truck number, make/model or branch; open a truck to see its
-repair events newest first, each with a one-line "what was done"; open an
-event to read it as a bill (read-only), with its photos/PDFs and the board
-requests it closed. Pages are addressed by URL hash (`#search`,
-`#vehicle=<id>`, `#event=<id>`), so Back and bookmarks work.
+The log (`#log`) is where history is found: choose one truck in its picker to see
+that truck's whole history, with a header card (usage, main driver, last repair,
+lifetime totals). Open a job to read it as a bill (read-only), with its
+photos/PDFs and the board requests it closed. Pages are addressed by URL hash
+(`#roster`, `#log`, `#where`, `#event=<id>`), so Back and bookmarks work; the
+old `#search` and `#vehicle=<id>` links still land on the roster / that truck's log.
 
 **Editing a saved bill** ("แก้ไข" on the bill page): header fields, the
 truck, a short summary, and the line items (same row as the review page, with
@@ -292,3 +295,24 @@ open --send_to_shop--> at_shop --returned--> awaiting_bill --(bill saved)--> com
 The trucks that are out at a shop right now, grouped by shop (most trucks first):
 days away, expected return, overdue flag, and the same "back" / "change shop"
 buttons as the board. It reads the board's own list, so the two never disagree.
+
+## Fleet roster ("ทะเบียนรถ", `#roster`)
+
+Trucks and drivers under one roof (`app/fleet.py`, `static/roster.js`).
+
+- **Trucks:** one row each with its **usage** (รถสาย, รถหน้าโรง, or any label you
+  type once -- it is offered again next time) and **main driver**, both changeable
+  straight from the row. "แก้ไข" edits plate / province / fleet number / branch /
+  make / model / notes, and retires a truck ("ใช้งานอยู่" unticked) or brings it
+  back. Retiring never deletes: the truck leaves every picker but its history
+  stays in the log. A truck with work still open (waiting, at a shop, waiting for
+  a bill) cannot be retired until that is closed.
+- **Checks:** a plate (ignoring spaces) can exist once per province; a fleet number
+  once per branch among active trucks (number 6 may exist in both branches, and a
+  retired truck frees its number).
+- **Drivers:** name, phone, branch, notes. A driver is "main driver" of any number
+  of trucks; a driver who stops driving ("เลิกขับ") is removed from those trucks.
+  Picking a truck on the repair form suggests its main driver as the reporter.
+- `schema_v6.sql` adds the `drivers` table and `vehicles.usage`,
+  `vehicles.main_driver_id`, `vehicles.notes`. Until it has been run the roster is
+  read-only and says so (`fleet.has_v6()` probes for it); everything else works as before.

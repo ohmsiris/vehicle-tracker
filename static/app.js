@@ -58,11 +58,11 @@ function initTheme() {
 
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
-const VIEW_NAMES = ["board", "dash", "capture", "busy", "review", "done", "search", "vehicle", "event", "log", "where", "machinery"];
+const VIEW_NAMES = ["board", "dash", "capture", "busy", "review", "done", "roster", "event", "log", "where", "machinery"];
 // which sidebar entry lights up for each view
 const NAV_OF = {
   board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
-  search: "navSearch", vehicle: "navSearch", event: "navSearch", log: "navLog", where: "navWhere", machinery: "navMachinery",
+  roster: "navRoster", event: "navLog", log: "navLog", where: "navWhere", machinery: "navMachinery",
 };
 
 function showView(name) {
@@ -567,7 +567,7 @@ async function init() {
   $("navBoard").addEventListener("click", () => showView("board"));
   $("navBills").addEventListener("click", () => showView(lastBillView));
   $("navDash").addEventListener("click", () => { showView("dash"); loadDashboard(); });
-  $("navSearch").addEventListener("click", goSearch);
+  $("navRoster").addEventListener("click", () => goHash("#roster"));
   $("navLog").addEventListener("click", () => goHash("#log"));
   $("navWhere").addEventListener("click", () => goHash("#where"));
   $("navMachinery").addEventListener("click", () => showView("machinery"));
@@ -595,6 +595,7 @@ async function init() {
   initDashboard();
   initFleet();
   initLog();
+  initRoster();
   initManual();
   if (location.hash) route();
   if (params.get("tab") === "dash") { showView("dash"); loadDashboard(); }
@@ -612,6 +613,9 @@ async function loadMeta() {
     state.vehicles = meta.vehicles;
     board.fixers = meta.fixers || [];
     board.shops = meta.shops || [];
+    state.usages = meta.usages || [];
+    state.branches = meta.branches || [];
+    state.fleetReady = meta.fleet_ready;
     $("addShop").replaceChildren(el("option", { value: "", text: "ยังไม่ได้ส่งอู่ (รอซ่อม)" }), ...board.shops.map((n) => el("option", { value: n, text: `ส่งอู่เลย: ${n}` })));
     $("tokenBox").hidden = true;
     fillVehicleSelect($("vehicleSelect"));

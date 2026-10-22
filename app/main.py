@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, history, logbook, logsource, repair_requests, shops, summarize, supabase
+from app import dashboard, events, fleet, history, logbook, logsource, repair_requests, shops, summarize, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -118,7 +118,10 @@ def meta(x_app_token: str = Header(default=""), token: str = Query(default="")) 
             fixers += [f for f in repair_requests.known_fixers() if f not in fixers]
         except supabase.SupabaseError:
             logger.exception("could not load fixer suggestions")
-    return {"categories": CATEGORIES, "vehicles": load_roster(), "fixers": fixers, "shops": shops.choices()}
+    roster = load_roster()
+    return {"categories": CATEGORIES, "vehicles": roster, "fixers": fixers, "shops": shops.choices(),
+            "usages": fleet.usage_choices(roster), "branches": fleet.BRANCHES,
+            "fleet_ready": fleet.has_v6() if supabase.configured() else False}
 
 
 # Dev-only: serves a saved extraction response so the review UI can be
@@ -398,10 +401,57 @@ def _history_call(fn, *args):
 
 
 @app.get("/api/vehicles")
-def api_vehicles(x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
-    """Every active truck with its status and lifetime repair count / spend."""
+def api_vehicles(include_inactive: bool = False, x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    """Every active truck (or every truck ever, with include_inactive) with its status, usage, main driver
+    and lifetime repair count / spend."""
     _check_token(x_app_token, token)
-    return _history_call(history.list_vehicles)
+    return _history_call(history.list_vehicles, include_inactive)
+
+
+# ------------------------------------------------------- fleet: trucks and drivers
+def _fleet_call(fn, *args):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return fn(*args)
+    except fleet.InvalidFleet as exc:
+        raise HTTPException(422, str(exc))
+    except fleet.NotFound:
+        raise HTTPException(404, "ไม่พบข้อมูลนี้")
+    except supabase.SupabaseError:
+        logger.exception("fleet change failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.post("/api/vehicles")
+def api_create_vehicle(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _fleet_call(fleet.create_vehicle, body)
+
+
+@app.patch("/api/vehicles/{vehicle_id}")
+def api_edit_vehicle(vehicle_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Edits only the fields present in the body (usage, main driver, details, active = retire / bring back)."""
+    _check_token(x_app_token, token)
+    return _fleet_call(fleet.edit_vehicle, vehicle_id, body)
+
+
+@app.get("/api/drivers")
+def api_drivers(include_inactive: bool = False, x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _fleet_call(fleet.list_drivers, include_inactive)
+
+
+@app.post("/api/drivers")
+def api_create_driver(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _fleet_call(fleet.create_driver, body)
+
+
+@app.patch("/api/drivers/{driver_id}")
+def api_edit_driver(driver_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _fleet_call(fleet.edit_driver, driver_id, body)
 
 
 @app.get("/api/vehicles/{vehicle_id}/events")

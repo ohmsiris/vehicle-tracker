@@ -476,6 +476,7 @@ async function submitNoBill() {
 // cleared too and the cursor goes back to the truck picker.
 function resetAddForm() {
   $("addVehicle").value = "";
+  delete $("addReporter").dataset.typed;
   $("addProblem").value = "";
   $("addReporter").value = "";
   $("addUrgent").checked = false;
@@ -553,6 +554,12 @@ const selectedFixIds = () => [...document.querySelectorAll("#fixesList input:che
 function initBoard() {
   fillVehicleSelect($("addVehicle"));
   $("addForm").addEventListener("submit", submitNewRequest);
+  // Picking a truck suggests its main driver as the reporter -- until you type a different name yourself.
+  $("addReporter").addEventListener("input", () => { $("addReporter").dataset.typed = "1"; });
+  $("addVehicle").addEventListener("change", () => {
+    const v = selectedVehicle($("addVehicle"));
+    if (!$("addReporter").dataset.typed) $("addReporter").value = v && v.driver ? v.driver : "";
+  });
   $("addDate").max = todayISO();
   bindDateField($("addDate"), $("addDateCap"));
   $("addDate").value = todayISO();

@@ -13,14 +13,14 @@ const lg = { f: {}, rows: [], total: 0, facets: null, stats: null, loaded: false
 const LOG_STATUS_BADGE = { done: "ok", done_no_bill: "nobill", awaiting_bill: "warn", at_shop: "shop", open: "urgent", cancelled: "" };
 const LOG_STORE = "vt_logfilters";
 
-const FILTER_KEYS = ["q", "date_from", "date_to", "status", "shop", "branch", "category", "source", "min_cost", "max_cost", "review", "sort"];
+const FILTER_KEYS = ["q", "date_from", "date_to", "status", "shop", "branch", "category", "vehicle_id", "review", "sort"];
 
 // ------------------------------------------------------------------ filters <-> form
 function readFilters() {
   const v = (id) => $(id).value.trim();
   return {
     q: v("lgQ"), date_from: v("lgFrom"), date_to: v("lgTo"), status: v("lgStatus") || "all", shop: v("lgShop"), branch: v("lgBranch"),
-    category: v("lgCategory"), source: v("lgSource"), min_cost: v("lgMin"), max_cost: v("lgMax"),
+    category: v("lgCategory"), vehicle_id: v("lgVehicle"),
     review: $("lgReview").checked ? "1" : "", sort: v("lgSort") || "date_desc",
   };
 }
@@ -28,7 +28,9 @@ function readFilters() {
 function writeFilters(f) {
   const set = (id, val) => { $(id).value = val || ""; };
   set("lgQ", f.q); set("lgFrom", f.date_from); set("lgTo", f.date_to); set("lgStatus", f.status || "all"); set("lgShop", f.shop);
-  set("lgBranch", f.branch); set("lgCategory", f.category); set("lgSource", f.source); set("lgMin", f.min_cost); set("lgMax", f.max_cost);
+  set("lgBranch", f.branch); set("lgCategory", f.category);
+  if (f.vehicle_id) ensureVehicleOption(f.vehicle_id);        // the list of trucks arrives with the first answer; this one is needed now
+  set("lgVehicle", f.vehicle_id);
   $("lgReview").checked = !!f.review;
   set("lgSort", f.sort || "date_desc");
   $("lgFromCap").textContent = dateCaption($("lgFrom").value);
@@ -70,10 +72,11 @@ async function loadLog(reset) {
     lg.rows = lg.rows.concat(res.rows);
     lg.total = res.total;
     lg.stats = res.stats;
-    if (!lg.facets) fillFacets(res.facets);
     lg.facets = res.facets;
+    fillFacets(res.facets);
     updateStatusCounts(res.facets);
     renderLog();
+    renderTruckHeader();
   } catch (err) {
     if (mySeq !== lg.seq) return;
     $("lgError").textContent = `โหลดสมุดงานซ่อมไม่สำเร็จ: ${err.message}`;
@@ -96,6 +99,87 @@ function fillFacets(fc) {
   opts($("lgShop"), fc.shops, "ทุกร้าน / ช่าง");
   opts($("lgBranch"), fc.branches, "ทุกสาขา");
   opts($("lgCategory"), fc.categories, "ทุกหมวด");
+  fillTruckOptions(fc.vehicles);
+}
+
+// ---- the truck picker: grouped by branch, only trucks that have history (plus the one currently chosen)
+const truckOptionText = (t, count) => `${truckLabel({ truck_number: t.truck_number, plate: t.plate })}${count === undefined ? "" : ` (${count})`}`;
+
+function fillTruckOptions(trucks) {
+  const sel = $("lgVehicle"), cur = sel.value;
+  const items = [...trucks];
+  if (cur && !items.some((t) => t.value === cur)) {            // chosen from the roster but it has no jobs yet
+    const v = (fleet.vehicles || []).find((x) => x.vehicle_id === cur);
+    if (v) items.push({ value: cur, plate: v.plate, truck_number: v.truck_number, branch: v.branch, count: 0 });
+  }
+  const groups = new Map();
+  for (const t of items) {
+    if (!groups.has(t.branch)) groups.set(t.branch, []);
+    groups.get(t.branch).push(t);
+  }
+  sel.replaceChildren(el("option", { value: "", text: "ทุกคัน" }),
+    ...[...groups.entries()].map(([branch, ts]) => el("optgroup", { label: branch ? `สาขา${branch}` : "ไม่ระบุสาขา" },
+      ...ts.map((t) => el("option", { value: t.value, text: truckOptionText(t, t.count) })))));
+  sel.value = cur;
+}
+
+function ensureVehicleOption(id) {
+  const sel = $("lgVehicle");
+  if ([...sel.options].some((o) => o.value === id)) return;
+  const v = (fleet.vehicles || []).find((x) => x.vehicle_id === id);
+  sel.append(el("option", { value: id, text: v ? truckOptionText({ truck_number: v.truck_number, plate: v.plate }) : "รถที่เลือก" }));
+}
+
+// Open the log showing one truck's whole history (from the roster, from a bill's back button ...).
+function showTruckLog(vehicleId) {
+  writeFilters({ vehicle_id: vehicleId });
+  fleet.backTo = null;
+  lg.loaded = true;                       // the form already holds what we want; don't restore the old filters over it
+  goHash("#log");
+}
+
+const ago = (days) => (days === 0 ? "วันนี้" : `${days} วันก่อน`);
+
+// The card above the list when one truck is chosen: who it is, what it is for, its driver, lifetime totals, shortcuts.
+async function renderTruckHeader() {
+  const box = $("lgTruck"), id = lg.f.vehicle_id;
+  if (!id) { box.hidden = true; return; }
+  await ensureVehicles();
+  const v = fleet.vehicles.find((x) => x.vehicle_id === id);
+  if (!v || lg.f.vehicle_id !== id) { box.hidden = true; return; }
+  const stat = (label, value) => el("div", { class: "vstat" }, el("div", { class: "vstat-label", text: label }), el("div", { class: "vstat-value", text: value }));
+  box.hidden = false;
+  fill(box,
+    el("div", { class: "lgtruck-top" },
+      el("div", {},
+        el("div", { class: "req-head" }, ...truckHead({ truck_number: v.truck_number, plate: v.plate }),
+          v.branch ? el("span", { class: "muted", text: v.branch }) : null,
+          v.usage ? el("span", { class: "badge shop", text: v.usage }) : null,
+          v.active === false ? el("span", { class: "badge", text: "เลิกใช้แล้ว" }) : null),
+        el("div", { class: "muted", text: [`${v.make} ${v.model}`.trim(), v.province, v.driver ? `คนขับหลัก ${v.driver}` : null].filter(Boolean).join(" · ") })),
+      el("div", { class: "lgtruck-actions" },
+        el("button", { class: "btn small primary", type: "button", text: "+ บันทึกบิล", onclick: () => billForVehicle(v) }),
+        el("button", { class: "btn small", type: "button", text: "+ แจ้งซ่อม", onclick: () => requestForVehicle(v) }),
+        el("button", { class: "btn small", type: "button", text: "แก้ไขข้อมูลรถ", onclick: () => openVehicleDialog(v) }))),
+    el("div", { class: "vstats" },
+      stat("ซ่อมล่าสุด", v.last_service_date ? `${beDate(v.last_service_date)} · ${ago(v.days_since_service)}` : "ยังไม่มีประวัติ"),
+      stat("ซ่อมทั้งหมด", `${v.repairs_total} ครั้ง`),
+      stat("ค่าซ่อมรวม", `${baht(v.spend_total)} ฿`),
+      stat("ไมล์ล่าสุดที่บันทึก", v.last_known_mileage ? `${baht(v.last_known_mileage)} กม.${v.next_service_mileage ? ` → ${baht(v.next_service_mileage)}` : ""}` : "–")));
+}
+
+function billForVehicle(v) {
+  const idx = state.vehicles.findIndex((x) => x.id === v.vehicle_id);
+  $("vehicleSelect").value = idx >= 0 ? String(idx) : "";
+  showView("capture");
+}
+
+function requestForVehicle(v) {
+  showView("board");
+  const idx = state.vehicles.findIndex((x) => x.id === v.vehicle_id);
+  $("addVehicle").value = idx >= 0 ? String(idx) : "";
+  $("addVehicle").dispatchEvent(new Event("change"));        // fills in the truck's main driver as the reporter
+  $("addProblem").focus();
 }
 
 function updateStatusCounts(fc) {
@@ -251,8 +335,7 @@ function initLog() {
   const reload = () => scheduleLoad(0);
   if (isNarrow()) $("lgMore2").open = false;           // on a phone the extra filters start folded away
   $("lgQ").addEventListener("input", () => scheduleLoad(300));
-  for (const id of ["lgStatus", "lgShop", "lgBranch", "lgCategory", "lgSource", "lgSort", "lgReview"]) $(id).addEventListener("change", reload);
-  for (const id of ["lgMin", "lgMax"]) $(id).addEventListener("input", () => scheduleLoad(500));
+  for (const id of ["lgVehicle", "lgStatus", "lgShop", "lgBranch", "lgCategory", "lgSort", "lgReview"]) $(id).addEventListener("change", reload);
   bindDateField($("lgFrom"), $("lgFromCap"));
   bindDateField($("lgTo"), $("lgToCap"));
   $("lgFrom").addEventListener("change", reload);

@@ -1,28 +1,31 @@
 "use strict";
 
-// Cars > ค้นหารถ / ประวัติ: search a truck, see its repair history as a list,
-// open one event to read it like a bill. Read-only here (editing is a
-// separate mode on the event page). Data comes from /api/vehicles,
-// /api/vehicles/{id}/events and /api/events/{id} (app/history.py).
+// One repair event read like a bill (and edited from there), plus the page router.
+// The truck list and per-truck history live in roster.js and logbook.js now. Data comes from
+// /api/vehicles and /api/events/{id} (app/history.py).
 //
-// Navigation is by URL hash (#search, #vehicle=<id>, #event=<id>) so the
-// browser's Back button walks list -> truck -> bill, and a view can be
-// bookmarked or shared. Loaded BEFORE app.js: nothing runs at load time;
-// helpers from board.js / dashboard.js / app.js are used at call time only.
+// Navigation is by URL hash (#roster, #log, #where, #event=<id>) so the browser's Back
+// button works and a view can be bookmarked or shared. Loaded BEFORE app.js: nothing runs
+// at load time; helpers from board.js / dashboard.js / app.js are used at call time only.
 
-const fleet = { vehicles: [], loaded: false, current: null, event: null };
+const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["search", "vehicle", "event", "log", "where"];
+const FLEET_VIEWS = ["roster", "event", "log", "where"];
 
 // ------------------------------------------------------------------ routing
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
-  if (h === "search") return openSearch();
+  if (h === "roster") return openRoster();
   if (h === "log") return openLog();
   if (h === "where") return openWhere();
   const m = /^(vehicle|event)=(.+)$/.exec(h);
-  if (m && UUID_RE.test(m[2])) return m[1] === "vehicle" ? openVehicle(m[2]) : openEvent(m[2]);
+  if (m && UUID_RE.test(m[2])) {
+    if (m[1] === "event") return openEvent(m[2]);
+    history.replaceState(null, "", location.pathname + location.search);       // an old #vehicle=... link: that truck's history, now in the log
+    return showTruckLog(m[2]);
+  }
+  if (h === "search") { history.replaceState(null, "", "#roster"); return openRoster(); }        // the old truck-search page
   return null;
 }
 
@@ -31,15 +34,13 @@ function goHash(hash) {
   else location.hash = hash;
 }
 
-const goSearch = () => goHash("#search");
-const goVehicle = (id) => goHash(`#vehicle=${id}`);
 const goEvent = (id) => goHash(`#event=${id}`);
 
 // ----------------------------------------------------------------- loading
 async function ensureVehicles(force = false) {
   if (fleet.loaded && !force) return true;
   try {
-    fleet.vehicles = await api("/api/vehicles");
+    fleet.vehicles = await api("/api/vehicles?include_inactive=true");
     fleet.loaded = true;
     return true;
   } catch (err) {
@@ -79,152 +80,10 @@ const SORTS = {
   stale: (a, b) => (a.last_service_date || "0000").localeCompare(b.last_service_date || "0000") || numKey(a) - numKey(b),
 };
 
-async function openSearch() {
-  fleet.backTo = null;
-  showView("search");
-  showErr("searchError", "");
-  if (!(await ensureVehicles())) {
-    showErr("searchError", `โหลดรายชื่อรถไม่สำเร็จ: ${fleet.loadError}`);
-    return;
-  }
-  const sel = $("vehBranch");
-  if (!sel.dataset.filled) {
-    const branches = [...new Set(fleet.vehicles.map((v) => v.branch).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th"));
-    sel.replaceChildren(el("option", { value: "", text: "ทุกสาขา" }), ...branches.map((b) => el("option", { value: b, text: b })));
-    sel.dataset.filled = "1";
-  }
-  renderVehicles();
-  $("vehSearch").focus();
-}
-
-function renderVehicles() {
-  const tokens = $("vehSearch").value.trim().split(/\s+/).map(vehNorm).filter(Boolean);
-  const branch = $("vehBranch").value;
-  let rows = fleet.vehicles
-    .filter((v) => !branch || v.branch === branch)
-    .map((v) => [v, vehScore(v, tokens)])
-    .filter(([, s]) => s > 0);
-  rows = tokens.length
-    ? rows.sort((a, b) => b[1] - a[1] || SORTS.number(a[0], b[0]))     // best match first
-    : rows.sort((a, b) => SORTS[$("vehSort").value](a[0], b[0]));
-  $("searchCount").textContent = `พบ ${rows.length} คัน จากทั้งหมด ${fleet.vehicles.length} คัน`;
-  $("vehList").replaceChildren(...(rows.length ? rows.map(([v]) => vehCard(v)) : [el("p", { class: "muted empty", text: "ไม่พบรถที่ตรงกับคำค้น ลองพิมพ์ทะเบียนบางส่วน เช่น 4786" })]));
-}
-
-function ago(days) { return days === 0 ? "วันนี้" : `${days} วันก่อน`; }
-
-function vehCard(v) {
-  const last = v.last_service_date ? `ซ่อมล่าสุด ${beDate(v.last_service_date)} · ${ago(v.days_since_service)}` : "ยังไม่มีประวัติการซ่อม";
-  return el("button", { class: "veh", type: "button", onclick: () => goVehicle(v.vehicle_id) },
-    el("div", { class: "veh-top" },
-      el("strong", { class: "veh-no", text: v.truck_number ? `#${v.truck_number}` : "–" }),
-      el("span", { class: "veh-plate", text: v.plate }),
-      el("span", { class: "grow" }),
-      v.open_requests ? el("span", { class: "badge warn", text: `รอซ่อม ${v.open_requests}` }) : null,
-      v.at_shop_requests ? el("span", { class: "badge shop", text: `อยู่ที่อู่ ${v.at_shop_requests}` }) : null,
-      v.awaiting_bill_requests ? el("span", { class: "badge warn", text: `รอบิล ${v.awaiting_bill_requests}` }) : null),
-    el("div", { class: "muted small", text: [v.branch, `${v.make} ${v.model}`.trim()].filter(Boolean).join(" · ") }),
-    el("div", { class: "veh-last small", text: last }),
-    v.repairs_total ? el("div", { class: "veh-stats small" }, el("span", { text: `ซ่อม ${v.repairs_total} ครั้ง` }), el("span", { class: "veh-spend", text: `รวม ${baht(v.spend_total)} ฿` })) : null);
-}
-
-// ----------------------------------------------------------------- vehicle
-const vehTitle = (v) => [v.truck_number ? `#${v.truck_number}` : null, v.plate].filter(Boolean).join(" ");
-
-async function openVehicle(id) {
-  fleet.backTo = null;
-  showView("vehicle");
-  showErr("vehicleError", "");
-  $("vehHead").replaceChildren();
-  $("vehEventCount").textContent = "";
-  $("vehEvents").replaceChildren(el("p", { class: "muted", text: "กำลังโหลด…" }));
-  if (!(await ensureVehicles())) { showErr("vehicleError", `โหลดข้อมูลรถไม่สำเร็จ: ${fleet.loadError}`); return; }
-  const v = fleet.vehicles.find((x) => x.vehicle_id === id);
-  if (!v) { showErr("vehicleError", "ไม่พบรถคันนี้"); $("vehEvents").replaceChildren(); return; }
-  fleet.current = v;
-  renderVehHead(v);
-  try {
-    const events = await api(`/api/vehicles/${id}/events`);
-    if (fleet.current !== v) return;            // the user already moved on to another truck
-    renderEvents(events);
-  } catch (err) {
-    $("vehEvents").replaceChildren();
-    showErr("vehicleError", `โหลดประวัติไม่สำเร็จ: ${err.message}`);
-  }
-}
-
-function stat(label, value) {
-  return el("div", { class: "vstat" }, el("div", { class: "vstat-label", text: label }), el("div", { class: "vstat-value", text: value }));
-}
-
-function renderVehHead(v) {
-  const open = (board.active || []).filter((r) => r.vehicle_id === v.vehicle_id);
-  fill($("vehHead"),
-    el("div", { class: "vehhead-top" },
-      el("div", {},
-        el("div", { class: "vehhead-title" }, el("strong", { text: vehTitle(v) }), v.branch ? el("span", { class: "muted", text: v.branch }) : null),
-        el("div", { class: "muted", text: [`${v.make} ${v.model}`.trim(), v.province].filter(Boolean).join(" · ") })),
-      el("div", { class: "vehhead-actions" },
-        el("button", { class: "btn primary", type: "button", text: "+ บันทึกบิลของรถคันนี้", onclick: () => billForVehicle(v) }),
-        el("button", { class: "btn", type: "button", text: "+ เพิ่มงานซ่อม", onclick: () => requestForVehicle(v) }))),
-    el("div", { class: "vstats" },
-      stat("ซ่อมล่าสุด", v.last_service_date ? `${beDate(v.last_service_date)} · ${ago(v.days_since_service)}` : "ยังไม่มีประวัติ"),
-      stat("จำนวนครั้งที่ซ่อม", `${v.repairs_total} ครั้ง`),
-      stat("ค่าซ่อมรวม", `${baht(v.spend_total)} ฿`),
-      stat("ไมล์ล่าสุดที่บันทึก", v.last_known_mileage ? `${baht(v.last_known_mileage)} กม.${v.next_service_mileage ? ` → ${baht(v.next_service_mileage)}` : ""}` : "–")),
-    open.length ? el("div", { class: "vehopen" },
-      el("div", { class: "vstat-label", text: "งานที่ยังค้างของรถคันนี้" }),
-      ...open.map((r) => el("div", { class: "vehopen-row small" },
-        reqStatusBadge(r.status),
-        el("span", { text: ` ${r.problem}` })))) : null);
-}
-
-function billForVehicle(v) {
-  const idx = state.vehicles.findIndex((x) => x.id === v.vehicle_id);
-  $("vehicleSelect").value = idx >= 0 ? String(idx) : "";
-  showView("capture");
-}
-
-function requestForVehicle(v) {
-  showView("board");
-  const idx = state.vehicles.findIndex((x) => x.id === v.vehicle_id);
-  $("addVehicle").value = idx >= 0 ? String(idx) : "";
-  $("addProblem").focus();
-}
-
-// ------------------------------------------------------------ event list
-const srcLabel = { bill: "บิล", manual: "บันทึกเอง" };
-
-function renderEvents(events) {
-  $("vehEventCount").textContent = events.length ? `(${events.length})` : "";
-  if (!events.length) {
-    $("vehEvents").replaceChildren(el("p", { class: "muted empty", text: "ยังไม่มีประวัติการซ่อมของคันนี้ — บันทึกบิลแรกได้จากปุ่มด้านบน" }));
-    return;
-  }
-  $("vehEvents").replaceChildren(...events.map(evRow));
-}
-
-function evRow(e) {
-  const d = beDate(e.event_date).split(" ");              // ["20", "ต.ค.", "2569"]
-  const who = e.vendor || e.performed_by || "ไม่ระบุร้าน";
-  const meta = [`${e.line_count} รายการ`, e.file_count ? `${e.file_count} ไฟล์` : null, e.mileage ? `ไมล์ ${baht(e.mileage)}` : null].filter(Boolean).join(" · ");
-  return el("button", { class: "evrow", type: "button", onclick: () => goEvent(e.event_id) },
-    el("div", { class: "evdate" }, el("div", { class: "evday", text: d[0] }), el("div", { class: "evmon", text: `${d[1]} ${d[2]}` })),
-    el("div", { class: "evmain" },
-      el("div", { class: "evtitle" }, el("strong", { text: who }),
-        el("span", { class: `badge${e.source === "manual" ? " nobill" : ""}`, text: srcLabel[e.source] || e.source }),
-        e.needs_review ? el("span", { class: "badge warn", text: "ควรตรวจ", title: e.review_reasons.join("\n") }) : null),
-      e.needs_review ? el("div", { class: "reviewwhy small", text: e.review_reasons[0] }) : null,
-      el("div", { class: e.summary ? "evsummary" : "evpreview", text: e.summary || e.preview || "(ไม่มีรายการ)" }),
-      el("div", { class: "muted small", text: meta })),
-    el("div", { class: "evtotal", text: e.total_cost ? `${baht(e.total_cost)} ฿` : "–" }),
-    el("span", { class: "evchev", text: "›", "aria-hidden": "true" }));
-}
-
 // ------------------------------------------------------------- event "bill"
 async function openEvent(id) {
   showView("event");
-  $("evBack").textContent = fleet.backTo === "#log" ? "← สมุดงานซ่อม" : "← ประวัติรถ";
+  $("evBack").textContent = "← สมุดงานซ่อม";
   showErr("eventError", "");
   $("evPaper").replaceChildren(el("p", { class: "muted", text: "กำลังโหลด…" }));
   try {
@@ -471,18 +330,11 @@ async function saveEdit() {
 
 // --------------------------------------------------------------------- init
 function initFleet() {
-  $("vehSearch").addEventListener("input", renderVehicles);
-  $("vehBranch").addEventListener("change", renderVehicles);
-  $("vehSort").addEventListener("change", renderVehicles);
-  $("vehSearch").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { const first = $("vehList").querySelector(".veh"); if (first) first.click(); }
-  });
-  $("vehBack").addEventListener("click", goSearch);
   $("evEdit").addEventListener("click", startEdit);
   $("evBack").addEventListener("click", () => {
     if (fleet.backTo) goHash(fleet.backTo);
-    else if (fleet.event) goVehicle(fleet.event.vehicle.vehicle_id);
-    else goSearch();
+    else if (fleet.event) showTruckLog(fleet.event.vehicle.vehicle_id);      // this truck's whole history
+    else goHash("#log");
   });
   window.addEventListener("hashchange", route);
 }

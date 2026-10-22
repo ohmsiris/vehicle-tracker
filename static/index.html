@@ -34,8 +34,8 @@
       <button id="navBoard" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>งานซ่อม</span></button>
       <button id="navWhere" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg><span>รถอยู่ที่ไหน</span></button>
       <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกซ่อม</span></button>
-      <button id="navSearch" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg><span>ค้นหารถ / ประวัติ</span></button>
       <button id="navLog" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>สมุดงานซ่อม</span></button>
+      <button id="navRoster" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg><span>ทะเบียนรถ</span></button>
       <button id="navDash" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>ภาพรวม</span></button>
     </nav>
   </div>
@@ -320,10 +320,13 @@
   <section id="logView" hidden>
     <div class="page-head">
       <h2 class="page-title">สมุดงานซ่อม</h2>
-      <p class="muted small">งานซ่อมทุกงานที่เคยทำ — กรองตามช่วงเวลา ร้าน รถ หมวด สถานะ หรือค้นด้วยคำ แล้วโหลดเป็นไฟล์ Excel ได้</p>
+      <p class="muted small">งานซ่อมทุกงานที่เคยทำ — เลือกรถ 1 คันเพื่อดูประวัติทั้งหมดของคันนั้น หรือกรองตามช่วงเวลา ร้าน หมวด สถานะ แล้วโหลดเป็นไฟล์ Excel ได้</p>
     </div>
     <div class="card logfilters">
-      <input id="lgQ" type="search" placeholder="ค้นหา: ทะเบียน เบอร์รถ ร้าน อาการ รายการอะไหล่ เช่น หัวฉีด, 84-4786, ชมรม" autocomplete="off" aria-label="ค้นหา">
+      <div class="lgtop">
+        <input id="lgQ" type="search" placeholder="ค้นหา: ทะเบียน เบอร์รถ ร้าน อาการ รายการอะไหล่ เช่น หัวฉีด, 84-4786, ชมรม" autocomplete="off" aria-label="ค้นหา">
+        <select id="lgVehicle" aria-label="เลือกรถ"><option value="">ทุกคัน</option></select>
+      </div>
       <div class="quick" id="lgQuick" role="group" aria-label="ช่วงเวลา">
         <button type="button" class="chip" data-range="30">30 วัน</button>
         <button type="button" class="chip" data-range="90">3 เดือน</button>
@@ -336,18 +339,14 @@
         <div><label for="lgTo">ถึงวันที่</label><input id="lgTo" type="date"><div id="lgToCap" class="datecap"></div></div>
       </div>
       <details class="lgmore" id="lgMore2" open>
-      <summary>ตัวกรองเพิ่มเติม (ร้าน หมวด สถานะ ราคา …)</summary>
+      <summary>ตัวกรองเพิ่มเติม (สถานะ ร้าน สาขา หมวด …)</summary>
       <div class="lggrid">
         <div><label for="lgStatus">สถานะ</label><select id="lgStatus"><option value="all">ทั้งหมด</option></select></div>
         <div><label for="lgShop">ร้าน / ช่าง</label><select id="lgShop"><option value="">ทุกร้าน / ช่าง</option></select></div>
         <div><label for="lgBranch">สาขา</label><select id="lgBranch"><option value="">ทุกสาขา</option></select></div>
         <div><label for="lgCategory">หมวดงาน</label><select id="lgCategory"><option value="">ทุกหมวด</option></select></div>
-        <div><label for="lgSource">ที่มาของข้อมูล</label>
-          <select id="lgSource"><option value="">ทั้งหมด</option><option value="bill">จากบิล</option><option value="manual">ช่างทำเอง (กรอกเอง)</option><option value="request">งานแจ้งซ่อมที่ยังไม่มีบันทึก</option></select></div>
         <div><label for="lgSort">เรียงตาม</label>
           <select id="lgSort"><option value="date_desc">ล่าสุดก่อน</option><option value="date_asc">เก่าสุดก่อน</option><option value="cost_desc">ค่าซ่อมสูงสุด</option></select></div>
-        <div><label for="lgMin">ค่าซ่อมตั้งแต่ (฿)</label><input id="lgMin" type="number" min="0" inputmode="numeric" placeholder="เช่น 5000"></div>
-        <div><label for="lgMax">ไม่เกิน (฿)</label><input id="lgMax" type="number" min="0" inputmode="numeric"></div>
       </div>
       </details>
       <div class="lgactions">
@@ -358,40 +357,49 @@
       </div>
     </div>
     <p class="error" id="lgError" hidden></p>
+    <div class="card lgtruck" id="lgTruck" hidden></div>
     <div class="lgsummary" id="lgSummary"></div>
     <div id="lgList" class="evlist"></div>
     <div class="center"><button id="lgMore" class="btn" type="button" hidden>แสดงเพิ่ม</button></div>
   </section>
 
-  <!-- ============ Vehicle search ============ -->
-  <section id="searchView" hidden>
+  <!-- ============ Fleet roster: trucks and drivers ============ -->
+  <section id="rosterView" hidden>
     <div class="page-head">
-      <h2 class="page-title">ค้นหารถ / ประวัติการซ่อม</h2>
-      <p class="muted small">พิมพ์ทะเบียน เบอร์รถ หรือรุ่น แล้วกดเข้าไปดูประวัติการซ่อมของคันนั้น</p>
+      <h2 class="page-title">ทะเบียนรถ</h2>
+      <p class="muted small">รถทุกคันและคนขับในที่เดียว — ตั้งว่าเป็นรถสายหรือรถหน้าโรง ใครเป็นคนขับหลัก เพิ่มรถใหม่ หรือเลิกใช้รถที่ขายแล้ว (ประวัติซ่อมยังอยู่ครบ)</p>
     </div>
-    <div class="card searchbar">
-      <input id="vehSearch" type="search" placeholder="เช่น 84-4786, 36, D-Max, แก่งคอย" autocomplete="off" aria-label="ค้นหารถ">
-      <select id="vehBranch" aria-label="สาขา"><option value="">ทุกสาขา</option></select>
-      <select id="vehSort" aria-label="เรียงตาม">
-        <option value="number">เรียงตามเบอร์รถ</option>
-        <option value="recent">ซ่อมล่าสุดก่อน</option>
-        <option value="spend">ค่าซ่อมรวมสูงสุด</option>
-        <option value="count">ซ่อมบ่อยสุด</option>
-        <option value="stale">ไม่ได้ซ่อมนานสุด</option>
-      </select>
+    <p class="error" id="rosterError" hidden></p>
+    <div class="edit-banner" id="rosterNeedsV6" hidden>ยังจัดการรถและคนขับไม่ได้ — ต้องรันไฟล์ <strong>schema_v6.sql</strong> ใน Supabase ก่อน (ดูรายการรถได้ตามปกติ)</div>
+    <div class="seg" role="tablist">
+      <button id="roTabTrucks" class="segbtn active" type="button" role="tab">รถ</button>
+      <button id="roTabDrivers" class="segbtn" type="button" role="tab">คนขับ</button>
     </div>
-    <p class="error" id="searchError" hidden></p>
-    <p class="muted small" id="searchCount"></p>
-    <div id="vehList" class="vehgrid"></div>
-  </section>
 
-  <!-- ============ One vehicle: its history ============ -->
-  <section id="vehicleView" hidden>
-    <button id="vehBack" class="btn small" type="button">← ค้นหารถ</button>
-    <div class="card vehhead" id="vehHead"></div>
-    <p class="error" id="vehicleError" hidden></p>
-    <h2 class="section-title">ประวัติการซ่อม <span class="count" id="vehEventCount"></span></h2>
-    <div id="vehEvents" class="evlist"></div>
+    <div id="rosterTrucks">
+      <div class="card rosterbar">
+        <input id="roSearch" type="search" placeholder="ค้นหา: เบอร์รถ ทะเบียน รุ่น ชื่อคนขับ เช่น 84-4786, 36, D-Max, สมชาย" autocomplete="off" aria-label="ค้นหารถ">
+        <select id="roBranch" aria-label="สาขา"><option value="">ทุกสาขา</option></select>
+        <select id="roUsage" aria-label="ประเภท"><option value="">ทุกประเภท</option></select>
+        <select id="roStatus" aria-label="สถานะ">
+          <option value="active">ใช้งานอยู่</option>
+          <option value="off">เลิกใช้แล้ว</option>
+          <option value="all">ทั้งหมด</option>
+        </select>
+        <button id="roAdd" class="btn primary" type="button">+ เพิ่มรถ</button>
+      </div>
+      <p class="muted small" id="rosterCount"></p>
+      <div id="rosterList" class="rostergrid"></div>
+    </div>
+
+    <div id="rosterDrivers" hidden>
+      <div class="lgactions rosterdrvbar">
+        <label class="check"><input id="drvShowOff" type="checkbox"> แสดงคนที่เลิกขับแล้ว</label>
+        <span class="grow"></span>
+        <button id="drvAdd" class="btn primary" type="button">+ เพิ่มคนขับ</button>
+      </div>
+      <div id="driverList" class="rostergrid"></div>
+    </div>
   </section>
 
   <!-- ============ One repair event: the "bill" ============ -->
@@ -436,6 +444,47 @@
     <button type="button" class="btn" id="fixNoBill">ไม่มีบิล — ปิดงานเลย</button>
     <button type="button" class="btn" id="fixSelf">ช่างทำเอง → กรอกบันทึก</button>
     <button type="button" class="btn primary" id="fixHasBill">มีบิล — รอเพิ่มบิล</button>
+  </div>
+</dialog>
+
+<!-- Add or edit a truck -->
+<dialog id="vehDialog">
+  <h3 id="vdTitle">เพิ่มรถใหม่</h3>
+  <div class="vdgrid">
+    <div><label for="vdPlate">ทะเบียน</label><input id="vdPlate" type="text" maxlength="30" autocomplete="off" placeholder="เช่น 1กข 4267"></div>
+    <div><label for="vdProvince">จังหวัดป้ายทะเบียน <span class="muted small">(ไม่บังคับ)</span></label><input id="vdProvince" type="text" maxlength="40" autocomplete="off" placeholder="เช่น กรุงเทพมหานคร"></div>
+    <div><label for="vdNumber">เบอร์รถ <span class="muted small">(เบอร์ในบริษัท)</span></label><input id="vdNumber" type="text" maxlength="40" autocomplete="off" placeholder="เช่น 36"></div>
+    <div><label for="vdBranch">สาขา</label><select id="vdBranch"></select></div>
+    <div><label for="vdMake">ยี่ห้อ</label><input id="vdMake" type="text" maxlength="40" autocomplete="off" placeholder="เช่น ISUZU"></div>
+    <div><label for="vdModel">รุ่น</label><input id="vdModel" type="text" maxlength="40" autocomplete="off" placeholder="เช่น D-Max 2.5"></div>
+    <div><label for="vdUsage">ประเภทการใช้งาน</label><input id="vdUsage" list="vdUsageList" type="text" maxlength="40" autocomplete="off" placeholder="เช่น รถสาย / รถหน้าโรง"><datalist id="vdUsageList"></datalist></div>
+    <div><label for="vdDriver">คนขับหลัก</label><select id="vdDriver"></select></div>
+  </div>
+  <label for="vdNotes">หมายเหตุ <span class="muted small">(ไม่บังคับ)</span></label>
+  <input id="vdNotes" type="text" maxlength="300" autocomplete="off">
+  <div id="vdActiveRow"><label class="check vdactive"><input id="vdActive" type="checkbox"> ใช้งานอยู่ <span class="muted small">(เอาติ๊กออก = เลิกใช้ เช่น ขายแล้ว รถจะไม่ขึ้นในตัวเลือก แต่ประวัติซ่อมยังอยู่)</span></label></div>
+  <p class="error" id="vdError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="vdCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="vdSave">บันทึก</button>
+  </div>
+</dialog>
+
+<!-- Add or edit a driver -->
+<dialog id="drvDialog">
+  <h3 id="ddTitle">เพิ่มคนขับ</h3>
+  <label for="ddName">ชื่อ</label>
+  <input id="ddName" type="text" maxlength="80" autocomplete="off" placeholder="ชื่อ หรือชื่อเล่น">
+  <label for="ddPhone">เบอร์โทร <span class="muted small">(ไม่บังคับ)</span></label>
+  <input id="ddPhone" type="text" maxlength="30" autocomplete="off" inputmode="tel">
+  <label for="ddBranch">สาขา <span class="muted small">(ไม่บังคับ)</span></label>
+  <select id="ddBranch"></select>
+  <label for="ddNotes">หมายเหตุ <span class="muted small">(ไม่บังคับ)</span></label>
+  <input id="ddNotes" type="text" maxlength="300" autocomplete="off">
+  <p class="error" id="ddError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="ddCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="ddSave">บันทึก</button>
   </div>
 </dialog>
 
@@ -509,6 +558,7 @@
 <script src="/static/fleet.js"></script>
 <script src="/static/logbook.js"></script>
 <script src="/static/where.js"></script>
+<script src="/static/roster.js"></script>
 <script src="/static/manual.js"></script>
 <script src="/static/app.js"></script>
 </body>

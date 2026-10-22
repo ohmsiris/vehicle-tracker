@@ -1,0 +1,281 @@
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app import fleet, history
+
+D1 = "11111111-1111-1111-1111-111111111111"
+D2 = "22222222-2222-2222-2222-222222222222"
+V1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+V2 = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+
+def truck(vid, plate, number, branch="สระบุรี", *, province="", active=True, **more):
+    return {"id": vid, "plate_number": plate, "plate_province": province, "vehicle_number": number, "branch": branch, "active": active, **more}
+
+
+def drivers(*rows):
+    return {r["id"]: r for r in rows}
+
+
+DRIVERS = drivers({"id": D1, "name": "สมชาย", "active": True}, {"id": D2, "name": "ลุงหมี", "active": False})
+
+
+def make(data, *, existing=None, others=(), busy=False):
+    return fleet.clean_vehicle(data, existing=existing, others=list(others), drivers=DRIVERS, busy_vehicle=busy)
+
+
+# ------------------------------------------------------------- vehicle rules
+def test_a_new_truck_is_cleaned_and_needs_plate_and_branch():
+    v = make({"plate_number": "  1กข   4267 ", "branch": "สระบุรี", "vehicle_number": " 36 ", "usage": "รถสาย", "make": "", "notes": "  "})
+    assert v["plate_number"] == "1กข 4267" and v["vehicle_number"] == "36" and v["usage"] == "รถสาย"
+    assert v["make"] is None and v["notes"] is None and v["main_driver_id"] is None and v["plate_province"] == ""
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        make({"plate_number": "", "branch": "สระบุรี"})
+    assert "ทะเบียน" in str(exc.value)
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        make({"plate_number": "1กข 1", "branch": ""})
+    assert "สาขา" in str(exc.value)
+
+
+def test_a_duplicate_plate_is_refused_whatever_the_spacing():
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        make({"plate_number": "1กข4267", "branch": "สระบุรี"}, others=[truck(V1, "1กข 4267", "5")])
+    assert "มีอยู่ในระบบแล้ว" in str(exc.value)
+    # the same number in another province is another truck
+    make({"plate_number": "1กข 4267", "plate_province": "นนทบุรี", "branch": "สระบุรี"}, others=[truck(V1, "1กข 4267", "5", province="กรุงเทพมหานคร")])
+
+
+def test_a_fleet_number_is_unique_within_a_branch_only():
+    others = [truck(V1, "A 1", "6", "สระบุรี"), truck(V2, "B 2", "7", "แก่งคอย")]
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        make({"plate_number": "C 3", "branch": "สระบุรี", "vehicle_number": "6"}, others=others)
+    assert "เบอร์ 6" in str(exc.value)
+    make({"plate_number": "C 3", "branch": "แก่งคอย", "vehicle_number": "6"}, others=others)       # truck 6 exists in both branches
+    make({"plate_number": "C 3", "branch": "สระบุรี", "vehicle_number": "6"}, others=[truck(V1, "A 1", "6", active=False)])   # a retired truck frees its number
+
+
+def test_editing_something_else_never_trips_over_an_old_duplicate():
+    existing = truck(V1, "A 1", "6")
+    others = [truck(V2, "A 1 ", "6")]                    # a pre-existing clash the data already had
+    assert make({"usage": "รถหน้าโรง"}, existing=existing, others=others) == {"usage": "รถหน้าโรง"}
+    with pytest.raises(fleet.InvalidFleet):
+        make({"vehicle_number": "6", "branch": "สระบุรี"}, existing=existing, others=others)    # but touching the number checks it
+
+
+def test_a_partial_edit_only_returns_what_was_sent():
+    assert make({"usage": " รถสาย "}, existing=truck(V1, "A 1", "6")) == {"usage": "รถสาย"}
+    assert make({"main_driver_id": ""}, existing=truck(V1, "A 1", "6")) == {"main_driver_id": None}
+
+
+def test_main_driver_must_exist_and_still_be_driving():
+    assert make({"main_driver_id": D1}, existing=truck(V1, "A 1", "6")) == {"main_driver_id": D1}
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        make({"main_driver_id": D2}, existing=truck(V1, "A 1", "6"))
+    assert "ลุงหมี" in str(exc.value)
+    with pytest.raises(fleet.InvalidFleet):
+        make({"main_driver_id": "33333333-3333-3333-3333-333333333333"}, existing=truck(V1, "A 1", "6"))
+    with pytest.raises(fleet.InvalidFleet):
+        make({"main_driver_id": "not-a-uuid"}, existing=truck(V1, "A 1", "6"))
+
+
+def test_a_truck_with_work_in_progress_cannot_be_retired_but_can_be_brought_back():
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        make({"active": False}, existing=truck(V1, "A 1", "6"), busy=True)
+    assert "งานซ่อมค้าง" in str(exc.value)
+    assert make({"active": False}, existing=truck(V1, "A 1", "6")) == {"active": False}
+    assert make({"active": True}, existing=truck(V1, "A 1", "6", active=False), busy=True) == {"active": True}
+
+
+def test_bringing_a_retired_truck_back_checks_its_number_is_still_free():
+    retired = truck(V1, "A 1", "6", active=False)
+    with pytest.raises(fleet.InvalidFleet):
+        make({"active": True}, existing=retired, others=[truck(V2, "B 2", "6")])
+
+
+def test_usage_choices_lists_presets_then_whatever_is_in_use():
+    assert fleet.usage_choices([{"usage": "รถสาย"}, {"usage": "รถส่งน้ำแข็งก้อน"}, {"usage": ""}, {}]) == ["รถสาย", "รถหน้าโรง", "รถส่งน้ำแข็งก้อน"]
+
+
+# -------------------------------------------------------------- driver rules
+def test_a_new_driver_needs_a_name_and_no_other_active_driver_has_it():
+    d = fleet.clean_driver({"name": "  สมศักดิ์  ", "phone": " 081 ", "branch": ""}, others=[])
+    assert d == {"name": "สมศักดิ์", "phone": "081", "branch": None, "notes": None}
+    with pytest.raises(fleet.InvalidFleet):
+        fleet.clean_driver({"name": " "}, others=[])
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        fleet.clean_driver({"name": "สมชาย"}, others=[{"name": " สมชาย", "active": True}])
+    assert "มีคนขับชื่อ" in str(exc.value)
+    fleet.clean_driver({"name": "สมชาย"}, others=[{"name": "สมชาย", "active": False}])      # a driver who left doesn't block the name
+
+
+def test_editing_a_driver_only_changes_what_was_sent():
+    assert fleet.clean_driver({"phone": "089"}, existing={"name": "ก", "active": True}, others=[]) == {"phone": "089"}
+    assert fleet.clean_driver({"active": False}, existing={"name": "ก", "active": True}, others=[]) == {"active": False}
+
+
+# ---------------------------------------------------------- database wrappers
+class Db:
+    def __init__(self, v6=True):
+        self.v6 = v6
+        self.tables = {
+            "vehicles": [truck(V1, "1กข 1", "1", usage=None, main_driver_id=None, notes=None), truck(V2, "2กข 2", "2", usage="รถสาย", main_driver_id=D1, notes=None)],
+            "drivers": [{"id": D1, "name": "สมชาย", "active": True, "phone": None, "branch": None, "notes": None}],
+            "repair_requests": [],
+        }
+        self.inserted, self.updates = [], []
+
+    def select(self, table, params=None):
+        params = params or {}
+        if table == "drivers" and not self.v6:
+            raise fleet.supabase.SupabaseError("no table")
+        if table == "vehicles" and "usage" in params.get("select", "") and not self.v6:
+            raise fleet.supabase.SupabaseError("no column")
+        rows = self.tables[table]
+        if table == "repair_requests" and "status" in params:
+            return [dict(r) for r in rows if r["status"] in params["status"]]
+        return [dict(r) for r in rows if all(r.get(k) == v[3:] for k, v in params.items() if isinstance(v, str) and v.startswith("eq.") and k in r)]
+
+    def select_all(self, table, params=None):
+        return self.select(table, params)
+
+    def insert(self, table, rows, **kw):
+        self.inserted.append((table, rows))
+        row = {**rows[0], "id": "new-id"}
+        self.tables[table].append(row)
+        return [row]
+
+    def update(self, table, match, values):
+        self.updates.append((table, match, values))
+        k, v = next(iter(match.items()))
+        hit = [r for r in self.tables[table] if str(r.get(k)) == v[3:]]
+        for r in hit:
+            r.update(values)
+        return [dict(r) for r in hit]
+
+
+@pytest.fixture
+def db(monkeypatch):
+    d = Db()
+    for name in ("select", "select_all", "insert", "update"):
+        monkeypatch.setattr(fleet.supabase, name, getattr(d, name))
+    monkeypatch.setitem(fleet._probe, "at", 0.0)
+    monkeypatch.setattr(fleet.roster, "invalidate_roster_cache", lambda: None)
+    return d
+
+
+def test_create_vehicle_writes_the_cleaned_values(db):
+    out = fleet.create_vehicle({"plate_number": "3กข 3", "branch": "แก่งคอย", "vehicle_number": "9", "usage": "รถหน้าโรง", "main_driver_id": D1})
+    assert out == {"vehicle_id": "new-id"}
+    assert db.inserted[0][1][0]["usage"] == "รถหน้าโรง" and db.inserted[0][1][0]["main_driver_id"] == D1
+
+
+def test_edit_vehicle_updates_only_the_sent_fields(db):
+    fleet.edit_vehicle(V1, {"usage": "รถสาย", "main_driver_id": D1})
+    assert db.updates[-1] == ("vehicles", {"id": f"eq.{V1}"}, {"usage": "รถสาย", "main_driver_id": D1})
+
+
+def test_edit_unknown_vehicle_is_not_found(db):
+    with pytest.raises(fleet.NotFound):
+        fleet.edit_vehicle("cccccccc-cccc-cccc-cccc-cccccccccccc", {"usage": "x"})
+    with pytest.raises(fleet.InvalidFleet):
+        fleet.edit_vehicle("garbage", {"usage": "x"})
+
+
+def test_retiring_a_truck_with_open_work_is_refused(db):
+    db.tables["repair_requests"].append({"vehicle_id": V1, "status": "at_shop"})
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        fleet.edit_vehicle(V1, {"active": False})
+    assert "งานซ่อมค้าง" in str(exc.value)
+    fleet.edit_vehicle(V2, {"active": False})                       # another truck, nothing pending: fine
+    assert db.tables["vehicles"][1]["active"] is False
+
+
+def test_retiring_a_driver_frees_their_trucks(db):
+    out = fleet.edit_driver(D1, {"active": False})
+    assert out == {"ok": True, "freed_trucks": 1}
+    assert db.tables["vehicles"][1]["main_driver_id"] is None and db.tables["drivers"][0]["active"] is False
+
+
+def test_driver_list_shows_each_drivers_trucks(db):
+    rows = fleet.list_drivers()
+    assert rows[0]["name"] == "สมชาย" and rows[0]["trucks"][0]["plate"] == "2กข 2"
+
+
+def test_everything_is_refused_with_a_clear_message_before_schema_v6(monkeypatch):
+    d = Db(v6=False)
+    for name in ("select", "select_all", "insert", "update"):
+        monkeypatch.setattr(fleet.supabase, name, getattr(d, name))
+    monkeypatch.setitem(fleet._probe, "at", 0.0)
+    for call in (lambda: fleet.create_vehicle({"plate_number": "x", "branch": "สระบุรี"}), lambda: fleet.edit_vehicle(V1, {"usage": "x"}),
+                 lambda: fleet.create_driver({"name": "x"}), lambda: fleet.edit_driver(D1, {"name": "y"})):
+        with pytest.raises(fleet.InvalidFleet) as exc:
+            call()
+        assert "schema_v6.sql" in str(exc.value)
+    assert not d.inserted and not d.updates
+    assert fleet.drivers_by_id() == {}                  # and reads degrade to "no drivers" instead of failing
+
+
+# ----------------------------------------------------------------- the list
+def test_vehicle_rows_carry_usage_driver_and_active_flag():
+    vehicles = [{"id": V1, "plate_number": "A", "vehicle_number": "1", "usage": "รถสาย", "main_driver_id": D1, "active": True},
+                {"id": V2, "plate_number": "B", "vehicle_number": "2", "active": False}]
+    rows = {r["plate"]: r for r in history.vehicle_rows(vehicles, {}, [], drivers=DRIVERS)}
+    assert (rows["A"]["usage"], rows["A"]["driver"], rows["A"]["driver_id"], rows["A"]["active"]) == ("รถสาย", "สมชาย", D1, True)
+    assert (rows["B"]["usage"], rows["B"]["driver"], rows["B"]["active"]) == ("", "", False)
+
+
+# ----------------------------------------------------------------- endpoints
+def _client(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+    object.__setattr__(main.settings, "app_token", "secret")
+    monkeypatch.setattr(main.supabase, "configured", lambda: True)
+    return main, TestClient(main.app)
+
+
+def test_fleet_endpoints_need_the_token_and_map_errors(monkeypatch):
+    main, c = _client(monkeypatch)
+    for method, url in (("post", "/api/vehicles"), ("patch", f"/api/vehicles/{V1}"), ("get", "/api/drivers"), ("post", "/api/drivers"), ("patch", f"/api/drivers/{D1}")):
+        kw = {} if method == "get" else {"json": {}}
+        assert getattr(c, method)(url, **kw).status_code == 403
+    monkeypatch.setattr(main.fleet, "create_vehicle", lambda d: (_ for _ in ()).throw(fleet.InvalidFleet("ทะเบียนซ้ำ")))
+    r = c.post("/api/vehicles?token=secret", json={"plate_number": "x"})
+    assert r.status_code == 422 and "ทะเบียนซ้ำ" in r.text
+    monkeypatch.setattr(main.fleet, "edit_driver", lambda i, d: (_ for _ in ()).throw(fleet.NotFound()))
+    assert c.patch(f"/api/drivers/{D1}?token=secret", json={"name": "x"}).status_code == 404
+
+    def boom(d):
+        raise main.supabase.SupabaseError("secret internals")
+    monkeypatch.setattr(main.fleet, "create_driver", boom)
+    r = c.post("/api/drivers?token=secret", json={"name": "x"})
+    assert r.status_code == 502 and "internals" not in r.text
+
+
+def test_vehicle_endpoints_pass_the_body_through(monkeypatch):
+    main, c = _client(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(main.fleet, "edit_vehicle", lambda vid, d: seen.update(id=vid, **d) or {"ok": True})
+    c.patch(f"/api/vehicles/{V1}?token=secret", json={"usage": "รถสาย", "main_driver_id": D1})
+    assert seen == {"id": V1, "usage": "รถสาย", "main_driver_id": D1}
+
+
+def test_vehicle_list_can_include_retired_trucks(monkeypatch):
+    main, c = _client(monkeypatch)
+    seen = []
+    monkeypatch.setattr(main.history, "list_vehicles", lambda include_inactive=False: seen.append(include_inactive) or [])
+    c.get("/api/vehicles?token=secret")
+    c.get("/api/vehicles?token=secret&include_inactive=true")
+    assert seen == [False, True]
+
+
+def test_meta_offers_usages_and_branches(monkeypatch):
+    main, c = _client(monkeypatch)
+    monkeypatch.setattr(main.supabase, "configured", lambda: False)
+    monkeypatch.setattr(main, "load_roster", lambda: [{"usage": "รถส่งก้อน"}])
+    d = c.get("/api/meta?token=secret").json()
+    assert d["usages"] == ["รถสาย", "รถหน้าโรง", "รถส่งก้อน"] and d["branches"] == ["สระบุรี", "แก่งคอย"]
