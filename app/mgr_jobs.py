@@ -18,7 +18,7 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Callable, Optional
 
-from app import line_push, mgr, supabase
+from app import line_push, mgr, service_plan, supabase
 
 logger = logging.getLogger("vehicle_tracker.mgr_jobs")
 
@@ -142,6 +142,33 @@ def run_tick(now: datetime, *, settings: dict, active_tickets: Callable[[], list
     return done
 
 
+def run_plan_reminders(now: datetime, *, settings: dict, compute: Callable[[date], list[dict]], text: Callable[[list[dict], date, int], str],
+                       claim: Callable[[str], bool], release: Callable[[str], None], push: Callable[[str], None]) -> int:
+    """The car-maintenance reminders, once a day after the summary time: items that have come within the window ("soon"),
+    are due today, or are overdue (again every few days), as ONE message. Each stage of each due date is claimed first, so a
+    restart never repeats it. Returns how many items were sent."""
+    if not settings.get("plan_reminders", True):
+        return 0
+    h, m = (int(x) for x in str(settings.get("digest_time", "08:00")).split(":")[:2])
+    if (now.hour, now.minute) < (h, m):
+        return 0
+    run_key = f"plan-run:{now.date().isoformat()}"
+    if not claim(run_key):
+        return 0
+    fresh: list[dict] = []
+    try:
+        fresh = [r for r in compute(now.date()) if claim(r["key"])]
+        if fresh:
+            push(text(fresh, now.date(), int(settings.get("plan_soon_days", service_plan.SOON_DAYS))))
+        return len(fresh)
+    except Exception:
+        for r in fresh:
+            release(r["key"])
+        release(run_key)                                  # try again next minute
+        logger.exception("car-maintenance reminders not sent")
+        return 0
+
+
 # ------------------------------------------------------------------ wiring
 def _claim(key: str) -> bool:
     """True if this process is the one to send `key` (the first to insert it)."""
@@ -165,7 +192,10 @@ def tick() -> dict:
         result["created"] = mgr.generate_recurring()
         if line_push.configured():
             now = datetime.now(mgr.THAI_TZ)
-            result.update(run_tick(now, settings=mgr.get_settings(), active_tickets=_active, claim=_claim, release=_release, push=line_push.push_text))
+            cfg = mgr.get_settings()
+            result.update(run_tick(now, settings=cfg, active_tickets=_active, claim=_claim, release=_release, push=line_push.push_text))
+            result["plan"] = run_plan_reminders(now, settings=cfg, compute=service_plan.reminder_candidates, text=service_plan.reminder_text,
+                                                claim=_claim, release=_release, push=line_push.push_text)
     except Exception:
         logger.exception("manager job tick failed")
     return result

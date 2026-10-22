@@ -690,15 +690,47 @@ def api_plan_options(x_app_token: str = Header(default=""), token: str = Query(d
 
 
 @app.get("/api/plan/overview")
-def api_plan_overview(branch: str = "", vehicle_class: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+def api_plan_overview(branch: str = "", vehicle_class: str = "", as_of: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
-    return _plan_call(service_plan.overview, branch, vehicle_class)
+    return _plan_call(lambda: service_plan.overview(branch, vehicle_class, today=service_plan.parse_as_of(as_of)))
 
 
 @app.get("/api/plan/vehicles/{vehicle_id}")
-def api_plan_vehicle(vehicle_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+def api_plan_vehicle(vehicle_id: str, as_of: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
-    return _plan_call(service_plan.vehicle_detail, vehicle_id)
+    return _plan_call(lambda: service_plan.vehicle_detail(vehicle_id, today=service_plan.parse_as_of(as_of)))
+
+
+@app.get("/api/plan/reminders")
+def api_plan_reminders(as_of: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """What the car-maintenance reminders would say on a day (today, or one the look-ahead slider picked). Sends nothing."""
+    _check_token(x_app_token, token)
+    return _plan_call(lambda: service_plan.reminder_preview(today=service_plan.parse_as_of(as_of)))
+
+
+@app.get("/api/plan/reminder-settings")
+def api_plan_reminder_settings(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.reminder_settings)
+
+
+@app.put("/api/plan/reminder-settings")
+def api_plan_save_reminder_settings(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.save_reminder_settings, body)
+
+
+@app.post("/api/plan/snooze")
+def api_plan_snooze(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Do not remind about this item of this truck for the next N days."""
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.snooze, body)
+
+
+@app.delete("/api/plan/snooze")
+def api_plan_clear_snooze(vehicle_id: str, item_key: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.clear_snooze, vehicle_id, item_key)
 
 
 @app.post("/api/plan/records")

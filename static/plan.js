@@ -8,8 +8,9 @@
 // Data: /api/plan/* (app/service_plan.py). Loaded BEFORE app.js: nothing here runs at load time.
 
 const pl = {
-  opts: { ready: true, rule_sets: [], items: [], soon_days: 14 },
-  overview: null, tab: "due", settings: null,
+  opts: { ready: true, rule_sets: [], items: [], soon_days: 10 },
+  overview: null, tab: "due", settings: null, reminder: null,
+  simDays: 0, simTimer: null,                  // the "look ahead" slider: how many days from today
   detail: null,
   dlg: null,                       // what the open dialog is doing: { kind, vehicle, draft }
 };
@@ -38,9 +39,15 @@ function plKmPerDay(k) {
 const plSourceText = (src) => (src === "bill" ? "จากบิล" : src === "baseline" ? "เริ่มนับ" : "ช่างทำเอง / บันทึกเอง");
 const plLabel = (v) => [v.vehicle_number ? `#${v.vehicle_number}` : null, v.plate_number, v.nickname].filter(Boolean).join(" · ");
 
-function plChip(i) {
+// The day the page is looking at: today, or (slider) some days ahead. Nothing is saved by looking ahead.
+const plAsOf = () => (pl.simDays > 0 ? addDaysISO(plToday(), pl.simDays) : "");
+const plAsOfQuery = (sep = "?") => (pl.simDays > 0 ? `${sep}as_of=${plAsOf()}` : "");
+
+function plChip(i, v) {
   const when = i.days_left < 0 ? `เลย ${-i.days_left} วัน` : i.days_left === 0 ? "วันนี้" : `อีก ${i.days_left} วัน`;
-  return el("span", { class: `badge ${PL_BADGE[i.state]}`.trim(), title: plDueText(i), text: `${i.label} · ${when}` });
+  if (i.snoozed_until) return el("span", { class: "badge", title: "เลื่อนเตือนอยู่", text: `💤 ${i.label} · เลื่อนเตือนถึง ${beDate(i.snoozed_until)}` });
+  if (!v) return el("span", { class: `badge ${PL_BADGE[i.state]}`.trim(), title: plDueText(i), text: `${i.label} · ${when}` });
+  return el("button", { class: `badge ${PL_BADGE[i.state]} plchip-btn`.trim(), type: "button", title: `${plDueText(i)} — กดเพื่อเลื่อนเตือน`, text: `${i.label} · ${when}`, onclick: () => openSnoozeDialog(v, i) });
 }
 
 async function plLoadOptions() {
@@ -79,6 +86,7 @@ async function loadOverview() {
   const p = new URLSearchParams();
   if ($("plBranch").value) p.set("branch", $("plBranch").value);
   if ($("plClass").value) p.set("vehicle_class", $("plClass").value);
+  if (pl.simDays > 0) p.set("as_of", plAsOf());
   try {
     pl.overview = await api(`/api/plan/overview?${p}`);
   } catch (err) {
@@ -86,6 +94,31 @@ async function loadOverview() {
     return;
   }
   renderOverview();
+  if ($("plPreview").open) loadPreview();
+}
+
+// ---- look ahead: slide the day forward and see which trucks fall due, and what the reminder would say that day
+function setSim(days) {
+  pl.simDays = days;
+  $("plSim").value = String(days);
+  $("plSimLabel").textContent = days === 0 ? "วันนี้" : `อีก ${days} วัน · ${beDate(plAsOf())} — จำลองเฉยๆ ไม่ได้บันทึกอะไร`;
+  $("plSimLabel").classList.toggle("warn", days > 0);
+  $("plSimReset").hidden = days === 0;
+  clearTimeout(pl.simTimer);
+  pl.simTimer = setTimeout(loadOverview, 250);
+}
+
+async function loadPreview() {
+  fill($("plPreviewText"), "กำลังคำนวณ…");
+  let r;
+  try {
+    r = await api(`/api/plan/reminders${plAsOfQuery()}`);
+  } catch (err) {
+    fill($("plPreviewText"), `โหลดไม่สำเร็จ: ${err.message}`);
+    return;
+  }
+  fill($("plPreviewText"), r.text || `ไม่มีรายการที่ต้องเตือนในวันนั้น (เตือนเฉพาะที่เหลือไม่เกิน ${r.soon_days} วัน)`);
+  fill($("plPreviewMeta"), `${r.items.length} รายการที่จะเตือน${r.snoozed.length ? ` · ที่เลื่อนเตือนไว้ ${r.snoozed.length}` : ""} · ${r.enabled ? "เปิดเตือนอยู่" : "ปิดการเตือนอยู่"} — ข้อความจริงส่งทาง LINE ตอนเช้าเฉพาะรายการใหม่ของแต่ละขั้น`);
 }
 
 function renderOverview() {
@@ -94,7 +127,7 @@ function renderOverview() {
   const t = o.totals, k = o.trucks;
   fill($("plKpis"),
     plKpi("รถที่มีรายการเลยกำหนด", k.overdue, `${t.overdue} รายการ`, k.overdue ? "bad" : ""),
-    plKpi("รถที่ใกล้ถึงกำหนด", k.soon, `ภายใน ${pl.opts.soon_days} วัน · ${t.soon} รายการ`, k.soon ? "warn" : ""),
+    plKpi("รถที่ใกล้ถึงกำหนด", k.soon, `ภายใน ${o.soon_days || pl.opts.soon_days} วัน · ${t.soon} รายการ`, k.soon ? "warn" : ""),
     plKpi("รถที่ยังไม่มีประวัติเลย", k.no_history, "บันทึกครั้งล่าสุดเพื่อเริ่มนับ", ""),
     plKpi("รายการที่ปกติ", t.ok, "อยู่ในระยะ", ""));
   const q = $("plQ").value.trim().toLowerCase();
@@ -124,7 +157,7 @@ function planCard(v) {
       el("span", { class: "grow" }),
       v.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, attention.map((i) => i.key)) }) : null),
     !v.has_plan ? el("p", { class: "muted small", text: "ยังไม่ได้เลือกกลุ่มแผน — เปิดหน้ารถแล้วเลือกกลุ่ม (หรือปล่อยว่างถ้าไม่ต้องทำตาราง)" })
-      : attention.length ? el("div", { class: "pl-chips" }, ...attention.map(plChip))
+      : attention.length ? el("div", { class: "pl-chips" }, ...attention.map((i) => plChip(i, v)))
       : el("p", { class: "muted small", text: known ? `ปกติทุกรายการที่มีประวัติ (${known}/${v.items.length} รายการ)` : "ยังไม่มีประวัติเลย — กด “บันทึกว่าทำแล้ว” เพื่อเริ่มนับ" }),
     v.has_plan ? el("div", { class: "muted small", text: plKmPerDay(v.km_per_day) }) : null);
 }
@@ -132,12 +165,43 @@ function planCard(v) {
 // ================================================================== the settings (second tab)
 async function loadSettings() {
   try {
-    pl.settings = await api("/api/plan/intervals");
+    [pl.settings, pl.reminder] = await Promise.all([api("/api/plan/intervals"), api("/api/plan/reminder-settings")]);
   } catch (err) {
     showErr("plError", `โหลดตั้งค่าไม่สำเร็จ: ${err.message}`);
     return;
   }
   renderSettings();
+}
+
+// the reminders: how many days ahead "coming close" starts, and which items are reminded about by LINE
+function reminderCard() {
+  const r = pl.reminder;
+  if (!r) return null;
+  const enabled = el("input", { type: "checkbox", id: "plrOn" });
+  enabled.checked = !!r.enabled;
+  const soon = el("input", { type: "number", id: "plrSoon", min: "1", max: "60", step: "1", value: String(r.soon_days) });
+  const boxes = r.all_items.map((it) => {
+    const b = el("input", { type: "checkbox", "data-key": it.key });
+    b.checked = r.items.includes(it.key);
+    return el("label", { class: "pl-pick" }, b, el("span", { text: it.label }));
+  });
+  const msg = el("span", { class: "muted small" });
+  return el("section", { class: "card plset" },
+    el("h3", { text: "เตือนรอบซ่อมบำรุง" }),
+    el("p", { class: "muted small", text: `เตือน 3 ขั้น: เหลือไม่เกิน N วัน → ถึงวันครบกำหนด → เลยกำหนด (เตือนซ้ำทุก 3 วันจนกว่าจะทำหรือเลื่อนเตือน) ส่งพร้อมสรุปตอนเช้าทาง LINE` }),
+    r.line_configured ? null : el("div", { class: "edit-banner", text: "ยังไม่ได้ต่อ LINE — การเตือนจะส่งได้เมื่อตั้งค่า LINE แล้ว (ดูหน้า ผู้จัดการ › ตั้งค่า) แต่ดูตัวอย่างข้อความได้ที่แถบ “ดูล่วงหน้า” ในหน้าแผนซ่อมบำรุง" }),
+    el("label", { class: "inline" }, enabled, "เปิดการเตือนรอบซ่อมบำรุง"),
+    el("div", { class: "mgset-time" }, el("label", { for: "plrSoon", text: "เริ่มเตือนเมื่อเหลือไม่เกิน (วัน)" }), soon),
+    el("p", { class: "muted small", text: "เตือนเรื่องอะไรบ้าง (ปกติเฉพาะเปลี่ยนน้ำมันเครื่อง)" }),
+    el("div", { class: "pl-picks" }, ...boxes),
+    el("div", { class: "pl-set-actions" }, el("button", { class: "btn small primary", type: "button", text: "บันทึก", onclick: async () => {
+      try {
+        pl.reminder = await api("/api/plan/reminder-settings", jsonOpts("PUT", { enabled: enabled.checked, soon_days: soon.value,
+          items: boxes.map((l) => l.querySelector("input")).filter((b) => b.checked).map((b) => b.dataset.key) }));
+        pl.opts.soon_days = pl.reminder.soon_days;
+        msg.textContent = "บันทึกแล้ว"; msg.className = "muted small";
+      } catch (err) { msg.textContent = err.message; msg.className = "error small"; }
+    } }), msg));
 }
 
 function plSettingMsg(msg, text) { msg.textContent = text; msg.className = "error small"; }
@@ -155,7 +219,7 @@ function renderSettings() {
       el("h3", { text: `${rule}: ระยะกม. ของแต่ละรายการ` }),
       el("p", { class: "muted small", text: rule === "รถเล็ก" ? "D-Max, Revo" : "NLR / NMR / NPR, รถ 6 ล้อ, รถ 10 ล้อ (Hino / Isuzu)" }),
       ...items.map((it) => kmRow(rule, it))));
-  fill($("plSetList"), groups, ...rules);
+  fill($("plSetList"), reminderCard(), groups, ...rules);
 }
 
 function groupRow(g) {
@@ -203,7 +267,7 @@ async function renderTruckPlan(v, editing) {
   fill(box, el("p", { class: "muted small", text: "กำลังโหลดแผนซ่อมบำรุง…" }));
   let d;
   try {
-    d = await api(`/api/plan/vehicles/${v.vehicle_id}`);
+    d = await api(`/api/plan/vehicles/${v.vehicle_id}${plAsOfQuery()}`);
   } catch (err) {
     fill(box, el("p", { class: "error", text: `โหลดแผนซ่อมบำรุงไม่สำเร็จ: ${err.message}` }));
     return;
@@ -245,7 +309,8 @@ function truckPlanNodes(d) {
       el("strong", { text: r.kind === "gps" ? `GPS ${plKm(r.km)}` : `เลขไมล์ ${plKm(r.km)}` }),
       el("span", { class: "muted small", text: r.notes || "" }),
       el("button", { class: "btn small danger", type: "button", text: "ลบ", onclick: () => deleteReading(r) })))) : null;
-  return [head, groupBar, el("p", { class: "muted small", text: `ระยะทางต่อวัน: ${plKmPerDay(d.km_per_day)}${odo}` }), planChart(d), history, readings];
+  const simBanner = d.simulated ? el("div", { class: "edit-banner", text: `กำลังดูล่วงหน้า ณ ${beDate(d.as_of)} (จำลองเฉยๆ ไม่ได้บันทึกอะไร) — เลื่อนแถบที่หน้า “แผนซ่อมบำรุง” กลับมาวันนี้เพื่อเลิกจำลอง` }) : null;
+  return [head, simBanner, groupBar, el("p", { class: "muted small", text: `ระยะทางต่อวัน: ${plKmPerDay(d.km_per_day)}${odo}` }), planCalc(d), planChart(d), history, readings];
 }
 
 // The Isuzu-style chart: columns = the latest event, then the next rounds; rows = the items.
@@ -300,6 +365,53 @@ async function plAfterSave() {
   $("planDialog").close();
   if (!$("planView").hidden) await loadOverview();
   await plRefreshTruck();
+}
+
+// ---- the calculator: for each item how much of its interval is used, and how many km / days are left
+function planCalc(d) {
+  const rows = d.items.filter((i) => i.progress !== null && i.progress !== undefined).sort((a, b) => b.progress - a.progress);
+  if (!rows.length) return null;
+  return el("div", { class: "card plcalc" },
+    el("h4", { class: "mgh", text: "เหลืออีกเท่าไหร่ถึงรอบ" }),
+    el("p", { class: "muted small", text: `แถบเต็ม = ถึงรอบ · เหลือง = เหลือไม่เกิน ${d.soon_days} วัน · แดง = เลยกำหนด · กม. ที่มี ≈ เป็นค่าประมาณจากกลุ่มของรถ (ใส่เลขไมล์จะแม่นขึ้น)` }),
+    ...rows.map((i) => calcRow(d, i)));
+}
+
+function calcRow(d, i) {
+  const pct = Math.round(i.progress * 100);
+  const tone = i.state === "overdue" ? "bad" : i.state === "soon" ? "warn" : "ok";
+  const left = (n, approx) => `${n >= 0 ? "เหลือ" : "เกิน"} ${approx ? "≈ " : ""}${baht(Math.abs(n))} กม.${approx ? " (ประมาณ)" : ""}`;
+  const km = i.km_left !== null ? left(i.km_left, false) : i.est_km_left !== null ? left(i.est_km_left, true) : null;
+  const days = i.days_left === null ? null : i.days_left < 0 ? `เลยมา ${-i.days_left} วัน` : i.days_left === 0 ? "ครบวันนี้" : `อีก ${i.days_left} วัน`;
+  const v = { id: d.vehicle.id, plate_number: d.vehicle.plate_number, vehicle_number: d.vehicle.vehicle_number, nickname: d.vehicle.nickname };
+  const snooze = i.snoozed_until
+    ? el("span", { class: "plcalc-snz" }, el("span", { class: "badge", text: `💤 เลื่อนเตือนถึง ${beDate(i.snoozed_until)}` }),
+        el("button", { class: "btn small", type: "button", text: "ยกเลิกการเลื่อน", onclick: () => clearSnooze(v, i) }))
+    : (i.state === "soon" || i.state === "overdue") && !d.simulated ? el("button", { class: "btn small", type: "button", text: "💤 เลื่อนเตือน", onclick: () => openSnoozeDialog(v, i) }) : null;
+  return el("div", { class: `plcalc-row ${tone}` },
+    el("div", { class: "plcalc-head" }, el("strong", { text: i.label }), el("span", { class: "muted small", text: `ทุก ${[i.interval_km ? plKm(i.interval_km) : null, i.interval_months ? plMonths(i.interval_months) : null].filter(Boolean).join(" / ")}` }), el("span", { class: "grow" }), snooze),
+    el("div", { class: `pl-bar ${tone}`, role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.min(pct, 100)), title: `ใช้ไป ${pct}%` },
+      el("span", { style: `width:${Math.min(pct, 100)}%` })),
+    el("div", { class: "plcalc-text small" }, el("span", { text: `ใช้ไป ${pct}%` }), km ? el("span", { text: km }) : null,
+      days ? el("span", { class: `plcalc-days ${tone}`, text: `${days}${i.due_date ? ` (${beDate(i.due_date)}${i.due_by === "km" ? " · ครบระยะทาง" : ""})` : ""}` }) : null));
+}
+
+// ---- snooze: "do not remind me about this for N days"
+function openSnoozeDialog(v, i) {
+  pl.dlg = { kind: "snooze", vehicle: v, item: i, draft: { days: "3" } };
+  const d = pl.dlg.draft;
+  const chips = [1, 3, 7, 14, 30].map((n) => el("button", { class: "chipbtn", type: "button", text: `${n} วัน`, onclick: () => { d.days = String(n); $("mf_days").value = d.days; } }));
+  fill($("pdlgBody"),
+    el("p", { class: "muted small", text: `${plLabel(v)} — ${i.label}${i.due_date ? ` · ครบกำหนด ${beDate(i.due_date)}` : ""}` }),
+    el("div", { class: "edit-banner", text: "เลื่อนเฉพาะการเตือน — รายการนี้ยังเป็นสถานะเดิมในแผน พอครบวันที่เลื่อน ระบบจะเตือนใหม่ และถ้าทำรายการนี้ไปแล้ว การเลื่อนจะหมดไปเอง" }),
+    el("div", { class: "chips" }, ...chips),
+    el("div", { class: "mfields" }, mfield(d, "days", "เลื่อนเตือนกี่วัน", { type: "number" })));
+  plOpenDialog("เลื่อนเตือน", "เลื่อนเตือน");
+}
+
+async function clearSnooze(v, i) {
+  try { await api(`/api/plan/snooze?vehicle_id=${v.id}&item_key=${i.key}`, { method: "DELETE" }); } catch (err) { alert(err.message); return; }
+  await plAfterSave();
 }
 
 function plOpenDialog(title, saveText) {
@@ -385,6 +497,8 @@ async function savePlanDialog() {
     if (dlg.kind === "record") {
       await api("/api/plan/services", jsonOpts("POST", { vehicle_id: dlg.vehicle.id, items: [...dlg.picked], done_date: d.done_date, odometer_km: d.odometer_km,
         performed_by: d.performed_by, notes: d.notes }));
+    } else if (dlg.kind === "snooze") {
+      await api("/api/plan/snooze", jsonOpts("POST", { vehicle_id: dlg.vehicle.id, item_key: dlg.item.key, days: d.days }));
     } else if (dlg.kind === "group") {
       await api(`/api/plan/vehicles/${dlg.vehicle.id}/group`, jsonOpts("PUT", { group_code: d.group_code }));
     } else {
@@ -400,6 +514,9 @@ async function savePlanDialog() {
 
 // ================================================================== init
 function initPlan() {
+  $("plSim").addEventListener("input", () => setSim(Number($("plSim").value)));
+  $("plSimReset").addEventListener("click", () => setSim(0));
+  $("plPreview").addEventListener("toggle", () => { if ($("plPreview").open) loadPreview(); });
   $("plTabDue").addEventListener("click", () => setPlanTab("due"));
   $("plTabSet").addEventListener("click", () => setPlanTab("set"));
   $("plQ").addEventListener("input", renderOverview);

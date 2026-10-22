@@ -25,12 +25,17 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from app import events, logsource, supabase
+from app import events, line_push, logsource, mgr, supabase
 
 SMALL, BIG = "รถเล็ก", "รถใหญ่"
 RULE_SETS = [SMALL, BIG]
 NEEDS_V10 = "ต้องรัน schema_v10.sql และ schema_v11.sql ใน Supabase ก่อน จึงจะใช้แผนซ่อมบำรุงได้"
-SOON_DAYS = 14                       # "due soon" = due within this many days
+NEEDS_V13 = "ต้องรัน schema_v13.sql ใน Supabase ก่อน จึงจะเลื่อนเตือนได้"
+SOON_DAYS = 10                       # "due soon" = due within this many days (changeable in the settings)
+DEFAULT_REMIND_ITEMS = ["engine_oil"]   # which items are reminded about by LINE (changeable in the settings)
+OVERDUE_REPEAT_DAYS = 3              # an overdue item is reminded about again every this many days
+MAX_SNOOZE_DAYS = 90
+MAX_AS_OF_DAYS = 400                 # how far ahead the "look ahead" slider may go
 GPS_WINDOW_DAYS = 120                # GPS periods older than this no longer describe how the truck is used now
 MIN_ODOMETER_SPAN = 30               # days between two odometer readings before they beat the GPS figure
 MAX_KM = 3_000_000
@@ -308,13 +313,17 @@ def last_done(item_key: str, records: list[dict]) -> Optional[dict]:
     return best[1] if best else None
 
 
-def item_status(item: dict, last: Optional[dict], kmpd: Optional[float], odo_now: Optional[dict], today: date) -> dict:
+def item_status(item: dict, last: Optional[dict], kmpd: Optional[float], odo_now: Optional[dict], today: date,
+                soon_days: int = SOON_DAYS, est_kmpd: Optional[float] = None) -> dict:
     """One item of one truck: state ('overdue' / 'soon' / 'ok' / 'unknown'), when it falls due and by which limit.
-    `kmpd` is the MEASURED km per day (None when nothing is measured: then only the months decide)."""
+    `kmpd` is the MEASURED km per day (None when nothing is measured: then only the months decide); `est_kmpd` (what the
+    truck's group assumes) is only used for the "about N km left" shown beside the real figures.
+    `progress` is how much of the interval is used up (0 = just done, 1 = due, above 1 = overdue)."""
     out = {"key": item["key"], "label": item["label"], "group": item["group"], "interval_km": item.get("interval_km"),
            "interval_months": item.get("interval_months"), "customised": item.get("customised", False),
            "last_date": None, "last_source": None, "last_odometer_km": None, "km_since": None, "km_basis": None,
-           "due_date": None, "due_by": None, "days_left": None, "km_left": None, "state": "unknown"}
+           "due_date": None, "due_by": None, "days_left": None, "km_left": None, "state": "unknown",
+           "progress": None, "est_km_since": None, "est_km_left": None}
     if last is None:
         return out
     done = last["date"]
@@ -327,23 +336,30 @@ def item_status(item: dict, last: Optional[dict], kmpd: Optional[float], odo_now
             km_since += kmpd * max((today - odo_now["date"]).days, 0)
     elif kmpd:
         km_since, basis = kmpd * days, "estimate"
-    candidates = []
+    candidates, used = [], []
     if item.get("interval_months"):
         candidates.append((add_months_f(done, item["interval_months"]), "months"))
+        used.append(days / (item["interval_months"] * DAYS_PER_MONTH))
     if item.get("interval_km") and km_since is not None:
         out["km_since"] = round(km_since)
         out["km_basis"] = basis
         out["km_left"] = round(item["interval_km"] - km_since)
+        used.append(km_since / item["interval_km"])
         if kmpd:
             candidates.append((today + timedelta(days=math.ceil(out["km_left"] / kmpd)), "km"))
         elif out["km_left"] <= 0:
             candidates.append((today, "km"))
+    elif item.get("interval_km") and est_kmpd:         # no real distance: "about", from what the group assumes
+        out["est_km_since"] = round(est_kmpd * days)
+        out["est_km_left"] = round(item["interval_km"] - est_kmpd * days)
+    if used:
+        out["progress"] = round(max(used), 3)
     if not candidates:
         out["state"] = "ok"
         return out
     due, by = min(candidates)
     out.update(due_date=due.isoformat(), due_by=by, days_left=(due - today).days)
-    out["state"] = "overdue" if out["days_left"] < 0 else "soon" if out["days_left"] <= SOON_DAYS else "ok"
+    out["state"] = "overdue" if out["days_left"] < 0 else "soon" if out["days_left"] <= soon_days else "ok"
     return out
 
 
@@ -387,20 +403,27 @@ def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odom
 
 
 def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], readings: list[dict], overrides: list[dict],
-                 today: date, with_chart: bool = False) -> dict:
-    """The whole programme for one truck. `records` = saved records + bill hits for THIS truck; `group` = its group."""
+                 today: date, with_chart: bool = False, soon_days: int = SOON_DAYS, snoozes: Optional[dict] = None) -> dict:
+    """The whole programme for one truck. `records` = saved records + bill hits for THIS truck; `group` = its group;
+    `snoozes` = this truck's snoozed reminders {item_key: {until, for_due}}."""
     plan = effective_plan(group, overrides)
     default_kmpd = group_km_per_day(group) if group else None
     est = estimate_km_per_day(readings, today, default_kmpd)
     odo = latest_odometer(readings, records)
     measured = est["value"] if est["source"] in ("gps", "odometer") else None
-    statuses = [item_status(it, last_done(it["key"], records), measured, odo, today) for it in plan]
+    statuses = [item_status(it, last_done(it["key"], records), measured, odo, today, soon_days, default_kmpd) for it in plan]
+    for s in statuses:                                  # a snooze counts only for the due date it was made for
+        s["snoozed_until"] = s["snooze_ended"] = None
+        sn = (snoozes or {}).get(s["key"])
+        until = parse_date(sn.get("until")) if sn else None
+        if until and s["due_date"] and sn.get("for_due") == s["due_date"]:
+            s["snoozed_until" if until > today else "snooze_ended"] = until.isoformat()
     items = sorted(statuses, key=lambda i: (STATE_ORDER[i["state"]], i["days_left"] if i["days_left"] is not None else 10**6))
     counts = {s: sum(1 for i in items if i["state"] == s) for s in ("overdue", "soon", "ok", "unknown")}
     worst = next((s for s in ("overdue", "soon", "ok", "unknown") if counts[s]), None)
     out = {"vehicle_id": vehicle["id"], "group": ({**group, "months": group_months(group)} if group else None), "km_per_day": est,
            "odometer": ({"date": odo["date"].isoformat(), "km": odo["km"]} if odo else None),
-           "items": items, "counts": counts, "worst": worst, "has_plan": bool(plan)}
+           "items": items, "counts": counts, "worst": worst, "has_plan": bool(plan), "soon_days": soon_days}
     if with_chart:
         anchor = None
         if statuses:
@@ -594,7 +617,7 @@ def _require() -> None:
 
 
 def options() -> dict:
-    return {"ready": has_v10(), "rule_sets": RULE_SETS, "soon_days": SOON_DAYS,
+    return {"ready": has_v10(), "rule_sets": RULE_SETS, "soon_days": _plan_settings()["soon_days"],
             "items": [{"key": k, "label": v[0], "group": v[1]} for k, v in ITEMS.items()]}
 
 
@@ -634,9 +657,12 @@ def _vehicles(branch: str = "", vehicle_class: str = "", only: Optional[str] = N
 
 
 def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date] = None) -> dict:
-    """Every active truck with its programme, the trucks that need attention first."""
-    today = today or today_th()
+    """Every active truck with its programme, the trucks that need attention first. `today` is the day to look from
+    (the "look ahead" slider passes a later one: nothing is saved, it only shows what would be due then)."""
+    real_today = today_th()
+    today = today or real_today
     ready = has_v10()
+    soon_days, snoozes = _plan_settings()["soon_days"], _snoozes()
     vehicles = _vehicles(branch, vehicle_class)
     records = _group(supabase.select_all("service_records", {"select": "*", "order": "id.asc"})) if ready else {}
     readings = _group(supabase.select_all("km_readings", {"select": "*", "order": "id.asc"})) if ready else {}
@@ -647,7 +673,7 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
     for v in vehicles:
         group = groups.get(assigned.get(v["id"]))
         plan = vehicle_plan(v, group=group, records=records.get(v["id"], []) + hits.get(v["id"], []), readings=readings.get(v["id"], []),
-                            overrides=overrides, today=today)
+                            overrides=overrides, today=today, soon_days=soon_days, snoozes=snoozes.get(v["id"]))
         rows.append({**{k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "usage")}, **plan})
 
     def rank(r):
@@ -657,7 +683,7 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
 
     rows.sort(key=rank)
     totals = {s: sum(r["counts"][s] for r in rows) for s in ("overdue", "soon", "ok", "unknown")}
-    return {"as_of": today.isoformat(), "ready": ready, "vehicles": rows, "totals": totals,
+    return {"as_of": today.isoformat(), "simulated": today != real_today, "soon_days": soon_days, "ready": ready, "vehicles": rows, "totals": totals,
             "trucks": {"overdue": sum(1 for r in rows if r["counts"]["overdue"]), "soon": sum(1 for r in rows if not r["counts"]["overdue"] and r["counts"]["soon"]),
                        "no_history": sum(1 for r in rows if r["has_plan"] and r["counts"]["unknown"] == len(r["items"])),
                        "no_group": sum(1 for r in rows if not r["has_plan"])}}
@@ -669,7 +695,8 @@ def _numkey(value) -> tuple:
 
 
 def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
-    today = today or today_th()
+    real_today = today_th()
+    today = today or real_today
     _uuid(vehicle_id, "รถ")
     rows = _vehicles(only=vehicle_id)
     if not rows:
@@ -684,10 +711,11 @@ def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
     hits = bill_hits(events)
     groups = _groups()
     code = _vehicle_groups().get(vehicle_id)
-    plan = vehicle_plan(v, group=groups.get(code), records=records + hits, readings=readings, overrides=overrides, today=today, with_chart=True)
+    plan = vehicle_plan(v, group=groups.get(code), records=records + hits, readings=readings, overrides=overrides, today=today, with_chart=True,
+                        soon_days=_plan_settings()["soon_days"], snoozes=_snoozes().get(vehicle_id))
     history = sorted([{**r, "label": item_label(r["item_key"])} for r in records + hits], key=lambda r: (r["done_date"], r["item_key"]), reverse=True)
     choices = [{**g, "months": group_months(g)} for g in sorted(groups.values(), key=lambda g: g.get("sort_order", 99))]
-    return {"as_of": today.isoformat(), "ready": ready, "vehicle": {k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model")},
+    return {"as_of": today.isoformat(), "simulated": today != real_today, "ready": ready, "vehicle": {k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model")},
             **plan, "group_code": code, "groups": choices, "history": history, "readings": readings}
 
 
@@ -790,3 +818,192 @@ def set_group(data: dict) -> dict:
             "sort_order": base.get("sort_order", 99), **row}
     supabase.insert("service_groups", [full], on_conflict="code")
     return settings()
+
+
+# ------------------------------------------------------- reminder settings
+def _plan_settings() -> dict:
+    """soon_days (how many days ahead "coming close" starts), enabled, items (which items are reminded about by LINE)."""
+    saved: dict = {}
+    try:
+        saved = mgr.get_settings() if mgr.has_v12() else {}
+    except supabase.SupabaseError:
+        saved = {}
+    try:
+        soon = int(saved.get("plan_soon_days", SOON_DAYS))
+    except (TypeError, ValueError):
+        soon = SOON_DAYS
+    items = saved.get("plan_remind_items")
+    return {"soon_days": max(1, min(60, soon)), "enabled": bool(saved.get("plan_reminders", True)),
+            "items": [k for k in (items if isinstance(items, list) else DEFAULT_REMIND_ITEMS) if k in ITEMS]}
+
+
+def reminder_settings() -> dict:
+    return {**_plan_settings(), "line_configured": line_push.configured(), "ready": mgr.has_v12() if supabase.configured() else False,
+            "all_items": [{"key": k, "label": v[0]} for k, v in ITEMS.items()]}
+
+
+def clean_reminder_settings(data: dict) -> dict:
+    out: dict = {}
+    if "soon_days" in data:
+        out["plan_soon_days"] = _positive_int(data["soon_days"], "จำนวนวันที่เริ่มเตือน", 1, 60)
+    if "enabled" in data:
+        out["plan_reminders"] = bool(data["enabled"])
+    if "items" in data:
+        items = data["items"]
+        if not isinstance(items, list) or any(k not in ITEMS for k in items):
+            raise InvalidPlan("รายการที่เตือนไม่ถูกต้อง")
+        out["plan_remind_items"] = list(dict.fromkeys(items))
+    return out
+
+
+def _positive_int(value, what: str, low: int, high: int) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise InvalidPlan(f"{what}ต้องเป็นตัวเลข")
+    if not low <= n <= high:
+        raise InvalidPlan(f"{what}ต้องอยู่ระหว่าง {low}-{high}")
+    return n
+
+
+def save_reminder_settings(data: dict) -> dict:
+    values = clean_reminder_settings(data)
+    try:
+        if values:
+            mgr.save_settings(values)
+    except mgr.InvalidTicket as exc:
+        raise InvalidPlan(str(exc))
+    return reminder_settings()
+
+
+def parse_as_of(value, *, today: Optional[date] = None) -> Optional[date]:
+    """The day the "look ahead" slider asks about, or None for today. Only the future, a limited way."""
+    if value in (None, ""):
+        return None
+    d = parse_date(value)
+    today = today or today_th()
+    if d is None or not today <= d <= today + timedelta(days=MAX_AS_OF_DAYS):
+        raise InvalidPlan(f"ดูล่วงหน้าได้ไม่เกิน {MAX_AS_OF_DAYS} วัน")
+    return None if d == today else d
+
+
+# --------------------------------------------------------------- snoozing
+_probe13 = {"at": 0.0, "ok": False}
+
+
+def has_v13() -> bool:
+    now = time.time()
+    if now - _probe13["at"] < 30:
+        return _probe13["ok"]
+    try:
+        supabase.select("service_snoozes", {"select": "vehicle_id", "limit": "1"})
+        ok = True
+    except supabase.SupabaseError:
+        ok = False
+    _probe13.update(at=now, ok=ok)
+    return ok
+
+
+def _snoozes() -> dict:
+    """vehicle_id -> {item_key -> row}."""
+    if not has_v13():
+        return {}
+    out: dict = {}
+    for r in supabase.select_all("service_snoozes", {"select": "*", "order": "vehicle_id.asc,item_key.asc"}):
+        out.setdefault(r["vehicle_id"], {})[r["item_key"]] = r
+    return out
+
+
+def clean_snooze(data: dict, *, today: date) -> dict:
+    vehicle_id = _uuid(data.get("vehicle_id"), "รถ")
+    key = data.get("item_key")
+    if key not in ITEMS:
+        raise InvalidPlan("ไม่รู้จักรายการ")
+    days = _positive_int(data.get("days"), "จำนวนวันที่เลื่อน", 1, MAX_SNOOZE_DAYS)
+    return {"vehicle_id": vehicle_id, "item_key": key, "until": (today + timedelta(days=days)).isoformat()}
+
+
+def snooze(data: dict) -> dict:
+    """Do not remind about this item of this truck for the next N days. Applies to its current due date only."""
+    if not has_v13():
+        raise InvalidPlan(NEEDS_V13)
+    row = clean_snooze(data, today=today_th())
+    detail = vehicle_detail(row["vehicle_id"])
+    item = next((i for i in detail["items"] if i["key"] == row["item_key"]), None)
+    if item is None or not item["due_date"]:
+        raise InvalidPlan("รายการนี้ยังไม่มีวันครบกำหนด จึงไม่มีอะไรให้เลื่อนเตือน")
+    supabase.insert("service_snoozes", [{**row, "for_due": item["due_date"]}], on_conflict="vehicle_id,item_key")
+    return vehicle_detail(row["vehicle_id"])
+
+
+def clear_snooze(vehicle_id: str, item_key: str) -> dict:
+    if not has_v13():
+        raise InvalidPlan(NEEDS_V13)
+    _uuid(vehicle_id, "รถ")
+    supabase.delete("service_snoozes", {"vehicle_id": f"eq.{vehicle_id}", "item_key": f"eq.{item_key}"})
+    return vehicle_detail(vehicle_id)
+
+
+# --------------------------------------------------------------- reminders
+def _truck_label(r: dict) -> str:
+    return " ".join(x for x in (f"#{r['vehicle_number']}" if r.get("vehicle_number") else "", r.get("plate_number") or "") if x) or "รถ"
+
+
+def collect_reminders(rows: list[dict], today: date, soon_days: int, items: list[str]) -> list[dict]:
+    """The items to remind about, from the overview rows. Stages: 'soon' (within `soon_days`), 'due' (today), 'overdue'
+    (repeated every OVERDUE_REPEAT_DAYS days). Snoozed items are left out. Each carries a `key` that is unique for that
+    stage of that due date (and for the end of a snooze), so a push can be claimed once."""
+    out = []
+    for r in rows:
+        if not r.get("has_plan"):
+            continue
+        for it in r["items"]:
+            dl = it.get("days_left")
+            if it["key"] not in items or it["state"] == "unknown" or dl is None or dl > soon_days or it.get("snoozed_until"):
+                continue
+            stage = "overdue" if dl < 0 else "due" if dl == 0 else "soon"
+            suffix = f":s{it['snooze_ended']}" if it.get("snooze_ended") else ""
+            tail = f"over{(-dl) // OVERDUE_REPEAT_DAYS}" if stage == "overdue" else stage
+            km = it["km_left"] if it.get("km_left") is not None else it.get("est_km_left")
+            out.append({"key": f"plan:{r['id']}:{it['key']}:{it['due_date']}:{tail}{suffix}", "stage": stage, "vehicle_id": r["id"], "truck": _truck_label(r),
+                        "branch": r.get("branch"), "item_key": it["key"], "label": it["label"], "days_left": dl, "due_date": it["due_date"],
+                        "km_left": km, "km_real": it.get("km_left") is not None})
+    order = {"overdue": 0, "due": 1, "soon": 2}
+    return sorted(out, key=lambda x: (order[x["stage"]], x["days_left"], x["truck"]))
+
+
+def _km_text(x: dict) -> str:
+    if x["km_left"] is None:
+        return ""
+    sign = "≈ " if not x["km_real"] else ""
+    return f" · เหลือ {sign}{abs(x['km_left']):,} กม." if x["km_left"] >= 0 else f" · เกิน {sign}{abs(x['km_left']):,} กม."
+
+
+def reminder_text(reminders: list[dict], today: date, soon_days: int) -> str:
+    """The plain-text LINE message for a list of reminders."""
+    months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
+    lines = [f"เตือนรอบซ่อมบำรุงรถ · {today.day} {months[today.month - 1]} {today.year + 543}", ""]
+    for stage, title, phrase in (("due", "ครบกำหนดวันนี้", lambda x: ""), ("overdue", "เลยกำหนดแล้ว", lambda x: f" · เลย {-x['days_left']} วัน"),
+                                 ("soon", f"ใกล้ถึงรอบ (ภายใน {soon_days} วัน)", lambda x: f" · อีก {x['days_left']} วัน")):
+        rows = [x for x in reminders if x["stage"] == stage]
+        if rows:
+            lines += [f"{title} ({len(rows)})"] + [f"• {x['truck']} — {x['label']}{phrase(x)}{_km_text(x)}" for x in rows] + [""]
+    return "\n".join(lines).strip()
+
+
+def reminder_preview(*, today: Optional[date] = None) -> dict:
+    """What the reminders would say for `today` (the look-ahead slider's day): every item in the window, snoozed ones left out."""
+    today = today or today_th()
+    cfg = _plan_settings()
+    rows = overview(today=today)["vehicles"]
+    found = collect_reminders(rows, today, cfg["soon_days"], cfg["items"])
+    snoozed = [{"truck": _truck_label(r), "label": it["label"], "until": it["snoozed_until"]} for r in rows for it in r["items"]
+               if it.get("snoozed_until") and it["key"] in cfg["items"]]
+    return {"as_of": today.isoformat(), "soon_days": cfg["soon_days"], "enabled": cfg["enabled"], "items": found, "snoozed": snoozed,
+            "text": reminder_text(found, today, cfg["soon_days"]) if found else ""}
+
+
+def reminder_candidates(today: date) -> list[dict]:
+    """For the LINE job: the same list, for today."""
+    cfg = _plan_settings()
+    return collect_reminders(overview(today=today)["vehicles"], today, cfg["soon_days"], cfg["items"])

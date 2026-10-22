@@ -462,6 +462,7 @@
       <input id="mgQ" type="search" placeholder="ค้นหา: เรื่อง รายละเอียด ชื่อคนที่รอ" autocomplete="off" aria-label="ค้นหา">
       <select id="mgFilter" aria-label="ประเภท"><option value="">ทุกประเภท</option></select>
       <div id="mgSummary" class="mgsummary"></div>
+      <div id="mgPlaces" class="mgplaces" role="group" aria-label="กรองตามสถานที่"></div>
     </div>
     <div class="kanban mgkanban" id="mgKanban">
       <section class="kcol mgcol" data-status="todo" aria-label="ต้องทำ"><h2 class="section-title">ต้องทำ <span class="count" id="mgCount_todo"></span></h2><div id="mgList_todo" class="reqlist"></div></section>
@@ -507,6 +508,12 @@
       <button id="plTabSet" class="tab" type="button" role="tab">ตั้งค่าระยะ (กม. / เดือน)</button>
     </div>
     <div id="plDuePane">
+      <div class="card plsim">
+        <div class="plsim-top"><strong>ดูล่วงหน้า</strong><span id="plSimLabel" class="muted">วันนี้</span><span class="grow"></span><button id="plSimReset" class="btn small" type="button" hidden>กลับมาวันนี้</button></div>
+        <input id="plSim" type="range" min="0" max="120" step="1" value="0" aria-label="ดูล่วงหน้ากี่วัน">
+        <div class="plsim-scale muted small"><span>วันนี้</span><span>+30</span><span>+60</span><span>+90</span><span>+120 วัน</span></div>
+        <details id="plPreview" class="plpreview"><summary>ข้อความเตือนที่จะส่งในวันนั้น</summary><pre id="plPreviewText" class="plpretext"></pre><p id="plPreviewMeta" class="muted small"></p></details>
+      </div>
       <div id="plKpis" class="kpis"></div>
       <div class="card plbar">
         <input id="plQ" type="search" placeholder="ค้นหา: ทะเบียน เบอร์รถ ชื่อเรียก" autocomplete="off" aria-label="ค้นหารถ">

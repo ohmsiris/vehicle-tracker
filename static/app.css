@@ -842,3 +842,31 @@ a.btn.call .callnum { font-weight: 400; color: var(--muted); }
   .mgbar { grid-template-columns: 1fr; }
   .mgset-row { grid-template-columns: 1fr auto; }
 }
+
+/* ------------------------------------------------- reminders: the look-ahead slider, the calculator bars, snoozing */
+.plsim { padding: 14px 18px; margin-bottom: 12px; }
+.plsim-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.plsim-top .warn { color: var(--warn); font-weight: 650; }
+.plsim input[type=range] { width: 100%; accent-color: var(--accent); }
+.plsim-scale { display: flex; justify-content: space-between; margin-top: 2px; }
+.plpreview { margin-top: 10px; }
+.plpreview summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+.plpretext { white-space: pre-wrap; font: inherit; font-size: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; margin: 10px 0 6px; }
+.plchip-btn { cursor: pointer; font: inherit; font-size: 12px; font-weight: 500; }
+.plchip-btn:hover { filter: brightness(.95); }
+.plcalc { padding: 6px 18px 12px; margin-bottom: 10px; }
+.plcalc-row { padding: 10px 0; border-top: 1px solid var(--line); }
+.plcalc-row:first-of-type { border-top: 0; }
+.plcalc-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.plcalc-snz { display: inline-flex; align-items: center; gap: 8px; }
+.pl-bar { height: 12px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; }
+.pl-bar span { display: block; height: 100%; border-radius: 999px; background: var(--ok); transition: width .25s; }
+.pl-bar.warn span { background: var(--warn-line); }
+.pl-bar.bad span { background: var(--bad); }
+.plcalc-text { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; color: var(--muted); }
+.plcalc-days.bad { color: var(--bad); font-weight: 650; }
+.plcalc-days.warn { color: var(--warn); font-weight: 650; }
+
+/* the manager's board: filter by place */
+.mgplaces { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.mgset-id select { width: auto; max-width: 11em; }

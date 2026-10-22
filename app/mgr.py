@@ -202,7 +202,8 @@ def move_action(ticket: dict, to: str) -> str:
 
 
 # ------------------------------------------------------------------- settings
-DEFAULT_SETTINGS = {"digest_time": "08:00", "digest_enabled": True, "timed_enabled": True}
+DEFAULT_SETTINGS = {"digest_time": "08:00", "digest_enabled": True, "timed_enabled": True, "plan_soon_days": 10, "plan_reminders": True,
+                    "plan_remind_items": ["engine_oil"]}
 
 
 def clean_settings(data: dict) -> dict:
@@ -212,9 +213,17 @@ def clean_settings(data: dict) -> dict:
         if not t:
             raise InvalidTicket("ใส่เวลาส่งสรุป")
         out["digest_time"] = t
-    for k in ("digest_enabled", "timed_enabled"):
+    for k in ("digest_enabled", "timed_enabled", "plan_reminders"):
         if k in data:
             out[k] = bool(data[k])
+    if "plan_soon_days" in data:                          # the car-maintenance reminders (validated in app/service_plan.py)
+        try:
+            out["plan_soon_days"] = max(1, min(60, int(data["plan_soon_days"])))
+        except (TypeError, ValueError):
+            raise InvalidTicket("จำนวนวันที่เริ่มเตือนต้องเป็นตัวเลข")
+    if "plan_remind_items" in data:
+        items = data["plan_remind_items"]
+        out["plan_remind_items"] = [str(k)[:40] for k in items][:30] if isinstance(items, list) else []
     return out
 
 
@@ -517,11 +526,26 @@ def save_type(key: Optional[str], data: dict) -> list[dict]:
     return list_types(include_inactive=True)
 
 
+PLACE_KINDS = ("branch", "shop", "other")                # สาขา / ร้าน-อู่-ศูนย์ / อื่นๆ
+
+
+def _place_kind(data: dict) -> Optional[str]:
+    kind = data.get("kind")
+    if kind in (None, ""):
+        return None
+    if kind not in PLACE_KINDS:
+        raise InvalidTicket("ชนิดของสถานที่ไม่ถูกต้อง")
+    return kind
+
+
 def save_place(place_id: Optional[str], data: dict) -> list[dict]:
     _require()
     label = _text(data.get("label"), 40)
+    kind = _place_kind(data)
     if place_id:
         values = {}
+        if kind:
+            values["kind"] = kind
         if "label" in data:
             if not label:
                 raise InvalidTicket("ใส่ชื่อสถานที่ด้วย")
@@ -535,5 +559,5 @@ def save_place(place_id: Optional[str], data: dict) -> list[dict]:
     else:
         if not label:
             raise InvalidTicket("ใส่ชื่อสถานที่ด้วย")
-        supabase.insert("mgr_places", [{"label": label, "sort_order": 50}], on_conflict="label", ignore_duplicates=True)
+        supabase.insert("mgr_places", [{"label": label, "kind": kind or "other", "sort_order": 50}], on_conflict="label", ignore_duplicates=True)
     return list_places(include_inactive=True)

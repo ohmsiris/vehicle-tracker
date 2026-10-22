@@ -151,3 +151,11 @@ def test_with_an_api_key_the_ai_decides_and_a_failure_falls_back(monkeypatch):
         raise RuntimeError("down")
     monkeypatch.setattr(mgr_ai, "_ask", boom)
     assert mgr_ai.classify("โอนเงินค่าไฟ", None, KEYS) == ("finance", "rule")          # never blocks on the AI
+
+
+# ------------------------------------------------------------------ places
+def test_the_kind_of_a_place_is_checked():
+    assert mgr._place_kind({"kind": "shop"}) == "shop" and mgr._place_kind({}) is None and mgr._place_kind({"kind": ""}) is None
+    with pytest.raises(mgr.InvalidTicket, match="ชนิด"):
+        mgr._place_kind({"kind": "moon"})
+    assert mgr.PLACE_KINDS == ("branch", "shop", "other")

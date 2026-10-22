@@ -8,7 +8,7 @@
 // Loaded BEFORE app.js: nothing here runs at load time.
 
 const mg = {
-  data: null, q: "", filterType: "",
+  data: null, q: "", filterType: "", filterPlace: "",
   dragId: null,
   edit: null, draft: {}, waiting: null,
   rec: [], recEdit: null, recDraft: {},
@@ -42,10 +42,19 @@ async function loadMgrBoard() {
   return true;
 }
 
+// Places by kind: the branches first, then the shops / garages, then the rest.
+const MG_KINDS = [["branch", "สาขา"], ["shop", "ร้าน / อู่ / ศูนย์"], ["other", "อื่นๆ"]];
+const mgPlacesSorted = () => [...mg.data.places].sort((a, b) => MG_KINDS.findIndex(([k]) => k === a.kind) - MG_KINDS.findIndex(([k]) => k === b.kind) || a.sort_order - b.sort_order);
+
+function mgPlaceOptions() {
+  const groups = MG_KINDS.map(([k, title]) => [title, mg.data.places.filter((p) => (p.kind || "other") === k).sort((a, b) => a.sort_order - b.sort_order)]).filter(([, rows]) => rows.length);
+  return groups.map(([title, rows]) => el("optgroup", { label: title }, ...rows.map((p) => el("option", { value: p.label, text: p.label }))));
+}
+
 function fillMgSelects() {
   const keepT = $("mgType").value, keepP = $("mgPlace").value, keepF = $("mgFilter").value;
   $("mgType").replaceChildren(el("option", { value: "", text: "ให้ระบบเลือกประเภท (AI)" }), ...mg.data.types.map((t) => el("option", { value: t.key, text: t.label })));
-  $("mgPlace").replaceChildren(el("option", { value: "", text: "สถานที่ (ไม่ระบุ)" }), ...mg.data.places.map((p) => el("option", { value: p.label, text: p.label })));
+  $("mgPlace").replaceChildren(el("option", { value: "", text: "สถานที่ (ไม่ระบุ)" }), ...mgPlaceOptions());
   $("mgFilter").replaceChildren(el("option", { value: "", text: "ทุกประเภท" }), ...mg.data.types.map((t) => el("option", { value: t.key, text: t.label })));
   $("mgType").value = keepT;
   $("mgPlace").value = keepP;
@@ -63,6 +72,7 @@ function renderMgBoard() {
   const d = mg.data;
   const q = mg.q.trim().toLowerCase();
   const keep = (t) => (!mg.filterType || t.type_key === mg.filterType)
+    && (!mg.filterPlace || (mg.filterPlace === "__none" ? !t.place : t.place === mg.filterPlace))
     && (!q || [t.title, t.notes, t.waiting_on, t.place, t.type_label].filter(Boolean).join(" ").toLowerCase().includes(q));
   const by = { todo: [], doing: [], waiting: [], done: d.recent.filter(keep) };
   for (const t of d.tickets.filter(keep)) by[t.status].push(t);
@@ -71,12 +81,24 @@ function renderMgBoard() {
     $(`mgCount_${key}`).textContent = key === "done" ? String(by.done.length) : String(by[key].length);
     fill($(`mgList_${key}`), ...(by[key].length ? by[key].map(mgCard) : [el("p", { class: "muted empty small", text: key === "done" ? "ยังไม่มีงานที่เสร็จ" : "ว่าง" })]));
   }
+  renderMgPlaces();
   const overdue = d.tickets.filter((t) => t.due_date && t.due_date < d.today).length;
   const followUps = d.tickets.filter((t) => t.status === "waiting" && t.remind_on && t.remind_on <= d.today).length;
   fill($("mgSummary"),
     el("strong", { text: `${d.tickets.length} เรื่องที่ยังเปิดอยู่` }),
     overdue ? el("span", { class: "badge urgent", text: `เลยกำหนด ${overdue}` }) : null,
     followUps ? el("span", { class: "badge warn", text: `ถึงวันติดตาม ${followUps}` }) : null);
+}
+
+// A row of chips to filter by where the work is: all, the two branches, the shops / places that have something open, "no place".
+function renderMgPlaces() {
+  const counts = new Map();
+  for (const t of mg.data.tickets) counts.set(t.place || "", (counts.get(t.place || "") || 0) + 1);
+  const chip = (value, label, n) => el("button", { class: `chipbtn mgchip${mg.filterPlace === value ? " on" : ""}`, type: "button", text: n === null ? label : `${label} (${n})`,
+    onclick: () => { mg.filterPlace = mg.filterPlace === value ? "" : value; renderMgBoard(); } });
+  const shown = mgPlacesSorted().filter((p) => p.kind === "branch" || counts.has(p.label) || mg.filterPlace === p.label);
+  fill($("mgPlaces"), chip("", "ทุกที่", mg.data.tickets.length), ...shown.map((p) => chip(p.label, p.label, counts.get(p.label) || 0)),
+    counts.get("") ? chip("__none", "ไม่ระบุที่", counts.get("")) : null);
 }
 
 function mgDue(t) {
@@ -486,15 +508,25 @@ function renderMgrSettings() {
     }));
 
   // places
+  const kindSelect = (value) => {
+    const sel = el("select", { "aria-label": "ชนิด" }, ...MG_KINDS.map(([k, t]) => el("option", { value: k, text: t })));
+    sel.value = value || "other";
+    return sel;
+  };
   const placeRow = (p) => {
     const label = el("input", { type: "text", maxlength: "40", value: p.label });
+    const kind = kindSelect(p.kind);
     const active = el("input", { type: "checkbox" }); active.checked = p.active !== false;
-    return mgSettingRow([el("div", { class: "mgset-id" }, label), el("label", { class: "inline small" }, active, "ใช้งาน")],
-      async () => { mg.set.places = await api(`/api/mgr/places/${p.id}`, jsonOpts("PATCH", { label: label.value, active: active.checked })); });
+    return mgSettingRow([el("div", { class: "mgset-id" }, label, kind), el("label", { class: "inline small" }, active, "ใช้งาน")],
+      async () => { mg.set.places = await api(`/api/mgr/places/${p.id}`, jsonOpts("PATCH", { label: label.value, kind: kind.value, active: active.checked })); });
   };
-  const newPlace = el("input", { type: "text", maxlength: "40", placeholder: "สถานที่ใหม่" });
-  const card3 = el("section", { class: "card mgset" }, el("h3", { text: "สถานที่" }), ...s.places.map(placeRow),
-    mgSettingRow([el("div", { class: "mgset-id" }, newPlace)], async () => { mg.set.places = await api("/api/mgr/places", jsonOpts("POST", { label: newPlace.value })); renderMgrSettings(); }));
+  const newPlace = el("input", { type: "text", maxlength: "40", placeholder: "สถานที่ใหม่ เช่น ชื่อร้าน / อู่ / ลูกค้า" });
+  const newKind = kindSelect("shop");
+  const ordered = [...s.places].sort((a, b) => MG_KINDS.findIndex(([k]) => k === a.kind) - MG_KINDS.findIndex(([k]) => k === b.kind) || a.sort_order - b.sort_order);
+  const card3 = el("section", { class: "card mgset" }, el("h3", { text: "สถานที่" }),
+    el("p", { class: "muted small", text: "ใช้กรองเรื่องตามที่ที่ต้องไป — สาขา (สระบุรี / แก่งคอย) ร้าน / อู่ / ศูนย์ และที่อื่นๆ เพิ่มชื่อร้านใหม่ได้ตลอด" }),
+    ...ordered.map(placeRow),
+    mgSettingRow([el("div", { class: "mgset-id" }, newPlace, newKind)], async () => { mg.set.places = await api("/api/mgr/places", jsonOpts("POST", { label: newPlace.value, kind: newKind.value })); renderMgrSettings(); }));
   fill($("mgrSetList"), card1, card2, card3);
 }
 
