@@ -198,6 +198,7 @@ function renderTruck() {
     : [btn("ประวัติซ่อม", () => showTruckLog(v.vehicle_id)), btn("+ บันทึกบิล", () => billForVehicle(v)), btn("+ แจ้งซ่อม", () => requestForVehicle(v)), btn("แก้ไข", startTruckEdit, "primary")]));
   // ---- body
   fill($("tkBody"), ...(tk.editing ? editCards() : viewCards(v)));
+  renderTruckPlan(v, tk.editing);
 }
 
 // ---- reading

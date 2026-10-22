@@ -41,7 +41,8 @@ service key bypasses row-level security: server-side only, never in a page.
 `schema_v6.sql` (drivers, truck usage, main driver), then
 `schema_v7.sql` (the rest of the master vehicle list: size class, registration papers, driver nickname), then
 `schema_v8.sql` (the truck's own nickname), then
-`schema_v9.sql` (machinery: machines, parts index, maintenance reports). Replace
+`schema_v9.sql` (machinery: machines, parts index, maintenance reports), then
+`schema_v10.sql` (the vehicle maintenance programme). Replace
 `<PROJECT_REF>` in `schema.sql` first. Then seed the fleet:
 
 ```bash
@@ -372,3 +373,30 @@ the truck page. The import fills it from the nickname column of "หน้าโ
   (routine cleaning schedule, purchase orders, price comparison, water calculation) are not imported yet.
 - Until `schema_v9.sql` has been run the pages show a banner and writes explain what is missing
   (`machinery.has_v9()`).
+
+## Maintenance programme ("แผนซ่อมบำรุง", `#plan`)
+
+`schema_v10.sql`, `app/service_plan.py`, `static/plan.js`, `scripts/seed_gps.py`. When is each truck's next oil change,
+filter, gearbox oil ... due?
+
+- **The plan** is in code (`DEFAULT_PLAN`), per size class: **รถเล็ก** (D-Max, Revo) and **รถใหญ่** (NLR/NMR/NPR,
+  6- and 10-wheelers). The km are the dealership's rules; the months are the "6 months per step" of the Isuzu / Toyota /
+  Hino guides. Every item is **whichever comes first, km or months**. Two deliberate differences from the dealership:
+  small trucks change the engine filter with every oil change (10,000, the owner's choice; dealership 20,000), and the
+  plan lists coolant / valve adjustment / injector washers per the dealership although the official D-Max 1.9 table
+  has no valve or injector item. The second tab, **ตั้งค่าระยะ**, changes any interval per class (saved in
+  `service_intervals`; "คืนค่าเริ่มต้น" removes the change).
+- **When it was last done** comes from two places, newest wins: confirmed repair bills (a line such as "กรองเครื่อง" on
+  a bill counts as that truck's engine filter that day -- `classify_line`; a top-up "(เติม)" and parts such as
+  "สกรูแรงดันน้ำมันเครื่อง" are ignored; the bill's mileage is used when it has one) and what people record
+  (**+ บันทึกว่าทำแล้ว**, several items at once, date + odometer). **เริ่มนับจากวันนี้** gives every item with no
+  history today's date as a starting point.
+- **How far a truck drives** is estimated: odometer readings (two at least 30 days apart), else the GPS distance entered
+  for the last 120 days (**+ ระยะทาง**: a period + the km the GPS app shows), else a class average (130 km/day small, 70
+  big, flagged "ประมาณ"). `scripts/seed_gps.py` loaded the 12 trucks from the Sep-Oct 2026 GPS screenshots.
+  From it: km since the last service, the date the km interval runs out, and the earlier of that and the months deadline
+  is the due date. "Due soon" = within 14 days.
+- **Pages**: `#plan` -- trucks that are overdue / due soon first, with filters (branch, size, search; "ทุกคัน" and "ที่ยังไม่มีประวัติเลย");
+  each truck's page has its own table (last done, km used, next due, state), the history (bills link to the bill)
+  and the distance data.
+- Until `schema_v10.sql` has been run the page shows a banner and writes explain what is missing (`service_plan.has_v10()`).

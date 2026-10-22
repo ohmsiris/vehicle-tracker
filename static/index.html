@@ -36,6 +36,7 @@
       <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกซ่อม</span></button>
       <button id="navLog" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>สมุดงานซ่อม</span></button>
       <button id="navRoster" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg><span>ทะเบียนรถ</span></button>
+      <button id="navPlan" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M9 15l2 2 4-4"/></svg><span>แผนซ่อมบำรุง</span></button>
       <button id="navDash" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>ภาพรวม</span></button>
     </nav>
   </div>
@@ -419,6 +420,40 @@
     <p class="error" id="tkError" hidden></p>
     <div class="card tkhead" id="tkHead"></div>
     <div class="tkgrid" id="tkBody"></div>
+    <div id="tkPlan" class="tkplan" hidden></div>
+  </section>
+
+  <!-- ============ Maintenance programme: what is due, and the intervals ============ -->
+  <section id="planView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">แผนซ่อมบำรุงรถ</h2>
+      <p class="muted small">ถึงรอบเปลี่ยนน้ำมันเครื่อง ไส้กรอง น้ำมันเกียร์ ฯลฯ เมื่อไหร่ — นับจากระยะทางหรือเวลา แล้วแต่อย่างไหนถึงก่อน (ตามเกณฑ์ของศูนย์บริการ เทียบกับคู่มือ Isuzu / Toyota / Hino) คำนวณระยะทางจาก GPS หรือเลขไมล์ของแต่ละคัน และอ่านวันที่ทำล่าสุดจากบิลให้อัตโนมัติ</p>
+    </div>
+    <p class="error" id="plError" hidden></p>
+    <div class="edit-banner" id="plNeedsV10" hidden>ยังใช้แผนซ่อมบำรุงไม่ได้ — ต้องรันไฟล์ <strong>schema_v10.sql</strong> ใน Supabase ก่อน</div>
+    <div class="tabs" role="tablist">
+      <button id="plTabDue" class="tab active" type="button" role="tab">รถที่ต้องทำ</button>
+      <button id="plTabSet" class="tab" type="button" role="tab">ตั้งค่าระยะ (กม. / เดือน)</button>
+    </div>
+    <div id="plDuePane">
+      <div id="plKpis" class="kpis"></div>
+      <div class="card plbar">
+        <input id="plQ" type="search" placeholder="ค้นหา: ทะเบียน เบอร์รถ ชื่อเรียก" autocomplete="off" aria-label="ค้นหารถ">
+        <select id="plBranch" aria-label="สาขา"><option value="">ทุกสาขา</option></select>
+        <select id="plClass" aria-label="ขนาดรถ"><option value="">รถทุกขนาด</option></select>
+        <select id="plShow" aria-label="แสดง">
+          <option value="due">เฉพาะที่ต้องทำ (เลย / ใกล้ถึงกำหนด)</option>
+          <option value="all">ทุกคัน</option>
+          <option value="nohistory">ที่ยังไม่มีประวัติเลย</option>
+        </select>
+      </div>
+      <p class="muted small" id="plCount"></p>
+      <div id="plList" class="pllist"></div>
+    </div>
+    <div id="plSetPane" hidden>
+      <p class="muted small">ปรับได้ถ้าอยากให้ถี่หรือห่างกว่านี้ — ใช้กับรถทุกคันในกลุ่มนั้น เช่น ถ้ารถใหญ่ที่วิ่งน้อยเปลี่ยนน้ำมันเครื่องทุก 12 เดือนก็พอ ให้แก้เดือนของน้ำมันเครื่องรถใหญ่</p>
+      <div id="plSetList" class="plsetgrid"></div>
+    </div>
   </section>
 
   <!-- ============ One repair event: the "bill" ============ -->
@@ -553,6 +588,18 @@
   </div>
 </dialog>
 
+<!-- Maintenance programme: record that items were done / how far a truck drives -->
+<dialog id="planDialog" class="wide">
+  <h3 id="pdlgTitle">บันทึก</h3>
+  <div id="pdlgBody"></div>
+  <p class="error" id="pdlgError" hidden></p>
+  <div class="dialog-actions">
+    <span class="grow"></span>
+    <button type="button" class="btn" id="pdlgCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="pdlgSave">บันทึก</button>
+  </div>
+</dialog>
+
 <!-- A part / spec of the machinery index -->
 <dialog id="partDialog" class="wide">
   <h3 id="pdTitle">อะไหล่ / สเปค</h3>
@@ -658,6 +705,7 @@
 <script src="/static/where.js"></script>
 <script src="/static/roster.js"></script>
 <script src="/static/machinery.js"></script>
+<script src="/static/plan.js"></script>
 <script src="/static/manual.js"></script>
 <script src="/static/app.js"></script>
 </body>

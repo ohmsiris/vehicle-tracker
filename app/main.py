@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, fleet, history, logbook, logsource, machinery, repair_requests, shops, summarize, supabase
+from app import dashboard, events, fleet, history, logbook, logsource, machinery, repair_requests, service_plan, shops, summarize, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -528,6 +528,83 @@ def api_create_machine_event(body: dict = Body(...), x_app_token: str = Header(d
 def api_edit_machine_event(event_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
     return _machinery_call(machinery.edit_event, event_id, body)
+
+
+# ------------------------------------------------------------- maintenance program
+def _plan_call(fn, *args, **kwargs):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return fn(*args, **kwargs)
+    except service_plan.InvalidPlan as exc:
+        raise HTTPException(422, str(exc))
+    except service_plan.NotFound:
+        raise HTTPException(404, "ไม่พบข้อมูลนี้")
+    except supabase.SupabaseError:
+        logger.exception("maintenance plan call failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/plan/options")
+def api_plan_options(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.options)
+
+
+@app.get("/api/plan/overview")
+def api_plan_overview(branch: str = "", vehicle_class: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.overview, branch, vehicle_class)
+
+
+@app.get("/api/plan/vehicles/{vehicle_id}")
+def api_plan_vehicle(vehicle_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.vehicle_detail, vehicle_id)
+
+
+@app.post("/api/plan/records")
+def api_plan_add_records(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.add_records, body)
+
+
+@app.delete("/api/plan/records/{record_id}")
+def api_plan_delete_record(record_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    _plan_call(service_plan.delete_record, record_id)
+    return {"ok": True}
+
+
+@app.post("/api/plan/readings")
+def api_plan_add_reading(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.add_reading, body)
+
+
+@app.delete("/api/plan/readings/{reading_id}")
+def api_plan_delete_reading(reading_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    _plan_call(service_plan.delete_reading, reading_id)
+    return {"ok": True}
+
+
+@app.get("/api/plan/intervals")
+def api_plan_intervals(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.intervals)
+
+
+@app.put("/api/plan/intervals")
+def api_plan_set_interval(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.set_interval, body)
+
+
+@app.delete("/api/plan/intervals")
+def api_plan_reset_interval(vehicle_class: str, item_key: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.reset_interval, vehicle_class, item_key)
 
 
 @app.get("/api/drivers")

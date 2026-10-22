@@ -711,3 +711,50 @@ button.btn.danger { color: var(--bad); }
   .mp-loc { grid-column: 1 / -1; }
   .mfields { grid-template-columns: 1fr; }
 }
+
+/* ------------------------------------------------------------- maintenance programme (แผนซ่อมบำรุง) */
+.tabs { display: flex; gap: 6px; margin: 0 0 14px; border-bottom: 1px solid var(--line); }
+.tab { background: none; border: 0; border-bottom: 3px solid transparent; padding: 9px 14px; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent, var(--ok)); }
+.plbar { display: grid; grid-template-columns: minmax(180px, 2fr) 1fr 1fr 2fr; gap: 10px; margin-bottom: 8px; }
+.pllist { display: flex; flex-direction: column; gap: 10px; }
+.plcard { padding: 12px 16px; border-left: 4px solid transparent; }
+.plcard.overdue { border-left-color: var(--bad); }
+.plcard.soon { border-left-color: var(--warn-line); }
+.pl-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.pl-title { color: inherit; text-decoration: none; }
+.pl-title:hover strong { text-decoration: underline; }
+.pl-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
+.tkplan { margin-top: 8px; }
+.pltable { padding: 6px 0; overflow-x: auto; }
+.pl-row { display: grid; grid-template-columns: minmax(190px, 2.2fr) 1.3fr 1.1fr 1.7fr auto; gap: 10px; align-items: center; padding: 9px 16px; border-top: 1px solid var(--line); }
+.pl-row.pl-th { border-top: 0; font-weight: 600; }
+.pl-item { display: flex; flex-direction: column; }
+.pl-row.overdue { background: var(--bad-soft); }
+.pl-row.soon { background: var(--warn-soft); }
+.pl-hist { margin-top: 10px; }
+.pl-hist summary { cursor: pointer; font-weight: 600; }
+.pl-hrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); margin-top: 7px; }
+.pl-hrow .muted { flex: 1; }
+.pl-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 14px; margin: 10px 0 4px; }
+.pl-pick { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
+.pl-pick input { width: auto; margin: 0; }
+.plsetgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+.plset h3 { margin: 0 0 2px; }
+.pl-set-head, .pl-set-row { display: grid; grid-template-columns: minmax(150px, 2fr) 100px 100px auto; gap: 8px; align-items: center; }
+.pl-set-head { padding: 6px 0; }
+.pl-set-row { padding: 8px 0; border-top: 1px solid var(--line); }
+.pl-set-row.custom { background: var(--warn-soft); margin: 0 -8px; padding: 8px; border-radius: var(--radius-sm); }
+.pl-set-row input { width: 100%; }
+.pl-set-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+@media (max-width: 720px) {
+  .plbar { grid-template-columns: 1fr; }
+  .pl-row { grid-template-columns: 1fr 1fr; }
+  .pl-row.pl-th { display: none; }
+  .pl-item { grid-column: 1 / -1; }
+  .plsetgrid { grid-template-columns: 1fr; }
+  .pl-set-head { display: none; }
+  .pl-set-row { grid-template-columns: 1fr 1fr; }
+  .pl-set-row > :first-child, .pl-set-actions { grid-column: 1 / -1; }
+}
