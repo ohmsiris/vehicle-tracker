@@ -15,45 +15,46 @@ IN_HOUSE = "ช่างเอ๋ (ในโรงงาน)"
 
 # The places a truck is sent to, in the order they are offered on the board.
 SHOPS: list[str] = [
-    "อู่ชมรม",
+    "ชมรมย์การช่าง",
     "อู่ช่างเก่ง",
     "โชคพัฒนา",
     "มงคลไดนาโม",
-    "อู่ช่างลิ้ม",
-    "ศูนย์ Isuzu",
-    "ศูนย์ Hino",
+    "ช่างลิ้ม 24 ไดนาโม",
+    "อิซูซุจึงกงเฮงแก่งคอย",
+    "ฮีโน่ เอเซีย หนองแค",
 ]
 
 # (fragment, canonical name). First match wins, so put the more specific fragment first.
 # Fragments are compared after lower-casing and removing spaces / dots / dashes.
+# The old short names ("อู่ชมรม", "ศูนย์ Isuzu" ...) still fold into the official ones.
 ALIASES: list[tuple[str, str]] = [
     ("ช่างเอ๋", IN_HOUSE),
-    ("ชมรม", "อู่ชมรม"),
+    ("ชมรม", "ชมรมย์การช่าง"),
     ("ช่างเก่ง", "อู่ช่างเก่ง"),
     ("เก่งเจริญ", "อู่ช่างเก่ง"),
     ("โชคพัฒนา", "โชคพัฒนา"),
     ("โชค", "โชคพัฒนา"),
-    ("ช่างลิ้ม", "อู่ช่างลิ้ม"),                 # before "ไดนาโม": the shop is called "ช่างลิ้ม 24 ไดนาโม"
-    ("ลิ้ม", "อู่ช่างลิ้ม"),
+    ("ช่างลิ้ม", "ช่างลิ้ม 24 ไดนาโม"),               # before "ไดนาโม": the shop is called "ช่างลิ้ม 24 ไดนาโม"
+    ("ลิ้ม", "ช่างลิ้ม 24 ไดนาโม"),
     ("มงคล", "มงคลไดนาโม"),
     ("ไดนาโม", "มงคลไดนาโม"),
-    ("isuzu", "ศูนย์ Isuzu"),
-    ("อีซูซุ", "ศูนย์ Isuzu"),
-    ("อิซูซุ", "ศูนย์ Isuzu"),
-    ("hino", "ศูนย์ Hino"),
-    ("ฮีโน่", "ศูนย์ Hino"),
-    ("ฮีโน", "ศูนย์ Hino"),
+    ("isuzu", "อิซูซุจึงกงเฮงแก่งคอย"),
+    ("อีซูซุ", "อิซูซุจึงกงเฮงแก่งคอย"),
+    ("อิซูซุ", "อิซูซุจึงกงเฮงแก่งคอย"),
+    ("hino", "ฮีโน่ เอเซีย หนองแค"),
+    ("ฮีโน่", "ฮีโน่ เอเซีย หนองแค"),
+    ("ฮีโน", "ฮีโน่ เอเซีย หนองแค"),
 ]
 
-# Who to call. canonical shop -> its full name and phone numbers (a shop can have several: a service centre and a body shop).
+# Who to call. canonical shop -> its phone numbers (a shop can have several: a service centre and a body shop).
 # A shop with no number yet simply shows no call button.
 DIRECTORY: dict[str, dict] = {
-    "อู่ชมรม": {"full_name": "ชมรมย์การช่าง (อู่ชมรม)", "contacts": [{"label": "ช่างลม", "phone": "081-928-5474"}]},
-    "อู่ช่างลิ้ม": {"full_name": "ช่างลิ้ม 24 ไดนาโม", "contacts": [{"label": "ช่างลิ้ม", "phone": "081-374-0394"}]},
-    IN_HOUSE: {"full_name": "ช่างเอ๋", "contacts": [{"label": "ช่างเอ๋", "phone": "085-967-4875"}]},
-    "ศูนย์ Isuzu": {"full_name": "อิซูซุจึงกงเฮงแก่งคอย", "contacts": [
+    "ชมรมย์การช่าง": {"contacts": [{"label": "ช่างลม", "phone": "081-928-5474"}]},
+    "ช่างลิ้ม 24 ไดนาโม": {"contacts": [{"label": "ช่างลิ้ม", "phone": "081-374-0394"}]},
+    IN_HOUSE: {"contacts": [{"label": "ช่างเอ๋", "phone": "085-967-4875"}]},
+    "อิซูซุจึงกงเฮงแก่งคอย": {"contacts": [
         {"label": "ศูนย์บริการ", "phone": "086-391-0548"}, {"label": "ศูนย์ซ่อมสีและตัวถัง", "phone": "081-581-3465"}]},
-    "ศูนย์ Hino": {"full_name": "ฮีโน่ เอเซีย หนองแค", "contacts": []},
+    "ฮีโน่ เอเซีย หนองแค": {"contacts": []},
 }
 
 _STRIP = re.compile(r"[\s\-_.]")

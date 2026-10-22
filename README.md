@@ -157,9 +157,10 @@ The **รถ** group is ordered by what you do, with a line between each part: *
 (input) · **รถอยู่ที่ไหน**, **สมุดงานซ่อม** (output) · **ทะเบียนรถ**, **แผนซ่อมบำรุง** (editing).
 
 **Who to call**: a driver's number is a tap-to-call button (`tel:`) on the truck's page, the drivers list, the board cards
-and "รถอยู่ที่ไหน". The shops' numbers are kept in `app/shops.py` (`DIRECTORY`: full name + one or more contacts, e.g. the
-Isuzu service centre and its body shop) and shown as call buttons under each shop on "รถอยู่ที่ไหน" and in the "ส่งซ่อมที่…"
-dialog. A shop with no number yet (ฮีโน่ เอเซีย หนองแค) shows "ยังไม่มีเบอร์".
+and "รถอยู่ที่ไหน". The shops' numbers are kept in `app/shops.py` (`DIRECTORY`: one or more contacts per shop, e.g. the
+Isuzu service centre and its body shop; the shops are listed by their official names, and the old short names such as
+"อู่ชมรม" or "ศูนย์ Isuzu" still fold into them) and shown as call buttons under each shop on "รถอยู่ที่ไหน" and in the "ส่งซ่อมที่…"
+dialog. A shop with no number yet (ฮีโน่ เอเซีย หนองแค) shows no call button.
 
 ## One repair event, read like a bill
 

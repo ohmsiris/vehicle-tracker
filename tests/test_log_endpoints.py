@@ -27,7 +27,7 @@ def rows():
     return build(
         events=[ev("e1", "v1", "2026-10-10", vendor="ชมรมย์การช่าง", total=3000), ev("e2", "v2", "2026-09-20", vendor="โชคพัฒนา", total=500)],
         lines=[ln("e1", "น้ำมันเครื่อง", "ไส้กรองและของเหลว", 3000), ln("e2", "ลูกปืน", "ช่วงล่าง", 500)],
-        requests=[rq("r1", "v1", "at_shop", seq=1, shop="อู่ช่างลิ้ม", sent_date="2026-10-12")])
+        requests=[rq("r1", "v1", "at_shop", seq=1, shop="ช่างลิ้ม 24 ไดนาโม", sent_date="2026-10-12")])
 
 
 def test_log_requires_the_token(monkeypatch, rows):
@@ -42,7 +42,7 @@ def test_log_returns_rows_totals_and_facets(monkeypatch, rows):
     d = c.get("/api/log?token=secret").json()
     assert d["total"] == 3 and len(d["rows"]) == 3 and d["rows"][0]["key"] == "request:r1"
     assert d["stats"]["total_cost"] == 3500 and d["stats"]["trucks"] == 2
-    assert {s["value"] for s in d["facets"]["shops"]} >= {"อู่ชมรม", "โชคพัฒนา", "อู่ช่างลิ้ม", "ศูนย์ Hino"}
+    assert {s["value"] for s in d["facets"]["shops"]} >= {"ชมรมย์การช่าง", "โชคพัฒนา", "ช่างลิ้ม 24 ไดนาโม", "ฮีโน่ เอเซีย หนองแค"}
     assert all("_hay" not in r for r in d["rows"]) and d["rows"][0]["status_label"] == "อยู่ที่อู่"
 
 
@@ -51,7 +51,7 @@ def test_every_filter_is_wired_through_the_url(monkeypatch, rows):
     get = lambda qs: [r["key"] for r in c.get(f"/api/log?token=secret&{qs}").json()["rows"]]
     assert get("q=ลูกปืน") == ["event:e2"]
     assert get("status=active") == ["request:r1"]
-    assert get("shop=อู่ชมรม") == ["event:e1"]
+    assert get("shop=ชมรมย์การช่าง") == ["event:e1"]
     assert get("branch=แก่งคอย") == ["event:e2"]
     assert get("category=ช่วงล่าง") == ["event:e2"]
     assert get("date_from=2026-10-01&date_to=2026-10-10") == ["event:e1"]
@@ -64,7 +64,7 @@ def test_every_filter_is_wired_through_the_url(monkeypatch, rows):
 
 def test_csv_download_is_a_spreadsheet_with_a_bom_and_respects_filters(monkeypatch, rows):
     main, c = _client(monkeypatch, rows)
-    r = c.get("/api/log.csv?token=secret&shop=อู่ชมรม")
+    r = c.get("/api/log.csv?token=secret&shop=ชมรมย์การช่าง")
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
     assert "attachment" in r.headers["content-disposition"] and ".csv" in r.headers["content-disposition"]
     assert r.content.startswith("﻿".encode("utf-8"))                       # Excel needs it for the Thai text

@@ -50,7 +50,7 @@ def rows():
     requests = [
         rq("r1", "v1", "open", seq=1, problem="กระจกข้างตก"),
         rq("r2", "v2", "at_shop", seq=2, problem="เพลาร้าว", shop="โชคพัฒนา", sent_date="2026-10-12"),
-        rq("r3", "v3", "awaiting_bill", seq=3, problem="ไฟท้ายเสีย", fixed_by="อู่ช่างลิ้ม", fixed_date="2026-10-15"),
+        rq("r3", "v3", "awaiting_bill", seq=3, problem="ไฟท้ายเสีย", fixed_by="ช่างลิ้ม 24 ไดนาโม", fixed_date="2026-10-15"),
         rq("r4", "v1", "completed", seq=4, problem="เปลี่ยนไฟเลี้ยว", fixed_by="ช่างเอ๋", fixed_date="2026-10-14", no_bill=True, no_bill_reason="งานเล็กน้อย"),
         rq("r5", "v2", "cancelled", seq=5, problem="ซ่อมที่นั่ง"),
         rq("r6", "v1", "completed", seq=6, problem="เบรกหลังมีเสียง", fixed_by="ชมรมย์การช่าง", fixed_date="2026-10-10", fixed_event_id="e1"),
@@ -69,11 +69,11 @@ def keys(res):
 
 # -------------------------------------------------- shop folding
 @pytest.mark.parametrize("written, canon", [
-    ("ชมรมย์การช่าง", "อู่ชมรม"), ("อู่ชมรม", "อู่ชมรม"), ("  ชมรม ", "อู่ชมรม"),
+    ("ชมรมย์การช่าง", "ชมรมย์การช่าง"), ("อู่ชมรม", "ชมรมย์การช่าง"), ("  ชมรม ", "ชมรมย์การช่าง"),
     ("ช่างเก่งเจริญยนต์", "อู่ช่างเก่ง"), ("อู่ช่างเก่ง", "อู่ช่างเก่ง"),
-    ("โชคพัฒนา", "โชคพัฒนา"), ("มงคลไดนาโม", "มงคลไดนาโม"), ("อู่ช่างลิ้ม", "อู่ช่างลิ้ม"),
-    ("ศูนย์อีซูซุสระบุรี", "ศูนย์ Isuzu"), ("ศูนย์ isuzu", "ศูนย์ Isuzu"), ("ISUZU  center", "ศูนย์ Isuzu"),
-    ("ศูนย์ฮีโน่", "ศูนย์ Hino"), ("Hino Saraburi", "ศูนย์ Hino"),
+    ("โชคพัฒนา", "โชคพัฒนา"), ("มงคลไดนาโม", "มงคลไดนาโม"), ("ช่างลิ้ม 24 ไดนาโม", "ช่างลิ้ม 24 ไดนาโม"),
+    ("ศูนย์อีซูซุสระบุรี", "อิซูซุจึงกงเฮงแก่งคอย"), ("ศูนย์ isuzu", "อิซูซุจึงกงเฮงแก่งคอย"), ("ISUZU  center", "อิซูซุจึงกงเฮงแก่งคอย"),
+    ("ศูนย์ฮีโน่", "ฮีโน่ เอเซีย หนองแค"), ("Hino Saraburi", "ฮีโน่ เอเซีย หนองแค"),
     ("ช่างเอ๋", shops.IN_HOUSE), ("[ทดสอบ] ช่างเอ๋", shops.IN_HOUSE),
     ("อู่ใหม่ไม่รู้จัก", "อู่ใหม่ไม่รู้จัก"), ("", ""), (None, ""),
 ])
@@ -82,7 +82,7 @@ def test_shop_names_fold_into_one(written, canon):
 
 
 def test_the_board_offers_every_shop_you_named_plus_the_mechanic():
-    assert shops.choices() == ["อู่ชมรม", "อู่ช่างเก่ง", "โชคพัฒนา", "มงคลไดนาโม", "อู่ช่างลิ้ม", "ศูนย์ Isuzu", "ศูนย์ Hino", shops.IN_HOUSE]
+    assert shops.choices() == ["ชมรมย์การช่าง", "อู่ช่างเก่ง", "โชคพัฒนา", "มงคลไดนาโม", "ช่างลิ้ม 24 ไดนาโม", "อิซูซุจึงกงเฮงแก่งคอย", "ฮีโน่ เอเซีย หนองแค", shops.IN_HOUSE]
 
 
 # ----------------------------------------------- what becomes a row
@@ -106,9 +106,9 @@ def test_request_rows_are_dated_by_the_date_that_matters_for_their_stage(rows):
 
 def test_shop_and_truck_details_are_filled_in(rows):
     e4 = next(r for r in rows if r["key"] == "event:e4")
-    assert (e4["shop"], e4["plate"], e4["truck_number"], e4["branch"]) == ("ศูนย์ Isuzu", "1ฒถ 8966", "1", "สระบุรี")
+    assert (e4["shop"], e4["plate"], e4["truck_number"], e4["branch"]) == ("อิซูซุจึงกงเฮงแก่งคอย", "1ฒถ 8966", "1", "สระบุรี")
     r3 = next(r for r in rows if r["key"] == "request:r3")
-    assert r3["shop"] == "อู่ช่างลิ้ม" and r3["problem"] == "ไฟท้ายเสีย"            # who it came back from
+    assert r3["shop"] == "ช่างลิ้ม 24 ไดนาโม" and r3["problem"] == "ไฟท้ายเสีย"            # who it came back from
     r2 = next(r for r in rows if r["key"] == "request:r2")
     assert r2["shop"] == "โชคพัฒนา" and r2["sent_date"] == "2026-10-12"
 
@@ -144,7 +144,7 @@ def test_date_range_is_inclusive_and_filters_by_the_rows_own_date(rows):
 def test_branch_truck_shop_category_source(rows):
     assert {r["plate"] for r in q(rows, branch="แก่งคอย")["rows"]} == {"81-3195"}
     assert set(keys(q(rows, vehicle_id="v3"))) == {"event:e4", "request:r3"}
-    assert set(keys(q(rows, shop="อู่ชมรม"))) == {"event:e1"}
+    assert set(keys(q(rows, shop="ชมรมย์การช่าง"))) == {"event:e1"}
     assert set(keys(q(rows, shop=shops.IN_HOUSE))) == {"event:e3", "request:r4"}
     assert set(keys(q(rows, category="เบรก"))) == {"event:e1"}
     assert set(keys(q(rows, source="manual"))) == {"event:e3"}
@@ -213,7 +213,7 @@ def test_internal_search_text_never_leaks_to_the_page(rows):
 def test_facets_offer_every_shop_even_ones_with_no_work_yet(rows):
     f = logbook.facets(rows)
     counts = {s["value"]: s["count"] for s in f["shops"]}
-    assert counts["อู่ชมรม"] == 1 and counts["ศูนย์ Hino"] == 0 and counts["มงคลไดนาโม"] == 0
+    assert counts["ชมรมย์การช่าง"] == 1 and counts["ฮีโน่ เอเซีย หนองแค"] == 0 and counts["มงคลไดนาโม"] == 0
     assert {c["value"] for c in f["categories"]} == {"ไส้กรองและของเหลว", "เบรก", "ค่าแรง", "ช่วงล่าง", "คลัตช์"}
     assert {b["value"]: b["count"] for b in f["branches"]} == {"สระบุรี": 6, "แก่งคอย": 3}
     assert {s["value"]: s["count"] for s in f["statuses"]}["at_shop"] == 1

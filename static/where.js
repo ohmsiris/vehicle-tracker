@@ -46,8 +46,7 @@ function shopSection(s) {
 function shopCallsFor(name) {
   const info = (board.shopContacts || {})[name];
   if (!info) return null;
-  return el("div", { class: "shopcalls" }, el("span", { class: "muted small", text: info.full_name }),
-    ...(info.contacts.length ? info.contacts.map((c) => callLink(c.phone, c.label)) : [el("span", { class: "muted small", text: "ยังไม่มีเบอร์" })]));
+  return info.contacts.length ? el("div", { class: "shopcalls" }, ...info.contacts.map((c) => callLink(c.phone, c.label))) : null;
 }
 
 // who normally drives it (and their number), from the fleet list

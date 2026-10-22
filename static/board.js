@@ -445,8 +445,7 @@ function renderShopCalls() {
   const key = Object.keys(dir).find((k) => k.toLowerCase().replace(/\s+/g, "") === typed)
     || (typed.length >= 3 ? Object.keys(dir).find((k) => k.toLowerCase().replace(/\s+/g, "").includes(typed)) : null);
   const info = key ? dir[key] : null;
-  fill($("shopCalls"), ...(info ? [el("span", { class: "muted small", text: info.contacts.length ? `โทรหา ${info.full_name}:` : `${info.full_name} — ยังไม่มีเบอร์` }),
-    ...info.contacts.map((c) => callLink(c.phone, c.label))] : []));
+  fill($("shopCalls"), ...(info ? info.contacts.map((c) => callLink(c.phone, c.label)) : []));
 }
 
 async function submitShop() {
