@@ -143,12 +143,6 @@ function stageLine(r) {
   return "";
 }
 
-// Some trucks have no separate fleet number (it is just their plate): don't print it twice.
-function truckLabel(r) {
-  const same = r.truck_number && r.plate && r.plate.includes(r.truck_number);
-  return [r.truck_number && !same ? `#${r.truck_number}` : null, r.plate].filter(Boolean).join(" ") || "ไม่ระบุรถ";
-}
-
 function logRow(r) {
   const d = beDate(r.date).split(" ");
   const truck = truckLabel(r);

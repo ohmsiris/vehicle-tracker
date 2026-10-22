@@ -610,6 +610,8 @@ async function loadMeta() {
     state.categories = meta.categories;
     state.vehicles = meta.vehicles;
     board.fixers = meta.fixers || [];
+    board.shops = meta.shops || [];
+    $("addShop").replaceChildren(el("option", { value: "", text: "ยังไม่ได้ส่งอู่ (รอซ่อม)" }), ...board.shops.map((n) => el("option", { value: n, text: `ส่งอู่เลย: ${n}` })));
     $("tokenBox").hidden = true;
     fillVehicleSelect($("vehicleSelect"));
     fillVehicleSelect($("addVehicle"));

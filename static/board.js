@@ -9,15 +9,27 @@
 // helpers from app.js (state, $, el, api, showView, ...) at call time only.
 
 const board = {
-  active: [],      // open + awaiting_bill, from /api/requests?scope=active
+  active: [],      // open + at_shop + awaiting_bill, from /api/requests?scope=active
   recent: [],      // completed / cancelled, newest first
   fixers: [],      // names/shops seen before (suggestions)
+  shops: [],       // the shops you send trucks to (server list: app/shops.py)
+  drag: null,      // the card being dragged between columns
   attached: [],    // request ids the bill being entered will complete
   attachedInfo: null,
 };
 
 // Days before a request starts to look neglected (amber, then red).
-const AGE = { open: { warn: 7, bad: 14 }, awaiting_bill: { warn: 3, bad: 7 } };
+const AGE = { open: { warn: 7, bad: 14 }, at_shop: { warn: 7, bad: 14 }, awaiting_bill: { warn: 3, bad: 7 } };
+
+// label + badge colour of each step, used wherever a request is shown
+const REQ_STATUS = { open: ["รอซ่อม", "urgent"], at_shop: ["อยู่ที่อู่", "shop"], awaiting_bill: ["รอบิล", "warn"] };
+const reqStatusBadge = (status) => el("span", { class: `badge ${(REQ_STATUS[status] || [])[1] || ""}`.trim(), text: (REQ_STATUS[status] || [status])[0] });
+
+const addDaysISO = (iso, n) => {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return d.toLocaleDateString("sv-SE");
+};
 
 // --------------------------------------------------------------- helpers
 const todayISO = () => new Date().toLocaleDateString("sv-SE");   // YYYY-MM-DD in the viewer's timezone
@@ -72,8 +84,10 @@ function bindDateField(input, captionEl) {
 
 const thDate = beDate;
 
+// Some trucks have no separate fleet number (it is just their plate): don't print it twice.
 function truckLabel(r) {
-  return [r.truck_number ? `#${r.truck_number}` : null, r.plate].filter(Boolean).join(" ") || "ไม่ระบุรถ";
+  const same = r.truck_number && r.plate && r.plate.includes(r.truck_number);
+  return [r.truck_number && !same ? `#${r.truck_number}` : null, r.plate].filter(Boolean).join(" ") || "ไม่ระบุรถ";
 }
 
 function jsonOpts(method, body) {
@@ -111,13 +125,18 @@ async function loadBoard() {
 // --------------------------------------------------------------- rendering
 function renderBoard() {
   const open = board.active.filter((r) => r.status === "open");
+  const atShop = board.active
+    .filter((r) => r.status === "at_shop")
+    .sort((a, b) => atShopDays(b) - atShopDays(a));          // away longest first
   const awaiting = board.active
     .filter((r) => r.status === "awaiting_bill")
     .sort((a, b) => b.days_in_status - a.days_in_status);   // waiting longest first
 
   $("countOpen").textContent = open.length ? `(${open.length})` : "";
+  $("countAtShop").textContent = atShop.length ? `(${atShop.length})` : "";
   $("countAwaiting").textContent = awaiting.length ? `(${awaiting.length})` : "";
   $("openList").replaceChildren(...(open.length ? open.map((r) => requestCard(r, "open")) : [emptyNote("ไม่มีงานรอซ่อม")]));
+  $("atShopList").replaceChildren(...(atShop.length ? atShop.map((r) => requestCard(r, "at_shop")) : [emptyNote("ไม่มีรถที่อยู่ที่อู่")]));
   $("awaitingList").replaceChildren(...(awaiting.length ? awaiting.map((r) => requestCard(r, "awaiting_bill")) : [emptyNote("ไม่มีงานที่รอบิล")]));
   $("recentList").replaceChildren(...(board.recent.length ? board.recent.map(recentCard) : [emptyNote("ยังไม่มีงานที่ปิดแล้ว")]));
   $("recentBox").querySelector("summary").textContent = `ปิดแล้วล่าสุด${board.recent.length ? ` (${board.recent.length})` : ""}`;
@@ -125,37 +144,108 @@ function renderBoard() {
 
 const emptyNote = (text) => el("p", { class: "muted small empty", text });
 
+const atShopDays = (r) => (r.days_at_shop ?? (r.sent_date ? daysSince(r.sent_date) : 0));
+
+// แจ้ง -> ส่งอู่ -> กลับมา -> บิล: how far this request has got
+function stageRail(status) {
+  const reached = { open: 0, at_shop: 1, awaiting_bill: 2 }[status] ?? 0;
+  return el("div", { class: "rail", "aria-hidden": "true" },
+    ...["แจ้ง", "ส่งอู่", "กลับมา", "บิล"].map((t, i) => el("span", { class: `${i <= reached ? "on" : ""}${i === reached ? " cur" : ""}`.trim(), text: t })));
+}
+
 function requestCard(r, kind) {
-  const days = kind === "open" ? daysSince(r.request_date) : r.days_in_status;
+  const days = kind === "open" ? daysSince(r.request_date) : kind === "at_shop" ? atShopDays(r) : r.days_in_status;
+  const overdue = kind === "at_shop" && r.expected_return && r.expected_return < todayISO() ? daysSince(r.expected_return) : 0;
   const meta = kind === "open"
     ? [r.reported_by ? `ผู้แจ้ง ${r.reported_by}` : null, `แจ้งเมื่อ ${thDate(r.request_date)}`]
-    : [`ซ่อมโดย ${r.fixed_by || "-"}`, `เมื่อ ${thDate(r.fixed_date)}`, r.reported_by ? `ผู้แจ้ง ${r.reported_by}` : null];
+    : kind === "at_shop"
+      ? [`ส่ง ${r.shop} เมื่อ ${thDate(r.sent_date)}`, r.expected_return ? `คาดว่ากลับ ${thDate(r.expected_return)}` : null, `แจ้งเมื่อ ${thDate(r.request_date)}`]
+      : [`ซ่อมโดย ${r.fixed_by || "-"}`, `เมื่อ ${thDate(r.fixed_date)}`, r.reported_by ? `ผู้แจ้ง ${r.reported_by}` : null];
 
   const small = (text, title, fn, cls = "") => el("button", { class: `btn small ${cls}`.trim(), type: "button", title, text, onclick: fn });
+  const story = small("ขั้นตอน", "ดูเส้นทางของงานนี้", () => showBoardRequest(r));
   const actions = kind === "open"
     ? [
-        el("button", { class: "btn primary", type: "button", text: "ซ่อมแล้ว ✓", onclick: () => openFixDialog(r) }),
+        el("button", { class: "btn primary", type: "button", text: "ส่งซ่อม →", onclick: () => openSendDialog(r) }),
+        el("button", { class: "btn", type: "button", title: "ซ่อมเอง หรือซ่อมเสร็จแล้วโดยไม่ได้บันทึกว่าส่งที่ไหน", text: "ซ่อมแล้ว ✓", onclick: () => openFixDialog(r) }),
         small("✎", "แก้ข้อความ", () => editProblem(r)),
         small(r.urgent ? "เลิกด่วน" : "ด่วน", "สลับสถานะด่วน", () => patchRequest(r.request_id, { urgent: !r.urgent })),
         small("ยกเลิก", "ยกเลิกงานนี้", () => cancelRequest(r), "danger"),
       ]
-    : [
-        el("button", { class: "btn primary", type: "button", text: "เพิ่มบิล →", onclick: () => startBillFor(r) }),
-        el("button", { class: "btn", type: "button", text: "ไม่มีบิล", onclick: () => openNoBillDialog(r) }),
-        small("← ย้อนกลับ", "กลับไปเป็นรอซ่อม", () => runAction(r.request_id, { action: "reopen" })),
-        small("ยกเลิก", "ยกเลิกงานนี้", () => cancelRequest(r), "danger"),
-      ];
+    : kind === "at_shop"
+      ? [
+          el("button", { class: "btn primary", type: "button", text: "รถกลับมาแล้ว ✓", onclick: () => openReturnDialog(r) }),
+          small("เปลี่ยนอู่ / วันที่", "แก้ไขข้อมูลการส่งซ่อม", () => openSendDialog(r)),
+          small("← เรียกรถคืน", "ยังไม่ได้ส่งจริง กลับไปเป็นรอซ่อม", () => recallFromShop(r)),
+          small("ยกเลิก", "ยกเลิกงานนี้", () => cancelRequest(r), "danger"),
+        ]
+      : [
+          el("button", { class: "btn primary", type: "button", text: "เพิ่มบิล →", onclick: () => startBillFor(r) }),
+          el("button", { class: "btn", type: "button", text: "ไม่มีบิล", onclick: () => openNoBillDialog(r) }),
+          small("← ย้อนกลับ", r.sent_date ? "กลับไปเป็นอยู่ที่อู่" : "กลับไปเป็นรอซ่อม", () => stepBack(r)),
+          small("ยกเลิก", "ยกเลิกงานนี้", () => cancelRequest(r), "danger"),
+        ];
 
-  return el("div", { class: `req${r.urgent ? " urgent" : ""}` },
+  const card = el("div", { class: `req${r.urgent ? " urgent" : ""}${overdue ? " late" : ""}`, "data-id": r.request_id },
     el("div", { class: "req-head" },
       el("span", { class: "req-no", text: `#${r.request_no}` }),
       el("strong", { text: truckLabel(r) }),
       r.branch ? el("span", { class: "muted small", text: r.branch }) : null,
       r.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null,
+      r.on_paper === false ? el("span", { class: "badge nobill", title: "ไม่ได้ลงใบแจ้งซ่อมกระดาษ", text: "ไม่มีในใบแจ้ง" }) : null,
+      overdue ? el("span", { class: "badge urgent", text: `เลยกำหนด ${overdue} วัน` }) : null,
       ageChip(days, kind)),
     el("p", { class: "req-problem", text: r.problem }),
     el("p", { class: "muted small", text: meta.filter(Boolean).join(" · ") }),
-    el("div", { class: "req-actions" }, ...actions));
+    stageRail(kind),
+    el("div", { class: "req-actions" }, ...actions, story));
+  wireDrag(card, r);
+  return card;
+}
+
+// The timeline dialog lives with the maintenance log (logbook.js); a board row has the same fields.
+function showBoardRequest(r) {
+  showRequestDialog({ ...r, shop_raw: r.shop || r.fixed_by, status_label: (REQ_STATUS[r.status] || [r.status])[0] });
+}
+
+// ---- moving cards: drag to the next column (desktop) or use the buttons (phone) -- both end in the same dialogs
+function wireDrag(card, r) {
+  card.draggable = true;
+  card.addEventListener("dragstart", (e) => {
+    board.drag = r;
+    e.dataTransfer.setData("text/plain", r.request_id);
+    e.dataTransfer.effectAllowed = "move";
+    card.classList.add("dragging");
+  });
+  card.addEventListener("dragend", () => {
+    board.drag = null;
+    card.classList.remove("dragging");
+    document.querySelectorAll(".kcol.dragover").forEach((c) => c.classList.remove("dragover"));
+  });
+}
+
+function wireColumns() {
+  document.querySelectorAll(".kcol").forEach((col) => {
+    col.addEventListener("dragover", (e) => { if (board.drag) { e.preventDefault(); col.classList.add("dragover"); } });
+    col.addEventListener("dragleave", (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove("dragover"); });
+    col.addEventListener("drop", (e) => {
+      e.preventDefault();
+      col.classList.remove("dragover");
+      const r = board.drag;
+      board.drag = null;
+      if (r) moveTo(r, col.dataset.status);
+    });
+  });
+}
+
+function moveTo(r, target) {
+  if (r.status === target) return;
+  if (r.status === "open" && target === "at_shop") return openSendDialog(r);
+  if (r.status === "open" && target === "awaiting_bill") return openFixDialog(r);
+  if (r.status === "at_shop" && target === "awaiting_bill") return openReturnDialog(r);
+  if (r.status === "at_shop" && target === "open") return recallFromShop(r);
+  if (r.status === "awaiting_bill" && target === "at_shop" && r.sent_date) return stepBack(r);
+  showBoardError("ย้ายข้ามขั้นแบบนี้ไม่ได้ — ย้ายไปทีละขั้น (รอซ่อม → อยู่ที่อู่ → รอบิล) หรือใช้ปุ่มในการ์ด");
 }
 
 function recentCard(r) {
@@ -164,7 +254,8 @@ function recentCard(r) {
   else if (r.no_bill) badges.push(el("span", { class: "badge nobill", text: "ปิดโดยไม่มีบิล" }));
   else badges.push(el("span", { class: "badge ok", text: r.has_record ? "ปิดแล้ว · มีบิล/บันทึก" : "ปิดแล้ว" }));
   const meta = [
-    r.fixed_by ? `ซ่อมโดย ${r.fixed_by}` : null,
+    r.sent_date ? `ส่ง ${r.shop} เมื่อ ${thDate(r.sent_date)}` : null,
+    r.fixed_by && r.fixed_by !== r.shop ? `ซ่อมโดย ${r.fixed_by}` : null,
     r.fixed_date ? `เมื่อ ${thDate(r.fixed_date)}` : null,
     r.no_bill && r.no_bill_reason ? `เหตุผล: ${r.no_bill_reason}` : null,
   ].filter(Boolean).join(" · ");
@@ -215,9 +306,94 @@ async function cancelRequest(r) {
 }
 
 async function reopenRecent(r) {
-  if (!confirm(`ย้อนงาน #${r.request_no} กลับไปเป็นรอซ่อมใช่ไหม?`)) return;
+  if (!confirm(`ย้อนงาน #${r.request_no} กลับไป${r.sent_date ? "เป็นอยู่ที่อู่" : "เป็นรอซ่อม"}ใช่ไหม?`)) return;
   const err = await runAction(r.request_id, { action: "reopen" });
   if (err) showBoardError(err);
+}
+
+// undo one step: waiting-for-bill -> back at the shop (or -> waiting, if it never went to one)
+async function stepBack(r) {
+  const err = await runAction(r.request_id, { action: "reopen" });
+  if (err) showBoardError(err);
+}
+
+// "we haven't actually sent it" / the shop sent it back unfixed
+async function recallFromShop(r) {
+  if (!confirm(`เรียก #${r.request_no} (${truckLabel(r)}) คืนจาก ${r.shop} กลับไปเป็นรอซ่อมใช่ไหม?`)) return;
+  const err = await runAction(r.request_id, { action: "reopen" });
+  if (err) showBoardError(err);
+}
+
+// ---- "ส่งซ่อม": which shop, since when, expected back
+let shopTarget = null;
+
+function openSendDialog(r) {
+  shopTarget = r;
+  $("shopTitle").textContent = r.status === "at_shop" ? "แก้ไขการส่งซ่อม" : "ส่งซ่อมที่…";
+  $("shopOk").textContent = r.status === "at_shop" ? "บันทึก" : "ส่งซ่อม";
+  $("shopSummary").textContent = `#${r.request_no} · ${truckLabel(r)} · ${r.problem}`;
+  $("shopName").value = r.shop || "";
+  $("shopDate").min = r.request_date;
+  $("shopDate").max = todayISO();
+  $("shopDate").value = r.sent_date || todayISO();
+  $("shopDateCap").textContent = dateCaption($("shopDate").value);
+  $("shopBack").value = r.expected_return || "";
+  $("shopBack").min = $("shopDate").value;
+  $("shopBackCap").textContent = dateCaption($("shopBack").value);
+  $("shopError").hidden = true;
+  const names = [...new Set([...board.shops, ...board.fixers])];
+  $("shopList").replaceChildren(...names.map((n) => el("option", { value: n })));
+  $("shopChips").replaceChildren(...board.shops.map((n) => el("button", { class: "chipbtn", type: "button", text: n, onclick: () => { $("shopName").value = n; } })));
+  $("shopBackChips").replaceChildren(...[3, 7, 14].map((n) => el("button", { class: "chipbtn", type: "button", text: `อีก ${n} วัน`, onclick: () => {
+    $("shopBack").value = addDaysISO($("shopDate").value || todayISO(), n);
+    $("shopBackCap").textContent = dateCaption($("shopBack").value);
+  } })));
+  $("shopDialog").showModal();
+}
+
+async function submitShop() {
+  const err = await runAction(shopTarget.request_id, {
+    action: "send_to_shop", shop: $("shopName").value.trim(), sent_date: $("shopDate").value || null, expected_return: $("shopBack").value || null,
+  });
+  if (err) {
+    $("shopError").textContent = err;
+    $("shopError").hidden = false;
+    return;
+  }
+  $("shopDialog").close();
+}
+
+// ---- "รถกลับมาแล้ว": when it came back (the days away are shown as you pick the date)
+let returnTarget = null;
+
+function updateReturnDays() {
+  const r = returnTarget, back = $("returnDate").value;
+  if (!r || !back) { $("returnDays").textContent = ""; return; }
+  const days = Math.round((new Date(`${back}T00:00:00`) - new Date(`${r.sent_date}T00:00:00`)) / 86400000);
+  $("returnDays").textContent = days >= 0 ? `อยู่ที่ ${r.shop} ${days} วัน (ส่ง ${thDate(r.sent_date)})` : "วันที่รถกลับมาต้องไม่ก่อนวันที่ส่งซ่อม";
+}
+
+function openReturnDialog(r) {
+  returnTarget = r;
+  $("returnSummary").textContent = `#${r.request_no} · ${truckLabel(r)} · ${r.problem} — ที่ ${r.shop}`;
+  $("returnDate").min = r.sent_date;
+  $("returnDate").max = todayISO();
+  $("returnDate").value = todayISO();
+  $("returnDateCap").textContent = dateCaption($("returnDate").value);
+  $("returnReason").value = "";
+  $("returnError").hidden = true;
+  updateReturnDays();
+  $("returnDialog").showModal();
+}
+
+async function submitReturn(action) {
+  const err = await runAction(returnTarget.request_id, { action, fixed_date: $("returnDate").value || null, reason: $("returnReason").value.trim() });
+  if (err) {
+    $("returnError").textContent = err;
+    $("returnError").hidden = false;
+    return;
+  }
+  $("returnDialog").close();
 }
 
 // ---- "ซ่อมแล้ว": who fixed it, then bill / no bill
@@ -287,10 +463,13 @@ async function submitNewRequest(e) {
   try {
     await api("/api/requests", jsonOpts("POST", {
       vehicle_id: veh.id, problem, reported_by: $("addReporter").value.trim() || null, urgent: $("addUrgent").checked,
+      shop: $("addShop").value || null, on_paper: $("addOffPaper").checked ? false : null,
     }));
     $("addProblem").value = "";
     $("addReporter").value = "";
     $("addUrgent").checked = false;
+    $("addShop").value = "";
+    $("addOffPaper").checked = false;
     $("addProblem").focus();
     await loadBoard();
   } catch (e2) {
@@ -336,7 +515,7 @@ function renderFixes() {
     box.checked = board.attached.includes(r.request_id);
     return el("label", { class: "fixrow" }, box,
       el("span", {}, el("strong", { text: `#${r.request_no} ` }), `${r.problem} `,
-        el("span", { class: "muted small", text: r.status === "awaiting_bill" ? "(ซ่อมแล้ว รอบิล)" : `(ยังไม่ได้ซ่อม · แจ้ง ${thDate(r.request_date)})` })));
+        el("span", { class: "muted small", text: r.status === "awaiting_bill" ? "(ซ่อมแล้ว รอบิล)" : r.status === "at_shop" ? `(อยู่ที่ ${r.shop})` : `(ยังไม่ได้ซ่อม · แจ้ง ${thDate(r.request_date)})` })));
   }));
 }
 
@@ -350,6 +529,18 @@ function initBoard() {
   $("fixCancel").addEventListener("click", () => $("fixDialog").close());
   $("fixHasBill").addEventListener("click", () => submitFix("fixed_awaiting_bill"));
   $("fixNoBill").addEventListener("click", () => submitFix("fixed_no_bill"));
+  $("shopCancel").addEventListener("click", () => $("shopDialog").close());
+  $("shopOk").addEventListener("click", submitShop);
+  bindDateField($("shopDate"), $("shopDateCap"));
+  bindDateField($("shopBack"), $("shopBackCap"));
+  $("shopDate").addEventListener("change", () => { $("shopBack").min = $("shopDate").value; });
+  $("returnCancel").addEventListener("click", () => $("returnDialog").close());
+  $("returnOk").addEventListener("click", () => submitReturn("returned"));
+  $("returnNoBill").addEventListener("click", () => submitReturn("returned_no_bill"));
+  bindDateField($("returnDate"), $("returnDateCap"));
+  $("returnDate").addEventListener("change", updateReturnDays);
+  $("returnDate").addEventListener("input", updateReturnDays);
+  wireColumns();
   $("noBillCancel").addEventListener("click", () => $("noBillDialog").close());
   $("noBillOk").addEventListener("click", submitNoBill);
   $("attachClear").addEventListener("click", clearAttachment);

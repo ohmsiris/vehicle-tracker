@@ -36,7 +36,8 @@ service key bypasses row-level security: server-side only, never in a page.
 
 **Database** (Supabase SQL Editor, in this order): `schema.sql`, then
 `schema_v2.sql`, then `schema_v3_dashboard.sql` (only needed for Looker), then
-`schema_v4.sql` (editing saved bills + the written summary). Replace
+`schema_v4.sql` (editing saved bills + the written summary), then
+`schema_v5.sql` (the "at the shop" step of the repair flow). Replace
 `<PROJECT_REF>` in `schema.sql` first. Then seed the fleet:
 
 ```bash
@@ -254,3 +255,33 @@ One page, two modes (switch at the top):
   dashboard and board. It can close the truck's waiting repair requests, and the
   board's "ซ่อมแล้ว" dialog has a **ช่างทำเอง → กรอกบันทึก** button that opens this
   form with the request already ticked.
+
+## Repair flow: reported -> at a shop -> back -> bill
+
+```
+open --send_to_shop--> at_shop --returned--> awaiting_bill --(bill saved)--> completed
+ |                        \--returned, no bill--------------------------> completed (no bill)
+ |--"fixed" (own mechanic / shop never recorded)--> awaiting_bill
+ \--cancel (also from at_shop / awaiting_bill)
+```
+
+- The board has three columns -- รอซ่อม, อยู่ที่อู่, กลับมาแล้ว รอบิล -- and each
+  card shows a rail (แจ้ง -> ส่งอู่ -> กลับมา -> บิล), how many days it has been in
+  its column (amber at 7 days at a shop, red at 14) and "เลยกำหนด N วัน" once an
+  expected-return date has passed. Drag a card to the next column on a computer,
+  or use the buttons (always available, and the only way on a phone); both open
+  the same dialog. Moves go one step at a time; "back" undoes one step
+  (waiting-for-bill -> at the shop, at the shop -> waiting).
+- **Sending to a shop** asks for the shop (buttons for the usual ones, or type any;
+  spellings are folded to one name by `app/shops.py`), the date sent (default
+  today) and optionally when it should be back. **Back** asks for the return date and
+  shows the days it was away. A saved bill closes a request in any of the three
+  columns, so a bill that arrives early is fine.
+- An emergency that went straight to a shop and never reached the paper sheet:
+  tick "ไม่ได้ลงใบแจ้งซ่อมกระดาษ" and pick the shop when adding it. It is marked
+  "ไม่มีในใบแจ้ง" and is found in the log (`#log`) afterwards.
+- `schema_v5.sql` adds `shop`, `sent_date`, `expected_return`, `on_paper` to
+  `repair_requests`, the `at_shop` status, `days_at_shop` / `at_shop_requests` on
+  the views, and teaches `save_maintenance_event()` about it. Until it has been run
+  the app works exactly as before and the new buttons say so instead of failing
+  (`repair_requests.has_v5()` probes for the columns).

@@ -20,6 +20,7 @@ function compactBaht(n) {
 
 const FLAG_LABELS = {
   open_requests: ["มีงานรอซ่อม", "warn"],
+  at_shop: ["อยู่ที่อู่", "shop"],
   awaiting_bill: ["รอบิล", "warn"],
   not_serviced_lately: ["ไม่เข้าซ่อมนาน", ""],
   no_history: ["ยังไม่มีประวัติ", ""],
@@ -114,6 +115,9 @@ function renderKpis(d) {
     kpi("งานรอซ่อม · ตอนนี้", String(k.open_requests),
       k.open_requests ? (k.avg_days_to_fix === null ? "จากใบแจ้งซ่อมที่ใส่ไว้" : `แจ้ง→ซ่อมเฉลี่ย ${k.avg_days_to_fix} วัน`) : "ไม่มีงานค้าง",
       k.open_requests ? "warn" : "", "นับจากใบแจ้งซ่อมที่ใส่ในระบบเท่านั้น"),
+    kpi("อยู่ที่อู่ · ตอนนี้", String(k.at_shop || 0),
+      k.at_shop ? `นานสุด ${k.longest_at_shop_days} วัน` : "ไม่มีรถที่อู่",
+      k.longest_at_shop_days >= 14 ? "bad" : k.at_shop ? "warn" : "", "รถที่ส่งซ่อมแล้วยังไม่กลับ นับจากวันที่ส่ง"),
     kpi("ซ่อมแล้ว รอบิล · ตอนนี้", String(k.awaiting_bill),
       k.awaiting_bill ? `นานสุด ${k.oldest_awaiting_days} วัน` : "ไม่มีบิลค้าง",
       k.oldest_awaiting_days >= 7 ? "bad" : k.awaiting_bill ? "warn" : "", "นับจากใบแจ้งซ่อมที่ใส่ในระบบเท่านั้น"),
@@ -172,7 +176,7 @@ function renderFleet(d) {
       el("td", { text: f.branch || "" }),
       el("td", { text: f.last_service_date ? `${beDate(f.last_service_date)} (${f.days_since_service} วันก่อน)` : "–" }),
       el("td", { text: f.last_known_mileage ? `${baht(f.last_known_mileage)}${f.next_service_mileage ? ` → ${baht(f.next_service_mileage)}` : ""}` : "–" }),
-      el("td", { text: [f.open_requests ? `รอซ่อม ${f.open_requests}` : null, f.awaiting_bill_requests ? `รอบิล ${f.awaiting_bill_requests}` : null].filter(Boolean).join(" · ") || "–" }),
+      el("td", { text: [f.open_requests ? `รอซ่อม ${f.open_requests}` : null, f.at_shop_requests ? `อยู่ที่อู่ ${f.at_shop_requests}` : null, f.awaiting_bill_requests ? `รอบิล ${f.awaiting_bill_requests}` : null].filter(Boolean).join(" · ") || "–" }),
       el("td", { class: "num", text: f.spend_period ? baht(f.spend_period) : "–" }),
       el("td", {}, ...f.flags.map((fl) => el("span", { class: `badge ${FLAG_LABELS[fl][1]}`.trim(), text: FLAG_LABELS[fl][0] })))))));
 }

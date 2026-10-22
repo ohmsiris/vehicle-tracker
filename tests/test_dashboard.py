@@ -284,3 +284,30 @@ def test_done_count_respects_branch_and_window():
                 rq("completed", fixed="2024-01-01", no_bill=True)]
     assert build(requests=requests, branch="แก่งคอย", months=6)["kpis"]["done_period"]["total"] == 1
     assert build(requests=requests, months=6)["kpis"]["done_period"]["total"] == 2     # the 2024 one is outside the window
+
+
+# ------------------------------------------------------------ trucks at a shop
+def test_trucks_at_a_shop_are_counted_with_the_longest_stay():
+    requests = [req("open"), {**req("at_shop", days_in_status=4), "days_at_shop": 4}, {**req("at_shop", days_in_status=11), "days_at_shop": 11},
+                req("awaiting_bill", days_in_status=3, days_to_fix=2, fixed_date="2026-10-14")]
+    k = build(requests=requests)["kpis"]
+    assert (k["open_requests"], k["at_shop"], k["longest_at_shop_days"], k["awaiting_bill"]) == (1, 2, 11, 1)
+
+
+def test_no_trucks_at_shops_gives_zero_not_an_error():
+    k = build(requests=[req("open")])["kpis"]
+    assert k["at_shop"] == 0 and k["longest_at_shop_days"] == 0
+
+
+def test_an_at_shop_request_is_never_counted_as_a_finished_repair():
+    d = build(requests=[{**req("at_shop", days_in_status=4), "days_at_shop": 4}])
+    assert d["kpis"]["done_period"]["total"] == 0 and d["kpis"]["avg_days_to_fix"] is None
+
+
+def test_fleet_flags_a_truck_at_a_shop_between_open_work_and_bills():
+    vehicles = [veh("o", "OPEN", "1", last="2026-10-15", open_=1), veh("s", "SHOP", "2", last="2026-10-15"),
+                veh("w", "AWAIT", "3", last="2026-10-15", awaiting=1), veh("q", "QUIET", "4", last="2026-10-15")]
+    vehicles[1]["at_shop_requests"] = 1
+    fleet = build(vehicles=vehicles)["fleet"]
+    assert [f["plate"] for f in fleet][:3] == ["OPEN", "SHOP", "AWAIT"]
+    assert {f["plate"]: f["flags"] for f in fleet}["SHOP"] == ["at_shop"] and fleet[1]["at_shop_requests"] == 1

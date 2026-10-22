@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, history, logbook, logsource, repair_requests, summarize, supabase
+from app import dashboard, events, history, logbook, logsource, repair_requests, shops, summarize, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -118,7 +118,7 @@ def meta(x_app_token: str = Header(default=""), token: str = Query(default="")) 
             fixers += [f for f in repair_requests.known_fixers() if f not in fixers]
         except supabase.SupabaseError:
             logger.exception("could not load fixer suggestions")
-    return {"categories": CATEGORIES, "vehicles": load_roster(), "fixers": fixers}
+    return {"categories": CATEGORIES, "vehicles": load_roster(), "fixers": fixers, "shops": shops.choices()}
 
 
 # Dev-only: serves a saved extraction response so the review UI can be
@@ -279,6 +279,10 @@ class NewRequest(BaseModel):
     reported_by: str | None = Field(default=None, max_length=150)
     urgent: bool = False
     request_date: str | None = None
+    shop: str | None = Field(default=None, max_length=150)             # already at a shop when it is added
+    sent_date: str | None = None
+    expected_return: str | None = None
+    on_paper: bool | None = None                                       # False = never written on the FOH sheet (emergency)
 
 
 class EditRequest(BaseModel):
@@ -292,6 +296,9 @@ class RequestAction(BaseModel):
     fixed_by: str = Field(default="", max_length=150)
     fixed_date: str | None = None
     reason: str = Field(default="", max_length=600)
+    shop: str = Field(default="", max_length=150)
+    sent_date: str | None = None
+    expected_return: str | None = None
 
 
 def _board_call(fn, *args, **kwargs):
@@ -337,6 +344,7 @@ def request_action(request_id: str, body: RequestAction, x_app_token: str = Head
     return _board_call(
         repair_requests.act, request_id, body.action,
         fixed_by=body.fixed_by, fixed_date=body.fixed_date, reason=body.reason,
+        shop=body.shop, sent_date=body.sent_date, expected_return=body.expected_return,
     )
 
 

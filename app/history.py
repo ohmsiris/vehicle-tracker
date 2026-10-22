@@ -12,7 +12,7 @@ import uuid
 from datetime import date, timedelta
 from typing import Optional
 
-from app import supabase
+from app import repair_requests, supabase
 
 PREVIEW_LINES = 4          # how many line descriptions the one-line preview names
 CHUNK = 50                 # ids per `in.(...)` filter, to keep request URLs short
@@ -118,6 +118,7 @@ def vehicle_rows(vehicles: list[dict], status: dict[str, dict], events: list[dic
             "truck_number": v.get("vehicle_number") or "", "branch": v.get("branch") or "",
             "make": v.get("make") or "", "model": v.get("model") or "",
             "open_requests": int(st.get("open_requests") or 0), "awaiting_bill_requests": int(st.get("awaiting_bill_requests") or 0),
+            "at_shop_requests": int(st.get("at_shop_requests") or 0),
             "last_service_date": st.get("last_service_date"), "days_since_service": st.get("days_since_service"),
             "last_known_mileage": st.get("last_known_mileage"), "next_service_mileage": st.get("next_service_mileage"),
             "repairs_total": n, "spend_total": round(total, 2),
@@ -151,7 +152,8 @@ def list_vehicles() -> list[dict]:
         "select": "id,plate_number,plate_province,vehicle_number,make,model,branch", "active": "eq.true",
         "order": "branch.asc,vehicle_number.asc,id.asc"})
     status = {r["vehicle_id"]: r for r in supabase.select_all("v_vehicle_status", {
-        "select": "vehicle_id,open_requests,awaiting_bill_requests,last_service_date,days_since_service,last_known_mileage,next_service_mileage",
+        "select": "vehicle_id,open_requests,awaiting_bill_requests,last_service_date,days_since_service,last_known_mileage,next_service_mileage"
+                  + (",at_shop_requests" if repair_requests.has_v5() else ""),
         "order": "vehicle_id.asc"})}
     events = supabase.select_all("v_events", {"select": "vehicle_id,total_cost", "order": "event_id.asc"})
     return vehicle_rows(vehicles, status, events)

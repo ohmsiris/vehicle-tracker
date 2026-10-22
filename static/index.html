@@ -66,17 +66,31 @@
         <input id="addReporter" type="text" placeholder="ผู้แจ้ง (ไม่บังคับ)" maxlength="100" aria-label="ผู้แจ้ง">
         <label class="inline"><input id="addUrgent" type="checkbox"> ด่วน</label>
         <button class="btn primary" type="submit">เพิ่ม</button>
+        <div class="addextra">
+          <select id="addShop" aria-label="ส่งซ่อมที่ไหน"><option value="">ยังไม่ได้ส่งอู่ (รอซ่อม)</option></select>
+          <label class="inline"><input id="addOffPaper" type="checkbox"> เสียฉุกเฉิน — ไม่ได้ลงใบแจ้งซ่อมกระดาษ</label>
+        </div>
       </form>
       <p class="error" id="addError" hidden></p>
     </div>
 
     <p class="error" id="boardError" hidden></p>
 
-    <h2 class="section-title">รอซ่อม <span class="count" id="countOpen"></span></h2>
-    <div id="openList" class="reqlist"></div>
-
-    <h2 class="section-title">ซ่อมแล้ว — รอบิล <span class="count" id="countAwaiting"></span></h2>
-    <div id="awaitingList" class="reqlist"></div>
+    <p class="muted small boardhint">เส้นทางของรถ: แจ้งซ่อม → ส่งอู่ → รถกลับมา → บิลตามมา · ลากการ์ดไปคอลัมน์ถัดไปได้ (บนมือถือใช้ปุ่มในการ์ด)</p>
+    <div class="kanban">
+      <section class="kcol" data-status="open" aria-label="รอซ่อม">
+        <h2 class="section-title">รอซ่อม <span class="count" id="countOpen"></span></h2>
+        <div id="openList" class="reqlist"></div>
+      </section>
+      <section class="kcol" data-status="at_shop" aria-label="อยู่ที่อู่">
+        <h2 class="section-title">อยู่ที่อู่ <span class="count" id="countAtShop"></span></h2>
+        <div id="atShopList" class="reqlist"></div>
+      </section>
+      <section class="kcol" data-status="awaiting_bill" aria-label="รถกลับมาแล้ว รอบิล">
+        <h2 class="section-title">กลับมาแล้ว — รอบิล <span class="count" id="countAwaiting"></span></h2>
+        <div id="awaitingList" class="reqlist"></div>
+      </section>
+    </div>
 
     <details id="recentBox" class="card">
       <summary>ปิดแล้วล่าสุด</summary>
@@ -418,6 +432,46 @@
   <div class="dialog-actions">
     <button type="button" class="btn" id="reqDlgBoard">ไปที่กระดานงานซ่อม</button>
     <button type="button" class="btn primary" id="reqDlgClose">ปิด</button>
+  </div>
+</dialog>
+
+<!-- Send a request to a shop (or change where it is) -->
+<dialog id="shopDialog">
+  <h3 id="shopTitle">ส่งซ่อมที่…</h3>
+  <p id="shopSummary" class="muted small"></p>
+  <label for="shopName">อู่ / ศูนย์ / ช่าง</label>
+  <input id="shopName" list="shopList" type="text" maxlength="100" autocomplete="off" placeholder="เลือกด้านล่าง หรือพิมพ์ชื่อเอง">
+  <datalist id="shopList"></datalist>
+  <div id="shopChips" class="chips"></div>
+  <label for="shopDate">วันที่ส่งซ่อม <span class="muted small">(ปีที่แสดงใต้ช่อง เป็น พ.ศ.)</span></label>
+  <input id="shopDate" type="date">
+  <div id="shopDateCap" class="datecap"></div>
+  <label for="shopBack">คาดว่าจะได้รถคืน <span class="muted small">(ไม่บังคับ — ไว้เตือนเมื่อเกินกำหนด)</span></label>
+  <input id="shopBack" type="date">
+  <div id="shopBackCap" class="datecap"></div>
+  <div id="shopBackChips" class="chips"></div>
+  <p class="error" id="shopError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="shopCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="shopOk">ส่งซ่อม</button>
+  </div>
+</dialog>
+
+<!-- The truck is back from the shop -->
+<dialog id="returnDialog">
+  <h3>รถกลับมาแล้ว</h3>
+  <p id="returnSummary" class="muted small"></p>
+  <label for="returnDate">วันที่รถกลับมา <span class="muted small">(ปีที่แสดงใต้ช่อง เป็น พ.ศ.)</span></label>
+  <input id="returnDate" type="date">
+  <div id="returnDateCap" class="datecap"></div>
+  <p id="returnDays" class="returndays"></p>
+  <label for="returnReason">เหตุผลที่ไม่มีบิล (ไม่บังคับ — ใช้เมื่อกด "ไม่มีบิล")</label>
+  <input id="returnReason" type="text" maxlength="200" placeholder="เช่น งานเล็กน้อย / ร้านไม่ให้บิล">
+  <p class="error" id="returnError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="returnCancel">ยกเลิก</button>
+    <button type="button" class="btn" id="returnNoBill">ไม่มีบิล — ปิดงานเลย</button>
+    <button type="button" class="btn primary" id="returnOk">รอบิล</button>
   </div>
 </dialog>
 

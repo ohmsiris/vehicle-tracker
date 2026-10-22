@@ -225,7 +225,8 @@ def test_action_endpoint_passes_fields_through(monkeypatch):
     r = client.post("/api/requests/abc/action?token=secret",
                     json={"action": "fixed_awaiting_bill", "fixed_by": "ช่างเอ๋", "fixed_date": "2026-10-20", "reason": ""})
     assert r.status_code == 200
-    assert seen == {"rid": "abc", "action": "fixed_awaiting_bill", "fixed_by": "ช่างเอ๋", "fixed_date": "2026-10-20", "reason": ""}
+    assert seen == {"rid": "abc", "action": "fixed_awaiting_bill", "fixed_by": "ช่างเอ๋", "fixed_date": "2026-10-20", "reason": "",
+                    "shop": "", "sent_date": None, "expected_return": None}
 
 
 def test_edit_endpoint_sends_only_fields_the_page_sent(monkeypatch):
@@ -248,3 +249,168 @@ def test_buddhist_year_in_the_fixed_date_gets_a_specific_message():
     with pytest.raises(rr.InvalidRequest) as exc:
         act(req(), "fixed_awaiting_bill", fixed_by="ช่างเอ๋", fixed_date="2569-10-15")
     assert "พ.ศ." in str(exc.value) and "2026" in str(exc.value)
+
+
+# ------------------------------------------------- the "at the shop" step (schema_v5)
+def test_send_to_shop():
+    v = act(req(), "send_to_shop", shop="  อู่ชมรม ", sent_date="2026-10-12", expected_return="2026-10-25")
+    assert v == {"status": "at_shop", "shop": "อู่ชมรม", "sent_date": "2026-10-12", "expected_return": "2026-10-25"}
+
+
+def test_send_to_shop_defaults_to_today_and_needs_no_return_date():
+    v = act(req(), "send_to_shop", shop="ศูนย์ Hino")
+    assert v["sent_date"] == "2026-10-20" and v["expected_return"] is None
+
+
+def test_the_shop_name_is_folded_to_the_canonical_one():
+    assert act(req(), "send_to_shop", shop="ชมรมย์การช่าง")["shop"] == "อู่ชมรม"
+    assert act(req(), "send_to_shop", shop="isuzu")["shop"] == "ศูนย์ Isuzu"
+    assert act(req(), "send_to_shop", shop="อู่ใหม่ของเพื่อน")["shop"] == "อู่ใหม่ของเพื่อน"      # unknown shops are kept as typed
+
+
+@pytest.mark.parametrize("kwargs, fragment", [
+    ({"shop": ""}, "อู่"),
+    ({"shop": "  "}, "อู่"),
+    ({"shop": "อู่ชมรม", "sent_date": "2026-10-09"}, "ก่อนวันที่แจ้ง"),
+    ({"shop": "อู่ชมรม", "sent_date": "2026-12-25"}, "อนาคต"),
+    ({"shop": "อู่ชมรม", "sent_date": "2569-10-15"}, "พ.ศ."),
+    ({"shop": "อู่ชมรม", "sent_date": "2026-10-15", "expected_return": "2026-10-14"}, "ก่อนวันที่ส่ง"),
+    ({"shop": "อู่ชมรม", "expected_return": "2027-06-01"}, "ไกลเกินไป"),
+    ({"shop": "อู่ชมรม", "expected_return": "2569-10-30"}, "พ.ศ."),
+    ({"shop": "อู่ชมรม", "expected_return": "30/10/2026"}, "ไม่ถูกต้อง"),
+])
+def test_sending_to_a_shop_validates(kwargs, fragment):
+    with pytest.raises(rr.InvalidRequest) as exc:
+        act(req(), "send_to_shop", **kwargs)
+    assert fragment in str(exc.value)
+
+
+def test_an_expected_return_may_be_in_the_future():
+    assert act(req(), "send_to_shop", shop="อู่ชมรม", expected_return="2026-11-15")["expected_return"] == "2026-11-15"
+
+
+def test_resending_from_the_shop_changes_the_details_but_other_states_cannot_send():
+    at_shop = req("at_shop", shop="อู่ชมรม", sent_date="2026-10-12")
+    assert act(at_shop, "send_to_shop", shop="โชคพัฒนา", sent_date="2026-10-13")["shop"] == "โชคพัฒนา"
+    for status in ("awaiting_bill", "completed", "cancelled"):
+        with pytest.raises(rr.InvalidRequest):
+            act(req(status), "send_to_shop", shop="อู่ชมรม")
+
+
+def test_returned_moves_to_awaiting_bill_and_credits_the_shop():
+    at_shop = req("at_shop", shop="อู่ช่างเก่ง", sent_date="2026-10-12")
+    assert act(at_shop, "returned") == {"status": "awaiting_bill", "fixed_by": "อู่ช่างเก่ง", "fixed_date": "2026-10-20"}
+    v = act(at_shop, "returned", fixed_date="2026-10-18", fixed_by="ช่างเก่ง (คุณหนึ่ง)")
+    assert v["fixed_date"] == "2026-10-18" and v["fixed_by"] == "ช่างเก่ง (คุณหนึ่ง)"
+
+
+def test_returned_validates():
+    at_shop = req("at_shop", shop="อู่ชมรม", sent_date="2026-10-12")
+    with pytest.raises(rr.InvalidRequest) as exc:
+        act(at_shop, "returned", fixed_date="2026-10-11")
+    assert "ก่อนวันที่ส่งซ่อม" in str(exc.value)
+    with pytest.raises(rr.InvalidRequest):
+        act(at_shop, "returned", fixed_date="2026-12-25")
+    for status in ("open", "awaiting_bill", "completed", "cancelled"):
+        with pytest.raises(rr.InvalidRequest):
+            act(req(status, sent_date="2026-10-12"), "returned")
+
+
+def test_returned_without_a_bill_closes_it_flagged():
+    at_shop = req("at_shop", shop="อู่ชมรม", sent_date="2026-10-12")
+    v = act(at_shop, "returned_no_bill", reason=" ไม่ให้บิล ")
+    assert v == {"status": "completed", "fixed_by": "อู่ชมรม", "fixed_date": "2026-10-20", "no_bill": True, "no_bill_reason": "ไม่ให้บิล"}
+
+
+def test_cancel_from_the_shop():
+    assert act(req("at_shop", shop="x", sent_date="2026-10-12"), "cancel") == {"status": "cancelled"}
+
+
+def test_reopen_from_the_shop_recalls_the_truck():
+    v = act(req("at_shop", shop="อู่ชมรม", sent_date="2026-10-12", expected_return="2026-10-20"), "reopen")
+    assert v == {"status": "open", "shop": None, "sent_date": None, "expected_return": None}
+
+
+def test_reopen_after_return_steps_back_to_the_shop_not_to_the_start():
+    cleared = {"fixed_by": None, "fixed_date": None, "no_bill": False, "no_bill_reason": None}
+    back = req("awaiting_bill", shop="อู่ชมรม", sent_date="2026-10-12", fixed_by="อู่ชมรม", fixed_date="2026-10-18")
+    assert act(back, "reopen") == {"status": "at_shop", **cleared}
+    closed = req("completed", no_bill=True, shop="อู่ชมรม", sent_date="2026-10-12", fixed_by="อู่ชมรม", fixed_date="2026-10-18")
+    assert act(closed, "reopen") == {"status": "at_shop", **cleared}
+
+
+def test_a_request_never_sent_anywhere_still_reopens_to_open_and_touches_no_v5_column():
+    v = act(req("awaiting_bill", fixed_by="ช่างเอ๋", fixed_date="2026-10-15"), "reopen")
+    assert v["status"] == "open" and not set(v) & set(rr.V5_COLUMNS)
+
+
+def test_the_old_actions_write_no_v5_column_so_they_work_before_the_migration():
+    for action, kw in (("fixed_awaiting_bill", {"fixed_by": "x"}), ("fixed_no_bill", {"fixed_by": "x"}), ("cancel", {})):
+        assert not set(act(req(), action, **kw)) & set(rr.V5_COLUMNS)
+
+
+@pytest.fixture
+def v5(monkeypatch):
+    monkeypatch.setitem(rr._v5_probe, "at", 1e18)       # "probed a moment ago": no database call
+    monkeypatch.setitem(rr._v5_probe, "ok", True)
+
+
+@pytest.fixture
+def no_v5(monkeypatch):
+    monkeypatch.setitem(rr._v5_probe, "at", 1e18)
+    monkeypatch.setitem(rr._v5_probe, "ok", False)
+
+
+def test_create_straight_at_a_shop_and_off_the_paper(db, v5):
+    rr.create({"vehicle_id": "v1", "problem": "เพลาขาด", "shop": "ชมรมย์การช่าง", "on_paper": False, "expected_return": None})
+    row = db.inserted[0][1][0]
+    assert row["status"] == "at_shop" and row["shop"] == "อู่ชมรม" and row["on_paper"] is False
+    assert row["sent_date"] == row["request_date"] and row["expected_return"] is None
+
+
+def test_a_plain_create_sends_no_v5_column(db, no_v5):
+    rr.create({"vehicle_id": "v1", "problem": "เบรก", "on_paper": None, "shop": None})
+    assert not set(db.inserted[0][1][0]) & set(rr.V5_COLUMNS) and "status" not in db.inserted[0][1][0]
+
+
+def test_v5_features_are_refused_with_a_clear_message_until_the_migration_is_run(db, no_v5):
+    with pytest.raises(rr.InvalidRequest) as exc:
+        rr.create({"vehicle_id": "v1", "problem": "เบรก", "shop": "อู่ชมรม"})
+    assert "schema_v5.sql" in str(exc.value)
+    with pytest.raises(rr.InvalidRequest) as exc:
+        rr.create({"vehicle_id": "v1", "problem": "เบรก", "on_paper": False})
+    assert "schema_v5.sql" in str(exc.value)
+    with pytest.raises(rr.InvalidRequest) as exc:
+        rr.act("r1", "send_to_shop", shop="อู่ชมรม")
+    assert "schema_v5.sql" in str(exc.value) and not db.updates
+    rr.act("r1", "cancel")                                    # the old actions are unaffected
+    assert db.updates[-1][1] == {"status": "cancelled"}
+
+
+def test_sending_a_request_to_a_shop_updates_it_only_if_still_open(db, v5):
+    rr.act("r1", "send_to_shop", shop="โชคพัฒนา", sent_date="2026-10-12")
+    match, values = db.updates[-1]
+    assert match == {"id": "eq.r1", "status": "eq.open"} and values["status"] == "at_shop" and values["shop"] == "โชคพัฒนา"
+
+
+def test_the_action_endpoint_carries_the_shop_fields(monkeypatch):
+    main, client = _client(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(main.repair_requests, "act", lambda rid, action, **kw: seen.update(action=action, **kw) or {"ok": True})
+    client.post("/api/requests/abc/action?token=secret", json={"action": "send_to_shop", "shop": "อู่ชมรม", "sent_date": "2026-10-12", "expected_return": "2026-10-20"})
+    assert seen["shop"] == "อู่ชมรม" and seen["sent_date"] == "2026-10-12" and seen["expected_return"] == "2026-10-20"
+
+
+def test_the_new_request_endpoint_carries_shop_and_on_paper(monkeypatch):
+    main, client = _client(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(main.repair_requests, "create", lambda d: seen.update(d) or {"id": "x"})
+    client.post("/api/requests?token=secret", json={"problem": "เพลาขาด", "shop": "อู่ชมรม", "on_paper": False})
+    assert seen["shop"] == "อู่ชมรม" and seen["on_paper"] is False
+
+
+def test_meta_offers_the_shop_list(monkeypatch):
+    main, client = _client(monkeypatch)
+    monkeypatch.setattr(main, "load_roster", lambda: [])
+    shops_ = client.get("/api/meta?token=secret").json()["shops"]
+    assert "อู่ชมรม" in shops_ and "ศูนย์ Hino" in shops_ and "ช่างเอ๋ (ในโรงงาน)" in shops_

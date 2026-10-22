@@ -120,6 +120,7 @@ function vehCard(v) {
       el("span", { class: "veh-plate", text: v.plate }),
       el("span", { class: "grow" }),
       v.open_requests ? el("span", { class: "badge warn", text: `รอซ่อม ${v.open_requests}` }) : null,
+      v.at_shop_requests ? el("span", { class: "badge shop", text: `อยู่ที่อู่ ${v.at_shop_requests}` }) : null,
       v.awaiting_bill_requests ? el("span", { class: "badge warn", text: `รอบิล ${v.awaiting_bill_requests}` }) : null),
     el("div", { class: "muted small", text: [v.branch, `${v.make} ${v.model}`.trim()].filter(Boolean).join(" · ") }),
     el("div", { class: "veh-last small", text: last }),
@@ -173,7 +174,7 @@ function renderVehHead(v) {
     open.length ? el("div", { class: "vehopen" },
       el("div", { class: "vstat-label", text: "งานที่ยังค้างของรถคันนี้" }),
       ...open.map((r) => el("div", { class: "vehopen-row small" },
-        el("span", { class: `badge ${r.status === "awaiting_bill" ? "warn" : "urgent"}`, text: r.status === "awaiting_bill" ? "รอบิล" : "รอซ่อม" }),
+        reqStatusBadge(r.status),
         el("span", { text: ` #${r.request_no} ${r.problem}` })))) : null);
 }
 

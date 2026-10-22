@@ -150,6 +150,8 @@ def build_dashboard(*, events: list[dict], lines: list[dict], vehicles: list[dic
         flags = []
         if _num(v.get("awaiting_bill_requests")) > 0:
             flags.append("awaiting_bill")
+        if _num(v.get("at_shop_requests")) > 0:
+            flags.append("at_shop")
         if _num(v.get("open_requests")) > 0:
             flags.append("open_requests")
         if last is None:
@@ -159,17 +161,19 @@ def build_dashboard(*, events: list[dict], lines: list[dict], vehicles: list[dic
         fleet.append({
             "vehicle_id": vid, "plate": v.get("plate_number"), "truck_number": v.get("vehicle_number"), "branch": v.get("branch"),
             "open_requests": int(_num(v.get("open_requests"))), "awaiting_bill_requests": int(_num(v.get("awaiting_bill_requests"))),
+            "at_shop_requests": int(_num(v.get("at_shop_requests"))),
             "last_service_date": last.isoformat() if last else None, "days_since_service": days,
             "last_known_mileage": v.get("last_known_mileage"), "next_service_mileage": v.get("next_service_mileage"),
             "spend_period": _money(s["amount"]), "repairs_period": s["count"], "flags": flags,
         })
     # open work first, then bills outstanding, then staleness; quiet trucks last
-    order = {"open_requests": 0, "awaiting_bill": 1, "not_serviced_lately": 2, "no_history": 3}
+    order = {"open_requests": 0, "at_shop": 1, "awaiting_bill": 2, "not_serviced_lately": 3, "no_history": 4}
     fleet.sort(key=lambda f: (min((order[x] for x in f["flags"]), default=9), -(f["days_since_service"] or 0), f["truck_number"] or ""))
 
     # ---- requests
-    active = [r for r in req if r.get("status") in ("open", "awaiting_bill")]
+    active = [r for r in req if r.get("status") in ("open", "at_shop", "awaiting_bill")]
     awaiting = [r for r in active if r["status"] == "awaiting_bill"]
+    at_shop = [r for r in active if r["status"] == "at_shop"]
     closed_period = [r for r in req if r.get("status") == "completed" and (_d(r.get("status_changed_date")) or date.min) >= first_month]
     fix_days = [r["days_to_fix"] for r in req if r.get("days_to_fix") is not None and r.get("status") in ("awaiting_bill", "completed")
                 and (_d(r.get("fixed_date")) or date.min) >= first_month]
@@ -184,6 +188,8 @@ def build_dashboard(*, events: list[dict], lines: list[dict], vehicles: list[dic
             # every repair once, however it was recorded
             "done_this_month": done_total([this_month]), "done_period": done_total(month_keys),
             "open_requests": sum(1 for r in active if r["status"] == "open"),
+            "at_shop": len(at_shop),
+            "longest_at_shop_days": max((r.get("days_at_shop") or 0 for r in at_shop), default=0),
             "awaiting_bill": len(awaiting),
             "oldest_awaiting_days": max((r.get("days_in_status") or 0 for r in awaiting), default=0),
             "closed_without_bill": sum(1 for r in closed_period if r.get("no_bill")),

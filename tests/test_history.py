@@ -229,3 +229,10 @@ def test_event_rows_expose_the_reasons():
                                {"id": "e2", "event_date": "2026-10-10", "created_at": "2026-10-20T00:00:00+00:00", "total_cost": 500, "low_confidence_fields": ["x"]}],
                               [{"event_id": "e1", "line_total": 100, "description": "a"}, {"event_id": "e2", "line_total": 500, "description": "b"}], [])
     assert [(r["needs_review"], len(r["review_reasons"])) for r in rows] == [(True, 1), (False, 0)]
+
+
+def test_vehicle_rows_carry_the_at_shop_count_and_default_to_zero_before_the_migration():
+    vehicles = [{"id": "v1", "plate_number": "A", "vehicle_number": "1"}, {"id": "v2", "plate_number": "B", "vehicle_number": "2"}]
+    status = {"v1": {"at_shop_requests": 2}}                       # v2 has no status row; and "at_shop_requests" is absent entirely pre-v5
+    rows = {r["plate"]: r for r in history.vehicle_rows(vehicles, status, [])}
+    assert rows["A"]["at_shop_requests"] == 2 and rows["B"]["at_shop_requests"] == 0
