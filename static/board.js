@@ -84,9 +84,14 @@ function bindDateField(input, captionEl) {
 
 const thDate = beDate;
 
+// A few trucks have no fleet number of their own -- the "number" is just the plate. Only then is it left out.
+// (Not a substring test: truck #1 must not vanish because "1" appears in its plate.)
+const squash = (t) => String(t || "").replace(/[\s\-_.]/g, "");
+const numberIsPlate = (r) => !!r.truck_number && !!r.plate && squash(r.truck_number) === squash(r.plate);
+
 // The truck, as the heading of a card: its fleet number stands out as a chip so it is never mistaken for anything else.
 function truckHead(r) {
-  const same = r.truck_number && r.plate && r.plate.includes(r.truck_number);
+  const same = numberIsPlate(r);
   return [
     r.truck_number && !same ? el("span", { class: "truckno", title: "เบอร์รถ", text: `#${r.truck_number}` }) : null,
     el("strong", { class: "truckplate", text: r.plate || (r.truck_number && same ? r.truck_number : "ไม่ระบุรถ") }),
@@ -95,7 +100,7 @@ function truckHead(r) {
 
 // Some trucks have no separate fleet number (it is just their plate): don't print it twice.
 function truckLabel(r) {
-  const same = r.truck_number && r.plate && r.plate.includes(r.truck_number);
+  const same = numberIsPlate(r);
   return [r.truck_number && !same ? `#${r.truck_number}` : null, r.plate].filter(Boolean).join(" ") || "ไม่ระบุรถ";
 }
 
