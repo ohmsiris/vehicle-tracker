@@ -355,3 +355,69 @@ def edit_vehicle(vehicle_id: str, data: dict) -> dict:
         supabase.update("vehicles", {"id": f"eq.{vid}"}, values)
     _changed()
     return {"ok": True}
+
+
+# ------------------------------------------------------------ who to call about a repair request
+FACTORY_USAGE = "รถหน้าโรง"            # a factory truck has no main driver: whoever reports the problem is the one to call
+_HONORIFICS = ("นางสาว", "น.ส.", "นาย", "นาง", "คุณ", "พี่", "น้อง", "ลุง", "ป้า", "ครู")
+
+
+def _name_key(text) -> str:
+    """A name for comparing: no spaces, lower case, no leading honorific (คุณฉัตรชัย -> ฉัตรชัย)."""
+    t = "".join(str(text or "").split()).lower()
+    for h in _HONORIFICS:
+        if t.startswith(h) and len(t) > len(h) + 1:
+            return t[len(h):]
+    return t
+
+
+def _first_name_key(name) -> str:
+    words = str(name or "").split()
+    if len(words) > 1 and words[0] in _HONORIFICS:      # "นาย สมชาย ใจดี" -> สมชาย
+        words = words[1:]
+    return _name_key(words[0]) if words else ""
+
+
+def match_reporter(reporter, drivers: list[dict]) -> Optional[dict]:
+    """The driver a name typed as "ผู้แจ้ง" refers to: by nickname, full name, first name, or (3+ letters) the start of the
+    name -- the first kind of match that finds anyone decides, and it must find exactly one (two drivers called
+    ประสงค์ is not a guess worth making). Only active drivers with a phone number can be matched."""
+    key = _name_key(reporter)
+    if not key:
+        return None
+    pool = [d for d in drivers if d.get("active", True) and d.get("phone")]
+    tiers = (
+        lambda d: _name_key(d.get("nickname")) == key,
+        lambda d: _name_key(d.get("name")) == key,
+        lambda d: _first_name_key(d.get("name")) == key,
+        lambda d: len(key) >= 3 and _name_key(d.get("name")).startswith(key),
+    )
+    for test in tiers:
+        found = [d for d in pool if test(d)]
+        if len(found) == 1:
+            return found[0]
+        if len(found) > 1:
+            return None
+    return None
+
+
+def call_target(reporter, usage, main_driver: Optional[dict], drivers: list[dict]) -> Optional[dict]:
+    """Who to ring about a request: {kind: 'driver' | 'reporter', name, phone}, or None.
+    A factory truck (รถหน้าโรง) -> the person who reported it; any other truck -> its main driver, and when it has none
+    (or no number) the reporter, if that name is a driver we know."""
+    if usage != FACTORY_USAGE and main_driver and main_driver.get("phone"):
+        return {"kind": "driver", "name": main_driver.get("nickname") or main_driver.get("name"), "phone": main_driver["phone"]}
+    d = match_reporter(reporter, drivers)
+    # named as the card says ("ผู้แจ้ง ฉัตรชัย"), not by the nickname the number is saved under
+    return {"kind": "reporter", "name": str(reporter).strip(), "phone": d["phone"]} if d else None
+
+
+def with_call_targets(rows: list[dict], vehicles: list[dict], drivers: list[dict]) -> list[dict]:
+    """Adds `call` to each board row. vehicles = [{id, usage, main_driver_id}], drivers = list_drivers() rows."""
+    by_vehicle = {v["id"]: v for v in vehicles}
+    by_driver = {d["driver_id"]: d for d in drivers}
+    out = []
+    for r in rows:
+        v = by_vehicle.get(r.get("vehicle_id")) or {}
+        out.append({**r, "call": call_target(r.get("reported_by"), v.get("usage"), by_driver.get(v.get("main_driver_id")), drivers)})
+    return out

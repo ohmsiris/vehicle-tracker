@@ -156,7 +156,7 @@ slide-in drawer on a phone.
 The **รถ** group is ordered by what you do, with a line between each part: **ภาพรวม** (overview) · **งานซ่อม**, **บันทึกซ่อม**
 (input) · **รถอยู่ที่ไหน**, **สมุดงานซ่อม** (output) · **ทะเบียนรถ**, **แผนซ่อมบำรุง** (editing).
 
-**Who to call**: a driver's number is a tap-to-call button (`tel:`) on the truck's page, the drivers list, the board cards
+**Who to call**: on the board and "รถอยู่ที่ไหน" the server works out who to ring about each request (`fleet.call_target`): the truck's main driver -- or, for a factory truck (รถหน้าโรง, which has no driver), whoever reported the problem (ผู้แจ้ง), found among the drivers by nickname / name / first name when exactly one matches and has a number. A driver's number is a tap-to-call button (`tel:`) on the truck's page, the drivers list, the board cards
 and "รถอยู่ที่ไหน". The shops' numbers are kept in `app/shops.py` (`DIRECTORY`: one or more contacts per shop, e.g. the
 Isuzu service centre and its body shop; the shops are listed by their official names, and the old short names such as
 "อู่ชมรม" or "ศูนย์ Isuzu" still fold into them) and shown as call buttons under each shop on "รถอยู่ที่ไหน" and in the "ส่งซ่อมที่…"

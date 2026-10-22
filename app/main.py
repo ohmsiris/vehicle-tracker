@@ -330,7 +330,21 @@ def list_requests(scope: str = "active", x_app_token: str = Header(default=""), 
     _check_token(x_app_token, token)
     if scope not in ("active", "recent"):
         raise HTTPException(400, "scope must be active or recent")
-    return _board_call(repair_requests.list_active if scope == "active" else repair_requests.list_recent)
+    rows = _board_call(repair_requests.list_active if scope == "active" else repair_requests.list_recent)
+    return _with_call_targets(rows) if scope == "active" else rows
+
+
+def _with_call_targets(rows: list) -> list:
+    """Each active request says who to ring about it (the truck's driver, or for a factory truck whoever reported it).
+    Best effort: the board must still load if the driver list cannot be read."""
+    if not rows or not any(isinstance(r, dict) and r.get("vehicle_id") for r in rows) or not fleet.has_v6():
+        return rows
+    try:
+        vehicles = supabase.select_all("vehicles", {"select": "id,usage,main_driver_id", "order": "id.asc"})
+        return fleet.with_call_targets(rows, vehicles, fleet.list_drivers(include_inactive=False))
+    except supabase.SupabaseError:
+        logger.exception("could not work out who to call")
+        return rows
 
 
 @app.post("/api/requests")

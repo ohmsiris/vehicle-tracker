@@ -51,6 +51,10 @@ function shopCallsFor(name) {
 
 // who normally drives it (and their number), from the fleet list
 function driverLine(r) {
+  const c = r.call;
+  if (c && c.kind === "reporter") {                      // a factory truck has no driver of its own: ring whoever reported it
+    return el("div", { class: "driverline" }, el("span", { class: "muted small", text: `ผู้แจ้ง ${c.name} · ${c.phone}` }), callLink(c.phone, "โทรผู้แจ้ง", true));
+  }
   const v = (fleet.vehicles || []).find((x) => x.vehicle_id === r.vehicle_id);
   if (!v || !v.driver) return null;
   return el("div", { class: "driverline" },

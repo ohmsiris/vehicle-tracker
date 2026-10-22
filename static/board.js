@@ -123,12 +123,6 @@ function callLink(phone, label = "โทร", compact = false) {
     el("span", { text: `📞 ${label}` }), compact ? null : el("span", { class: "callnum", text: phone }));
 }
 
-// The main driver of a truck (with a number to call), from the fleet list -- null when there is none or it has no number.
-function driverFor(vehicleId) {
-  const v = (fleet.vehicles || []).find((x) => x.vehicle_id === vehicleId);
-  return v && v.driver && v.driver_phone ? { name: v.driver, nickname: v.driver_nickname, phone: v.driver_phone } : null;
-}
-
 function jsonOpts(method, body) {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
@@ -243,9 +237,10 @@ function requestCard(r, kind) {
   return card;
 }
 
+// Who to ring about a request (worked out by the server): the truck's driver, or for a factory truck the person who reported it.
 function callDriver(r) {
-  const d = driverFor(r.vehicle_id);
-  return d ? callLink(d.phone, `โทร ${d.nickname || d.name}`, true) : null;
+  const c = r.call;
+  return c ? callLink(c.phone, c.kind === "reporter" ? `โทรผู้แจ้ง ${c.name}` : `โทร ${c.name}`, true) : null;
 }
 
 // The timeline dialog lives with the maintenance log (logbook.js); a board row has the same fields.
