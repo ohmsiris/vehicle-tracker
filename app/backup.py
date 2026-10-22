@@ -38,6 +38,7 @@ TABLES: dict[str, str] = {
     "event_attachments": "id.asc",
     "bill_line_items": "id.asc",
     "repair_requests": "id.asc",
+    "drivers": "id.asc",             # schema_v6 -- a backup run before that was applied would fail here, loudly
 }
 BANGKOK = ZoneInfo("Asia/Bangkok")
 
