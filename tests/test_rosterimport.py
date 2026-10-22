@@ -61,6 +61,18 @@ def test_a_factory_truck_has_no_driver_and_the_factory_usage():
     assert (m[0]["driver_name"], m[0]["usage"]) == ("สมชาย ใจดี", "รถสาย")
 
 
+def test_a_row_without_a_running_number_still_counts_and_the_block_title_decides_the_branch():
+    sheet = [["รถแก่งคอย", "รถแก่งคอย"], HEADER,
+             truck_row(1, "แก่งคอย", "ก ข", "ก", "5", None, "รถเล็ก", "1กข 5"),
+             truck_row(None, "สระบุรี", "หน้าโรง", None, "17", None, "รถเล็ก", "1ฒถ 2092"),         # a moved truck: no number, old branch text
+             [None] * 11]
+    m = ri.parse_master(sheet)
+    assert [(r["branch"], r["number"]) for r in m] == [("แก่งคอย", "5"), ("แก่งคอย", "17")]
+    assert m[0]["branch_note"] is None and "สระบุรี" in m[1]["branch_note"]
+    plan = ri.build_plan(m, {}, [db_truck("v17", "1ฒถ 2092", "17", "แก่งคอย")], [])
+    assert any("กลุ่มรถแก่งคอย" in d for d in plan["differences"]) and plan["matched"] == 1
+
+
 def test_missing_plate_and_dash_placeholders_become_none():
     m = ri.parse_master(SHEET1)
     assert m[3]["plate"] is None and m[3]["province"] is None

@@ -75,15 +75,25 @@ def parse_thai_date(value) -> Optional[str]:
 
 # ----------------------------------------------------------------- reading
 def parse_master(rows: list[list]) -> list[dict]:
-    """The numbered truck rows of sheet 1. Header rows (first cell 'ลำดับ') tell which column is which,
-    so a block whose columns were shuffled still reads right."""
-    out, cols = [], {}
+    """The truck rows of sheet 1. Header rows (first cell 'ลำดับ') tell which column is which, so a block whose
+    columns were shuffled still reads right. A block starts with a title such as 'รถแก่งคอย'; a row inside it
+    belongs to that branch even if its own สาขา cell says otherwise (a truck that moved between branches keeps
+    the old text in that cell) -- the disagreement is passed on as branch_note so it gets reported."""
+    out, cols, block_branch = [], {}, None
     for n, row in enumerate(rows, 1):
         first = clean(row[0]) if row else None
         if first == "ลำดับ":
             cols = {clean(c): i for i, c in enumerate(row) if clean(c)}
             continue
-        if not cols or not isinstance(row[0], (int, float)):
+        filled = [clean(c) for c in row if clean(c)]
+        title = re.match(r"^รถ(\S+)$", filled[0]) if filled and len(filled) <= 3 and not isinstance(row[0], (int, float)) else None
+        if title:
+            block_branch, cols = title.group(1), {}
+            continue
+        if not cols or not filled:
+            continue
+        # a data row has its running number, or at least a plate / fleet number (some rows lack the number)
+        if not isinstance(row[0], (int, float)) and not (clean(row[cols["ทะเบียนรถ"]]) if "ทะเบียนรถ" in cols and cols["ทะเบียนรถ"] < len(row) else None)                 and not (clean(row[cols["รถเบอร์"]]) if "รถเบอร์" in cols and cols["รถเบอร์"] < len(row) else None):
             continue
 
         def cell(name):
@@ -92,8 +102,11 @@ def parse_master(rows: list[list]) -> list[dict]:
 
         driver = clean(cell("ชื่อจริง พขร"))
         at_factory = driver == FACTORY
+        own_branch = clean(cell("สาขา"))
+        branch = block_branch or own_branch
         out.append({
-            "row": n, "branch": clean(cell("สาขา")), "number": clean(cell("รถเบอร์")), "plate": clean(cell("ทะเบียนรถ")),
+            "row": n, "branch": branch,
+            "branch_note": f"แถว {n}: คอลัมน์สาขาเขียนว่า {own_branch} แต่อยู่ในกลุ่มรถ{block_branch} — ใช้ {block_branch}" if block_branch and own_branch and own_branch != block_branch else None, "number": clean(cell("รถเบอร์")), "plate": clean(cell("ทะเบียนรถ")),
             "province": clean(cell("จังหวัด")), "make": clean(cell("ยี่ห้อ")), "model": clean(cell("รุ่นรถ")),
             "vehicle_class": clean(cell("ประเภทรถ")),
             "driver_name": None if at_factory else driver, "nickname": clean(cell("ชื่อเล่น")), "phone": parse_phone(cell("เบอร์โทร")),
@@ -143,6 +156,8 @@ def build_plan(master: list[dict], registrations: dict[str, dict], vehicles: lis
     seen = set()
 
     for m in master:
+        if m.get("branch_note"):
+            plan["differences"].append(m["branch_note"])
         by_p = by_plate.get(squash(m["plate"])) if m["plate"] else None
         by_n = by_number.get((m["branch"] or "", squash(m["number"]))) if m["number"] else None
         if by_p and by_n and by_p["id"] != by_n["id"]:
