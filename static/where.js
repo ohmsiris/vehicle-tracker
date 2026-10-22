@@ -6,6 +6,7 @@
 
 async function openWhere() {
   showView("where");
+  await ensureVehicles();                // the trucks' main drivers (shown on each row)
   await loadBoard();                     // fresh data; renderWhere() runs at the end of loadBoard
 }
 
@@ -37,10 +38,17 @@ function shopSection(s) {
       el("span", { class: "badge shop", text: `${s.rows.length} คัน` }),
       el("span", { class: "grow" }),
       ageChip(longest, "at_shop")),
-    ...s.rows.map(truckRow));
+    ...s.rows.map(whereRow));
 }
 
-function truckRow(r) {
+// who normally drives it (and their number), from the fleet list
+function driverLine(r) {
+  const v = (fleet.vehicles || []).find((x) => x.vehicle_id === r.vehicle_id);
+  if (!v || !v.driver) return null;
+  return el("div", { class: "muted small", text: `คนขับหลัก ${v.driver}${v.driver_nickname ? ` (${v.driver_nickname})` : ""}${v.driver_phone ? ` · ${v.driver_phone}` : ""}` });
+}
+
+function whereRow(r) {
   const days = atShopDays(r);
   const overdue = r.expected_return && r.expected_return < todayISO() ? daysSince(r.expected_return) : 0;
   const when = [`ส่งเมื่อ ${thDate(r.sent_date)}`, r.expected_return ? `คาดว่ากลับ ${thDate(r.expected_return)}` : "ยังไม่ระบุวันกลับ"].join(" · ");
@@ -52,6 +60,7 @@ function truckRow(r) {
         r.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null,
         overdue ? el("span", { class: "badge urgent", text: `เลยกำหนด ${overdue} วัน` }) : null),
       el("div", { class: "truckproblem", text: r.problem }),
+      driverLine(r),
       el("div", { class: "muted small", text: `${when} · อยู่มา ${days === 0 ? "วันนี้" : `${days} วัน`}` })),
     el("div", { class: "truckbtns" },
       el("button", { class: "btn primary small", type: "button", text: "รถกลับมาแล้ว ✓", onclick: () => openReturnDialog(r) }),
