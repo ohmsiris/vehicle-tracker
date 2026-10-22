@@ -445,3 +445,86 @@ def test_adding_the_same_unfinished_job_twice_is_refused(monkeypatch):
     assert seen[0]["status"] == "in.(open,at_shop,awaiting_bill)"           # a finished job of the same name does not count
     rr.create({"vehicle_id": "v1", "problem": "เบรกหน้า"})                    # a different problem on the same truck is fine
     assert len(d.inserted) == 1
+
+
+# --------------------------------------------------- fixing a request entered against the wrong truck
+class EditDb(FakeDb):
+    """r1 is open on truck v1; truck v2 exists; v3 is retired; truck v2 already has an unfinished 'เบรกไม่อยู่'."""
+    def __init__(self):
+        super().__init__()
+        self.rows = {"r1": req("open", problem="เบรกไม่อยู่", vehicle_id="v1")}
+        self.unfinished_on_v2 = []
+
+    def select(self, table, params=None):
+        params = params or {}
+        if table == "vehicles":
+            vid = params.get("id", "")[3:]
+            return {"v1": [{"id": "v1", "active": True}], "v2": [{"id": "v2", "active": True}], "v3": [{"id": "v3", "active": False}]}.get(vid, [])
+        if table == "repair_requests" and "vehicle_id" in params:
+            return self.unfinished_on_v2 if params["vehicle_id"] == "eq.v2" else []
+        return super().select(table, params)
+
+
+@pytest.fixture
+def edb(monkeypatch):
+    d = EditDb()
+    for name in ("select", "insert", "update"):
+        monkeypatch.setattr(rr.supabase, name, getattr(d, name))
+    return d
+
+
+def test_a_request_can_be_moved_to_the_right_truck(edb):
+    rr.edit("r1", {"vehicle_id": "v2"})
+    assert edb.updates[-1][1] == {"vehicle_id": "v2"}
+
+
+def test_moving_to_the_same_truck_changes_nothing_else_is_still_validated(edb):
+    with pytest.raises(rr.InvalidRequest):
+        rr.edit("r1", {"vehicle_id": "v1"})                                  # nothing to change
+    rr.edit("r1", {"vehicle_id": "v1", "urgent": True})
+    assert edb.updates[-1][1] == {"urgent": True}
+
+
+def test_the_new_truck_must_exist_and_still_be_in_use(edb):
+    for bad in ("nope", "v3", "", None):
+        with pytest.raises(rr.InvalidRequest) as exc:
+            rr.edit("r1", {"vehicle_id": bad})
+        assert "ไม่พบรถ" in str(exc.value)
+
+
+def test_moving_a_request_onto_a_truck_that_already_has_the_same_job_is_refused(edb):
+    edb.unfinished_on_v2 = [{"seq": 4, "problem": "เบรก ไม่อยู่"}]
+    with pytest.raises(rr.InvalidRequest) as exc:
+        rr.edit("r1", {"vehicle_id": "v2"})
+    assert "มีงานเดียวกัน" in str(exc.value)
+    rr.edit("r1", {"vehicle_id": "v2", "problem": "ไฟหน้าดับ"})              # fixing the text at the same time makes it a different job
+    assert edb.updates[-1][1] == {"problem": "ไฟหน้าดับ", "vehicle_id": "v2"}
+
+
+def test_a_request_closed_by_a_saved_bill_cannot_change_truck(edb):
+    edb.rows["r1"]["fixed_event_id"] = "evt-1"
+    with pytest.raises(rr.InvalidRequest) as exc:
+        rr.edit("r1", {"vehicle_id": "v2"})
+    assert "บิล" in str(exc.value)
+
+
+def test_the_reported_date_can_be_corrected_but_not_after_it_was_sent_or_fixed(edb):
+    rr.edit("r1", {"request_date": "2026-10-05"})
+    assert edb.updates[-1][1] == {"request_date": "2026-10-05"}
+    edb.rows["r1"].update(status="at_shop", sent_date="2026-10-12")
+    rr.edit("r1", {"request_date": "2026-10-12"})
+    with pytest.raises(rr.InvalidRequest) as exc:
+        rr.edit("r1", {"request_date": "2026-10-13"})
+    assert "ไม่หลังวันที่ส่งซ่อม" in str(exc.value)
+    for bad, fragment in (("", "ใส่วันที่"), ("2569-10-05", "พ.ศ."), ("2999-01-01", "พ.ศ.")):
+        with pytest.raises(rr.InvalidRequest) as exc:
+            rr.edit("r1", {"request_date": bad})
+        assert fragment in str(exc.value)
+
+
+def test_the_edit_endpoint_carries_the_truck_and_the_date(monkeypatch):
+    main, client = _client(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(main.repair_requests, "edit", lambda rid, data: seen.update(data) or {"ok": True})
+    client.patch("/api/requests/abc?token=secret", json={"vehicle_id": "v2", "request_date": "2026-10-05"})
+    assert seen == {"vehicle_id": "v2", "request_date": "2026-10-05"}

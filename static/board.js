@@ -194,7 +194,7 @@ function requestCard(r, kind) {
     ? [
         el("button", { class: "btn primary", type: "button", text: "ส่งซ่อม →", onclick: () => openSendDialog(r) }),
         el("button", { class: "btn", type: "button", title: "ซ่อมเอง หรือซ่อมเสร็จแล้วโดยไม่ได้บันทึกว่าส่งที่ไหน", text: "ซ่อมแล้ว ✓", onclick: () => openFixDialog(r) }),
-        small("✎", "แก้ข้อความ", () => editProblem(r)),
+        small("แก้ไข", "แก้ไขงาน เช่น เปลี่ยนรถ", () => openEditRequest(r)),
         small(r.urgent ? "เลิกด่วน" : "ด่วน", "สลับสถานะด่วน", () => patchRequest(r.request_id, { urgent: !r.urgent })),
         small("ยกเลิก", "ยกเลิกงานนี้", () => cancelRequest(r), "danger"),
       ]
@@ -202,6 +202,7 @@ function requestCard(r, kind) {
       ? [
           el("button", { class: "btn primary", type: "button", text: "รถกลับมาแล้ว ✓", onclick: () => openReturnDialog(r) }),
           small("เปลี่ยนอู่ / วันที่", "แก้ไขข้อมูลการส่งซ่อม", () => openSendDialog(r)),
+          small("แก้ไข", "แก้ไขงาน เช่น เปลี่ยนรถ", () => openEditRequest(r)),
           small("← เรียกรถคืน", "ยังไม่ได้ส่งจริง กลับไปเป็นรอซ่อม", () => recallFromShop(r)),
           small("ยกเลิก", "ยกเลิกงานนี้", () => cancelRequest(r), "danger"),
         ]
@@ -209,6 +210,7 @@ function requestCard(r, kind) {
           el("button", { class: "btn primary", type: "button", text: "เพิ่มบิล →", onclick: () => startBillFor(r) }),
           el("button", { class: "btn", type: "button", text: "ไม่มีบิล", onclick: () => openNoBillDialog(r) }),
           small("← ย้อนกลับ", r.sent_date ? "กลับไปเป็นอยู่ที่อู่" : "กลับไปเป็นรอซ่อม", () => stepBack(r)),
+          small("แก้ไข", "แก้ไขงาน เช่น เปลี่ยนรถ", () => openEditRequest(r)),
           small("ยกเลิก", "ยกเลิกงานนี้", () => cancelRequest(r), "danger"),
         ];
 
@@ -324,10 +326,44 @@ async function patchRequest(id, body) {
   }
 }
 
-async function editProblem(r) {
-  const text = prompt("แก้ไขปัญหา", r.problem);
-  if (text === null || !text.trim() || text.trim() === r.problem) return;
-  await patchRequest(r.request_id, { problem: text.trim() });
+// ---- "แก้ไข": fix a mistake on a request (wrong truck, typo, wrong date ...)
+let editTarget = null;
+
+function openEditRequest(r) {
+  editTarget = r;
+  $("reSummary").textContent = `${truckLabel(r)} · ${r.problem}`;
+  const idx = state.vehicles.findIndex((v) => v.id === r.vehicle_id);
+  fillVehicleSelect($("reTruck"), idx >= 0 ? idx : "");
+  $("reProblem").value = r.problem;
+  $("reReporter").value = r.reported_by || "";
+  $("reDate").max = todayISO();
+  $("reDate").value = r.request_date;
+  $("reDateCap").textContent = dateCaption($("reDate").value);
+  $("reUrgent").checked = !!r.urgent;
+  $("reError").hidden = true;
+  $("reqEditDialog").showModal();
+}
+
+async function saveEditRequest() {
+  const r = editTarget, veh = selectedVehicle($("reTruck"));
+  if (!veh) { $("reError").textContent = "เลือกรถด้วย"; $("reError").hidden = false; return; }
+  const body = {};
+  if (veh.id !== r.vehicle_id) body.vehicle_id = veh.id;
+  if ($("reProblem").value.trim() !== r.problem) body.problem = $("reProblem").value.trim();
+  if ($("reReporter").value.trim() !== (r.reported_by || "")) body.reported_by = $("reReporter").value.trim();
+  if ($("reDate").value !== r.request_date) body.request_date = $("reDate").value;
+  if ($("reUrgent").checked !== !!r.urgent) body.urgent = $("reUrgent").checked;
+  if (!Object.keys(body).length) { $("reqEditDialog").close(); return; }
+  if (body.vehicle_id && !confirm(`ย้ายงานนี้จาก ${truckLabel(r)} ไปที่ ${truckLabel({ truck_number: veh.truck_number, plate: veh.plate })} ใช่ไหม?`)) return;
+  try {
+    await api(`/api/requests/${r.request_id}`, jsonOpts("PATCH", body));
+  } catch (err) {
+    $("reError").textContent = err.message;
+    $("reError").hidden = false;
+    return;
+  }
+  $("reqEditDialog").close();
+  await loadBoard();
 }
 
 async function cancelRequest(r) {
@@ -587,6 +623,9 @@ function initBoard() {
   $("fixCancel").addEventListener("click", () => $("fixDialog").close());
   $("fixHasBill").addEventListener("click", () => submitFix("fixed_awaiting_bill"));
   $("fixNoBill").addEventListener("click", () => submitFix("fixed_no_bill"));
+  $("reCancel").addEventListener("click", () => $("reqEditDialog").close());
+  $("reSave").addEventListener("click", saveEditRequest);
+  bindDateField($("reDate"), $("reDateCap"));
   $("shopCancel").addEventListener("click", () => $("shopDialog").close());
   $("shopOk").addEventListener("click", submitShop);
   bindDateField($("shopDate"), $("shopDateCap"));

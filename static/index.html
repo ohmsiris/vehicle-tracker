@@ -496,6 +496,27 @@
   </div>
 </dialog>
 
+<!-- Fix a repair request: the truck, the problem, who reported it, when, urgent -->
+<dialog id="reqEditDialog">
+  <h3>แก้ไขงานซ่อม</h3>
+  <p class="muted small" id="reSummary"></p>
+  <label for="reTruck">รถ <span class="muted small">(เปลี่ยนได้ ถ้าลงผิดคัน)</span></label>
+  <select id="reTruck"></select>
+  <label for="reProblem">ปัญหา</label>
+  <input id="reProblem" type="text" maxlength="500" autocomplete="off">
+  <label for="reReporter">ผู้แจ้ง <span class="muted small">(ไม่บังคับ)</span></label>
+  <input id="reReporter" type="text" maxlength="100" autocomplete="off">
+  <label for="reDate">วันที่คนขับแจ้งซ่อม</label>
+  <input id="reDate" type="date">
+  <div id="reDateCap" class="datecap"></div>
+  <label class="check"><input id="reUrgent" type="checkbox"> ด่วน</label>
+  <p class="error" id="reError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="reCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="reSave">บันทึก</button>
+  </div>
+</dialog>
+
 <!-- Send a request to a shop (or change where it is) -->
 <dialog id="shopDialog">
   <h3 id="shopTitle">ส่งซ่อมที่…</h3>

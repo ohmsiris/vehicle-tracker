@@ -294,6 +294,8 @@ class EditRequest(BaseModel):
     problem: str | None = Field(default=None, max_length=600)
     reported_by: str | None = Field(default=None, max_length=150)
     urgent: bool | None = None
+    vehicle_id: str | None = None
+    request_date: str | None = None
 
 
 class RequestAction(BaseModel):

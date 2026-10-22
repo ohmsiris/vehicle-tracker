@@ -254,8 +254,9 @@ def create(data: dict) -> dict:
 
 
 def edit(request_id: str, data: dict) -> dict:
-    """Fix a typo / flip urgent. Only the descriptive fields -- status
-    changes go through act() so the rules are enforced."""
+    """Fix a mistake: the problem text, who reported it, urgent, the date it was reported, or the TRUCK (it was
+    entered against the wrong one). Only these descriptive fields -- status changes go through act() so the rules
+    are enforced."""
     values = {}
     if "problem" in data:
         problem = _clean(data["problem"], MAX_PROBLEM_CHARS)
@@ -266,6 +267,29 @@ def edit(request_id: str, data: dict) -> dict:
         values["reported_by"] = _clean(data["reported_by"], MAX_NAME_CHARS) or None
     if "urgent" in data:
         values["urgent"] = bool(data["urgent"])
+    if "vehicle_id" in data or "request_date" in data:
+        current = get(request_id)
+        if current is None:
+            raise InvalidRequest("ไม่พบงานนี้")
+        if "vehicle_id" in data and data["vehicle_id"] != current.get("vehicle_id"):
+            if current.get("fixed_event_id"):
+                raise InvalidRequest("งานนี้ปิดด้วยบิลที่บันทึกแล้ว เปลี่ยนรถที่นี่ไม่ได้ — แก้ที่บิลแทน")
+            found = supabase.select("vehicles", {"select": "id,active", "id": f"eq.{data['vehicle_id']}", "limit": "1"}) if data["vehicle_id"] else []
+            if not found or found[0].get("active", True) is False:
+                raise InvalidRequest("ไม่พบรถที่เลือก หรือรถคันนี้เลิกใช้แล้ว")
+            unfinished = supabase.select("repair_requests", {"select": "seq,problem", "vehicle_id": f"eq.{data['vehicle_id']}",
+                                                              "status": "in.(open,at_shop,awaiting_bill)", "limit": "200"})
+            if find_duplicate(unfinished, values.get("problem", current["problem"])):
+                raise InvalidRequest("รถคันที่เลือกมีงานเดียวกันนี้อยู่แล้วและยังไม่ปิด")
+            values["vehicle_id"] = data["vehicle_id"]
+        if "request_date" in data:
+            if not data["request_date"]:
+                raise InvalidRequest("ใส่วันที่แจ้งซ่อมด้วย")
+            when = _parse_date(data["request_date"], default=today_bangkok(), what="วันที่แจ้ง")
+            later = [d for d in (current.get("sent_date"), current.get("fixed_date")) if d]
+            if later and when.isoformat() > min(later):
+                raise InvalidRequest("วันที่แจ้งซ่อมต้องไม่หลังวันที่ส่งซ่อม / ซ่อมเสร็จ")
+            values["request_date"] = when.isoformat()
     if not values:
         raise InvalidRequest("ไม่มีอะไรให้แก้")
     rows = supabase.update("repair_requests", {"id": f"eq.{request_id}"}, values)
