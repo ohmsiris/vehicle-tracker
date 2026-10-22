@@ -25,6 +25,18 @@
 <div class="shell">
 <div id="sideScrim" class="scrim"></div>
 <aside id="sidebar" class="sidebar" aria-label="เมนูหลัก">
+  <!-- The manager's own board -->
+  <div class="side-group" id="groupMgr">
+    <button class="side-head" type="button" aria-expanded="true" aria-controls="sideMgr">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg><span>ผู้จัดการ</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <nav class="side-items" id="sideMgr">
+      <button id="navMgr" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg><span>บอร์ดของฉัน</span></button>
+      <button id="navMgrRecurring" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg><span>งานประจำ</span></button>
+      <button id="navMgrSettings" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>ตั้งค่า</span></button>
+    </nav>
+  </div>
+
   <!-- Cars: everything that exists today lives here -->
   <div class="side-group" id="groupCars">
     <button class="side-head" type="button" aria-expanded="true" aria-controls="sideCars">
@@ -426,6 +438,62 @@
     <div id="tkPlan" class="tkplan" hidden></div>
   </section>
 
+  <!-- ============ The manager's board ============ -->
+  <section id="mgrView" hidden>
+    <div class="card">
+      <h2>เพิ่มเรื่อง <span class="muted small">(พิมพ์เรื่องสั้นๆ — ระบบเลือกประเภทให้เอง ถ้าไม่เลือก)</span></h2>
+      <form id="addMgForm" class="mgaddgrid" autocomplete="off">
+        <input id="mgTitle" type="text" placeholder="เรื่องที่ต้องทำ เช่น โทรตามอะไหล่ชมรม" maxlength="200" aria-label="เรื่อง">
+        <select id="mgType" aria-label="ประเภท"><option value="">ให้ระบบเลือกประเภท (AI)</option></select>
+        <select id="mgPlace" aria-label="สถานที่"><option value="">สถานที่ (ไม่ระบุ)</option></select>
+        <label class="inline"><input id="mgUrgent" type="checkbox"> ด่วน</label>
+        <button id="mgAddBtn" class="btn primary" type="submit">เพิ่ม</button>
+        <div class="addextra">
+          <div class="adddate"><label for="mgDue">กำหนดวันที่ <span class="muted small">(ไม่บังคับ)</span></label><input id="mgDue" type="date"><div id="mgDueCap" class="datecap"></div></div>
+          <div class="adddate"><label for="mgTime">เวลา</label><input id="mgTime" type="time"></div>
+          <div class="adddate"><label for="mgRemind">ติดตามวันที่ <span class="muted small">(ไม่บังคับ)</span></label><input id="mgRemind" type="date"><div id="mgRemindCap" class="datecap"></div></div>
+        </div>
+      </form>
+      <p class="error" id="mgAddError" hidden></p>
+    </div>
+    <p class="error" id="mgError" hidden></p>
+    <div class="edit-banner" id="mgNeedsV12" hidden>ยังใช้บอร์ดผู้จัดการไม่ได้ — ต้องรันไฟล์ <strong>schema_v12.sql</strong> ใน Supabase ก่อน</div>
+    <div class="card mgbar">
+      <input id="mgQ" type="search" placeholder="ค้นหา: เรื่อง รายละเอียด ชื่อคนที่รอ" autocomplete="off" aria-label="ค้นหา">
+      <select id="mgFilter" aria-label="ประเภท"><option value="">ทุกประเภท</option></select>
+      <div id="mgSummary" class="mgsummary"></div>
+    </div>
+    <div class="kanban mgkanban" id="mgKanban">
+      <section class="kcol mgcol" data-status="todo" aria-label="ต้องทำ"><h2 class="section-title">ต้องทำ <span class="count" id="mgCount_todo"></span></h2><div id="mgList_todo" class="reqlist"></div></section>
+      <section class="kcol mgcol" data-status="doing" aria-label="กำลังทำ"><h2 class="section-title">กำลังทำ <span class="count" id="mgCount_doing"></span></h2><div id="mgList_doing" class="reqlist"></div></section>
+      <section class="kcol mgcol" data-status="waiting" aria-label="รอคนอื่น / รอผล"><h2 class="section-title">รอคนอื่น / รอผล <span class="count" id="mgCount_waiting"></span></h2><div id="mgList_waiting" class="reqlist"></div></section>
+      <section class="kcol mgcol" data-status="done" aria-label="เสร็จแล้ว"><h2 class="section-title">เสร็จแล้ว <span class="count" id="mgCount_done"></span></h2><div id="mgList_done" class="reqlist"></div></section>
+    </div>
+  </section>
+
+  <!-- ============ Recurring tickets ============ -->
+  <section id="mgrRecurringView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">งานประจำ</h2>
+      <p class="muted small">เรื่องที่ต้องทำซ้ำๆ — ทุกวัน ทุกวันจันทร์ วันที่ 1 และ 15 ทุก 3 เดือน ทุกปี ถึงวันแล้วระบบสร้างเรื่องบนบอร์ดให้เอง (และเตือนผ่าน LINE ถ้าตั้งเวลาไว้)</p>
+    </div>
+    <p class="error" id="mgrRecError" hidden></p>
+    <div class="edit-banner" id="mgrRecNeedsV12" hidden>ยังใช้ไม่ได้ — ต้องรันไฟล์ <strong>schema_v12.sql</strong> ใน Supabase ก่อน</div>
+    <div class="mchead"><h3 class="section-title">งานประจำทั้งหมด</h3><button id="mgRecAdd" class="btn small primary" type="button">+ เพิ่มงานประจำ</button></div>
+    <div id="mgrRecList" class="reqlist"></div>
+  </section>
+
+  <!-- ============ The manager's settings ============ -->
+  <section id="mgrSettingsView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">ตั้งค่าบอร์ดผู้จัดการ</h2>
+      <p class="muted small">เตือนผ่าน LINE ประเภทของเรื่อง และสถานที่</p>
+    </div>
+    <p class="error" id="mgrSetError" hidden></p>
+    <div class="edit-banner" id="mgrSetNeedsV12" hidden>ยังใช้ไม่ได้ — ต้องรันไฟล์ <strong>schema_v12.sql</strong> ใน Supabase ก่อน</div>
+    <div id="mgrSetList" class="plsetgrid"></div>
+  </section>
+
   <!-- ============ Maintenance programme: what is due, and the intervals ============ -->
   <section id="planView" hidden>
     <div class="page-head">
@@ -592,6 +660,18 @@
   </div>
 </dialog>
 
+<!-- The manager's board: edit a ticket / wait for someone / a recurring ticket -->
+<dialog id="mgDialog" class="wide">
+  <h3 id="mgDlgTitle">เรื่อง</h3>
+  <div id="mgDlgBody"></div>
+  <p class="error" id="mgDlgError" hidden></p>
+  <div class="dialog-actions">
+    <span class="grow"></span>
+    <button type="button" class="btn" id="mgDlgCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="mgDlgSave">บันทึก</button>
+  </div>
+</dialog>
+
 <!-- Maintenance programme: record that items were done / how far a truck drives -->
 <dialog id="planDialog" class="wide">
   <h3 id="pdlgTitle">บันทึก</h3>
@@ -711,6 +791,7 @@
 <script src="/static/roster.js"></script>
 <script src="/static/machinery.js"></script>
 <script src="/static/plan.js"></script>
+<script src="/static/mgr.js"></script>
 <script src="/static/manual.js"></script>
 <script src="/static/app.js"></script>
 </body>

@@ -11,13 +11,16 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog"];
+const FLEET_VIEWS = ["roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings"];
 
 // ------------------------------------------------------------------ routing
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
   if (h === "roster") return openRoster();
   if (h === "plan") return openPlan();
+  if (h === "mgr") return openMgr();
+  if (h === "mgr-recurring") return openMgrRecurring();
+  if (h === "mgr-settings") return openMgrSettings();
   if (h === "machinery") return openMachinery();
   if (h === "machine-log") return openMachineLog();
   const mach = /^machine=(.+)$/.exec(h);

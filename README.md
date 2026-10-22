@@ -42,7 +42,8 @@ service key bypasses row-level security: server-side only, never in a page.
 `schema_v7.sql` (the rest of the master vehicle list: size class, registration papers, driver nickname), then
 `schema_v8.sql` (the truck's own nickname), then
 `schema_v9.sql` (machinery: machines, parts index, maintenance reports), then
-`schema_v10.sql` and `schema_v11.sql` (the vehicle maintenance programme). Replace
+`schema_v10.sql` and `schema_v11.sql` (the vehicle maintenance programme), then
+`schema_v12.sql` (the manager's ticket board). Replace
 `<PROJECT_REF>` in `schema.sql` first. Then seed the fleet:
 
 ```bash
@@ -424,3 +425,33 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   brought forward. Otherwise the months decide.
 - **`#plan`** lists the trucks that are overdue / due soon first (filters: branch, size, search; "ทุกคัน", "ที่ยังไม่มีประวัติเลย").
 - Until the two schema files have been run the page shows a banner and writes explain what is missing (`service_plan.has_v10()`).
+
+## The manager's board ("ผู้จัดการ")
+
+`schema_v12.sql`, `app/mgr.py`, `app/mgr_recurring.py`, `app/mgr_ai.py`, `app/mgr_jobs.py`, `app/line_push.py`,
+`static/mgr.js`. The owner's own ticket system -- the same idea as the repair board, for follow-ups, money, fixing things,
+the outside world, rounds and inspections. A group at the top of the sidebar with three pages:
+
+- **บอร์ดของฉัน** (`#mgr`): ต้องทำ -> กำลังทำ -> รอคนอื่น / รอผล -> เสร็จแล้ว; drag a card or use its buttons. "รอผล…" asks who /
+  what it is waiting on (with a call button; the shops' numbers are offered), and a **follow-up date**: that day the card comes
+  back to the top of its column marked "ถึงวันติดตามแล้ว". A ticket has a title, notes, type, place, urgent, due date + time, a
+  follow-up date and a checklist. Done / cancelled tickets can be reopened.
+- **The type is picked by the AI** (`mgr_ai.classify`: Claude chooses from the types with structured output) unless chosen by
+  hand; the card shows an "AI" tag and the type can be changed in the edit dialog ("ให้ระบบเลือกใหม่" asks again). If the AI
+  fails or there is no key, a keyword rule decides (marked as such), so adding a ticket never waits on it. The 13 default types
+  are in `schema_v12.sql` (ตามงาน/ตามของ, การเงิน, แก้ปัญหา/ซ่อม, ติดต่อภายนอก, ลูกค้า/ขาย, จัดซื้อ, คน, ตรวจ/เยี่ยมโรงงาน,
+  ตัดสินใจ/โครงการ, ซื้อของ, รายงาน, ส่วนตัว, อื่นๆ) and can be renamed, recoloured or switched off.
+- **งานประจำ** (`#mgr-recurring`): recurring tickets -- every N days; chosen weekdays (every N weeks); days of the month (1, 15,
+  "สิ้นเดือน") or "the first Monday"; every N months; yearly -- with a time of day, "create it N days ahead", optional start and
+  end, and two modes: by the calendar, or **counted from the day the last one was finished** (one at a time). Tickets are created by
+  the server (`mgr.generate_recurring`, every minute and whenever the board loads); one ticket per occurrence is enforced by a
+  unique index, an occurrence missed by more than 3 days is skipped rather than piled up.
+- **ตั้งค่า** (`#mgr-settings`): the LINE reminders, the types, the places.
+- **LINE reminders** (`mgr_jobs`): plain text, one way (nothing reads replies, no AI chat). A morning summary at the set time
+  (default 08:00): overdue / due today / follow-ups that have come up / urgent / how many are in progress; and a reminder at a
+  ticket's own time. Each push is claimed in `mgr_notifications` first, so it is never sent twice. Needs
+  `LINE_CHANNEL_ACCESS_TOKEN` and `OWNER_LINE_USER_ID` (the old Ticketing bot's `OHM_LINE_USER_ID` works too) on Railway and in
+  `.env`; until then nothing is sent and the settings page says so. The background loop starts with the app
+  (`DISABLE_SCHEDULER=1` switches it off, e.g. for a second local copy).
+- The old Ticketing bot is not removed yet: besides tickets it also reads bills, slips and supply photos and keeps the
+  preventive-maintenance catalogue.

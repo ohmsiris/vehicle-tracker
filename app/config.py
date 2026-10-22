@@ -35,6 +35,9 @@ class Settings:
     supabase_service_key: str
     max_files_per_batch: int
     max_file_bytes: int
+    # LINE push messages for the manager's board (reminders only: the bot never reads replies)
+    line_channel_access_token: str
+    owner_line_user_id: str
 
 
 def load_settings() -> Settings:
@@ -46,6 +49,8 @@ def load_settings() -> Settings:
         supabase_service_key=_env("SUPABASE_SERVICE_KEY"),
         max_files_per_batch=int(_env("MAX_FILES_PER_BATCH", "12")),
         max_file_bytes=int(_env("MAX_FILE_BYTES", str(20 * 1024 * 1024))),
+        line_channel_access_token=_env("LINE_CHANNEL_ACCESS_TOKEN"),
+        owner_line_user_id=_env("OWNER_LINE_USER_ID") or _env("OHM_LINE_USER_ID"),    # the old ticket bot's name for it works too
     )
 
 

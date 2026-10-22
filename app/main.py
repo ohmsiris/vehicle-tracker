@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, fleet, history, logbook, logsource, machinery, repair_requests, service_plan, shops, summarize, supabase
+from app import dashboard, events, fleet, history, line_push, logbook, logsource, machinery, mgr, mgr_jobs, repair_requests, service_plan, shops, summarize, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -42,6 +42,7 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(_app):
     _startup_checks()
+    mgr_jobs.start_scheduler()          # the manager's reminders (a no-op unless Supabase is configured)
     yield
 
 
@@ -563,6 +564,123 @@ def _plan_call(fn, *args, **kwargs):
 def api_plan_record_service(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
     return _plan_call(service_plan.record_service, body)
+
+
+# ------------------------------------------------------------- the manager's board
+def _mgr_call(fn, *args, **kwargs):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return fn(*args, **kwargs)
+    except mgr.InvalidTicket as exc:
+        raise HTTPException(422, str(exc))
+    except mgr.NotFound:
+        raise HTTPException(404, "ไม่พบข้อมูลนี้")
+    except supabase.SupabaseError:
+        logger.exception("manager board call failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/mgr/board")
+def api_mgr_board(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.board)
+
+
+@app.post("/api/mgr/tickets")
+def api_mgr_create(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.create_ticket, body)
+
+
+@app.patch("/api/mgr/tickets/{ticket_id}")
+def api_mgr_edit(ticket_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.edit_ticket, ticket_id, body)
+
+
+@app.post("/api/mgr/tickets/{ticket_id}/action")
+def api_mgr_action(ticket_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.act_ticket, ticket_id, str(body.get("action") or ""), body)
+
+
+@app.get("/api/mgr/recurring")
+def api_mgr_recurring(x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.list_recurring)
+
+
+@app.post("/api/mgr/recurring")
+def api_mgr_create_recurring(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.create_recurring, body)
+
+
+@app.patch("/api/mgr/recurring/{recurring_id}")
+def api_mgr_edit_recurring(recurring_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.edit_recurring, recurring_id, body)
+
+
+@app.delete("/api/mgr/recurring/{recurring_id}")
+def api_mgr_delete_recurring(recurring_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    _mgr_call(mgr.delete_recurring, recurring_id)
+    return {"ok": True}
+
+
+@app.get("/api/mgr/settings")
+def api_mgr_settings(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The settings page: types and places (including switched-off ones), reminder settings, whether LINE is set up."""
+    _check_token(x_app_token, token)
+
+    def load():
+        ready = mgr.has_v12()
+        return {"ready": ready, "types": mgr.list_types(include_inactive=True) if ready else [], "places": mgr.list_places(include_inactive=True) if ready else [],
+                "settings": mgr.get_settings() if ready else mgr.DEFAULT_SETTINGS, "line_configured": line_push.configured()}
+    return _mgr_call(load)
+
+
+@app.put("/api/mgr/settings")
+def api_mgr_save_settings(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.save_settings, body)
+
+
+@app.post("/api/mgr/types")
+def api_mgr_new_type(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.save_type, None, body)
+
+
+@app.patch("/api/mgr/types/{key}")
+def api_mgr_edit_type(key: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.save_type, key, body)
+
+
+@app.post("/api/mgr/places")
+def api_mgr_new_place(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.save_place, None, body)
+
+
+@app.patch("/api/mgr/places/{place_id}")
+def api_mgr_edit_place(place_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _mgr_call(mgr.save_place, place_id, body)
+
+
+@app.post("/api/mgr/line/test")
+def api_mgr_line_test(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Sends one test message to the owner's LINE (the button on the settings page)."""
+    _check_token(x_app_token, token)
+    try:
+        line_push.push_text("ทดสอบ: ระบบเตือนงานผู้จัดการส่งข้อความถึง LINE ได้แล้ว")
+    except line_push.LinePushError as exc:
+        raise HTTPException(422, str(exc))
+    return {"ok": True}
 
 
 @app.get("/api/plan/options")
