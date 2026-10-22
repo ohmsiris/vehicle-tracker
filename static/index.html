@@ -60,7 +60,7 @@
   <!-- ============ Repair board ============ -->
   <section id="boardView">
     <div class="card">
-      <h2>เพิ่มงานซ่อมที่ต้องติดตาม <span class="muted small">(ใบแจ้งซ่อมกระดาษยังเป็นต้นฉบับ — ใส่เฉพาะงานที่อยากให้เตือน)</span></h2>
+      <h2>เพิ่มงานซ่อม <span class="muted small">(ทั้งที่คนขับแจ้งมา และที่เห็นหรือสั่งเอง — ถ้ารถเข้าอู่แล้วเลือกอู่ได้เลย)</span></h2>
       <form id="addForm" class="addgrid" autocomplete="off">
         <select id="addVehicle" aria-label="รถ"><option value="">กำลังโหลดรายชื่อรถ…</option></select>
         <input id="addProblem" type="text" placeholder="ปัญหา เช่น เบรกหลังมีเสียง" maxlength="500" aria-label="ปัญหา">
@@ -69,7 +69,6 @@
         <button class="btn primary" type="submit">เพิ่ม</button>
         <div class="addextra">
           <select id="addShop" aria-label="ส่งซ่อมที่ไหน"><option value="">ยังไม่ได้ส่งอู่ (รอซ่อม)</option></select>
-          <label class="inline"><input id="addOffPaper" type="checkbox"> เสียฉุกเฉิน — ไม่ได้ลงใบแจ้งซ่อมกระดาษ</label>
         </div>
       </form>
       <p class="error" id="addError" hidden></p>

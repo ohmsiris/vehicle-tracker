@@ -277,9 +277,10 @@ open --send_to_shop--> at_shop --returned--> awaiting_bill --(bill saved)--> com
   today) and optionally when it should be back. **Back** asks for the return date and
   shows the days it was away. A saved bill closes a request in any of the three
   columns, so a bill that arrives early is fine.
-- An emergency that went straight to a shop and never reached the paper sheet:
-  tick "ไม่ได้ลงใบแจ้งซ่อมกระดาษ" and pick the shop when adding it. It is marked
-  "ไม่มีในใบแจ้ง" and is found in the log (`#log`) afterwards.
+- A truck that is already at a shop when you add it: pick the shop in the add form
+  and it starts in "อยู่ที่อู่". (The `on_paper` column and "ไม่มีในใบแจ้ง" badge
+  still exist in the database but the form no longer offers them -- entries made
+  here are the record, with or without a paper sheet.)
 - `schema_v5.sql` adds `shop`, `sent_date`, `expected_return`, `on_paper` to
   `repair_requests`, the `at_shop` status, `days_at_shop` / `at_shop_requests` on
   the views, and teaches `save_maintenance_event()` about it. Until it has been run

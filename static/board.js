@@ -472,13 +472,12 @@ async function submitNewRequest(e) {
   try {
     await api("/api/requests", jsonOpts("POST", {
       vehicle_id: veh.id, problem, reported_by: $("addReporter").value.trim() || null, urgent: $("addUrgent").checked,
-      shop: $("addShop").value || null, on_paper: $("addOffPaper").checked ? false : null,
+      shop: $("addShop").value || null,
     }));
     $("addProblem").value = "";
     $("addReporter").value = "";
     $("addUrgent").checked = false;
     $("addShop").value = "";
-    $("addOffPaper").checked = false;
     $("addProblem").focus();
     await loadBoard();
   } catch (e2) {
