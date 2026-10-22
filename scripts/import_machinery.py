@@ -68,8 +68,10 @@ def main() -> None:
     if not args.write:
         print("\n(dry run — ยังไม่ได้เขียนอะไร  ใส่ --write เพื่อทำจริง)")
         return
-    for i in range(0, len(plan["parts"]), 100):
-        supabase.insert("machine_parts", plan["parts"][i:i + 100])
+    keys = sorted({k for p in plan["parts"] for k in p})          # a bulk insert needs every row to have the same keys
+    uniform = [{k: p.get(k) for k in keys} for p in plan["parts"]]
+    for i in range(0, len(uniform), 100):
+        supabase.insert("machine_parts", uniform[i:i + 100])
     for e in plan["events"]:
         supabase.insert("machine_events", [e])
     print("\nเสร็จแล้ว")
