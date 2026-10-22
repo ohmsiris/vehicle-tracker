@@ -11,7 +11,7 @@ To teach it a new shop or spelling, add to SHOPS / ALIASES below.
 """
 import re
 
-IN_HOUSE = "ช่างเอ๋ (ในโรงงาน)"
+IN_HOUSE = "ซ่อมในโรงงาน"
 
 # The places a truck is sent to, in the order they are offered on the board.
 SHOPS: list[str] = [
@@ -29,6 +29,8 @@ SHOPS: list[str] = [
 # The old short names ("อู่ชมรม", "ศูนย์ Isuzu" ...) still fold into the official ones.
 ALIASES: list[tuple[str, str]] = [
     ("ช่างเอ๋", IN_HOUSE),
+    ("ซ่อมในโรงงาน", IN_HOUSE),
+    ("ในโรงงาน", IN_HOUSE),
     ("ชมรม", "ชมรมย์การช่าง"),
     ("ช่างเก่ง", "อู่ช่างเก่ง เจริญยนต์"),
     ("เก่งเจริญ", "อู่ช่างเก่ง เจริญยนต์"),

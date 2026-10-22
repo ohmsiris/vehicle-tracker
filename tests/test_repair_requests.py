@@ -414,7 +414,7 @@ def test_meta_offers_the_shop_list(monkeypatch):
     main, client = _client(monkeypatch)
     monkeypatch.setattr(main, "load_roster", lambda: [])
     shops_ = client.get("/api/meta?token=secret").json()["shops"]
-    assert "ชมรมย์การช่าง" in shops_ and "ฮีโน่ เอเซีย หนองแค" in shops_ and "ช่างเอ๋ (ในโรงงาน)" in shops_
+    assert "ชมรมย์การช่าง" in shops_ and "ฮีโน่ เอเซีย หนองแค" in shops_ and "ซ่อมในโรงงาน" in shops_
 
 
 # ------------------------------------------------------------ the same job twice
