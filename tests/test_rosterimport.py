@@ -205,3 +205,21 @@ def test_a_row_without_a_plate_is_not_guessed_when_the_number_is_ambiguous():
     vehicles = [db_truck("a", "86-3139", "2", "แก่งคอย", vehicle_class="รถใหญ่"), db_truck("b", "1ฒถ 2087", "2", "แก่งคอย", vehicle_class="รถใหญ่")]
     p = ri.build_plan(ri.parse_master(sheet), {}, vehicles, [])
     assert len(p["conflicts"]) == 1 and not p["vehicle_updates"]
+
+
+def test_a_factory_trucks_nickname_is_its_label_and_retired_is_noticed():
+    sheet = [["รถสระบุรี"], HEADER,
+             truck_row(1, "สระบุรี", "หน้าโรง", "หัวขาว", "บฉ 6161", None, "รถใหญ่", "บฉ 6161"),
+             truck_row(2, "สระบุรี", "หน้าโรง", "เลิกใช้", "9", None, "รถเล็ก", "1กข 9"),
+             truck_row(3, "สระบุรี", "หน้าโรง", None, "10", None, "รถเล็ก", "1กข 10"),
+             truck_row(4, "สระบุรี", "สมชาย ใจดี", "ชาย", "11", None, "รถเล็ก", "1กข 11")]
+    m = ri.parse_master(sheet)
+    assert [r["usage"] for r in m] == ["หัวขาว", "รถหน้าโรง", "รถหน้าโรง", "รถสาย"]
+    assert [r["retired"] for r in m] == [False, True, False, False]
+    assert m[0]["nickname"] is None and m[3]["nickname"] == "ชาย"                   # a truck's label is not a driver's nickname
+    p = ri.build_plan(m, {}, [db_truck("a", "บฉ 6161", "บฉ 6161"), db_truck("b", "1กข 9", "9")], [])
+    assert not p["driver_creates"] or list(p["driver_creates"]) == [ri.squash("สมชาย ใจดี")]
+    assert next(u for u in p["vehicle_updates"] if u["id"] == "a")["values"]["usage"] == "หัวขาว"
+    assert any("เลิกใช้" in d for d in p["differences"])
+    created = ri.build_plan(m[1:2], {}, [], [])["vehicle_creates"][0]["values"]
+    assert created["active"] is False

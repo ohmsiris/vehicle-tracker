@@ -3,7 +3,9 @@ One-time import of the master vehicle list (Drivers.xlsx) into the database.
 
 Sheet 1 ("Vehicle Roster"): one block per branch, one row per truck -- branch, driver (full name,
 nickname, phone), fleet number, size class (รถเล็ก / รถใหญ่), plate, province, make, model. A driver
-written as "หน้าโรง" is not a person: it marks a truck that stays at the factory.
+written as "หน้าโรง" is not a person: it marks a truck that stays at the factory, and the nickname
+column of such a row describes the TRUCK (หัวขาว, หัวน้ำเงิน, สต๊อคน้ำแข็ง ...): that text becomes its usage
+label (the blue chip). "เลิกใช้" there means the truck is retired.
 Sheet 2 ("รายละเอียดทะเบียน"): the registration papers by plate -- colour, engine / chassis numbers,
 registration date, type, owner, holder.
 
@@ -21,6 +23,7 @@ from typing import Optional
 
 FACTORY = "หน้าโรง"                    # in the driver column: the truck stays at the factory
 USAGE_ROUTE, USAGE_FACTORY = "รถสาย", "รถหน้าโรง"
+RETIRED_LABEL = "เลิกใช้"
 # abbreviated month names with the dots left out, because the sheet writes both "มิ.ย." and "มิย."
 THAI_MONTHS = {"มค": 1, "กพ": 2, "มีค": 3, "เมย": 4, "พค": 5, "มิย": 6, "กค": 7, "สค": 8, "กย": 9, "ตค": 10, "พย": 11, "ธค": 12}
 
@@ -109,8 +112,10 @@ def parse_master(rows: list[list]) -> list[dict]:
             "branch_note": f"แถว {n}: คอลัมน์สาขาเขียนว่า {own_branch} แต่อยู่ในกลุ่มรถ{block_branch} — ใช้ {block_branch}" if block_branch and own_branch and own_branch != block_branch else None, "number": clean(cell("รถเบอร์")), "plate": clean(cell("ทะเบียนรถ")),
             "province": clean(cell("จังหวัด")), "make": clean(cell("ยี่ห้อ")), "model": clean(cell("รุ่นรถ")),
             "vehicle_class": clean(cell("ประเภทรถ")),
-            "driver_name": None if at_factory else driver, "nickname": clean(cell("ชื่อเล่น")), "phone": parse_phone(cell("เบอร์โทร")),
-            "usage": USAGE_FACTORY if at_factory else (USAGE_ROUTE if driver else None),
+            "driver_name": None if at_factory else driver, "nickname": None if at_factory else clean(cell("ชื่อเล่น")), "phone": parse_phone(cell("เบอร์โทร")),
+            "usage": (clean(cell("ชื่อเล่น")) if at_factory and clean(cell("ชื่อเล่น")) not in (None, RETIRED_LABEL) else USAGE_FACTORY) if at_factory
+                     else (USAGE_ROUTE if driver else None),
+            "retired": at_factory and clean(cell("ชื่อเล่น")) == RETIRED_LABEL,
         })
     return out
 
@@ -192,6 +197,8 @@ def build_plan(master: list[dict], registrations: dict[str, dict], vehicles: lis
                 continue
             values = {"plate_number": m["plate"], "plate_province": m["province"] or "", "branch": m["branch"], "vehicle_number": m["number"],
                       "make": m["make"], "model": m["model"], "vehicle_class": m["vehicle_class"], "usage": m["usage"], **{k: v for k, v in reg.items() if v}}
+            if m.get("retired"):
+                values["active"] = False
             plan["vehicle_creates"].append({"label": _label({**m}), "values": values, "driver_key": driver_key})
             continue
 
@@ -210,6 +217,8 @@ def build_plan(master: list[dict], registrations: dict[str, dict], vehicles: lis
         for key, val in reg.items():
             if val and not truck.get(key):
                 values[key] = val
+        if m.get("retired") and truck.get("active", True):
+            plan["differences"].append(f"{_label(truck)}: ไฟล์ระบุว่าเลิกใช้ — ไม่เปลี่ยนให้ (เลิกใช้ได้ที่หน้าข้อมูลรถ)")
         if (m["branch"] or "") != (truck.get("branch") or "") or (m["number"] and squash(m["number"]) != squash(truck.get("vehicle_number"))):
             plan["differences"].append(f"{_label(truck)}: ในไฟล์เป็น {m['branch']} #{m['number']} (ไม่เปลี่ยนให้)")
         link = None
