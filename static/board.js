@@ -505,6 +505,12 @@ async function submitNewRequest(e) {
   if (!veh) { err.textContent = "ยังไม่ได้เลือกรถ"; err.hidden = false; return; }
   if (!problem) { err.textContent = "ใส่ปัญหาที่ต้องซ่อมด้วย"; err.hidden = false; return; }
   err.hidden = true;
+  // Another unfinished job on this truck is allowed (a truck can have two problems) but worth a second look.
+  const already = board.active.filter((r) => r.vehicle_id === veh.id);
+  if (already.length && !confirm(`รถคันนี้มีงานที่ยังไม่ปิดอยู่แล้ว ${already.length} งาน:\n${already.map((r) => `• ${r.problem}`).join("\n")}\n\nเพิ่มงานนี้อีกงานใช่ไหม?`)) return;
+  const submit = $("addForm").querySelector("button[type=submit]");
+  if (submit.disabled) return;                               // a double click or a second Enter while the first is still saving
+  submit.disabled = true;
   try {
     await api("/api/requests", jsonOpts("POST", {
       vehicle_id: veh.id, problem, reported_by: $("addReporter").value.trim() || null, urgent: $("addUrgent").checked,
@@ -515,6 +521,8 @@ async function submitNewRequest(e) {
   } catch (e2) {
     err.textContent = e2.message;
     err.hidden = false;
+  } finally {
+    submit.disabled = false;
   }
 }
 

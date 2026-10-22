@@ -212,6 +212,17 @@ def get(request_id: str) -> Optional[dict]:
     return rows[0] if rows else None
 
 
+def _norm(text: str) -> str:
+    return "".join(str(text or "").split()).lower()
+
+
+def find_duplicate(requests: list[dict], problem: str) -> Optional[dict]:
+    """An unfinished request on the same truck that says the same thing (ignoring spacing and case), or None.
+    `requests` are that truck's open / at-shop / waiting-for-bill requests."""
+    key = _norm(problem)
+    return next((r for r in requests if _norm(r.get("problem")) == key), None)
+
+
 def create(data: dict) -> dict:
     vehicle_id = data.get("vehicle_id")
     if not vehicle_id or not supabase.select("vehicles", {"select": "id", "id": f"eq.{vehicle_id}", "limit": "1"}):
@@ -219,6 +230,10 @@ def create(data: dict) -> dict:
     problem = _clean(data.get("problem"), MAX_PROBLEM_CHARS)
     if not problem:
         raise InvalidRequest("ใส่ปัญหาที่ต้องซ่อมด้วย")
+    unfinished = supabase.select("repair_requests", {"select": "seq,problem", "vehicle_id": f"eq.{vehicle_id}",
+                                                      "status": "in.(open,at_shop,awaiting_bill)", "limit": "200"})
+    if find_duplicate(unfinished, problem):
+        raise InvalidRequest(f"รถคันนี้มีงาน “{problem}” อยู่แล้วและยังไม่ปิด — ไม่ได้เพิ่มซ้ำ")
     requested = _parse_date(data.get("request_date"), default=today_bangkok(), what="วันที่แจ้ง")
     row = {
         "vehicle_id": vehicle_id,

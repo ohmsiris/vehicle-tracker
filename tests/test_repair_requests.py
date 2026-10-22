@@ -414,3 +414,34 @@ def test_meta_offers_the_shop_list(monkeypatch):
     monkeypatch.setattr(main, "load_roster", lambda: [])
     shops_ = client.get("/api/meta?token=secret").json()["shops"]
     assert "อู่ชมรม" in shops_ and "ศูนย์ Hino" in shops_ and "ช่างเอ๋ (ในโรงงาน)" in shops_
+
+
+# ------------------------------------------------------------ the same job twice
+def test_the_same_problem_on_the_same_truck_is_found_whatever_the_spacing():
+    open_ = [{"seq": 3, "problem": "เบรก หลัง  มีเสียง"}, {"seq": 4, "problem": "แอร์ไม่เย็น"}]
+    assert rr.find_duplicate(open_, " เบรกหลังมีเสียง ")["seq"] == 3
+    assert rr.find_duplicate(open_, "เบรกหน้ามีเสียง") is None
+    assert rr.find_duplicate([], "อะไรก็ได้") is None
+
+
+def test_adding_the_same_unfinished_job_twice_is_refused(monkeypatch):
+    seen = []
+
+    class Db2(FakeDb):
+        def select(self, table, params=None):
+            if table == "repair_requests" and "vehicle_id" in (params or {}):
+                seen.append(params)
+                return [{"seq": 9, "problem": "เบรกไม่อยู่"}]
+            return super().select(table, params)
+
+    d = Db2()
+    for name in ("select", "insert", "update"):
+        monkeypatch.setattr(rr.supabase, name, getattr(d, name))
+    monkeypatch.setitem(rr._v5_probe, "at", 1e18)
+    monkeypatch.setitem(rr._v5_probe, "ok", True)
+    with pytest.raises(rr.InvalidRequest) as exc:
+        rr.create({"vehicle_id": "v1", "problem": " เบรกไม่อยู่ "})
+    assert "อยู่แล้ว" in str(exc.value) and not d.inserted
+    assert seen[0]["status"] == "in.(open,at_shop,awaiting_bill)"           # a finished job of the same name does not count
+    rr.create({"vehicle_id": "v1", "problem": "เบรกหน้า"})                    # a different problem on the same truck is fine
+    assert len(d.inserted) == 1
