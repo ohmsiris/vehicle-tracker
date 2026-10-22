@@ -34,3 +34,4 @@ def test_the_old_short_names_still_fold_into_the_official_ones():
     assert shops.canonical("อู่ช่างลิ้ม") == "ช่างลิ้ม 24 ไดนาโม"
     assert shops.canonical("ศูนย์ Isuzu") == "อิซูซุจึงกงเฮงแก่งคอย"
     assert shops.canonical("ศูนย์ Hino") == "ฮีโน่ เอเซีย หนองแค"
+    assert shops.canonical("อู่ช่างเก่ง") == "อู่ช่างเก่ง เจริญยนต์" == shops.canonical("ช่างเก่งเจริญยนต์")

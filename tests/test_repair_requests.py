@@ -299,8 +299,8 @@ def test_resending_from_the_shop_changes_the_details_but_other_states_cannot_sen
 
 
 def test_returned_moves_to_awaiting_bill_and_credits_the_shop():
-    at_shop = req("at_shop", shop="อู่ช่างเก่ง", sent_date="2026-10-12")
-    assert act(at_shop, "returned") == {"status": "awaiting_bill", "fixed_by": "อู่ช่างเก่ง", "fixed_date": "2026-10-20"}
+    at_shop = req("at_shop", shop="อู่ช่างเก่ง เจริญยนต์", sent_date="2026-10-12")
+    assert act(at_shop, "returned") == {"status": "awaiting_bill", "fixed_by": "อู่ช่างเก่ง เจริญยนต์", "fixed_date": "2026-10-20"}
     v = act(at_shop, "returned", fixed_date="2026-10-18", fixed_by="ช่างเก่ง (คุณหนึ่ง)")
     assert v["fixed_date"] == "2026-10-18" and v["fixed_by"] == "ช่างเก่ง (คุณหนึ่ง)"
 
