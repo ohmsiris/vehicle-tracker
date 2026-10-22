@@ -139,7 +139,7 @@ function renderPaper(d) {
           el("div", { class: "muted small", text: `พ.ศ. · ค.ศ. ${ymd ? ymd[1] : ""}` }))),
       el("div", { class: "paper-meta" },
         el("div", { class: "kv" }, el("span", { class: "kv-k", text: "รถ" }),
-          el("a", { class: "kv-v link", href: `#vehicle=${v.vehicle_id}`, text: [vehTitle(v), v.branch, `${v.make} ${v.model}`.trim()].filter(Boolean).join(" · ") })),
+          el("a", { class: "kv-v link", href: `#truck=${v.vehicle_id}`, text: [truckLabel(v), v.branch, `${v.make} ${v.model}`.trim()].filter(Boolean).join(" · ") })),
         kv("เลขไมล์", e.mileage ? `${baht(e.mileage)} กม.` : ""),
         kv("ไมล์ครั้งต่อไป", e.next_service_mileage ? `${baht(e.next_service_mileage)} กม.` : ""),
         kv("ผู้ซ่อม", e.performed_by),
