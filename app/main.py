@@ -545,6 +545,12 @@ def _plan_call(fn, *args, **kwargs):
         raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
 
 
+@app.post("/api/plan/services")
+def api_plan_record_service(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.record_service, body)
+
+
 @app.get("/api/plan/options")
 def api_plan_options(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
@@ -649,6 +655,25 @@ def api_event(event_id: str, x_app_token: str = Header(default=""), token: str =
     """One confirmed event in full: header, every line, files, and the board requests it closed."""
     _check_token(x_app_token, token)
     return _history_call(history.event_detail, event_id)
+
+
+@app.delete("/api/events/{event_id}")
+def api_delete_event(event_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Deletes a record that was entered by hand (never a bill, never one that closed a board request)."""
+    _check_token(x_app_token, token)
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        events.delete_event(event_id)
+        logsource.invalidate()
+    except events.InvalidEvent as exc:
+        raise HTTPException(422, str(exc))
+    except events.EventNotFound:
+        raise HTTPException(404, "ไม่พบรายการนี้")
+    except supabase.SupabaseError:
+        logger.exception("deleting event failed")
+        raise HTTPException(502, "ลบไม่สำเร็จ ลองอีกครั้ง")
+    return {"ok": True}
 
 
 @app.patch("/api/events/{event_id}")

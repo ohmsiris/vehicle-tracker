@@ -132,6 +132,7 @@ function renderPaper(d) {
 
   fleet.editing = false;
   $("evEdit").disabled = false;
+  $("evDelete").hidden = e.source !== "manual";           // only a record entered by hand can be deleted (never a bill)
   fill($("evPaper"),
     e.needs_review ? el("div", { class: "warnings" }, el("strong", { text: "ควรตรวจบิลนี้" }), el("ul", {}, ...e.review_reasons.map((r) => el("li", { text: r })))) : null,
     (fleet.paperCard = el("div", { class: "card paper" },
@@ -336,7 +337,23 @@ async function saveEdit() {
 }
 
 // --------------------------------------------------------------------- init
+async function deleteEvent() {
+  const d = fleet.event;
+  if (!d || d.event.source !== "manual") return;
+  const names = d.lines.map((l) => l.description).join(", ");
+  if (!confirm(`ลบรายการนี้ใช่ไหม?\n${beDate(d.event.event_date)} · ${names}\n\nลบแล้วกู้คืนไม่ได้ และแผนซ่อมบำรุงจะไม่นับรายการนี้อีก`)) return;
+  try {
+    await api(`/api/events/${d.event.id}`, { method: "DELETE" });
+  } catch (err) {
+    showErr("eventError", `ลบไม่สำเร็จ: ${err.message}`);
+    return;
+  }
+  fleet.loaded = false;                                   // the truck list counts repairs
+  showTruckLog(d.vehicle.vehicle_id);
+}
+
 function initFleet() {
+  $("evDelete").addEventListener("click", deleteEvent);
   $("evEdit").addEventListener("click", startEdit);
   $("evBack").addEventListener("click", () => {
     if (fleet.backTo) goHash(fleet.backTo);

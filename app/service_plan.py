@@ -25,7 +25,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from app import supabase
+from app import events, logsource, supabase
 
 SMALL, BIG = "รถเล็ก", "รถใหญ่"
 RULE_SETS = [SMALL, BIG]
@@ -69,6 +69,10 @@ ITEMS = {
     "power_steering": ("น้ำมันพาวเวอร์", "ช่วงล่าง / ส่งกำลัง"),
     "wheel_grease": ("จาระบีลูกปืนล้อ", "ช่วงล่าง / ส่งกำลัง"),
 }
+
+# The category each item gets when it is recorded as a repair (the names of the categories table).
+ITEM_CATEGORY = {key: "ไส้กรองและของเหลว" for key in ITEMS}
+ITEM_CATEGORY.update(valve_adjust="เครื่องยนต์", valve_cover_seal="เครื่องยนต์", injector_washers="เครื่องยนต์")
 
 # rule set -> key -> km. The dealership's rules as the owner settled them (see Maintenance_Plan.xlsx):
 # small = D-Max / Revo, big = NLR / NMR / NPR, 6- and 10-wheelers. A missing key means no such service for that rule set.
@@ -214,8 +218,9 @@ def classify_line(description: Optional[str]) -> Optional[str]:
 
 
 def bill_hits(events: list[dict]) -> list[dict]:
-    """Confirmed bills (each {vehicle_id, event_date, mileage, bill_line_items: [{description}]}) -> one hit per
-    (truck, item, day): {vehicle_id, item_key, done_date, odometer_km, source: 'bill'}."""
+    """Confirmed events (each {vehicle_id, event_date, mileage, source, bill_line_items: [{description}]}) -> one hit per
+    (truck, item, day): {vehicle_id, item_key, done_date, odometer_km, source: 'bill' or 'manual', event_id}.
+    An event is a bill, or a job recorded by hand (including from this programme)."""
     seen, out = set(), []
     for ev in events:
         for line in ev.get("bill_line_items") or []:
@@ -227,7 +232,8 @@ def bill_hits(events: list[dict]) -> list[dict]:
                 continue
             seen.add(ident)
             out.append({"vehicle_id": ev["vehicle_id"], "item_key": key, "done_date": ev["event_date"],
-                        "odometer_km": ev.get("mileage"), "source": "bill", "event_id": ev.get("id")})
+                        "odometer_km": ev.get("mileage"), "source": "manual" if ev.get("source") == "manual" else "bill",
+                        "event_id": ev.get("id")})
     return out
 
 
@@ -480,6 +486,36 @@ def clean_records(data: dict, *, today: date) -> list[dict]:
             for k in dict.fromkeys(keys)]
 
 
+def clean_service(data: dict, *, today: date) -> dict:
+    """"These items were done on this day" -> what the repair record needs. Items come out in plan order."""
+    vehicle_id = _uuid(data.get("vehicle_id"), "รถ")
+    keys = data.get("items")
+    if not isinstance(keys, list) or not keys:
+        raise InvalidPlan("เลือกรายการที่ทำอย่างน้อย 1 อย่าง")
+    unknown = [k for k in keys if k not in ITEMS]
+    if unknown:
+        raise InvalidPlan(f"ไม่รู้จักรายการ: {', '.join(map(str, unknown))}")
+    done = _date(data.get("done_date"), "วันที่ทำ", today=today)
+    return {"vehicle_id": vehicle_id, "items": [k for k in ITEMS if k in keys], "done_date": done,
+            "odometer_km": _int(data.get("odometer_km"), "เลขไมล์", maximum=MAX_KM),
+            "performed_by": _note(data.get("performed_by")), "notes": _note(data.get("notes"))}
+
+
+def drop_done_already(keys: list[str], vehicle_id: str, done: date, hits: list[dict]) -> list[str]:
+    """Items already recorded for this truck on this day (a bill, an earlier click) are not recorded twice."""
+    have = {h["item_key"] for h in hits if h.get("vehicle_id") == vehicle_id and parse_date(h.get("done_date")) == done}
+    return [k for k in keys if k not in have]
+
+
+def service_payload(clean: dict, keys: list[str]) -> dict:
+    """The body events.save_event() takes for a job recorded by hand: one line per item, so it appears in the repair
+    log like any other record and the plan reads it back (the line text is the item's own name)."""
+    return {"vehicle_id": clean["vehicle_id"], "source": "manual", "attachments": [], "fixes_request_ids": [],
+            "event": {"event_date": clean["done_date"].isoformat(), "mileage": clean["odometer_km"], "performed_by": clean["performed_by"],
+                      "notes": clean["notes"], "summary": "บันทึกจากแผนซ่อมบำรุง: " + ", ".join(item_label(k) for k in keys)},
+            "line_items": [{"description": item_label(k), "category": ITEM_CATEGORY[k]} for k in keys]}
+
+
 def clean_reading(data: dict, *, today: date) -> dict:
     vehicle_id = _uuid(data.get("vehicle_id"), "รถ")
     kind = data.get("kind")
@@ -563,7 +599,7 @@ def options() -> dict:
 
 
 def _bill_events() -> list[dict]:
-    return supabase.select_all("maintenance_events", {"select": "id,vehicle_id,event_date,mileage,bill_line_items(description)",
+    return supabase.select_all("maintenance_events", {"select": "id,vehicle_id,event_date,mileage,source,bill_line_items(description)",
                                                       "status": "eq.confirmed", "order": "id.asc"})
 
 
@@ -643,7 +679,7 @@ def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
     records = supabase.select_all("service_records", {"select": "*", "vehicle_id": f"eq.{vehicle_id}", "order": "done_date.desc,id.asc"}) if ready else []
     readings = supabase.select_all("km_readings", {"select": "*", "vehicle_id": f"eq.{vehicle_id}", "order": "end_date.desc,id.asc"}) if ready else []
     overrides = supabase.select_all("service_intervals", {"select": "*", "order": "item_key.asc"}) if ready else []
-    events = supabase.select_all("maintenance_events", {"select": "id,vehicle_id,event_date,mileage,bill_line_items(description)",
+    events = supabase.select_all("maintenance_events", {"select": "id,vehicle_id,event_date,mileage,source,bill_line_items(description)",
                                                         "status": "eq.confirmed", "vehicle_id": f"eq.{vehicle_id}", "order": "id.asc"})
     hits = bill_hits(events)
     groups = _groups()
@@ -666,6 +702,26 @@ def set_vehicle_group(data: dict) -> dict:
         supabase.insert("vehicle_plans", [{"vehicle_id": vehicle_id, "group_code": code, "updated_at": datetime.now(timezone.utc).isoformat()}],
                         on_conflict="vehicle_id")
     return vehicle_detail(vehicle_id)
+
+
+def record_service(data: dict) -> dict:
+    """"บันทึกว่าทำแล้ว": saves the items as a repair record done by hand (source 'manual'), the same kind of record as a
+    mechanic's own work -- it shows in สมุดงานซ่อม and can be edited or deleted there, and the plan reads it back."""
+    clean = clean_service(data, today=today_th())
+    if not _vehicles(only=clean["vehicle_id"]):
+        raise InvalidPlan("ไม่พบรถคันนี้")
+    existing = supabase.select_all("maintenance_events", {"select": "id,vehicle_id,event_date,mileage,source,bill_line_items(description)",
+                                                          "status": "eq.confirmed", "vehicle_id": f"eq.{clean['vehicle_id']}",
+                                                          "event_date": f"eq.{clean['done_date'].isoformat()}", "order": "id.asc"})
+    keys = drop_done_already(clean["items"], clean["vehicle_id"], clean["done_date"], bill_hits(existing))
+    if not keys:
+        raise InvalidPlan("รายการเหล่านี้ถูกบันทึกไว้แล้วในวันนั้น (ดูในสมุดงานซ่อม)")
+    try:
+        saved = events.save_event(service_payload(clean, keys), [])
+    except events.InvalidEvent as exc:
+        raise InvalidPlan(str(exc))
+    logsource.invalidate()
+    return {"event_id": saved["event_id"], "items": keys}
 
 
 def add_records(data: dict) -> list[dict]:

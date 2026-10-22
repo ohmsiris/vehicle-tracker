@@ -398,10 +398,18 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   it was last done, so it lines up like the Isuzu chart. With no odometer known the columns only say which round;
   once there is a mileage (on a bill, a record or a reading) the km of each round appears. A truck with no history
   shows "ยังไม่มีประวัติ". Everything is recomputed from the records every time, so it moves on by itself.
-- **When it was last done** comes from confirmed repair bills (a line such as "กรองเครื่อง" counts as that truck's engine
-  filter that day -- `classify_line`; a top-up "(เติม)" and parts such as "สกรูแรงดันน้ำมันเครื่อง" are ignored; the
-  bill's mileage is used when it has one) and what people record (**+ บันทึกว่าทำแล้ว**: items, date, odometer).
-  **เริ่มนับจากวันนี้** gives every item with no history today's date as a starting point.
+- **"+ บันทึกว่าทำแล้ว"** (on a truck's page or on a card of `#plan`) saves the ticked items as a **repair record done by
+  hand** (`source = manual`, one line per item, the line text is the item's own name) -- the same kind of record as a
+  mechanic's own work. So it shows in **สมุดงานซ่อม** and its page, where it can be edited, and a record entered by hand
+  can be **deleted** (`DELETE /api/events/{id}`: never a bill, never a record that closed a board request) -- the way to undo a
+  mis-click. "เลือกทั้งหมด" ticks every item (that is how to start a truck's count). Items already recorded for that
+  truck on that day (a bill, an earlier click) are not recorded twice.
+- **When it was last done** comes from the repair records: confirmed bills (a line such as "กรองเครื่อง" counts as that
+  truck's engine filter that day -- `classify_line`; a top-up "(เติม)" and parts such as "สกรูแรงดันน้ำมันเครื่อง" are
+  ignored) and records entered by hand; the mileage on the record is used when it has one. The truck's page lists them
+  under "ประวัติที่ทำแล้ว" with a "ดู / แก้ไข" link to the record.
+- **The group is not a dropdown on the page**: it is shown as text, and "เปลี่ยนกลุ่ม…" opens a dialog with a warning
+  whose confirm button stays disabled until a different group is picked, so it cannot be changed by a mis-click.
 - **Real driving** only matters when it is known: odometer readings, GPS distance for a period (**+ ระยะทาง**, 12
   trucks seeded by `scripts/seed_gps.py`) -- then a truck that drives more than its group assumes gets its due date
   brought forward. Otherwise the months decide.

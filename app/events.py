@@ -320,3 +320,31 @@ def update_event(event_id: str, payload: dict) -> None:
         if "P0002" in text:
             raise EventNotFound() from exc
         raise
+
+
+# ------------------------------------------------------------ deleting a record made by hand
+def delete_event(event_id: str) -> None:
+    """
+    Deletes a record that was entered by hand (source 'manual') -- the way to undo a mis-click. A bill is never
+    deleted (it is a document: correct it instead), and neither is a record that closed a repair request on the
+    board. Its lines and attachments go with it, and so do its photos in storage.
+    """
+    try:
+        eid = str(uuid.UUID(str(event_id)))
+    except ValueError:
+        raise EventNotFound()
+    rows = supabase.select("maintenance_events", {"select": "id,source", "id": f"eq.{eid}", "limit": "1"})
+    if not rows:
+        raise EventNotFound()
+    if rows[0]["source"] != "manual":
+        raise InvalidEvent("ลบได้เฉพาะรายการที่กรอกเอง — บิลลบไม่ได้ แต่แก้ไขได้")
+    closed = supabase.select("repair_requests", {"select": "seq", "fixed_event_id": f"eq.{eid}", "order": "seq.asc"})
+    if closed:
+        raise InvalidEvent("รายการนี้ปิดงานซ่อมไว้ (" + ", ".join(f"#{r['seq']}" for r in closed) + ") ลบไม่ได้")
+    paths = [a["storage_path"] for a in supabase.select("event_attachments", {"select": "storage_path", "event_id": f"eq.{eid}"})]
+    supabase.delete("maintenance_events", {"id": f"eq.{eid}"})
+    if paths:
+        try:
+            supabase.storage_delete(paths)
+        except supabase.SupabaseError:
+            logger.exception("could not remove the photos of the deleted event %s", eid)

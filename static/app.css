@@ -696,7 +696,7 @@ button.mprow:hover, button.mprow:focus-visible { border-color: var(--accent); bo
 .mp-spec { margin: 2px 0; }
 .mp-qty { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 dialog.wide { max-width: 760px; width: calc(100vw - 32px); }
-.mfields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-bottom: 12px; }
+.mfields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-bottom: 12px; align-items: start; }
 .mfield { display: grid; gap: 3px; min-width: 0; }
 .mfield.wide { grid-column: 1 / -1; }
 .mfield label { margin: 0; font-size: 13px; color: var(--muted); }
@@ -746,9 +746,9 @@ button.btn.danger { color: var(--bad); }
 }
 
 /* the maintenance chart on a truck page: latest event + the next rounds, one row per item */
-.pl-groupbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; margin-bottom: 10px; }
-.pl-groupbar label { margin: 0; font-weight: 600; }
-.pl-groupbar select { max-width: 100%; }
+.pl-groupbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 10px; }
+.pl-groupinfo { min-width: 0; }
+.pl-pickall { margin-top: 10px; border-style: dashed; }
 .pl-empty { padding: 18px 20px; }
 .pl-chartbox { padding: 0; overflow: hidden; }
 .pl-chartscroll { overflow-x: auto; }
