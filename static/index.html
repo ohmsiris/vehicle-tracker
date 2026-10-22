@@ -32,6 +32,7 @@
     </button>
     <nav class="side-items" id="sideCars">
       <button id="navBoard" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>งานซ่อม</span></button>
+      <button id="navWhere" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg><span>รถอยู่ที่ไหน</span></button>
       <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกซ่อม</span></button>
       <button id="navSearch" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg><span>ค้นหารถ / ประวัติ</span></button>
       <button id="navLog" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>สมุดงานซ่อม</span></button>
@@ -300,6 +301,17 @@
     </div>
   </section>
 
+  <!-- ============ Who has which truck ============ -->
+  <section id="whereView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">รถอยู่ที่ไหน</h2>
+      <p class="muted small">รถที่ส่งซ่อมอยู่ตอนนี้ แยกตามอู่ — เห็นว่าใครถือรถคันไหน มากี่วันแล้ว และเกินกำหนดหรือยัง</p>
+    </div>
+    <p class="error" id="whereError" hidden></p>
+    <div id="whereSummary" class="lgsummary"></div>
+    <div id="whereList" class="wherelist"></div>
+  </section>
+
   <!-- ============ Maintenance log ============ -->
   <section id="logView" hidden>
     <div class="page-head">
@@ -492,6 +504,7 @@
 <script src="/static/dashboard.js"></script>
 <script src="/static/fleet.js"></script>
 <script src="/static/logbook.js"></script>
+<script src="/static/where.js"></script>
 <script src="/static/manual.js"></script>
 <script src="/static/app.js"></script>
 </body>

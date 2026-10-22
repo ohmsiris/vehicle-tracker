@@ -13,13 +13,14 @@
 const fleet = { vehicles: [], loaded: false, current: null, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["search", "vehicle", "event", "log"];
+const FLEET_VIEWS = ["search", "vehicle", "event", "log", "where"];
 
 // ------------------------------------------------------------------ routing
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
   if (h === "search") return openSearch();
   if (h === "log") return openLog();
+  if (h === "where") return openWhere();
   const m = /^(vehicle|event)=(.+)$/.exec(h);
   if (m && UUID_RE.test(m[2])) return m[1] === "vehicle" ? openVehicle(m[2]) : openEvent(m[2]);
   return null;

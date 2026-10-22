@@ -285,3 +285,9 @@ open --send_to_shop--> at_shop --returned--> awaiting_bill --(bill saved)--> com
   the views, and teaches `save_maintenance_event()` about it. Until it has been run
   the app works exactly as before and the new buttons say so instead of failing
   (`repair_requests.has_v5()` probes for the columns).
+
+### "รถอยู่ที่ไหน" (`#where`)
+
+The trucks that are out at a shop right now, grouped by shop (most trucks first):
+days away, expected return, overdue flag, and the same "back" / "change shop"
+buttons as the board. It reads the board's own list, so the two never disagree.

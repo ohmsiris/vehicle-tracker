@@ -120,6 +120,7 @@ async function loadBoard() {
   renderBoard();
   renderFixes();
   if (typeof renderManualFixes === "function") renderManualFixes();
+  if (typeof renderWhere === "function") renderWhere();
 }
 
 // --------------------------------------------------------------- rendering
@@ -216,15 +217,23 @@ function wireDrag(card, r) {
     e.dataTransfer.setData("text/plain", r.request_id);
     e.dataTransfer.effectAllowed = "move";
     card.classList.add("dragging");
+    document.querySelector(".kanban").classList.add("dragging");
   });
   card.addEventListener("dragend", () => {
     board.drag = null;
     card.classList.remove("dragging");
+    document.querySelector(".kanban").classList.remove("dragging");
     document.querySelectorAll(".kcol.dragover").forEach((c) => c.classList.remove("dragover"));
   });
 }
 
 function wireColumns() {
+  // a long board: scroll the page when the card is held near the top or bottom edge
+  document.addEventListener("dragover", (e) => {
+    if (!board.drag) return;
+    if (e.clientY < 90) window.scrollBy(0, -20);
+    else if (e.clientY > window.innerHeight - 90) window.scrollBy(0, 20);
+  });
   document.querySelectorAll(".kcol").forEach((col) => {
     col.addEventListener("dragover", (e) => { if (board.drag) { e.preventDefault(); col.classList.add("dragover"); } });
     col.addEventListener("dragleave", (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove("dragover"); });
