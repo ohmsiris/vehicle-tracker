@@ -94,7 +94,7 @@ function visibleTrucks() {
 // a truck matches when every word is somewhere in its number / plate / model / branch / driver / usage
 function rosterScore(v, tokens) {
   if (!tokens.length) return 1;
-  const hay = `${vehHay(v)}|${vehNorm(v.driver)}|${vehNorm(v.usage)}`;
+  const hay = `${vehHay(v)}|${vehNorm(v.driver)}|${vehNorm(v.usage)}|${vehNorm(v.nickname)}`;
   if (!tokens.every((t) => hay.includes(t))) return 0;
   return Math.max(1, vehScore(v, tokens));
 }
@@ -143,11 +143,11 @@ const PAPER_KEYS = ["registered_date", "registration_type", "engine_number", "ch
 // the page's form values, keyed by the API field names
 const draftFrom = (v) => (v ? {
   plate_number: v.plate, plate_province: v.province, vehicle_number: v.truck_number, branch: v.branch, vehicle_class: v.vehicle_class, usage: v.usage,
-  make: v.make, model: v.model, color: v.color, notes: v.notes, main_driver_id: v.driver_id, active: v.active !== false,
+  make: v.make, model: v.model, color: v.color, nickname: v.nickname, notes: v.notes, main_driver_id: v.driver_id, active: v.active !== false,
   registered_date: v.registered_date, registration_type: v.registration_type, engine_number: v.engine_number, chassis_number: v.chassis_number,
   owner_name: v.owner_name, holder_name: v.holder_name,
 } : {
-  plate_number: "", plate_province: "", vehicle_number: "", branch: tk.lastBranch || "", vehicle_class: "", usage: "", make: "", model: "", color: "", notes: "",
+  plate_number: "", plate_province: "", vehicle_number: "", branch: tk.lastBranch || "", vehicle_class: "", usage: "", make: "", model: "", color: "", nickname: "", notes: "",
   main_driver_id: "", active: true, registered_date: "", registration_type: "", engine_number: "", chassis_number: "", owner_name: "", holder_name: "",
 });
 
@@ -211,7 +211,7 @@ function viewCards(v) {
   return [
     tkCard("ข้อมูลรถ",
       kvAll("ทะเบียน", v.plate), kvAll("จังหวัด", v.province), kvAll("เบอร์รถ", v.truck_number), kvAll("สาขา", v.branch),
-      kvAll("ประเภทรถ", v.vehicle_class), kvAll("การใช้งาน", v.usage), kvAll("ยี่ห้อ", v.make), kvAll("รุ่น", v.model), kvAll("สี", v.color),
+      kvAll("ชื่อเรียกรถ", v.nickname), kvAll("ประเภทรถ", v.vehicle_class), kvAll("การใช้งาน", v.usage), kvAll("ยี่ห้อ", v.make), kvAll("รุ่น", v.model), kvAll("สี", v.color),
       kvAll("สถานะ", v.active === false ? "เลิกใช้แล้ว" : "ใช้งานอยู่")),
     tkCard("คนขับหลัก",
       kvAll("ชื่อ", d && d.name), kvAll("ชื่อเล่น", d && d.nickname),
@@ -264,6 +264,7 @@ function editCards() {
       field("ทะเบียน", "plate_number", { maxlength: 30, placeholder: "เช่น 1กข 4267" }),
       field("จังหวัดป้ายทะเบียน", "plate_province", { maxlength: 40, placeholder: "เช่น กรุงเทพมหานคร" }),
       field("เบอร์รถ (เบอร์ในบริษัท)", "vehicle_number", { maxlength: 40, placeholder: "เช่น 36" }),
+      state.fleetV8 ? field("ชื่อเรียกรถ (ชื่อเล่นรถ)", "nickname", { maxlength: 40, placeholder: "เช่น หัวขาว" }) : null,
       selectField("สาขา", "branch", (state.branches || []).map((b) => [b, b]), { blank: "— เลือกสาขา —" }),
       state.fleetV7 ? selectField("ประเภทรถ (ขนาด)", "vehicle_class", (state.vehicleClasses || []).map((c) => [c, c])) : null,
       field("การใช้งาน", "usage", { list: "tkUsageList", maxlength: 40, placeholder: "เช่น รถสาย / รถหน้าโรง" }),
@@ -324,6 +325,7 @@ async function saveTruck() {
   showErr("tkError", "");
   const v = tk.v, body = { ...tk.draft };
   if (!state.fleetV7) for (const k of ["vehicle_class", "color", ...PAPER_KEYS]) delete body[k];
+  if (!state.fleetV8) delete body.nickname;
   if (!v) delete body.active;                                // a new truck is simply active
   try {
     const res = v ? await api(`/api/vehicles/${v.vehicle_id}`, jsonOpts("PATCH", body)) : await api("/api/vehicles", jsonOpts("POST", body));
@@ -345,7 +347,7 @@ async function saveTruck() {
 
 // ------------------------------------------------------------ the master list as a spreadsheet
 function exportRoster() {
-  const cols = [["เบอร์รถ", (v) => v.truck_number], ["ทะเบียน", (v) => v.plate], ["จังหวัด", (v) => v.province], ["สาขา", (v) => v.branch],
+  const cols = [["เบอร์รถ", (v) => v.truck_number], ["ชื่อเรียกรถ", (v) => v.nickname], ["ทะเบียน", (v) => v.plate], ["จังหวัด", (v) => v.province], ["สาขา", (v) => v.branch],
     ["ประเภทรถ", (v) => v.vehicle_class], ["การใช้งาน", (v) => v.usage], ["ยี่ห้อ", (v) => v.make], ["รุ่น", (v) => v.model], ["สี", (v) => v.color],
     ["คนขับหลัก", (v) => v.driver], ["ชื่อเล่น", (v) => v.driver_nickname], ["เบอร์โทร", (v) => v.driver_phone],
     ["วันจดทะเบียน (ค.ศ.)", (v) => v.registered_date], ["ประเภทตามทะเบียน", (v) => v.registration_type], ["เลขเครื่อง", (v) => v.engine_number],

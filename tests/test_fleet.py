@@ -119,9 +119,10 @@ def test_editing_a_driver_only_changes_what_was_sent():
 
 # ---------------------------------------------------------- database wrappers
 class Db:
-    def __init__(self, v6=True, v7=True):
+    def __init__(self, v6=True, v7=True, v8=True):
         self.v6 = v6
         self.v7 = v7
+        self.v8 = v8
         self.tables = {
             "vehicles": [truck(V1, "1กข 1", "1", usage=None, main_driver_id=None, notes=None), truck(V2, "2กข 2", "2", usage="รถสาย", main_driver_id=D1, notes=None)],
             "drivers": [{"id": D1, "name": "สมชาย", "active": True, "phone": None, "branch": None, "notes": None}],
@@ -135,8 +136,11 @@ class Db:
             raise fleet.supabase.SupabaseError("no table")
         if table == "vehicles" and "usage" in params.get("select", "") and not self.v6:
             raise fleet.supabase.SupabaseError("no column")
-        if ("vehicle_class" in params.get("select", "") or "nickname" in params.get("select", "")) and not self.v7:
+        sel = params.get("select", "")
+        if ("vehicle_class" in sel or (table == "drivers" and "nickname" in sel)) and not self.v7:
             raise fleet.supabase.SupabaseError("no v7 column")
+        if table == "vehicles" and "nickname" in sel and not self.v8:
+            raise fleet.supabase.SupabaseError("no v8 column")
         rows = self.tables[table]
         if table == "repair_requests" and "status" in params:
             return [dict(r) for r in rows if r["status"] in params["status"]]
@@ -167,6 +171,7 @@ def db(monkeypatch):
         monkeypatch.setattr(fleet.supabase, name, getattr(d, name))
     monkeypatch.setitem(fleet._probe, "at", 0.0)
     monkeypatch.setitem(fleet._probe7, "at", 0.0)
+    monkeypatch.setitem(fleet._probe8, "at", 0.0)
     monkeypatch.setattr(fleet.roster, "invalidate_roster_cache", lambda: None)
     return d
 
@@ -326,6 +331,7 @@ def test_v7_fields_are_refused_with_a_clear_message_before_schema_v7_but_the_res
         monkeypatch.setattr(fleet.supabase, name, getattr(d, name))
     monkeypatch.setitem(fleet._probe, "at", 0.0)
     monkeypatch.setitem(fleet._probe7, "at", 0.0)
+    monkeypatch.setitem(fleet._probe8, "at", 0.0)
     monkeypatch.setattr(fleet.roster, "invalidate_roster_cache", lambda: None)
     with pytest.raises(fleet.InvalidFleet) as exc:
         fleet.edit_vehicle(V1, {"color": "ขาว"})
@@ -374,3 +380,41 @@ def test_moving_a_truck_to_another_branch_checks_the_number_there_per_size_class
         make({"branch": "แก่งคอย"}, existing={**mine, "vehicle_class": None}, others=[big])
     with pytest.raises(fleet.InvalidFleet):
         make({"vehicle_class": "รถใหญ่"}, existing={**mine, "branch": "แก่งคอย"}, others=[big])      # changing the size into a clash is caught too
+
+
+# ------------------------------------------------ schema_v8: the truck's own nickname
+def test_a_truck_nickname_is_trimmed_and_blank_becomes_none():
+    assert make({"nickname": "  หัวขาว "}, existing=truck(V1, "A 1", "6")) == {"nickname": "หัวขาว"}
+    assert make({"nickname": " "}, existing=truck(V1, "A 1", "6")) == {"nickname": None}
+
+
+def test_the_truck_nickname_is_saved_once_schema_v8_is_in(db):
+    fleet.edit_vehicle(V1, {"nickname": "หัวน้ำเงิน"})
+    assert db.updates[-1][2] == {"nickname": "หัวน้ำเงิน"}
+
+
+def test_the_truck_nickname_is_refused_before_schema_v8_but_everything_else_works(monkeypatch):
+    d = Db(v8=False)
+    for name in ("select", "select_all", "insert", "update"):
+        monkeypatch.setattr(fleet.supabase, name, getattr(d, name))
+    monkeypatch.setitem(fleet._probe, "at", 0.0)
+    monkeypatch.setitem(fleet._probe7, "at", 0.0)
+    monkeypatch.setitem(fleet._probe8, "at", 0.0)
+    monkeypatch.setattr(fleet.roster, "invalidate_roster_cache", lambda: None)
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        fleet.edit_vehicle(V1, {"nickname": "หัวขาว"})
+    assert "schema_v8.sql" in str(exc.value)
+    fleet.edit_vehicle(V1, {"color": "ขาว"})                                # the v7 columns still work
+    assert d.tables["vehicles"][0]["color"] == "ขาว" and fleet.has_v8() is False
+
+
+def test_vehicle_rows_carry_the_truck_nickname():
+    r = history.vehicle_rows([{"id": V1, "plate_number": "บฉ 6161", "vehicle_number": "บฉ 6161", "nickname": "หัวขาว"}], {}, [])[0]
+    assert r["nickname"] == "หัวขาว"
+
+
+def test_meta_reports_whether_schema_v8_is_in(monkeypatch):
+    main, c = _client(monkeypatch)
+    monkeypatch.setattr(main.supabase, "configured", lambda: False)
+    monkeypatch.setattr(main, "load_roster", lambda: [])
+    assert c.get("/api/meta?token=secret").json()["fleet_v8"] is False

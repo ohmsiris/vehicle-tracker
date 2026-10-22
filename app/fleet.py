@@ -31,6 +31,7 @@ VEHICLE_CLASSES = ["รถเล็ก", "รถใหญ่"]                  
 V7_VEHICLE_TEXT = ("color", "engine_number", "chassis_number", "registration_type", "owner_name", "holder_name")
 V7_VEHICLE_KEYS = ("vehicle_class", "registered_date") + V7_VEHICLE_TEXT
 V7_DRIVER_KEYS = ("nickname",)
+NEEDS_V8 = "ต้องรัน schema_v8.sql ใน Supabase ก่อน จึงจะบันทึกชื่อเรียกรถได้"
 # statuses that mean a truck still has work in progress, so it cannot be retired yet
 BUSY = ("open", "at_shop", "awaiting_bill")
 
@@ -58,6 +59,23 @@ def has_v6() -> bool:
     except supabase.SupabaseError:
         ok = False
     _probe.update(at=now, ok=ok)
+    return ok
+
+
+_probe8 = {"at": 0.0, "ok": False}
+
+
+def has_v8() -> bool:
+    """True once schema_v8.sql (vehicles.nickname) has been run (probed, cached 30 s)."""
+    now = time.time()
+    if now - _probe8["at"] < 30:
+        return _probe8["ok"]
+    try:
+        supabase.select("vehicles", {"select": "nickname", "limit": "1"})
+        ok = True
+    except supabase.SupabaseError:
+        ok = False
+    _probe8.update(at=now, ok=ok)
     return ok
 
 
@@ -124,6 +142,8 @@ def clean_vehicle(data: dict, *, existing: Optional[dict] = None, others: list[d
     for key in ("vehicle_number", "make", "model", "usage"):
         if creating or given(key):
             values[key] = _clean(data.get(key), 40) or None
+    if given("nickname"):                                   # the truck's own nickname (schema_v8)
+        values["nickname"] = _clean(data.get("nickname"), 40) or None
     if creating or given("notes"):
         values["notes"] = _clean(data.get("notes"), MAX_NOTES) or None
     # ---- registration details and size class (only written when sent: they need schema_v7.sql)
@@ -230,6 +250,8 @@ def _require_v6() -> None:
 def _require_v7_for(values: dict, keys) -> None:
     if any(k in values for k in keys) and not has_v7():
         raise InvalidFleet(NEEDS_V7)
+    if "nickname" in values and keys is V7_VEHICLE_KEYS and not has_v8():
+        raise InvalidFleet(NEEDS_V8)
 
 
 def _changed() -> None:
@@ -305,6 +327,8 @@ def _all_vehicles() -> list[dict]:
         cols += ",usage,main_driver_id,notes"
     if has_v7():
         cols += "," + ",".join(V7_VEHICLE_KEYS)
+    if has_v8():
+        cols += ",nickname"
     return supabase.select_all("vehicles", {"select": cols, "order": "id.asc"})
 
 

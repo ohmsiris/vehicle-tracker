@@ -3,9 +3,9 @@ One-time import of the master vehicle list (Drivers.xlsx) into the database.
 
 Sheet 1 ("Vehicle Roster"): one block per branch, one row per truck -- branch, driver (full name,
 nickname, phone), fleet number, size class (รถเล็ก / รถใหญ่), plate, province, make, model. A driver
-written as "หน้าโรง" is not a person: it marks a truck that stays at the factory, and the nickname
-column of such a row describes the TRUCK (หัวขาว, หัวน้ำเงิน, สต๊อคน้ำแข็ง ...): that text becomes its usage
-label (the blue chip). "เลิกใช้" there means the truck is retired.
+written as "หน้าโรง" is not a person: it marks a truck that stays at the factory (usage รถหน้าโรง), and the
+nickname column of such a row describes the TRUCK (หัวขาว, หัวน้ำเงิน, สต๊อคน้ำแข็ง ...): that text becomes the
+truck's own nickname. "เลิกใช้" there means the truck is retired.
 Sheet 2 ("รายละเอียดทะเบียน"): the registration papers by plate -- colour, engine / chassis numbers,
 registration date, type, owner, holder.
 
@@ -113,8 +113,8 @@ def parse_master(rows: list[list]) -> list[dict]:
             "province": clean(cell("จังหวัด")), "make": clean(cell("ยี่ห้อ")), "model": clean(cell("รุ่นรถ")),
             "vehicle_class": clean(cell("ประเภทรถ")),
             "driver_name": None if at_factory else driver, "nickname": None if at_factory else clean(cell("ชื่อเล่น")), "phone": parse_phone(cell("เบอร์โทร")),
-            "usage": (clean(cell("ชื่อเล่น")) if at_factory and clean(cell("ชื่อเล่น")) not in (None, RETIRED_LABEL) else USAGE_FACTORY) if at_factory
-                     else (USAGE_ROUTE if driver else None),
+            "usage": USAGE_FACTORY if at_factory else (USAGE_ROUTE if driver else None),
+            "truck_nickname": clean(cell("ชื่อเล่น")) if at_factory and clean(cell("ชื่อเล่น")) != RETIRED_LABEL else None,
             "retired": at_factory and clean(cell("ชื่อเล่น")) == RETIRED_LABEL,
         })
     return out
@@ -196,7 +196,7 @@ def build_plan(master: list[dict], registrations: dict[str, dict], vehicles: lis
                 plan["skipped"].append(f"แถว {m['row']}: {m['branch']} #{m['number']} ไม่มีทะเบียน — เพิ่มเองในหน้าทะเบียนรถเมื่อมีทะเบียน")
                 continue
             values = {"plate_number": m["plate"], "plate_province": m["province"] or "", "branch": m["branch"], "vehicle_number": m["number"],
-                      "make": m["make"], "model": m["model"], "vehicle_class": m["vehicle_class"], "usage": m["usage"], **{k: v for k, v in reg.items() if v}}
+                      "make": m["make"], "model": m["model"], "vehicle_class": m["vehicle_class"], "usage": m["usage"], "nickname": m["truck_nickname"], **{k: v for k, v in reg.items() if v}}
             if m.get("retired"):
                 values["active"] = False
             plan["vehicle_creates"].append({"label": _label({**m}), "values": values, "driver_key": driver_key})
@@ -214,6 +214,8 @@ def build_plan(master: list[dict], registrations: dict[str, dict], vehicles: lis
             values["vehicle_class"] = m["vehicle_class"]
         if m["usage"] and not truck.get("usage"):
             values["usage"] = m["usage"]
+        if m["truck_nickname"] and not truck.get("nickname") and "nickname" in truck:      # (the column exists only after schema_v8)
+            values["nickname"] = m["truck_nickname"]
         for key, val in reg.items():
             if val and not truck.get(key):
                 values[key] = val

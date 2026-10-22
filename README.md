@@ -39,7 +39,8 @@ service key bypasses row-level security: server-side only, never in a page.
 `schema_v4.sql` (editing saved bills + the written summary), then
 `schema_v5.sql` (the "at the shop" step of the repair flow), then
 `schema_v6.sql` (drivers, truck usage, main driver), then
-`schema_v7.sql` (the rest of the master vehicle list: size class, registration papers, driver nickname). Replace
+`schema_v7.sql` (the rest of the master vehicle list: size class, registration papers, driver nickname), then
+`schema_v8.sql` (the truck's own nickname). Replace
 `<PROJECT_REF>` in `schema.sql` first. Then seed the fleet:
 
 ```bash
@@ -340,3 +341,9 @@ the registration papers) was the source and is imported once.
   (so it is safe to run again and never undoes edits made on the site), and lists every difference it
   leaves alone. Needs `schema_v6.sql` + `schema_v7.sql` and `pip install openpyxl`.
 - `Drivers.xlsx` holds drivers' phone numbers: it is git-ignored and must not be committed.
+
+**Truck nickname** (`vehicles.nickname`, `schema_v8.sql`): what the truck itself is called -- หัวขาว,
+หัวน้ำเงิน, สต๊อคน้ำแข็ง (a driver's nickname is separate, on the driver). In the blue chip where the
+fleet number goes, a truck with no number of its own (its "number" is just its plate) shows the
+nickname; a truck with both shows the nickname next to the plate. Searchable, in the CSV, editable on
+the truck page. The import fills it from the nickname column of "หน้าโรง" rows; usage stays รถหน้าโรง.

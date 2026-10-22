@@ -71,7 +71,7 @@ def main() -> None:
             values["main_driver_id"] = ids[u["driver_key"]]
         supabase.update("vehicles", {"id": f"eq.{u['id']}"}, values)
     for c in plan["vehicle_creates"]:
-        values = {k: v for k, v in c["values"].items() if v is not None}
+        values = {k: v for k, v in c["values"].items() if v is not None and (k != "nickname" or fleet.has_v8())}
         if c["driver_key"]:
             values["main_driver_id"] = ids[c["driver_key"]]
         supabase.insert("vehicles", [values])

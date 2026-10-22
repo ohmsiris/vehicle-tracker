@@ -89,19 +89,30 @@ const thDate = beDate;
 const squash = (t) => String(t || "").replace(/[\s\-_.]/g, "");
 const numberIsPlate = (r) => !!r.truck_number && !!r.plate && squash(r.truck_number) === squash(r.plate);
 
-// The truck, as the heading of a card: its fleet number stands out as a chip so it is never mistaken for anything else.
+// The truck's own nickname (หัวขาว ...): carried on the row itself, or looked up by vehicle id from the fleet list.
+function nicknameOf(r) {
+  if (r.nickname) return r.nickname;
+  const v = r.vehicle_id && (state.vehicles || []).find((x) => x.id === r.vehicle_id);
+  return (v && v.nickname) || "";
+}
+
+// The truck, as the heading of a card. The blue chip is its fleet number; a truck with no number of its own
+// (the "number" is just its plate) shows its nickname there instead, and one with both keeps the nickname beside the plate.
 function truckHead(r) {
-  const same = numberIsPlate(r);
+  const hasNumber = !!r.truck_number && !numberIsPlate(r), nick = nicknameOf(r);
+  const chip = hasNumber ? el("span", { class: "truckno", title: "เบอร์รถ", text: `#${r.truck_number}` })
+    : nick ? el("span", { class: "truckno", title: "ชื่อเรียกรถ", text: nick }) : null;
   return [
-    r.truck_number && !same ? el("span", { class: "truckno", title: "เบอร์รถ", text: `#${r.truck_number}` }) : null,
-    el("strong", { class: "truckplate", text: r.plate || (r.truck_number && same ? r.truck_number : "ไม่ระบุรถ") }),
+    chip,
+    el("strong", { class: "truckplate", text: r.plate || (r.truck_number && !hasNumber ? r.truck_number : "ไม่ระบุรถ") }),
+    hasNumber && nick ? el("span", { class: "muted small", text: nick }) : null,
   ].filter(Boolean);
 }
 
-// Some trucks have no separate fleet number (it is just their plate): don't print it twice.
+// Some trucks have no separate fleet number (it is just their plate): don't print it twice, and use the nickname if it has one.
 function truckLabel(r) {
-  const same = numberIsPlate(r);
-  return [r.truck_number && !same ? `#${r.truck_number}` : null, r.plate].filter(Boolean).join(" ") || "ไม่ระบุรถ";
+  const hasNumber = !!r.truck_number && !numberIsPlate(r);
+  return [hasNumber ? `#${r.truck_number}` : nicknameOf(r), r.plate].filter(Boolean).join(" ") || "ไม่ระบุรถ";
 }
 
 function jsonOpts(method, body) {

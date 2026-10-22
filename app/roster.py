@@ -28,7 +28,7 @@ def _load_from_supabase() -> list[dict]:
     v6 = fleet.has_v6()                    # usage + main driver exist only after schema_v6.sql
     rows = supabase.select("vehicles", {
         "select": "id,plate_number,plate_province,vehicle_number,make,model,branch" + (",usage,main_driver_id" if v6 else "")
-                  + (",vehicle_class" if fleet.has_v7() else ""),
+                  + (",vehicle_class" if fleet.has_v7() else "") + (",nickname" if fleet.has_v8() else ""),
         "active": "eq.true", "order": "branch.asc,vehicle_number.asc", "limit": "1000",
     })
     drivers = {d["id"]: d["name"] for d in supabase.select("drivers", {"select": "id,name", "limit": "1000"})} if v6 else {}
@@ -37,7 +37,7 @@ def _load_from_supabase() -> list[dict]:
         "id": r["id"], "branch": r["branch"] or "", "truck_number": r["vehicle_number"] or "",
         "plate": r["plate_number"], "province": r["plate_province"] or "",
         "make": r["make"] or "", "model": r["model"] or "",
-        "usage": r.get("usage") or "", "vehicle_class": r.get("vehicle_class") or "", "driver_id": r.get("main_driver_id") or "", "driver": drivers.get(r.get("main_driver_id"), ""),
+        "usage": r.get("usage") or "", "vehicle_class": r.get("vehicle_class") or "", "nickname": r.get("nickname") or "", "driver_id": r.get("main_driver_id") or "", "driver": drivers.get(r.get("main_driver_id"), ""),
     } for r in rows]
 
 
