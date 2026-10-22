@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, fleet, history, logbook, logsource, repair_requests, shops, summarize, supabase
+from app import dashboard, events, fleet, history, logbook, logsource, machinery, repair_requests, shops, summarize, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -438,6 +438,96 @@ def api_edit_vehicle(vehicle_id: str, body: dict = Body(...), x_app_token: str =
     """Edits only the fields present in the body (usage, main driver, details, active = retire / bring back)."""
     _check_token(x_app_token, token)
     return _fleet_call(fleet.edit_vehicle, vehicle_id, body)
+
+
+# ------------------------------------------------------------- machinery
+def _machinery_call(fn, *args, **kwargs):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return fn(*args, **kwargs)
+    except machinery.InvalidMachinery as exc:
+        raise HTTPException(422, str(exc))
+    except machinery.NotFound:
+        raise HTTPException(404, "ไม่พบข้อมูลนี้")
+    except supabase.SupabaseError:
+        logger.exception("machinery call failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/machinery/options")
+def api_machinery_options(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return {**machinery.options(), "ready": machinery.has_v9() if supabase.configured() else False}
+
+
+@app.get("/api/machines")
+def api_machines(include_inactive: bool = False, x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.list_machines, include_inactive)
+
+
+@app.post("/api/machines")
+def api_create_machine(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.create_machine, body)
+
+
+@app.get("/api/machines/{machine_id}")
+def api_machine(machine_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.get_machine, machine_id)
+
+
+@app.patch("/api/machines/{machine_id}")
+def api_edit_machine(machine_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.edit_machine, machine_id, body)
+
+
+@app.get("/api/machine-parts")
+def api_machine_parts(q: str = "", machine_id: str = "", location: str = "", part: str = "", limit: int = 200, offset: int = 0,
+                      x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.list_parts, q=q, machine_id=machine_id, location=location, part=part, limit=limit, offset=offset)
+
+
+@app.post("/api/machine-parts")
+def api_create_part(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.create_part, body)
+
+
+@app.patch("/api/machine-parts/{part_id}")
+def api_edit_part(part_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.edit_part, part_id, body)
+
+
+@app.delete("/api/machine-parts/{part_id}")
+def api_delete_part(part_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.delete_part, part_id)
+
+
+@app.get("/api/machine-events")
+def api_machine_events(q: str = "", machine_id: str = "", area: str = "", kind: str = "", branch: str = "", date_from: str = "", date_to: str = "",
+                       limit: int = 50, offset: int = 0, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.list_events, q=q, machine_id=machine_id, area=area, kind=kind, branch=branch, date_from=date_from, date_to=date_to,
+                           limit=limit, offset=offset)
+
+
+@app.post("/api/machine-events")
+def api_create_machine_event(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.create_event, body)
+
+
+@app.patch("/api/machine-events/{event_id}")
+def api_edit_machine_event(event_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machinery.edit_event, event_id, body)
 
 
 @app.get("/api/drivers")
