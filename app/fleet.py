@@ -158,12 +158,16 @@ def clean_vehicle(data: dict, *, existing: Optional[dict] = None, others: list[d
         for o in others:
             if (_squash(o.get("plate_number")), _squash(o.get("plate_province"))) == plate_key:
                 raise InvalidFleet(f"ทะเบียน {final['plate_number']} มีอยู่ในระบบแล้ว")
-    number_changed = creating or any(k in values for k in ("vehicle_number", "branch", "active"))
+    # A fleet number is unique within a branch AND size class: a big truck #2 and a small truck #2 can both exist.
+    # (When either size class is not filled in yet, they are assumed to be the same kind.)
+    number_changed = creating or any(k in values for k in ("vehicle_number", "branch", "active", "vehicle_class"))
     if number_changed and final.get("vehicle_number") and final.get("active", True):
         for o in others:
-            if (o.get("active", True) and (o.get("branch") or "") == final.get("branch")
+            same_kind = not final.get("vehicle_class") or not o.get("vehicle_class") or final["vehicle_class"] == o["vehicle_class"]
+            if (o.get("active", True) and (o.get("branch") or "") == final.get("branch") and same_kind
                     and _squash(o.get("vehicle_number")) == _squash(final["vehicle_number"])):
-                raise InvalidFleet(f"เบอร์ {final['vehicle_number']} ของสาขา{final.get('branch')} ใช้อยู่แล้ว (ทะเบียน {o.get('plate_number')})")
+                raise InvalidFleet(f"เบอร์ {final['vehicle_number']} ของสาขา{final.get('branch')} ใช้อยู่แล้ว (ทะเบียน {o.get('plate_number')}) — "
+                                   "ถ้าเป็นรถคนละขนาด (เล็ก/ใหญ่) ให้เลือกประเภทรถก่อน")
     return values
 
 

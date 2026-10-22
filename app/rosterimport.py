@@ -149,7 +149,10 @@ def _label(v: dict) -> str:
 def build_plan(master: list[dict], registrations: dict[str, dict], vehicles: list[dict], drivers: list[dict]) -> dict:
     """What to write, without writing it. `vehicles` / `drivers` are the current database rows."""
     by_plate = {squash(v["plate_number"]): v for v in vehicles}
-    by_number = {(v.get("branch") or "", squash(v.get("vehicle_number"))): v for v in vehicles if v.get("vehicle_number")}
+    by_number: dict[tuple, list] = {}               # a number can repeat inside a branch: a big truck #2 and a small truck #2
+    for v in vehicles:
+        if v.get("vehicle_number"):
+            by_number.setdefault((v.get("branch") or "", squash(v["vehicle_number"])), []).append(v)
     known_drivers = {squash(d["name"]): d for d in drivers if d.get("name")}
     plan = {"vehicle_updates": [], "vehicle_creates": [], "driver_creates": {}, "driver_updates": [], "conflicts": [], "skipped": [],
             "differences": [], "matched": 0, "db_not_in_sheet": []}
@@ -159,7 +162,13 @@ def build_plan(master: list[dict], registrations: dict[str, dict], vehicles: lis
         if m.get("branch_note"):
             plan["differences"].append(m["branch_note"])
         by_p = by_plate.get(squash(m["plate"])) if m["plate"] else None
-        by_n = by_number.get((m["branch"] or "", squash(m["number"]))) if m["number"] else None
+        candidates = by_number.get((m["branch"] or "", squash(m["number"])), []) if m["number"] else []
+        if len(candidates) > 1:                                       # narrow by size class, else by the plate we already matched
+            candidates = [c for c in candidates if c.get("vehicle_class") == m["vehicle_class"]] or ([by_p] if by_p in candidates else candidates)
+        by_n = candidates[0] if len(candidates) == 1 else None
+        if len(candidates) > 1 and not by_p:
+            plan["conflicts"].append(f"แถว {m['row']}: เบอร์ {m['number']} ของสาขา{m['branch']} ตรงกับรถหลายคัน และไม่มีทะเบียนให้ตัดสิน — ข้ามแถวนี้")
+            continue
         if by_p and by_n and by_p["id"] != by_n["id"]:
             plan["conflicts"].append(f"แถว {m['row']}: ทะเบียน {m['plate']} ตรงกับ {_label(by_p)} แต่เบอร์ {m['number']} ตรงกับ {_label(by_n)} — ข้ามแถวนี้")
             continue

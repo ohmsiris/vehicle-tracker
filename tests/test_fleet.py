@@ -353,3 +353,24 @@ def test_meta_reports_whether_schema_v7_is_in_and_the_size_classes(monkeypatch):
     monkeypatch.setattr(main, "load_roster", lambda: [])
     d = c.get("/api/meta?token=secret").json()
     assert d["fleet_v7"] is False and d["vehicle_classes"] == ["รถเล็ก", "รถใหญ่"]
+
+
+def test_the_same_fleet_number_may_exist_once_per_size_class_in_a_branch():
+    big = truck(V1, "86-3139", "2", "แก่งคอย", vehicle_class="รถใหญ่")
+    small = {"plate_number": "1ฒถ 2087", "branch": "แก่งคอย", "vehicle_number": "2", "vehicle_class": "รถเล็ก"}
+    assert make(small, others=[big])["vehicle_number"] == "2"                       # another size: fine
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        make({**small, "vehicle_class": "รถใหญ่"}, others=[big])                    # the same size: still a clash
+    assert "เบอร์ 2" in str(exc.value)
+    with pytest.raises(fleet.InvalidFleet):
+        make({k: v for k, v in small.items() if k != "vehicle_class"}, others=[big])    # size not filled in: assumed the same, so the message asks for it
+
+
+def test_moving_a_truck_to_another_branch_checks_the_number_there_per_size_class():
+    big = truck(V1, "86-3139", "2", "แก่งคอย", vehicle_class="รถใหญ่")
+    mine = truck(V2, "1ฒถ 2087", "2", "สระบุรี", vehicle_class="รถเล็ก")
+    assert make({"branch": "แก่งคอย"}, existing=mine, others=[big]) == {"branch": "แก่งคอย"}
+    with pytest.raises(fleet.InvalidFleet):
+        make({"branch": "แก่งคอย"}, existing={**mine, "vehicle_class": None}, others=[big])
+    with pytest.raises(fleet.InvalidFleet):
+        make({"vehicle_class": "รถใหญ่"}, existing={**mine, "branch": "แก่งคอย"}, others=[big])      # changing the size into a clash is caught too

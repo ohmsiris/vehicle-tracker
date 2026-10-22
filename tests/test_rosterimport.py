@@ -187,3 +187,21 @@ def test_trucks_in_the_database_but_not_on_the_sheet_are_listed_and_the_branch_o
     renumbered = ri.build_plan(ri.parse_master([HEADER, truck_row(1, "สระบุรี", None, None, "7", None, "รถเล็ก", "1ฒถ 8966")]), {},
                                [db_truck("v1", "1ฒถ 8966", "1")], [])
     assert "vehicle_number" not in renumbered["vehicle_updates"][0]["values"] and any("#7" in d for d in renumbered["differences"])
+
+
+def test_two_trucks_with_the_same_number_in_a_branch_are_told_apart_by_plate_and_size():
+    sheet = [["รถแก่งคอย"], HEADER,
+             truck_row(1, "แก่งคอย", "หน้าโรง", None, "2", None, "รถใหญ่", "86-3139"),
+             truck_row(2, "แก่งคอย", "หน้าโรง", None, "2", None, "รถเล็ก", "1ฒถ 2087")]
+    vehicles = [db_truck("big", "86-3139", "2", "แก่งคอย"), db_truck("small", "1ฒถ 2087", "2", "แก่งคอย")]
+    p = ri.build_plan(ri.parse_master(sheet), {}, vehicles, [])
+    assert p["matched"] == 2 and not p["conflicts"]
+    classes = {u["id"]: u["values"]["vehicle_class"] for u in p["vehicle_updates"]}
+    assert classes == {"big": "รถใหญ่", "small": "รถเล็ก"}
+
+
+def test_a_row_without_a_plate_is_not_guessed_when_the_number_is_ambiguous():
+    sheet = [["รถแก่งคอย"], HEADER, truck_row(1, "แก่งคอย", "หน้าโรง", None, "2", None, "รถเล็ก", None)]
+    vehicles = [db_truck("a", "86-3139", "2", "แก่งคอย", vehicle_class="รถใหญ่"), db_truck("b", "1ฒถ 2087", "2", "แก่งคอย", vehicle_class="รถใหญ่")]
+    p = ri.build_plan(ri.parse_master(sheet), {}, vehicles, [])
+    assert len(p["conflicts"]) == 1 and not p["vehicle_updates"]
