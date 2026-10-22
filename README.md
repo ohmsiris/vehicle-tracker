@@ -40,7 +40,8 @@ service key bypasses row-level security: server-side only, never in a page.
 `schema_v5.sql` (the "at the shop" step of the repair flow), then
 `schema_v6.sql` (drivers, truck usage, main driver), then
 `schema_v7.sql` (the rest of the master vehicle list: size class, registration papers, driver nickname), then
-`schema_v8.sql` (the truck's own nickname). Replace
+`schema_v8.sql` (the truck's own nickname), then
+`schema_v9.sql` (machinery: machines, parts index, maintenance reports). Replace
 `<PROJECT_REF>` in `schema.sql` first. Then seed the fleet:
 
 ```bash
@@ -347,3 +348,27 @@ the registration papers) was the source and is imported once.
 fleet number goes, a truck with no number of its own (its "number" is just its plate) shows the
 nickname; a truck with both shows the nickname next to the plate. Searchable, in the CSV, editable on
 the truck page. The import fills it from the nickname column of "หน้าโรง" rows; usage stays รถหน้าโรง.
+
+## Machinery ("เครื่องจักร")
+
+`schema_v9.sql`, `app/machinery.py`, `static/machinery.js`. Three pages in the sidebar group **เครื่องจักร**:
+
+- **ดัชนีเครื่องจักร** (`#machinery`): the machines as cards -- the five numbered ice machines
+  (หลอดใหญ่ / เหลี่ยม / เล็ก, MYCOM 8WB-HE 50 ตัน, Sabroe SMC108L 30 ตัน) and the two brine-pond machines, which
+  usually have no number and are named "เครื่องบ่อซอง Sabroe 30 ตัน" -- and the **parts / specs index** under them:
+  every motor, pump, belt, bearing, breaker, contactor and overload with its spec, quantity and (for motors)
+  hp / amps / current vs desired contactor and overload / status. Search finds any word across all of it
+  ("calpeda", "B-82", "breaker 40A"); a row opens a form to correct or delete it, "+ เพิ่มรายการ" adds one.
+  Rows can be tied to a machine or left as a plant area (โรงซอง 1, ระบบน้ำ, ลานโหลด ...).
+- **A machine's page** (`#machine=<id>`): its details (view / edit like the truck page), its own parts, its
+  latest reports. "+ เพิ่มเครื่อง" opens `#machine=new`.
+- **บันทึกซ่อมบำรุง** (`#machine-log`): maintenance reports -- date, machine or area, equipment, kind (ซ่อม /
+  เปลี่ยนอะไหล่ / ตรวจเช็ค / ทำความสะอาด / หล่อลื่น / อื่นๆ), what was done, why, who did it, cost, and for a
+  replaced part its brand / model / serial / vendor. Filter by machine, kind, date, search.
+- **Import** from the Google Sheet "Saraburi Maintenence Sheet" (download as .xlsx):
+  `scripts/import_machinery.py <file>` (dry run) / `--write`. It reads "อะไหล่ Main", "Motor Index Main" (folded into
+  the same rows: status, current vs desired), "Pressure Relief Valve" and the change logs
+  ("Saraburi_General", "Kaeng Khoi"). Rows that already exist are skipped, so it can be re-run. The other tabs
+  (routine cleaning schedule, purchase orders, price comparison, water calculation) are not imported yet.
+- Until `schema_v9.sql` has been run the pages show a banner and writes explain what is missing
+  (`machinery.has_v9()`).

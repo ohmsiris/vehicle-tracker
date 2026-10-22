@@ -40,11 +40,15 @@
     </nav>
   </div>
 
-  <!-- Machinery: placeholder for now -->
+  <!-- Machinery -->
   <div class="side-group" id="groupMachinery">
-    <button id="navMachinery" class="side-head" type="button" aria-expanded="false">
-      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>เครื่องจักร</span><em class="soon">เร็วๆ นี้</em>
+    <button class="side-head" type="button" aria-expanded="true" aria-controls="sideMachinery">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>เครื่องจักร</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
     </button>
+    <nav class="side-items" id="sideMachinery">
+      <button id="navMachIndex" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>ดัชนีเครื่องจักร</span></button>
+      <button id="navMachLog" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>บันทึกซ่อมบำรุง</span></button>
+    </nav>
   </div>
 </aside>
 
@@ -430,12 +434,65 @@
 
   <!-- ============ Machinery placeholder ============ -->
   <section id="machineryView" hidden>
-    <div class="card center soonpage">
-      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>
-      <h2>เครื่องจักร</h2>
-      <p class="muted">ส่วนนี้กำลังจะมา — ฟรีซ คูลลิ่ง คอนเดนเซอร์ ตารางบำรุงรักษา และประวัติซ่อมของเครื่องจักรจะมาอยู่ตรงนี้</p>
-      <p class="muted small">ตอนนี้ยังใช้น้องติ๊กใน LINE ตามเดิม ไม่มีอะไรเปลี่ยน</p>
+    <div class="page-head">
+      <h2 class="page-title">ดัชนีเครื่องจักร</h2>
+      <p class="muted small">เครื่องทั้งหมด และรายการอะไหล่ / สเปคของแต่ละเครื่อง (มอเตอร์ ปั๊ม สายพาน ลูกปืน breaker contactor …) — กดเครื่องเพื่อดูรายละเอียด กดรายการเพื่อดู/แก้สเปค</p>
     </div>
+    <p class="error" id="mcError" hidden></p>
+    <div class="edit-banner" id="mcNeedsV9" hidden>ยังใช้ระบบเครื่องจักรไม่ได้ — ต้องรันไฟล์ <strong>schema_v9.sql</strong> ใน Supabase ก่อน</div>
+    <div class="mchead"><h3 class="section-title">เครื่อง</h3><button id="mcAddMachine" class="btn small" type="button">+ เพิ่มเครื่อง</button></div>
+    <div id="mcCards" class="mcgrid"></div>
+    <div class="mchead"><h3 class="section-title">อะไหล่และสเปคทั้งหมด</h3><button id="mpAdd" class="btn small" type="button">+ เพิ่มรายการ</button></div>
+    <div class="card mpbar">
+      <input id="mpQ" type="search" placeholder="ค้นหา: สเปค อุปกรณ์ รุ่น เช่น Calpeda, สายพาน B-82, breaker 40A, เครื่อง 3" autocomplete="off" aria-label="ค้นหาอะไหล่">
+      <select id="mpLocation" aria-label="สถานที่"><option value="">ทุกที่</option></select>
+      <select id="mpPart" aria-label="ชิ้นส่วน"><option value="">ทุกชิ้นส่วน</option></select>
+    </div>
+    <p class="muted small" id="mpCount"></p>
+    <div id="mpList" class="mplist"></div>
+  </section>
+
+  <section id="machineView" hidden>
+    <div class="evbar">
+      <button id="mdBack" class="btn small" type="button">← ดัชนีเครื่องจักร</button>
+      <span class="grow"></span>
+      <div id="mdActions" class="tk-actions"></div>
+    </div>
+    <p class="error" id="mdError" hidden></p>
+    <div class="card tkhead" id="mdHead"></div>
+    <div class="tkgrid" id="mdBody"></div>
+    <div id="mdParts" hidden>
+      <div class="mchead"><h3 class="section-title">อะไหล่และสเปคของเครื่องนี้ <span class="count" id="mdPartCount"></span></h3><button id="mdPartAdd" class="btn small" type="button">+ เพิ่มรายการ</button></div>
+      <div id="mdPartList" class="mplist"></div>
+    </div>
+    <div id="mdEvents" hidden>
+      <div class="mchead"><h3 class="section-title">บันทึกซ่อมบำรุงล่าสุด <span class="count" id="mdEventCount"></span></h3><button id="mdEventAll" class="btn small" type="button" hidden>ดูทั้งหมด →</button></div>
+      <div id="mdEventList" class="evlist"></div>
+    </div>
+  </section>
+
+  <section id="machineLogView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">บันทึกซ่อมบำรุง</h2>
+      <p class="muted small">งานซ่อม / เปลี่ยนอะไหล่ / ตรวจเช็คของเครื่องจักรและระบบต่างๆ — ใครทำ ทำอะไร เมื่อไหร่ ค่าใช้จ่ายเท่าไหร่</p>
+    </div>
+    <p class="error" id="mlError" hidden></p>
+    <div class="edit-banner" id="mlNeedsV9" hidden>ยังบันทึกไม่ได้ — ต้องรันไฟล์ <strong>schema_v9.sql</strong> ใน Supabase ก่อน</div>
+    <div class="card logfilters">
+      <div class="lgtop">
+        <input id="mlQ" type="search" placeholder="ค้นหา: อุปกรณ์ สิ่งที่ทำ ร้าน ยี่ห้อ เช่น สายพาน, PMV, SANWA" autocomplete="off" aria-label="ค้นหา">
+        <select id="mlMachine" aria-label="เครื่อง"><option value="">ทุกเครื่อง / พื้นที่</option></select>
+      </div>
+      <div class="lgdates">
+        <div><label for="mlFrom">ตั้งแต่วันที่</label><input id="mlFrom" type="date"><div id="mlFromCap" class="datecap"></div></div>
+        <div><label for="mlTo">ถึงวันที่</label><input id="mlTo" type="date"><div id="mlToCap" class="datecap"></div></div>
+        <div><label for="mlKind">ประเภทงาน</label><select id="mlKind"><option value="">ทุกประเภทงาน</option></select></div>
+      </div>
+      <div class="lgactions"><span class="grow"></span><button id="mlClear" class="btn small" type="button">ล้างตัวกรอง</button><button id="mlAdd" class="btn primary small" type="button">+ บันทึกงาน</button></div>
+    </div>
+    <div class="lgsummary" id="mlSummary"></div>
+    <div id="mlList" class="evlist"></div>
+    <div class="center"><button id="mlMore" class="btn" type="button" hidden>แสดงเพิ่ม</button></div>
   </section>
 </main>
 </div>
@@ -493,6 +550,30 @@
   <div class="dialog-actions">
     <button type="button" class="btn" id="reqDlgBoard">ไปที่กระดานงานซ่อม</button>
     <button type="button" class="btn primary" id="reqDlgClose">ปิด</button>
+  </div>
+</dialog>
+
+<!-- A part / spec of the machinery index -->
+<dialog id="partDialog" class="wide">
+  <h3 id="pdTitle">อะไหล่ / สเปค</h3>
+  <div id="pdBody"></div>
+  <p class="error" id="pdError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn danger" id="pdDelete" hidden>ลบรายการนี้</button>
+    <span class="grow"></span>
+    <button type="button" class="btn" id="pdCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="pdSave">บันทึก</button>
+  </div>
+</dialog>
+
+<!-- A maintenance report -->
+<dialog id="evDialog" class="wide">
+  <h3 id="evdTitle">บันทึกงานซ่อมบำรุง</h3>
+  <div id="evdBody"></div>
+  <p class="error" id="evdError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="evdCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="evdSave">บันทึก</button>
   </div>
 </dialog>
 
@@ -576,6 +657,7 @@
 <script src="/static/logbook.js"></script>
 <script src="/static/where.js"></script>
 <script src="/static/roster.js"></script>
+<script src="/static/machinery.js"></script>
 <script src="/static/manual.js"></script>
 <script src="/static/app.js"></script>
 </body>

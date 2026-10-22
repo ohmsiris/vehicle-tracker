@@ -11,12 +11,16 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["roster", "truck", "event", "log", "where"];
+const FLEET_VIEWS = ["roster", "truck", "event", "log", "where", "machinery", "machine", "machineLog"];
 
 // ------------------------------------------------------------------ routing
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
   if (h === "roster") return openRoster();
+  if (h === "machinery") return openMachinery();
+  if (h === "machine-log") return openMachineLog();
+  const mach = /^machine=(.+)$/.exec(h);
+  if (mach && (mach[1] === "new" || UUID_RE.test(mach[1]))) return openMachinePage(mach[1]);
   const t = /^truck=(.+)$/.exec(h);
   if (t && (t[1] === "new" || UUID_RE.test(t[1]))) return openTruck(t[1]);
   if (h === "log") return openLog();

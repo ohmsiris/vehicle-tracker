@@ -674,3 +674,40 @@ a.rlink:hover, a.rlink:focus-visible { border-color: var(--accent); box-shadow: 
 @media (max-width: 900px) { .tkgrid { grid-template-columns: 1fr; } .tkfields { grid-template-columns: 1fr; } .tk-title { font-size: 22px; } }
 .rlink .rr-badges:empty { display: flex; }
 .rr-cell .badge { justify-self: start; }
+
+
+/* ------------------------------------------------------------ machinery */
+.mchead { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 22px 0 8px; }
+.mchead h3 { margin: 0; }
+.mcgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+a.mccard { display: grid; gap: 4px; text-decoration: none; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-sm); transition: box-shadow .15s, border-color .15s; }
+a.mccard:hover, a.mccard:focus-visible { border-color: var(--accent); box-shadow: var(--shadow-md); outline: none; }
+.mc-name { font-size: 18px; font-weight: 700; }
+.mc-counts { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.mpbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 220px) minmax(150px, 220px); gap: 10px; padding: 14px 16px; }
+.mpbar input[type=search] { width: 100%; font: inherit; font-size: 16px; padding: 12px 14px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.mpbar input[type=search]:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.mplist { display: grid; gap: 8px; margin-top: 6px; }
+button.mprow { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 16px; align-items: start; text-align: left; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 14px; cursor: pointer; transition: border-color .15s, box-shadow .15s; width: 100%; }
+#mdPartList button.mprow { grid-template-columns: minmax(0, 1fr) auto; }
+button.mprow:hover, button.mprow:focus-visible { border-color: var(--accent); box-shadow: var(--shadow-sm); outline: none; }
+.mp-loc { font-weight: 600; color: var(--accent); font-size: 14px; }
+.mp-title { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.mp-spec { margin: 2px 0; }
+.mp-qty { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+dialog.wide { max-width: 760px; width: calc(100vw - 32px); }
+.mfields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-bottom: 12px; }
+.mfield { display: grid; gap: 3px; min-width: 0; }
+.mfield.wide { grid-column: 1 / -1; }
+.mfield label { margin: 0; font-size: 13px; color: var(--muted); }
+.mfield input, .mfield select, .mfield textarea { width: 100%; font: inherit; }
+.mdetails { margin: 4px 0 12px; }
+.mdetails summary { cursor: pointer; color: var(--accent); font-weight: 550; font-size: 14px; margin-bottom: 10px; }
+button.btn.danger { color: var(--bad); }
+@media (max-width: 700px) {
+  .mpbar { grid-template-columns: 1fr 1fr; }
+  .mpbar input[type=search] { grid-column: 1 / -1; }
+  button.mprow { grid-template-columns: minmax(0, 1fr) auto; }
+  .mp-loc { grid-column: 1 / -1; }
+  .mfields { grid-template-columns: 1fr; }
+}
