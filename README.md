@@ -182,6 +182,26 @@ It only ever writes into an EMPTY summary (a conditional update), so a summary
 a person typed is never overwritten. All of it is a no-op until
 `schema_v4.sql` has been run.
 
+## Maintenance log ("สมุดงานซ่อม")
+
+One list of every repair job ever done: saved bills, the mechanic's own entries,
+and requests that never got a record (still waiting, at a shop, cancelled,
+closed without a bill). A request that was closed by a saved bill is not listed
+twice -- the bill is the record and shows "จากงานแจ้งซ่อม" underneath.
+
+- **Filters** (all combine): free-text search (plate, truck number, shop,
+  problem, line items; spaces/dashes ignored), date range with quick chips,
+  status, shop, branch, category, source, cost range, "ควรตรวจ only".
+  Filtering happens on the server (`app/logbook.py`, pure functions with tests);
+  `app/logsource.py` caches the loaded rows for 15 s and every write clears it.
+- **Shops** are folded to one name (`app/shops.py`): a bill that says
+  "ชมรมย์การช่าง" and one that says "อู่ชมรม" are the same shop when filtering.
+  The shop list is also where the shop buttons in the status flow come from.
+- **Excel**: "ดาวน์โหลด Excel (CSV)" exports every match of the current
+  filters (not just the loaded page), with a BOM so Thai opens correctly.
+- Opening a bill from the log and pressing back returns to the log with the
+  filters as you left them. URL: `#log`. API: `GET /api/log`, `GET /api/log.csv`.
+
 ## Hosting (Railway)
 
 The app is one Python process with no local state (all data is in Supabase), so

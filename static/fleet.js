@@ -13,12 +13,13 @@
 const fleet = { vehicles: [], loaded: false, current: null, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["search", "vehicle", "event"];
+const FLEET_VIEWS = ["search", "vehicle", "event", "log"];
 
 // ------------------------------------------------------------------ routing
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
   if (h === "search") return openSearch();
+  if (h === "log") return openLog();
   const m = /^(vehicle|event)=(.+)$/.exec(h);
   if (m && UUID_RE.test(m[2])) return m[1] === "vehicle" ? openVehicle(m[2]) : openEvent(m[2]);
   return null;
@@ -78,6 +79,7 @@ const SORTS = {
 };
 
 async function openSearch() {
+  fleet.backTo = null;
   showView("search");
   showErr("searchError", "");
   if (!(await ensureVehicles())) {
@@ -128,6 +130,7 @@ function vehCard(v) {
 const vehTitle = (v) => [v.truck_number ? `#${v.truck_number}` : null, v.plate].filter(Boolean).join(" ");
 
 async function openVehicle(id) {
+  fleet.backTo = null;
   showView("vehicle");
   showErr("vehicleError", "");
   $("vehHead").replaceChildren();
@@ -219,6 +222,7 @@ function evRow(e) {
 // ------------------------------------------------------------- event "bill"
 async function openEvent(id) {
   showView("event");
+  $("evBack").textContent = fleet.backTo === "#log" ? "← สมุดงานซ่อม" : "← ประวัติรถ";
   showErr("eventError", "");
   $("evPaper").replaceChildren(el("p", { class: "muted", text: "กำลังโหลด…" }));
   try {
@@ -473,6 +477,10 @@ function initFleet() {
   });
   $("vehBack").addEventListener("click", goSearch);
   $("evEdit").addEventListener("click", startEdit);
-  $("evBack").addEventListener("click", () => (fleet.event ? goVehicle(fleet.event.vehicle.vehicle_id) : goSearch()));
+  $("evBack").addEventListener("click", () => {
+    if (fleet.backTo) goHash(fleet.backTo);
+    else if (fleet.event) goVehicle(fleet.event.vehicle.vehicle_id);
+    else goSearch();
+  });
   window.addEventListener("hashchange", route);
 }

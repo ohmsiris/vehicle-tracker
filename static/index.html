@@ -34,6 +34,7 @@
       <button id="navBoard" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>งานซ่อม</span></button>
       <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกซ่อม</span></button>
       <button id="navSearch" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg><span>ค้นหารถ / ประวัติ</span></button>
+      <button id="navLog" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>สมุดงานซ่อม</span></button>
       <button id="navDash" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>ภาพรวม</span></button>
     </nav>
   </div>
@@ -285,6 +286,53 @@
     </div>
   </section>
 
+  <!-- ============ Maintenance log ============ -->
+  <section id="logView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">สมุดงานซ่อม</h2>
+      <p class="muted small">งานซ่อมทุกงานที่เคยทำ — กรองตามช่วงเวลา ร้าน รถ หมวด สถานะ หรือค้นด้วยคำ แล้วโหลดเป็นไฟล์ Excel ได้</p>
+    </div>
+    <div class="card logfilters">
+      <input id="lgQ" type="search" placeholder="ค้นหา: ทะเบียน เบอร์รถ ร้าน อาการ รายการอะไหล่ เช่น หัวฉีด, 84-4786, ชมรม" autocomplete="off" aria-label="ค้นหา">
+      <div class="quick" id="lgQuick" role="group" aria-label="ช่วงเวลา">
+        <button type="button" class="chip" data-range="30">30 วัน</button>
+        <button type="button" class="chip" data-range="90">3 เดือน</button>
+        <button type="button" class="chip" data-range="month">เดือนนี้</button>
+        <button type="button" class="chip" data-range="year">ปีนี้</button>
+        <button type="button" class="chip" data-range="all">ทั้งหมด</button>
+      </div>
+      <div class="lgdates">
+        <div><label for="lgFrom">ตั้งแต่วันที่</label><input id="lgFrom" type="date"><div id="lgFromCap" class="datecap"></div></div>
+        <div><label for="lgTo">ถึงวันที่</label><input id="lgTo" type="date"><div id="lgToCap" class="datecap"></div></div>
+      </div>
+      <details class="lgmore" id="lgMore2" open>
+      <summary>ตัวกรองเพิ่มเติม (ร้าน หมวด สถานะ ราคา …)</summary>
+      <div class="lggrid">
+        <div><label for="lgStatus">สถานะ</label><select id="lgStatus"><option value="all">ทั้งหมด</option></select></div>
+        <div><label for="lgShop">ร้าน / ช่าง</label><select id="lgShop"><option value="">ทุกร้าน / ช่าง</option></select></div>
+        <div><label for="lgBranch">สาขา</label><select id="lgBranch"><option value="">ทุกสาขา</option></select></div>
+        <div><label for="lgCategory">หมวดงาน</label><select id="lgCategory"><option value="">ทุกหมวด</option></select></div>
+        <div><label for="lgSource">ที่มาของข้อมูล</label>
+          <select id="lgSource"><option value="">ทั้งหมด</option><option value="bill">จากบิล</option><option value="manual">ช่างทำเอง (กรอกเอง)</option><option value="request">งานแจ้งซ่อมที่ยังไม่มีบันทึก</option></select></div>
+        <div><label for="lgSort">เรียงตาม</label>
+          <select id="lgSort"><option value="date_desc">ล่าสุดก่อน</option><option value="date_asc">เก่าสุดก่อน</option><option value="cost_desc">ค่าซ่อมสูงสุด</option></select></div>
+        <div><label for="lgMin">ค่าซ่อมตั้งแต่ (฿)</label><input id="lgMin" type="number" min="0" inputmode="numeric" placeholder="เช่น 5000"></div>
+        <div><label for="lgMax">ไม่เกิน (฿)</label><input id="lgMax" type="number" min="0" inputmode="numeric"></div>
+      </div>
+      </details>
+      <div class="lgactions">
+        <label class="check"><input id="lgReview" type="checkbox"> เฉพาะที่ควรตรวจ</label>
+        <span class="grow"></span>
+        <button id="lgClear" class="btn small" type="button" hidden>ล้างตัวกรอง</button>
+        <button id="lgCsv" class="btn small" type="button">ดาวน์โหลด Excel (CSV)</button>
+      </div>
+    </div>
+    <p class="error" id="lgError" hidden></p>
+    <div class="lgsummary" id="lgSummary"></div>
+    <div id="lgList" class="evlist"></div>
+    <div class="center"><button id="lgMore" class="btn" type="button" hidden>แสดงเพิ่ม</button></div>
+  </section>
+
   <!-- ============ Vehicle search ============ -->
   <section id="searchView" hidden>
     <div class="page-head">
@@ -361,6 +409,18 @@
   </div>
 </dialog>
 
+<!-- One request's story: reported -> sent -> back -> bill -->
+<dialog id="reqDialog">
+  <h3 id="reqDlgTitle"></h3>
+  <div id="reqDlgStatus"></div>
+  <p id="reqDlgProblem" class="reqdlg-problem"></p>
+  <ol id="reqDlgSteps" class="tl"></ol>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="reqDlgBoard">ไปที่กระดานงานซ่อม</button>
+    <button type="button" class="btn primary" id="reqDlgClose">ปิด</button>
+  </div>
+</dialog>
+
 <!-- "No bill" for something already waiting on one -->
 <dialog id="noBillDialog">
   <h3>ปิดงานแบบไม่มีบิล</h3>
@@ -377,6 +437,7 @@
 <script src="/static/board.js"></script>
 <script src="/static/dashboard.js"></script>
 <script src="/static/fleet.js"></script>
+<script src="/static/logbook.js"></script>
 <script src="/static/manual.js"></script>
 <script src="/static/app.js"></script>
 </body>

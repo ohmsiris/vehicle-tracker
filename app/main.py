@@ -23,11 +23,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, history, repair_requests, summarize, supabase
+from app import dashboard, events, history, logbook, logsource, repair_requests, summarize, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -257,6 +257,7 @@ def save_event(
 
     try:
         saved = events.save_event(data, raws, allow_duplicates=allow_duplicates)
+        logsource.invalidate()
         # Write the one-line "what was done" AFTER replying, so saving never waits on the AI and
         # never fails because of it. (No-op until schema_v4.sql has been run.)
         if settings.anthropic_api_key:
@@ -298,7 +299,9 @@ def _board_call(fn, *args, **kwargs):
     if not supabase.configured():
         raise HTTPException(503, "Supabase is not configured on the server")
     try:
-        return fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
+        logsource.invalidate()          # (reads clear it too -- harmless, and a write can never be missed)
+        return result
     except repair_requests.InvalidRequest as exc:
         raise HTTPException(422, str(exc))
     except repair_requests.StaleRequest:
@@ -415,6 +418,7 @@ def api_update_event(event_id: str, body: dict = Body(...), x_app_token: str = H
         raise HTTPException(503, "Supabase is not configured on the server")
     try:
         events.update_event(event_id, body)
+        logsource.invalidate()
     except events.InvalidEvent as exc:
         raise HTTPException(422, str(exc))
     except events.EventNotFound:
@@ -449,3 +453,50 @@ def api_summarize(body: SummarizeRequest, x_app_token: str = Header(default=""),
     if not text:
         raise HTTPException(502, "ให้ AI สรุปไม่สำเร็จ พิมพ์เองหรือลองอีกครั้ง")
     return {"summary": text}
+
+
+# ------------------------------------------------------------ maintenance log
+def _log_filters(q, date_from, date_to, branch, vehicle_id, shop, category, status, source, min_cost, max_cost, review) -> dict:
+    return {"q": q, "date_from": date_from, "date_to": date_to, "branch": branch, "vehicle_id": vehicle_id, "shop": shop, "category": category,
+            "status": status, "source": source, "min_cost": min_cost, "max_cost": max_cost, "review": review}
+
+
+def _log_rows():
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return logsource.load_rows()
+    except supabase.SupabaseError:
+        logger.exception("log query failed")
+        raise HTTPException(502, "โหลดสมุดงานซ่อมไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/log")
+def api_log(
+    q: str = "", date_from: str = "", date_to: str = "", branch: str = "", vehicle_id: str = "", shop: str = "", category: str = "",
+    status: str = "all", source: str = "", min_cost: str = "", max_cost: str = "", review: str = "",
+    sort: str = "date_desc", limit: int = 50, offset: int = 0,
+    x_app_token: str = Header(default=""), token: str = Query(default=""),
+) -> dict:
+    """The maintenance log: every repair job (saved bills and manual entries, plus requests that have no record),
+    filtered, sorted and paged, with totals over all matches and the choices for the filter drop-downs."""
+    _check_token(x_app_token, token)
+    rows = _log_rows()
+    res = logbook.query(rows, _log_filters(q, date_from, date_to, branch, vehicle_id, shop, category, status, source, min_cost, max_cost, review),
+                        sort=sort, limit=limit, offset=offset)
+    res["facets"] = logbook.facets(rows)
+    return res
+
+
+@app.get("/api/log.csv")
+def api_log_csv(
+    q: str = "", date_from: str = "", date_to: str = "", branch: str = "", vehicle_id: str = "", shop: str = "", category: str = "",
+    status: str = "all", source: str = "", min_cost: str = "", max_cost: str = "", review: str = "", sort: str = "date_desc",
+    x_app_token: str = Header(default=""), token: str = Query(default=""),
+):
+    """The same filters as /api/log, every match, as a spreadsheet file."""
+    _check_token(x_app_token, token)
+    hits = logbook.matches(_log_rows(), _log_filters(q, date_from, date_to, branch, vehicle_id, shop, category, status, source, min_cost, max_cost, review), sort=sort)
+    body = "\ufeff" + logbook.to_csv(hits)           # BOM so Excel reads the Thai text
+    return Response(content=body, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="maintenance-log-{repair_requests.today_bangkok().isoformat()}.csv"'})

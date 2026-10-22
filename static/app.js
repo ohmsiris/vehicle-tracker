@@ -58,11 +58,11 @@ function initTheme() {
 
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
-const VIEW_NAMES = ["board", "dash", "capture", "busy", "review", "done", "search", "vehicle", "event", "machinery"];
+const VIEW_NAMES = ["board", "dash", "capture", "busy", "review", "done", "search", "vehicle", "event", "log", "machinery"];
 // which sidebar entry lights up for each view
 const NAV_OF = {
   board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
-  search: "navSearch", vehicle: "navSearch", event: "navSearch", machinery: "navMachinery",
+  search: "navSearch", vehicle: "navSearch", event: "navSearch", log: "navLog", machinery: "navMachinery",
 };
 
 function showView(name) {
@@ -568,6 +568,7 @@ async function init() {
   $("navBills").addEventListener("click", () => showView(lastBillView));
   $("navDash").addEventListener("click", () => { showView("dash"); loadDashboard(); });
   $("navSearch").addEventListener("click", goSearch);
+  $("navLog").addEventListener("click", () => goHash("#log"));
   $("navMachinery").addEventListener("click", () => showView("machinery"));
   initSidebar();
   initTheme();
@@ -592,6 +593,7 @@ async function init() {
   await initBoard();
   initDashboard();
   initFleet();
+  initLog();
   initManual();
   if (location.hash) route();
   if (params.get("tab") === "dash") { showView("dash"); loadDashboard(); }
