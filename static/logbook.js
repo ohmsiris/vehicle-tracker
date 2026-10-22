@@ -184,11 +184,10 @@ function requestForVehicle(v) {
 
 function updateStatusCounts(fc) {
   const byValue = Object.fromEntries(fc.statuses.map((s) => [s.value, s]));
-  const active = ["open", "at_shop", "awaiting_bill"].reduce((n, k) => n + (byValue[k]?.count || 0), 0);
   const done = (byValue.done?.count || 0) + (byValue.done_no_bill?.count || 0);
   const cur = $("lgStatus").value || "all";
   const all = fc.statuses.reduce((n, s) => n + s.count, 0);
-  const items = [["all", `ทั้งหมด (${all})`], ["active", `ยังทำอยู่ (${active})`], ["open", `รอซ่อม (${byValue.open?.count || 0})`],
+  const items = [["all", `ทั้งหมด (${all})`], ["open", `รอซ่อม (${byValue.open?.count || 0})`],
     ["at_shop", `อยู่ที่อู่ (${byValue.at_shop?.count || 0})`], ["awaiting_bill", `รอบิล (${byValue.awaiting_bill?.count || 0})`],
     ["done", `เสร็จแล้ว (${done})`], ["cancelled", `ยกเลิก (${byValue.cancelled?.count || 0})`]];
   $("lgStatus").replaceChildren(...items.map(([v, t]) => el("option", { value: v, text: t })));
