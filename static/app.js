@@ -616,6 +616,8 @@ async function loadMeta() {
     state.usages = meta.usages || [];
     state.branches = meta.branches || [];
     state.fleetReady = meta.fleet_ready;
+    state.fleetV7 = !!meta.fleet_v7;
+    state.vehicleClasses = meta.vehicle_classes || [];
     $("addShop").replaceChildren(el("option", { value: "", text: "ยังไม่ได้ส่งอู่ (รอซ่อม)" }), ...board.shops.map((n) => el("option", { value: n, text: `ส่งอู่เลย: ${n}` })));
     $("tokenBox").hidden = true;
     fillVehicleSelect($("vehicleSelect"));

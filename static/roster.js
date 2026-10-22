@@ -38,6 +38,9 @@ async function loadDrivers() {
 }
 
 const activeDrivers = () => ro.drivers.filter((d) => d.active);
+const driverLabel = (d) => (d.nickname ? `${d.name} (${d.nickname})` : d.name);
+const driverOf = (v) => ro.drivers.find((d) => d.driver_id === v.driver_id) || null;
+const kv = (k, val) => (val ? el("div", { class: "kv" }, el("span", { class: "kv-k", text: k }), el("span", { class: "kv-v", text: val })) : null);
 
 // After a change: the pickers on other pages (bill, repair form) read state.vehicles, so keep them in step.
 // A new or retired truck changes WHICH trucks they list, which shifts their positions -- so that is only
@@ -113,9 +116,10 @@ function truckRow(v) {
     v.awaiting_bill_requests ? el("span", { class: "badge warn", text: `รอบิล ${v.awaiting_bill_requests}` }) : null,
   ];
   return el("div", { class: `rrow${off ? " off" : ""}` },
-    el("div", { class: "rr-id" },
+    el("div", { class: "rr-id clickable", role: "button", tabindex: "0", title: "ดูข้อมูลรถทั้งหมด",
+      onclick: () => openVehicleInfo(v), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openVehicleInfo(v); } } },
       el("div", { class: "req-head" }, ...truckHead(v), v.branch ? el("span", { class: "muted small", text: v.branch }) : null),
-      el("div", { class: "muted small", text: [`${v.make} ${v.model}`.trim(), v.province].filter(Boolean).join(" · ") }),
+      el("div", { class: "muted small", text: [`${v.make} ${v.model}`.trim(), v.vehicle_class, v.province].filter(Boolean).join(" · ") }),
       el("div", { class: "rr-badges" }, ...badges.filter(Boolean))),
     el("label", { class: "rr-field" }, el("span", { text: "ประเภท" }), usageSelect(v)),
     el("label", { class: "rr-field" }, el("span", { text: "คนขับหลัก" }), driverSelect(v)),
@@ -147,7 +151,7 @@ function driverSelect(v) {
   const drivers = activeDrivers();
   const sel = el("select", { "aria-label": "คนขับหลัก" },
     el("option", { value: "", text: "— ยังไม่มี —" }),
-    ...drivers.map((d) => el("option", { value: d.driver_id, text: d.name })),
+    ...drivers.map((d) => el("option", { value: d.driver_id, text: driverLabel(d) })),
     el("option", { value: DRIVER_NEW, text: "+ คนขับใหม่…" }));
   if (v.driver_id && !drivers.some((d) => d.driver_id === v.driver_id)) {          // a driver who has since stopped: still shown
     sel.insertBefore(el("option", { value: v.driver_id, text: `${v.driver} (เลิกขับ)` }), sel.options[1]);
@@ -197,13 +201,24 @@ function openVehicleDialog(v) {
   $("vdUsage").value = v ? v.usage : "";
   $("vdNotes").value = v ? v.notes : "";
   $("vdActive").checked = v ? v.active !== false : true;
+  $("vdMore").hidden = !state.fleetV7;                   // these columns arrive with schema_v7.sql
+  $("vdClass").replaceChildren(el("option", { value: "", text: "— ไม่ระบุ —" }), ...(state.vehicleClasses || []).map((c) => el("option", { value: c, text: c })));
+  $("vdClass").value = v ? v.vehicle_class : "";
+  $("vdColor").value = v ? v.color : "";
+  $("vdEngine").value = v ? v.engine_number : "";
+  $("vdChassis").value = v ? v.chassis_number : "";
+  $("vdRegDate").value = v ? v.registered_date : "";
+  $("vdRegDateCap").textContent = dateCaption($("vdRegDate").value);
+  $("vdRegType").value = v ? v.registration_type : "";
+  $("vdOwner").value = v ? v.owner_name : "";
+  $("vdHolder").value = v ? v.holder_name : "";
   $("vdActiveRow").hidden = !v;                          // a new truck is simply active
   $("vdBranch").replaceChildren(el("option", { value: "", text: "— เลือกสาขา —" }), ...(state.branches || []).map((b) => el("option", { value: b, text: b })));
   if (v && v.branch && ![...$("vdBranch").options].some((o) => o.value === v.branch)) $("vdBranch").append(el("option", { value: v.branch, text: v.branch }));
   $("vdBranch").value = v ? v.branch : (ro.lastBranch || "");
   $("vdUsageList").replaceChildren(...usageList().map((u) => el("option", { value: u })));
   const drivers = activeDrivers();
-  $("vdDriver").replaceChildren(el("option", { value: "", text: "— ยังไม่มี —" }), ...drivers.map((d) => el("option", { value: d.driver_id, text: d.name })));
+  $("vdDriver").replaceChildren(el("option", { value: "", text: "— ยังไม่มี —" }), ...drivers.map((d) => el("option", { value: d.driver_id, text: driverLabel(d) })));
   if (v && v.driver_id && !drivers.some((d) => d.driver_id === v.driver_id)) $("vdDriver").append(el("option", { value: v.driver_id, text: `${v.driver} (เลิกขับ)` }));
   $("vdDriver").value = v ? v.driver_id : "";
   showErr("vdError", "");
@@ -217,6 +232,10 @@ async function saveVehicle() {
   };
   const v = ro.editing;
   if (v) body.active = $("vdActive").checked;
+  if (state.fleetV7) {
+    Object.assign(body, { vehicle_class: $("vdClass").value, color: $("vdColor").value, engine_number: $("vdEngine").value, chassis_number: $("vdChassis").value,
+      registered_date: $("vdRegDate").value, registration_type: $("vdRegType").value, owner_name: $("vdOwner").value, holder_name: $("vdHolder").value });
+  }
   const structural = !v || (v.active !== false) !== body.active;
   try {
     if (v) await api(`/api/vehicles/${v.vehicle_id}`, jsonOpts("PATCH", body));
@@ -229,7 +248,74 @@ async function saveVehicle() {
   $("vehDialog").close();
   await refreshRoster();
   await syncPickers(structural);
-  if ($("lgTruck") && !$("logView").hidden) renderTruckHeader();
+  if (!$("logView").hidden) renderTruckHeader();
+  reopenInfo();
+}
+
+// ------------------------------------------------- everything about one truck
+function openVehicleInfo(v) {
+  ro.info = v;
+  const d = driverOf(v);
+  fill($("viTitle"), ...truckHead(v), v.branch ? el("span", { class: "muted", text: v.branch }) : null);
+  $("viSub").textContent = [`${v.make} ${v.model}`.trim(), v.color, v.province].filter(Boolean).join(" · ");
+  fill($("viBadges"),
+    v.usage ? el("span", { class: "badge shop", text: v.usage }) : null,
+    v.vehicle_class ? el("span", { class: "badge", text: v.vehicle_class }) : null,
+    v.active === false ? el("span", { class: "badge", text: "เลิกใช้แล้ว" }) : null,
+    v.open_requests ? el("span", { class: "badge warn", text: `รอซ่อม ${v.open_requests}` }) : null,
+    v.at_shop_requests ? el("span", { class: "badge shop", text: `อยู่ที่อู่ ${v.at_shop_requests}` }) : null,
+    v.awaiting_bill_requests ? el("span", { class: "badge warn", text: `รอบิล ${v.awaiting_bill_requests}` }) : null);
+
+  const section = (title, ...rows) => el("section", { class: "visection" }, el("h4", { text: title }), ...rows.filter(Boolean));
+  const phone = d && d.phone ? el("div", { class: "kv" }, el("span", { class: "kv-k", text: "เบอร์โทร" }),
+    el("a", { class: "kv-v link", href: `tel:${d.phone}`, text: d.phone })) : null;
+  const hasPaper = ["registered_date", "registration_type", "engine_number", "chassis_number", "owner_name", "holder_name"].some((k) => v[k]);
+
+  const driverRows = d ? [kv("ชื่อ", d.name), kv("ชื่อเล่น", d.nickname), phone, kv("สาขา", d.branch), kv("หมายเหตุ", d.notes),
+    el("button", { class: "btn small", type: "button", text: "แก้ไขข้อมูลคนขับ", onclick: () => openDriverDialog(d) })]
+    : [el("p", { class: "muted small", text: "ยังไม่มีคนขับหลัก — เลือกได้ที่หน้ารายการรถ หรือกดแก้ไข" })];
+  const paperRows = hasPaper ? [
+    kv("วันจดทะเบียน", dateCaption(v.registered_date) || v.registered_date), kv("ประเภทตามทะเบียน", v.registration_type), kv("เลขเครื่อง", v.engine_number),
+    kv("เลขตัวรถ", v.chassis_number), kv("ชื่อกรรมสิทธิ์", v.owner_name), kv("ชื่อผู้ครอบครอง", v.holder_name)]
+    : [el("p", { class: "muted small", text: state.fleetV7 ? "ยังไม่มีข้อมูลทะเบียน — กดแก้ไขเพื่อเพิ่ม" : "ต้องรัน schema_v7.sql ก่อนจึงจะเก็บข้อมูลทะเบียนได้" })];
+
+  fill($("viBody"),
+    section("ข้อมูลรถ",
+      kv("ทะเบียน", [v.plate, v.province].filter(Boolean).join(" · ")), kv("เบอร์รถ", v.truck_number), kv("สาขา", v.branch),
+      kv("ประเภทรถ", v.vehicle_class), kv("การใช้งาน", v.usage), kv("ยี่ห้อ / รุ่น", `${v.make} ${v.model}`.trim()), kv("สี", v.color), kv("หมายเหตุ", v.notes)),
+    section("คนขับหลัก", ...driverRows),
+    section("ข้อมูลทะเบียน", ...paperRows),
+    section("งานซ่อม",
+      kv("ซ่อมทั้งหมด", v.repairs_total ? `${v.repairs_total} ครั้ง · รวม ${baht(v.spend_total)} ฿` : "ยังไม่มีประวัติการซ่อม"),
+      kv("ซ่อมล่าสุด", v.last_service_date ? `${beDate(v.last_service_date)} · ${ago(v.days_since_service)}` : ""),
+      kv("ไมล์ล่าสุดที่บันทึก", v.last_known_mileage ? `${baht(v.last_known_mileage)} กม.${v.next_service_mileage ? ` → ${baht(v.next_service_mileage)}` : ""}` : "")));
+  $("vehInfoDialog").showModal();
+}
+
+// after an edit made on top of the info dialog, show it again with the saved values
+function reopenInfo() {
+  if (!$("vehInfoDialog").open || !ro.info) return;
+  const fresh = fleet.vehicles.find((x) => x.vehicle_id === ro.info.vehicle_id);
+  if (fresh) openVehicleInfo(fresh);
+}
+
+// ------------------------------------------------------------ the master list as a spreadsheet
+function exportRoster() {
+  const cols = [["เบอร์รถ", (v) => v.truck_number], ["ทะเบียน", (v) => v.plate], ["จังหวัด", (v) => v.province], ["สาขา", (v) => v.branch],
+    ["ประเภทรถ", (v) => v.vehicle_class], ["การใช้งาน", (v) => v.usage], ["ยี่ห้อ", (v) => v.make], ["รุ่น", (v) => v.model], ["สี", (v) => v.color],
+    ["คนขับหลัก", (v) => v.driver], ["ชื่อเล่น", (v) => v.driver_nickname], ["เบอร์โทร", (v) => v.driver_phone],
+    ["วันจดทะเบียน (ค.ศ.)", (v) => v.registered_date], ["ประเภทตามทะเบียน", (v) => v.registration_type], ["เลขเครื่อง", (v) => v.engine_number],
+    ["เลขตัวรถ", (v) => v.chassis_number], ["ชื่อกรรมสิทธิ์", (v) => v.owner_name], ["ชื่อผู้ครอบครอง", (v) => v.holder_name],
+    ["สถานะ", (v) => (v.active === false ? "เลิกใช้" : "ใช้งานอยู่")], ["หมายเหตุ", (v) => v.notes]];
+  const q = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
+  const lines = [cols.map(([h]) => q(h)).join(","), ...visibleTrucks().map((v) => cols.map(([, f]) => q(f(v))).join(","))];
+  const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: `ทะเบียนรถ-${todayISO()}.csv` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 // ------------------------------------------------------------------ drivers
@@ -244,6 +330,7 @@ function driverRow(d) {
   return el("div", { class: `rrow drow${d.active ? "" : " off"}` },
     el("div", { class: "rr-id" },
       el("div", { class: "req-head" }, el("strong", { class: "truckplate", text: d.name }),
+        d.nickname ? el("span", { class: "muted", text: `(${d.nickname})` }) : null,
         d.branch ? el("span", { class: "muted small", text: d.branch }) : null,
         d.active ? null : el("span", { class: "badge", text: "เลิกขับแล้ว" })),
       el("div", { class: "muted small", text: [d.phone, d.notes].filter(Boolean).join(" · ") })),
@@ -271,6 +358,8 @@ function openDriverDialog(d) {
   ro.editingDriver = d || null;
   $("ddTitle").textContent = d ? `แก้ไขคนขับ · ${d.name}` : "เพิ่มคนขับ";
   $("ddName").value = d ? d.name : "";
+  $("ddNickRow").hidden = !state.fleetV7;
+  $("ddNick").value = d ? d.nickname : "";
   $("ddPhone").value = d ? d.phone : "";
   $("ddNotes").value = d ? d.notes : "";
   $("ddBranch").replaceChildren(el("option", { value: "", text: "— ไม่ระบุ —" }), ...(state.branches || []).map((b) => el("option", { value: b, text: b })));
@@ -281,6 +370,7 @@ function openDriverDialog(d) {
 
 async function saveDriver() {
   const body = { name: $("ddName").value, phone: $("ddPhone").value, branch: $("ddBranch").value, notes: $("ddNotes").value };
+  if (state.fleetV7) body.nickname = $("ddNick").value;
   try {
     if (ro.editingDriver) await api(`/api/drivers/${ro.editingDriver.driver_id}`, jsonOpts("PATCH", body));
     else await api("/api/drivers", jsonOpts("POST", body));
@@ -291,6 +381,7 @@ async function saveDriver() {
   $("drvDialog").close();
   await refreshRoster();
   await syncPickers(false);
+  reopenInfo();
 }
 
 // ------------------------------------------------------------------ tabs + init
@@ -312,6 +403,11 @@ function initRoster() {
   $("drvShowOff").addEventListener("change", renderDrivers);
   $("vdCancel").addEventListener("click", () => $("vehDialog").close());
   $("vdSave").addEventListener("click", saveVehicle);
+  bindDateField($("vdRegDate"), $("vdRegDateCap"));
+  $("roExport").addEventListener("click", exportRoster);
+  $("viClose").addEventListener("click", () => $("vehInfoDialog").close());
+  $("viHistory").addEventListener("click", () => { $("vehInfoDialog").close(); showTruckLog(ro.info.vehicle_id); });
+  $("viEdit").addEventListener("click", () => openVehicleDialog(ro.info));
   $("ddCancel").addEventListener("click", () => $("drvDialog").close());
   $("ddSave").addEventListener("click", saveDriver);
 }

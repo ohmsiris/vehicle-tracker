@@ -119,8 +119,9 @@ def test_editing_a_driver_only_changes_what_was_sent():
 
 # ---------------------------------------------------------- database wrappers
 class Db:
-    def __init__(self, v6=True):
+    def __init__(self, v6=True, v7=True):
         self.v6 = v6
+        self.v7 = v7
         self.tables = {
             "vehicles": [truck(V1, "1กข 1", "1", usage=None, main_driver_id=None, notes=None), truck(V2, "2กข 2", "2", usage="รถสาย", main_driver_id=D1, notes=None)],
             "drivers": [{"id": D1, "name": "สมชาย", "active": True, "phone": None, "branch": None, "notes": None}],
@@ -134,6 +135,8 @@ class Db:
             raise fleet.supabase.SupabaseError("no table")
         if table == "vehicles" and "usage" in params.get("select", "") and not self.v6:
             raise fleet.supabase.SupabaseError("no column")
+        if ("vehicle_class" in params.get("select", "") or "nickname" in params.get("select", "")) and not self.v7:
+            raise fleet.supabase.SupabaseError("no v7 column")
         rows = self.tables[table]
         if table == "repair_requests" and "status" in params:
             return [dict(r) for r in rows if r["status"] in params["status"]]
@@ -163,6 +166,7 @@ def db(monkeypatch):
     for name in ("select", "select_all", "insert", "update"):
         monkeypatch.setattr(fleet.supabase, name, getattr(d, name))
     monkeypatch.setitem(fleet._probe, "at", 0.0)
+    monkeypatch.setitem(fleet._probe7, "at", 0.0)
     monkeypatch.setattr(fleet.roster, "invalidate_roster_cache", lambda: None)
     return d
 
@@ -279,3 +283,73 @@ def test_meta_offers_usages_and_branches(monkeypatch):
     monkeypatch.setattr(main, "load_roster", lambda: [{"usage": "รถส่งก้อน"}])
     d = c.get("/api/meta?token=secret").json()
     assert d["usages"] == ["รถสาย", "รถหน้าโรง", "รถส่งก้อน"] and d["branches"] == ["สระบุรี", "แก่งคอย"]
+
+
+# ------------------------------------------------- schema_v7: the master-sheet columns
+def test_size_class_must_be_one_of_the_two_known_classes():
+    assert make({"vehicle_class": "รถเล็ก"}, existing=truck(V1, "A 1", "6")) == {"vehicle_class": "รถเล็ก"}
+    assert make({"vehicle_class": ""}, existing=truck(V1, "A 1", "6")) == {"vehicle_class": None}
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        make({"vehicle_class": "รถกลาง"}, existing=truck(V1, "A 1", "6"))
+    assert "รถเล็ก" in str(exc.value)
+
+
+def test_registration_date_is_validated_and_a_buddhist_year_gets_a_specific_message():
+    assert make({"registered_date": "2016-02-11"}, existing=truck(V1, "A 1", "6")) == {"registered_date": "2016-02-11"}
+    assert make({"registered_date": ""}, existing=truck(V1, "A 1", "6")) == {"registered_date": None}
+    for bad, fragment in (("11/02/2016", "ไม่ถูกต้อง"), ("2559-02-11", "พ.ศ."), ("2999-01-01", "พ.ศ.")):
+        with pytest.raises(fleet.InvalidFleet) as exc:
+            make({"registered_date": bad}, existing=truck(V1, "A 1", "6"))
+        assert fragment in str(exc.value)
+
+
+def test_registration_text_fields_are_trimmed_and_blank_becomes_none():
+    v = make({"color": "  ขาว-เขียว ", "engine_number": "", "owner_name": "บจ.ก", "holder_name": " "}, existing=truck(V1, "A 1", "6"))
+    assert v == {"color": "ขาว-เขียว", "engine_number": None, "owner_name": "บจ.ก", "holder_name": None}
+
+
+def test_a_driver_gets_a_nickname():
+    assert fleet.clean_driver({"nickname": " ชาย "}, existing={"name": "ก", "active": True}, others=[]) == {"nickname": "ชาย"}
+    assert fleet.clean_driver({"name": "สมชาย ใจดี", "nickname": ""}, others=[])["nickname"] is None
+
+
+def test_v7_fields_are_written_once_the_migration_is_in(db):
+    fleet.edit_vehicle(V1, {"vehicle_class": "รถใหญ่", "color": "ขาว", "registered_date": "2016-02-11"})
+    assert db.updates[-1][2] == {"vehicle_class": "รถใหญ่", "color": "ขาว", "registered_date": "2016-02-11"}
+    fleet.edit_driver(D1, {"nickname": "ชาย"})
+    assert db.updates[-1][2] == {"nickname": "ชาย"}
+
+
+def test_v7_fields_are_refused_with_a_clear_message_before_schema_v7_but_the_rest_still_works(monkeypatch):
+    d = Db(v6=True, v7=False)
+    for name in ("select", "select_all", "insert", "update"):
+        monkeypatch.setattr(fleet.supabase, name, getattr(d, name))
+    monkeypatch.setitem(fleet._probe, "at", 0.0)
+    monkeypatch.setitem(fleet._probe7, "at", 0.0)
+    monkeypatch.setattr(fleet.roster, "invalidate_roster_cache", lambda: None)
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        fleet.edit_vehicle(V1, {"color": "ขาว"})
+    assert "schema_v7.sql" in str(exc.value)
+    with pytest.raises(fleet.InvalidFleet) as exc:
+        fleet.edit_driver(D1, {"nickname": "ชาย"})
+    assert "schema_v7.sql" in str(exc.value)
+    fleet.edit_vehicle(V1, {"usage": "รถสาย"})                       # the v6 features are unaffected
+    assert d.tables["vehicles"][0]["usage"] == "รถสาย"
+    assert fleet.has_v7() is False
+
+
+def test_vehicle_rows_carry_the_registration_details_and_the_drivers_nickname_and_phone():
+    vehicles = [{"id": V1, "plate_number": "A", "vehicle_number": "1", "main_driver_id": D1, "vehicle_class": "รถเล็ก", "color": "ขาว",
+                 "registered_date": "2016-02-11", "owner_name": "บจ.ก"}]
+    drv = {D1: {"id": D1, "name": "สมชาย", "nickname": "ชาย", "phone": "0959354443", "active": True}}
+    r = history.vehicle_rows(vehicles, {}, [], drivers=drv)[0]
+    assert (r["vehicle_class"], r["color"], r["registered_date"], r["owner_name"]) == ("รถเล็ก", "ขาว", "2016-02-11", "บจ.ก")
+    assert (r["driver_nickname"], r["driver_phone"]) == ("ชาย", "0959354443") and r["engine_number"] == ""
+
+
+def test_meta_reports_whether_schema_v7_is_in_and_the_size_classes(monkeypatch):
+    main, c = _client(monkeypatch)
+    monkeypatch.setattr(main.supabase, "configured", lambda: False)
+    monkeypatch.setattr(main, "load_roster", lambda: [])
+    d = c.get("/api/meta?token=secret").json()
+    assert d["fleet_v7"] is False and d["vehicle_classes"] == ["รถเล็ก", "รถใหญ่"]

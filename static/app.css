@@ -622,3 +622,18 @@ dialog#vehDialog { max-width: 620px; width: calc(100vw - 32px); }
   .rr-trucks { grid-column: 1 / -1; }
 }
 @media (max-width: 560px) { .vdgrid { grid-template-columns: 1fr; } }
+
+
+/* roster: the clickable truck box, the "everything about this truck" dialog, the export bar */
+.rr-id.clickable { cursor: pointer; border-radius: var(--radius-sm); margin: -6px -8px; padding: 6px 8px; transition: background .15s; }
+.rr-id.clickable:hover, .rr-id.clickable:focus-visible { background: var(--accent-soft); outline: none; }
+.rostercountbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rostercountbar p { margin: 6px 0; }
+dialog#vehInfoDialog { max-width: 640px; width: calc(100vw - 32px); }
+.vihead { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.vibody { display: grid; gap: 4px; padding-top: 6px; max-height: 60vh; overflow-y: auto; }
+.visection { padding: 10px 0; border-bottom: 1px dashed var(--line); display: grid; gap: 5px; justify-items: start; }
+.visection:last-child { border-bottom: 0; }
+.visection h4 { margin: 0 0 2px; font-size: 13px; color: var(--muted); font-weight: 650; letter-spacing: .02em; }
+.visection .kv { width: 100%; }
+.vdsection { margin: 16px 0 4px; font-size: 14px; color: var(--accent); }

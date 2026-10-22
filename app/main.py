@@ -121,7 +121,8 @@ def meta(x_app_token: str = Header(default=""), token: str = Query(default="")) 
     roster = load_roster()
     return {"categories": CATEGORIES, "vehicles": roster, "fixers": fixers, "shops": shops.choices(),
             "usages": fleet.usage_choices(roster), "branches": fleet.BRANCHES,
-            "fleet_ready": fleet.has_v6() if supabase.configured() else False}
+            "fleet_ready": fleet.has_v6() if supabase.configured() else False,
+            "fleet_v7": fleet.has_v7() if supabase.configured() else False, "vehicle_classes": fleet.VEHICLE_CLASSES}
 
 
 # Dev-only: serves a saved extraction response so the review UI can be

@@ -15,6 +15,7 @@ just empty) and every write explains what is missing (has_v6()).
 import re
 import time
 import uuid
+from datetime import date
 from typing import Optional
 
 from app import roster, supabase
@@ -24,6 +25,12 @@ USAGE_PRESETS = ["รถสาย", "รถหน้าโรง"]
 MAX_TEXT = 100
 MAX_NOTES = 300
 NEEDS_V6 = "ต้องรัน schema_v6.sql ใน Supabase ก่อน จึงจะจัดการรถและคนขับได้"
+NEEDS_V7 = "ต้องรัน schema_v7.sql ใน Supabase ก่อน จึงจะบันทึกข้อมูลทะเบียนและชื่อเล่นคนขับได้"
+VEHICLE_CLASSES = ["รถเล็ก", "รถใหญ่"]                  # the size class on the master sheet; drives how often oil is changed
+# the extra truck details (registration paper etc.) and driver nickname that arrive with schema_v7.sql
+V7_VEHICLE_TEXT = ("color", "engine_number", "chassis_number", "registration_type", "owner_name", "holder_name")
+V7_VEHICLE_KEYS = ("vehicle_class", "registered_date") + V7_VEHICLE_TEXT
+V7_DRIVER_KEYS = ("nickname",)
 # statuses that mean a truck still has work in progress, so it cannot be retired yet
 BUSY = ("open", "at_shop", "awaiting_bill")
 
@@ -51,6 +58,24 @@ def has_v6() -> bool:
     except supabase.SupabaseError:
         ok = False
     _probe.update(at=now, ok=ok)
+    return ok
+
+
+_probe7 = {"at": 0.0, "ok": False}
+
+
+def has_v7() -> bool:
+    """True once schema_v7.sql has been run (probed, cached 30 s)."""
+    now = time.time()
+    if now - _probe7["at"] < 30:
+        return _probe7["ok"]
+    try:
+        supabase.select("vehicles", {"select": ",".join(V7_VEHICLE_KEYS), "limit": "1"})
+        supabase.select("drivers", {"select": ",".join(V7_DRIVER_KEYS), "limit": "1"})
+        ok = True
+    except supabase.SupabaseError:
+        ok = False
+    _probe7.update(at=now, ok=ok)
     return ok
 
 
@@ -101,6 +126,17 @@ def clean_vehicle(data: dict, *, existing: Optional[dict] = None, others: list[d
             values[key] = _clean(data.get(key), 40) or None
     if creating or given("notes"):
         values["notes"] = _clean(data.get("notes"), MAX_NOTES) or None
+    # ---- registration details and size class (only written when sent: they need schema_v7.sql)
+    if given("vehicle_class"):
+        cls = _clean(data.get("vehicle_class"), 20)
+        if cls and cls not in VEHICLE_CLASSES:
+            raise InvalidFleet(f"ประเภทรถต้องเป็น {' หรือ '.join(VEHICLE_CLASSES)}")
+        values["vehicle_class"] = cls or None
+    for key in V7_VEHICLE_TEXT:
+        if given(key):
+            values[key] = _clean(data.get(key), 80) or None
+    if given("registered_date"):
+        values["registered_date"] = _clean_registered_date(data.get("registered_date"))
     if creating or given("main_driver_id"):
         driver_id = _uuid_or_none(data.get("main_driver_id"))
         if driver_id is not None:
@@ -131,6 +167,21 @@ def clean_vehicle(data: dict, *, existing: Optional[dict] = None, others: list[d
     return values
 
 
+def _clean_registered_date(raw) -> Optional[str]:
+    text = _clean(raw, 20)
+    if not text:
+        return None
+    try:
+        d = date.fromisoformat(text)
+    except ValueError:
+        raise InvalidFleet("วันที่จดทะเบียนไม่ถูกต้อง")
+    if d.year >= 2400:
+        raise InvalidFleet(f"วันที่จดทะเบียน: ปี {d.year} ดูเหมือนเป็น พ.ศ. แต่ช่องนี้ต้องเป็น ค.ศ. (ปี {d.year - 543})")
+    if d > date.today():
+        raise InvalidFleet("วันที่จดทะเบียนเป็นวันในอนาคต")
+    return d.isoformat()
+
+
 def clean_driver(data: dict, *, existing: Optional[dict] = None, others: list[dict]) -> dict:
     creating = existing is None
     values: dict = {}
@@ -144,6 +195,8 @@ def clean_driver(data: dict, *, existing: Optional[dict] = None, others: list[di
             values[key] = _clean(data.get(key), limit) or None
     if creating or "notes" in data:
         values["notes"] = _clean(data.get("notes"), MAX_NOTES) or None
+    if "nickname" in data:
+        values["nickname"] = _clean(data.get("nickname"), 40) or None
     if "active" in data:
         values["active"] = bool(data["active"])
     final = {**(existing or {}), **values}
@@ -168,6 +221,11 @@ def usage_choices(vehicles: list[dict]) -> list[str]:
 def _require_v6() -> None:
     if not has_v6():
         raise InvalidFleet(NEEDS_V6)
+
+
+def _require_v7_for(values: dict, keys) -> None:
+    if any(k in values for k in keys) and not has_v7():
+        raise InvalidFleet(NEEDS_V7)
 
 
 def _changed() -> None:
@@ -197,7 +255,7 @@ def list_drivers(include_inactive: bool = False) -> list[dict]:
             if v.get("main_driver_id") and v.get("active"):
                 trucks.setdefault(v["main_driver_id"], []).append(
                     {"vehicle_id": v["id"], "plate": v["plate_number"], "truck_number": v.get("vehicle_number") or "", "branch": v.get("branch") or ""})
-    rows = [{"driver_id": d["id"], "name": d["name"], "phone": d.get("phone") or "", "branch": d.get("branch") or "",
+    rows = [{"driver_id": d["id"], "name": d["name"], "nickname": d.get("nickname") or "", "phone": d.get("phone") or "", "branch": d.get("branch") or "",
              "notes": d.get("notes") or "", "active": bool(d.get("active", True)), "trucks": trucks.get(d["id"], [])}
             for d in drivers.values() if include_inactive or d.get("active", True)]
     return sorted(rows, key=lambda r: (not r["active"], r["name"]))
@@ -206,7 +264,9 @@ def list_drivers(include_inactive: bool = False) -> list[dict]:
 def create_driver(data: dict) -> dict:
     _require_v6()
     others = list(drivers_by_id().values())
-    row = supabase.insert("drivers", [clean_driver(data, others=others)])[0]
+    values = clean_driver(data, others=others)
+    _require_v7_for(values, V7_DRIVER_KEYS)
+    row = supabase.insert("drivers", [values])[0]
     _changed()
     return {"driver_id": row["id"], "name": row["name"]}
 
@@ -219,6 +279,7 @@ def edit_driver(driver_id: str, data: dict) -> dict:
     if existing is None:
         raise NotFound()
     values = clean_driver(data, existing=existing, others=[d for k, d in drivers.items() if k != did])
+    _require_v7_for(values, V7_DRIVER_KEYS)
     freed = 0
     if values.get("active") is False and existing.get("active", True):
         # a driver who stopped driving no longer is anyone's main driver
@@ -238,12 +299,15 @@ def _all_vehicles() -> list[dict]:
     cols = "id,plate_number,plate_province,vehicle_number,make,model,branch,active"
     if has_v6():
         cols += ",usage,main_driver_id,notes"
+    if has_v7():
+        cols += "," + ",".join(V7_VEHICLE_KEYS)
     return supabase.select_all("vehicles", {"select": cols, "order": "id.asc"})
 
 
 def create_vehicle(data: dict) -> dict:
     _require_v6()
     values = clean_vehicle(data, others=_all_vehicles(), drivers=drivers_by_id())
+    _require_v7_for(values, V7_VEHICLE_KEYS)
     row = supabase.insert("vehicles", [values])[0]
     _changed()
     return {"vehicle_id": row["id"]}
@@ -258,6 +322,7 @@ def edit_vehicle(vehicle_id: str, data: dict) -> dict:
         raise NotFound()
     busy = data.get("active") is False and vid in _busy_vehicle_ids()
     values = clean_vehicle(data, existing=existing, others=[v for v in vehicles if v["id"] != vid], drivers=drivers_by_id(), busy_vehicle=busy)
+    _require_v7_for(values, V7_VEHICLE_KEYS)
     if values:
         supabase.update("vehicles", {"id": f"eq.{vid}"}, values)
     _changed()

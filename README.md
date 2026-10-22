@@ -38,7 +38,8 @@ service key bypasses row-level security: server-side only, never in a page.
 `schema_v2.sql`, then `schema_v3_dashboard.sql` (only needed for Looker), then
 `schema_v4.sql` (editing saved bills + the written summary), then
 `schema_v5.sql` (the "at the shop" step of the repair flow), then
-`schema_v6.sql` (drivers, truck usage, main driver). Replace
+`schema_v6.sql` (drivers, truck usage, main driver), then
+`schema_v7.sql` (the rest of the master vehicle list: size class, registration papers, driver nickname). Replace
 `<PROJECT_REF>` in `schema.sql` first. Then seed the fleet:
 
 ```bash
@@ -316,3 +317,22 @@ Trucks and drivers under one roof (`app/fleet.py`, `static/roster.js`).
 - `schema_v6.sql` adds the `drivers` table and `vehicles.usage`,
   `vehicles.main_driver_id`, `vehicles.notes`. Until it has been run the roster is
   read-only and says so (`fleet.has_v6()` probes for it); everything else works as before.
+
+### The master vehicle list
+
+The site is the master for trucks and drivers; `Drivers.xlsx` (sheet 1 the roster, sheet 2
+the registration papers) was the source and is imported once.
+
+- **Click a truck's box** (left side of its row) to see everything: plate, number, branch, size
+  class (รถเล็ก / รถใหญ่), usage, make / model, colour, the main driver with nickname and a tap-to-call
+  phone number, the registration papers (date, type, engine and chassis numbers, owner, holder) and its
+  repair totals. "แก้ไข" edits all of it; "ประวัติซ่อม" opens the log for that truck.
+- **"ดาวน์โหลด Excel (CSV)"** on the roster exports the trucks currently shown with every column, so
+  the master list can still go into a spreadsheet.
+- **Import:** `scripts/import_roster.py` (dry run) / `--write`. It creates drivers, links each to their
+  truck, sets usage (a driver written as "หน้าโรง" means รถหน้าโรง, anyone else means รถสาย), size class and
+  the registration details. Matching is by plate, then by branch + fleet number. It never changes a
+  truck's branch / number / plate, only fills usage, driver and registration details when they are empty
+  (so it is safe to run again and never undoes edits made on the site), and lists every difference it
+  leaves alone. Needs `schema_v6.sql` + `schema_v7.sql` and `pip install openpyxl`.
+- `Drivers.xlsx` holds drivers' phone numbers: it is git-ignored and must not be committed.
