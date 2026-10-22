@@ -27,7 +27,7 @@ def rows():
     return build(
         events=[ev("e1", "v1", "2026-10-10", vendor="ชมรมย์การช่าง", total=3000), ev("e2", "v2", "2026-09-20", vendor="โชคพัฒนา", total=500)],
         lines=[ln("e1", "น้ำมันเครื่อง", "ไส้กรองและของเหลว", 3000), ln("e2", "ลูกปืน", "ช่วงล่าง", 500)],
-        requests=[rq("r1", "v1", "at_shop", seq=1, shop="ช่างลิ้ม 24 ไดนาโม", sent_date="2026-10-12")])
+        requests=[rq("r1", "v1", "at_shop", seq=1, shop="24 ไดนาโม", sent_date="2026-10-12")])
 
 
 def test_log_requires_the_token(monkeypatch, rows):
@@ -42,7 +42,7 @@ def test_log_returns_rows_totals_and_facets(monkeypatch, rows):
     d = c.get("/api/log?token=secret").json()
     assert d["total"] == 3 and len(d["rows"]) == 3 and d["rows"][0]["key"] == "request:r1"
     assert d["stats"]["total_cost"] == 3500 and d["stats"]["trucks"] == 2
-    assert {s["value"] for s in d["facets"]["shops"]} >= {"ชมรมย์การช่าง", "โชคพัฒนา", "ช่างลิ้ม 24 ไดนาโม", "ฮีโน่ เอเซีย หนองแค"}
+    assert {s["value"] for s in d["facets"]["shops"]} >= {"ชมรมย์การช่าง", "โชคพัฒนา", "24 ไดนาโม", "ฮีโน่ เอเซีย หนองแค"}
     assert all("_hay" not in r for r in d["rows"]) and d["rows"][0]["status_label"] == "อยู่ที่อู่"
 
 

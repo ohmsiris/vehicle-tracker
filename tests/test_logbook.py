@@ -50,7 +50,7 @@ def rows():
     requests = [
         rq("r1", "v1", "open", seq=1, problem="กระจกข้างตก"),
         rq("r2", "v2", "at_shop", seq=2, problem="เพลาร้าว", shop="โชคพัฒนา", sent_date="2026-10-12"),
-        rq("r3", "v3", "awaiting_bill", seq=3, problem="ไฟท้ายเสีย", fixed_by="ช่างลิ้ม 24 ไดนาโม", fixed_date="2026-10-15"),
+        rq("r3", "v3", "awaiting_bill", seq=3, problem="ไฟท้ายเสีย", fixed_by="24 ไดนาโม", fixed_date="2026-10-15"),
         rq("r4", "v1", "completed", seq=4, problem="เปลี่ยนไฟเลี้ยว", fixed_by="ช่างเอ๋", fixed_date="2026-10-14", no_bill=True, no_bill_reason="งานเล็กน้อย"),
         rq("r5", "v2", "cancelled", seq=5, problem="ซ่อมที่นั่ง"),
         rq("r6", "v1", "completed", seq=6, problem="เบรกหลังมีเสียง", fixed_by="ชมรมย์การช่าง", fixed_date="2026-10-10", fixed_event_id="e1"),
@@ -71,7 +71,7 @@ def keys(res):
 @pytest.mark.parametrize("written, canon", [
     ("ชมรมย์การช่าง", "ชมรมย์การช่าง"), ("อู่ชมรม", "ชมรมย์การช่าง"), ("  ชมรม ", "ชมรมย์การช่าง"),
     ("ช่างเก่งเจริญยนต์", "อู่ช่างเก่ง เจริญยนต์"), ("อู่ช่างเก่ง", "อู่ช่างเก่ง เจริญยนต์"), ("อู่ช่างเก่ง เจริญยนต์", "อู่ช่างเก่ง เจริญยนต์"),
-    ("โชคพัฒนา", "โชคพัฒนา"), ("มงคลไดนาโม", "มงคลไดนาโม"), ("ช่างลิ้ม 24 ไดนาโม", "ช่างลิ้ม 24 ไดนาโม"),
+    ("โชคพัฒนา", "โชคพัฒนา"), ("มงคลไดนาโม", "มงคลไดนาโม"), ("24 ไดนาโม", "24 ไดนาโม"),
     ("ศูนย์อีซูซุสระบุรี", "อิซูซุจึงกงเฮงแก่งคอย"), ("ศูนย์ isuzu", "อิซูซุจึงกงเฮงแก่งคอย"), ("ISUZU  center", "อิซูซุจึงกงเฮงแก่งคอย"),
     ("ศูนย์ฮีโน่", "ฮีโน่ เอเซีย หนองแค"), ("Hino Saraburi", "ฮีโน่ เอเซีย หนองแค"),
     ("ช่างเอ๋", shops.IN_HOUSE), ("[ทดสอบ] ช่างเอ๋", shops.IN_HOUSE),
@@ -82,7 +82,7 @@ def test_shop_names_fold_into_one(written, canon):
 
 
 def test_the_board_offers_every_shop_you_named_plus_the_mechanic():
-    assert shops.choices() == ["ชมรมย์การช่าง", "อู่ช่างเก่ง เจริญยนต์", "โชคพัฒนา", "มงคลไดนาโม", "ช่างลิ้ม 24 ไดนาโม", "อิซูซุจึงกงเฮงแก่งคอย", "ฮีโน่ เอเซีย หนองแค", shops.IN_HOUSE]
+    assert shops.choices() == ["ชมรมย์การช่าง", "อู่ช่างเก่ง เจริญยนต์", "โชคพัฒนา", "มงคลไดนาโม", "24 ไดนาโม", "อิซูซุจึงกงเฮงแก่งคอย", "ฮีโน่ เอเซีย หนองแค", shops.IN_HOUSE]
 
 
 # ----------------------------------------------- what becomes a row
@@ -108,7 +108,7 @@ def test_shop_and_truck_details_are_filled_in(rows):
     e4 = next(r for r in rows if r["key"] == "event:e4")
     assert (e4["shop"], e4["plate"], e4["truck_number"], e4["branch"]) == ("อิซูซุจึงกงเฮงแก่งคอย", "1ฒถ 8966", "1", "สระบุรี")
     r3 = next(r for r in rows if r["key"] == "request:r3")
-    assert r3["shop"] == "ช่างลิ้ม 24 ไดนาโม" and r3["problem"] == "ไฟท้ายเสีย"            # who it came back from
+    assert r3["shop"] == "24 ไดนาโม" and r3["problem"] == "ไฟท้ายเสีย"            # who it came back from
     r2 = next(r for r in rows if r["key"] == "request:r2")
     assert r2["shop"] == "โชคพัฒนา" and r2["sent_date"] == "2026-10-12"
 
