@@ -96,7 +96,14 @@ def test_top_trucks_and_vendors():
     d = build(events=events)
     assert [(t["plate"], t["amount"], t["count"], t["last_date"]) for t in d["top_trucks"][:3]] == [
         ("B", 2000, 1, "2026-09-01"), ("A", 1500, 2, "2026-10-09"), ("C", 100, 1, "2026-10-10")]
-    assert d["top_vendors"] == [{"vendor": "โชค", "amount": 2000, "count": 1}, {"vendor": "ชมรม", "amount": 1500, "count": 2}]
+    # the spellings on the bills are folded into the shop (see app/shops.py): "โชค" and "ชมรม" are the shops' own short names
+    assert d["top_vendors"] == [{"vendor": "โชคพัฒนา", "amount": 2000, "count": 1}, {"vendor": "ชมรมย์การช่าง", "amount": 1500, "count": 2}]
+
+
+def test_one_shop_with_several_departments_is_one_bar():
+    events = [ev("1", "2026-10-01", 3000, vehicle_id="v1", plate="A", truck="1", vendor="บริษัท จึงกงเฮงอีซูซุ จำกัด (ศูนย์ซ่อมสีและตัวถัง แก่งคอย)"),
+              ev("2", "2026-10-02", 1200, vehicle_id="v2", plate="B", truck="2", vendor="อิซูซุจึงกงเฮง แก่งคอย ศูนย์บริการ")]
+    assert build(events=events)["top_vendors"] == [{"vendor": "อิซูซุจึงกงเฮงแก่งคอย", "amount": 4200, "count": 2}]
 
 
 def test_top_lists_are_capped():

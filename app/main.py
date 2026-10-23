@@ -120,7 +120,7 @@ def meta(x_app_token: str = Header(default=""), token: str = Query(default="")) 
         except supabase.SupabaseError:
             logger.exception("could not load fixer suggestions")
     roster = load_roster()
-    return {"categories": CATEGORIES, "vehicles": roster, "fixers": fixers, "shops": shops.choices(), "shop_contacts": shops.DIRECTORY,
+    return {"categories": CATEGORIES, "vehicles": roster, "fixers": fixers, "shops": shops.choices(), "shop_contacts": shops.directory(),
             "usages": fleet.usage_choices(roster), "branches": fleet.BRANCHES,
             "fleet_ready": fleet.has_v6() if supabase.configured() else False,
             "fleet_v7": fleet.has_v7() if supabase.configured() else False, "vehicle_classes": fleet.VEHICLE_CLASSES,
@@ -564,6 +564,41 @@ def _plan_call(fn, *args, **kwargs):
 def api_plan_record_service(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
     return _plan_call(service_plan.record_service, body)
+
+
+# ------------------------------------------------------------- settings: the repair shops
+def _shops_call(fn, *args, **kwargs):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        out = fn(*args, **kwargs)
+        logsource.invalidate()                 # the log folds shop names: it must read the new words
+        return out
+    except shops.InvalidShop as exc:
+        raise HTTPException(422, str(exc))
+    except shops.NotFound:
+        raise HTTPException(404, "ไม่พบร้านนี้")
+    except supabase.SupabaseError:
+        logger.exception("shops call failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/settings/shops")
+def api_settings_shops(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _shops_call(shops.settings)
+
+
+@app.post("/api/settings/shops")
+def api_settings_new_shop(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _shops_call(shops.create, body)
+
+
+@app.patch("/api/settings/shops/{shop_id}")
+def api_settings_edit_shop(shop_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _shops_call(shops.update, shop_id, body)
 
 
 # ------------------------------------------------------------- the manager's board

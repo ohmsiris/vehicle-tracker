@@ -23,6 +23,8 @@ from collections import defaultdict
 from datetime import date
 from typing import Optional
 
+from app import shops
+
 STALE_DAYS = 90       # a truck with no repair record for this long is surfaced for a look
 TOP_TRUCKS = 10
 TOP_VENDORS = 8
@@ -128,7 +130,7 @@ def build_dashboard(*, events: list[dict], lines: list[dict], vehicles: list[dic
         ed = _d(e.get("event_date"))
         if ed and (t["last_date"] is None or ed > t["last_date"]):
             t["last_date"] = ed
-        name = (e.get("vendor") or "").strip()
+        name = shops.canonical((e.get("vendor") or "").strip())      # "บริษัท จึงกงเฮงอีซูซุ จำกัด (ศูนย์ซ่อมสีและตัวถัง ...)" and the service centre are one shop
         if name:
             vendors[name][0] += _num(e.get("total_cost"))
             vendors[name][1] += 1

@@ -158,9 +158,7 @@ The **รถ** group is ordered by what you do, with a line between each part: *
 (input) · **รถอยู่ที่ไหน**, **สมุดงานซ่อม** (output) · **ทะเบียนรถ**, **แผนซ่อมบำรุง** (editing).
 
 **Who to call**: on the board and "รถอยู่ที่ไหน" the server works out who to ring about each request (`fleet.call_target`): the truck's main driver -- or, for a factory truck (รถหน้าโรง, which has no driver), whoever reported the problem (ผู้แจ้ง), found among the drivers by nickname / name / first name when exactly one matches and has a number. A driver's number is a tap-to-call button (`tel:`) on the truck's page, the drivers list, the board cards
-and "รถอยู่ที่ไหน". The shops' numbers are kept in `app/shops.py` (`DIRECTORY`: one or more contacts per shop, e.g. the
-Isuzu service centre and its body shop; the shops are listed by their official names, and the old short names such as
-"อู่ชมรม" or "ศูนย์ Isuzu" still fold into them) and shown as call buttons under each shop on "รถอยู่ที่ไหน" and in the "ส่งซ่อมที่…"
+and "รถอยู่ที่ไหน". The shops' numbers are kept in the database and edited on the settings page (see "Settings" below), shown as call buttons under each shop on "รถอยู่ที่ไหน" and in the "ส่งซ่อมที่…"
 dialog. A shop with no number yet (ฮีโน่ เอเซีย หนองแค) shows no call button.
 
 ## One repair event, read like a bill
@@ -455,3 +453,15 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
   every minute (`DISABLE_SCHEDULER=1` switches it off, e.g. for a second local copy).
 - The old Ticketing bot is not removed yet: besides tickets it also reads bills, slips and supply photos and keeps the
   preventive-maintenance catalogue.
+
+## Settings ("ตั้งค่า", `#settings`)
+
+`schema_v15.sql`, `app/shops.py`, `static/settings.js`. The repair shops are no longer written in the code: they are in the
+database (`shops`, `shop_aliases`, `shop_contacts`, filled from the old lists, so nothing changed) and edited in the app. A shop
+has a name, **words** (what a bill or a typed name may say: "จึงกงเฮง", "isuzu" ...; the shop's own name counts already; when
+several match, the longest wins) and **contacts** (phone numbers with a department or a person's name). A dealership with
+several departments is **one shop**: the Isuzu dealership is one place to go and one name in the log, the board and the
+dashboard, with ศูนย์บริการ and ศูนย์ซ่อมสีและตัวถัง as two contacts; each bill still keeps the department as written on it.
+Renaming a shop renames it in the repair requests and the manager's tickets, and keeps the old name as a word. A shop can be
+switched off (old bills keep grouping under it; it is no longer offered). The same shops appear as the "shop" places on the
+manager's board, so there is one list to look after. More settings (the other things that are still in the code) will be added to this page.

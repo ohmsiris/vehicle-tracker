@@ -19,7 +19,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from app import mgr_ai, mgr_recurring, supabase
+from app import mgr_ai, mgr_recurring, shops, supabase
 
 STATUSES = ("todo", "doing", "waiting", "done", "cancelled")
 ACTIVE = ("todo", "doing", "waiting")
@@ -321,7 +321,7 @@ def board(*, today: Optional[date] = None) -> dict:
     recent = supabase.select("mgr_tickets", {"select": "*", "status": "in.(done,cancelled)", "order": "done_at.desc.nullslast", "limit": str(RECENT_LIMIT)})
     return {"ready": True, "today": today.isoformat(), "tickets": [_ticket_row(t, by_key) for t in active],
             "recent": [_ticket_row(t, by_key) for t in recent], "types": [t for t in types if t.get("active", True)],
-            "places": list_places(), "settings": get_settings()}
+            "places": [*list_places(), *shops.board_places()], "settings": get_settings()}
 
 
 def create_ticket(data: dict) -> dict:
