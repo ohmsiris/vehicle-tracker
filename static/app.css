@@ -1011,4 +1011,35 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 .progress-history { display: grid; gap: 4px; margin-top: 12px; max-height: 220px; overflow-y: auto; }
 .progress-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
 
-
+/* ---- Home page (หน้าแรก): cards that grow in a grid; the dashed ones are ideas not built yet */
+.side-top { margin-bottom: 10px; }
+.side-top .sideitem { margin-left: 0; width: 100%; font-weight: 650; }
+.home-title { margin: 0; font-size: 20px; }
+.homegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; margin-bottom: 16px; }
+.hcard { margin-bottom: 0; }
+.hcard.wide { grid-column: 1 / -1; }
+.hcard-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.hcard-head h2 { margin: 0; }
+.hlink { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; padding: 2px 4px; border-radius: 6px; white-space: nowrap; }
+.hlink:hover { background: var(--accent-soft); }
+.hsub { margin: 14px 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.hsub:first-of-type { margin-top: 0; }
+.hstats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.hstat { flex: 1 1 88px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px 12px; }
+.hstat.warn { background: var(--warn-soft); border-color: var(--warn-line); }
+.hstat.bad { background: var(--bad-soft); border-color: var(--bad); }
+.hstat-v { font-size: 22px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.hstat.bad .hstat-v { color: var(--bad); }
+.hstat-l { font-size: 12px; color: var(--muted); }
+.hlist { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 2px; }
+.hrow { display: flex; justify-content: space-between; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.hrow:last-child { border-bottom: 0; }
+.hrow.warn .hrow-main { color: var(--warn); font-weight: 600; }
+.hrow.bad .hrow-main { color: var(--bad); font-weight: 600; }
+.hrow-side { text-align: right; flex-shrink: 0; max-width: 55%; }
+.hempty { margin: 4px 0 8px; }
+.hsoon { border: 2px dashed var(--line); border-radius: var(--radius); padding: 16px 18px; background: transparent; position: relative; }
+.hsoon h2 { margin-bottom: 6px; color: var(--text-2); }
+.hsoon-tag { position: absolute; top: 12px; right: 14px; font-size: 11px; font-weight: 600; color: var(--warn); background: var(--warn-soft); padding: 1px 9px; border-radius: 999px; }
+.hsoon-needs { color: var(--muted); font-style: italic; margin: 8px 0 0; }
+.hdigest { white-space: pre-line; font-size: 14px; margin: 4px 0 6px; line-height: 1.55; }

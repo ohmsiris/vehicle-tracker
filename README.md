@@ -145,6 +145,24 @@ calendars, a พ.ศ. year typed into one is converted automatically, and the
 server rejects a year >= 2400 with an explicit message. The bill reader
 already corrects a พ.ศ. year the model read off a bill (`app/batch.py`).
 
+## Home page ("หน้าแรก") and the app icon
+
+The app opens on **หน้าแรก** (the top item of the sidebar), not on the repair board: one screen of cards, all read in ONE request
+(`/api/home`, `app/home.py`; the server reads the tables side by side and keeps the answer 20 s, so a slow link pays for one round trip):
+**วันนี้ต้องดู** (the manager's board digest + the maintenance-plan reminders, incl. "ทำพร้อมน้ำมันเครื่อง"), **รถ — งานซ่อม** (รอซ่อม / อยู่ที่อู่ /
+รอบิล + the trucks at a shop), **ค่าใช้จ่าย** (repair spend and factory purchases, this month vs last), **สต็อก — ของใกล้หมด** (below the minimum set on
+the stock page), **เครื่องจักร** (active machines, recent maintenance). Every card has a link to its full page. A card that cannot be built
+(its schema file not run, or a database hiccup) says so by itself and the rest still show.
+
+It is a first draft built to grow. To add a card: a loader + pure `build_*` function in `app/home.py` (add it to `CARDS`), and a `draw*` function +
+an entry in `HOME_CARDS` in `static/home.js`. The ideas not built yet (`HOME_SOON` in `app/home.py`: ice production/sales, slips/finance, GMP
+inspection, vehicle documents, driver licences, purchase orders) show as dashed "เร็วๆ นี้" cards saying what each needs before it can show numbers.
+The other pages are unchanged (the old **ภาพรวม** is still under รถ).
+
+**App icon**: the artwork is `static/icons/icebox-source.jpg`; `.venv/Scripts/python.exe scripts/make_icons.py` makes the tab icon (`favicon.ico`, also served at
+`/favicon.ico`), the iPhone one (`apple-touch-icon.png`, a full square -- iOS rounds it) and the Android / "add to home screen" ones
+(`icon-192/512.png`, `icon-maskable-512.png` with extra margin so a round mask never cuts the picture), wired in by `static/manifest.webmanifest`.
+
 ## Navigation: sidebar, cars, machinery
 
 A left sidebar groups the app. Everything built so far lives under **รถ**

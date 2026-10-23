@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IceBox</title>
+<meta name="theme-color" content="#3e96d7">
+<link rel="icon" href="/static/icons/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<link rel="manifest" href="/static/manifest.webmanifest">
 <script>
   // Apply the saved theme before first paint (light unless the user chose dark) -- no flash.
   try { if (localStorage.getItem("vt_theme") === "dark") document.documentElement.dataset.theme = "dark"; } catch (e) { /* storage blocked: stay light */ }
@@ -25,6 +30,11 @@
 <div class="shell">
 <div id="sideScrim" class="scrim"></div>
 <aside id="sidebar" class="sidebar" aria-label="เมนูหลัก">
+  <!-- Where the app opens: everything that needs attention, in one place -->
+  <nav class="side-top">
+    <button id="navHome" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span>หน้าแรก</span></button>
+  </nav>
+
   <!-- The manager's own board -->
   <div class="side-group" id="groupMgr">
     <button class="side-head" type="button" aria-expanded="true" aria-controls="sideMgr">
@@ -44,7 +54,7 @@
     </button>
     <nav class="side-items" id="sideCars">
       <button id="navDash" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>ภาพรวม</span></button>
-      <button id="navBoard" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>สถานะงานซ่อม</span></button>
+      <button id="navBoard" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>สถานะงานซ่อม</span></button>
       <div class="side-sep" role="separator"></div>
       <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกงานซ่อม</span></button>
       <div class="side-sep" role="separator"></div>
@@ -82,8 +92,21 @@
     </div>
   </div>
 
+  <!-- ============ Home ============ -->
+  <section id="homeView">
+    <div class="dash-filters">
+      <h2 class="home-title">หน้าแรก</h2>
+      <button id="homeRefresh" class="btn small" type="button">รีเฟรช</button>
+      <span id="homeAsOf" class="muted small"></span>
+    </div>
+    <p class="error" id="homeError" hidden></p>
+    <div id="homeCards" class="homegrid"><p class="muted small">กำลังโหลด…</p></div>
+    <h3 class="kpi-group" id="homeSoonHead" hidden>ที่จะมาในหน้านี้ (ยังไม่ได้สร้าง — บอกได้ว่าอยากได้อันไหนก่อน)</h3>
+    <div id="homeSoon" class="homegrid"></div>
+  </section>
+
   <!-- ============ Repair board ============ -->
-  <section id="boardView">
+  <section id="boardView" hidden>
     <div class="card duestrip" id="dueStrip" hidden>
       <div class="duehead">
         <h2>รถใกล้ถึงคิวบำรุง <span class="muted small">ลากการ์ดลงไปที่ “รอซ่อม” เพื่อเข้าคิว (หรือกด “เข้าคิว”)</span></h2>
@@ -997,6 +1020,7 @@
 
 <script src="/static/board.js"></script>
 <script src="/static/dashboard.js"></script>
+<script src="/static/home.js"></script>
 <script src="/static/fleet.js"></script>
 <script src="/static/logbook.js"></script>
 <script src="/static/where.js"></script>

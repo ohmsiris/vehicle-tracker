@@ -60,10 +60,10 @@ function initTheme() {
 
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
-const VIEW_NAMES = ["board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "stock"];
+const VIEW_NAMES = ["home", "board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "stock"];
 // which sidebar entry lights up for each view
 const NAV_OF = {
-  board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
+  home: "navHome", board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
   roster: "navRoster", truck: "navRoster", event: "navLog", log: "navLog", where: "navWhere", plan: "navPlan", mgr: "navMgr", mgrRecurring: "navMgrRecurring", mgrSettings: "navMgrSettings", settings: "navSettings", machinery: "navMachIndex", machine: "navMachIndex", machineLog: "navMachLog", purchases: "navPurchases", purchaseNew: "navPurchases", prices: "navPrices", stock: "navStock",
 };
 
@@ -655,13 +655,14 @@ async function init() {
     }
     recategorize(eligible);
   });
-  $("tokenSave").addEventListener("click", () => { state.token = $("tokenInput").value.trim(); saveToken(state.token); loadMeta().then(loadBoard); });
+  $("tokenSave").addEventListener("click", () => { state.token = $("tokenInput").value.trim(); saveToken(state.token); loadMeta().then(loadBoard).then(() => { if (!$("homeView").hidden) loadHome(); }); });
 
-  showView("board");                    // (clears the hash, as every non-truck page does)
+  showView("home");                     // the app opens on the home page (clears the hash, as every non-truck page does)
   if (bootHash) history.replaceState(null, "", location.pathname + location.search + bootHash);
   await loadMeta();
   await initBoard();
   initDashboard();
+  initHome();
   initFleet();
   initLog();
   initRoster();
@@ -671,6 +672,7 @@ async function init() {
   initMgr();
   initManual();
   if (location.hash) route();
+  else if (params.get("tab") !== "dash" && !params.get("sample")) loadHome();
   if (params.get("tab") === "dash") { showView("dash"); loadDashboard(); }
   if (params.get("sample")) {
     state.draft = await api("/api/dev/sample-draft");

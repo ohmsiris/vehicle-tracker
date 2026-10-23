@@ -49,7 +49,7 @@ function todayToast(text) {
 function todayAlert(title, body, tag) {
   todayToast(`${title}\n${body}`);
   if (todayNotifyOn()) {
-    try { new Notification(title, { body, tag, icon: "/static/favicon.png" }); } catch (e) { /* some browsers only allow it from a service worker */ }
+    try { new Notification(title, { body, tag, icon: "/static/icons/icon-192.png" }); } catch (e) { /* some browsers only allow it from a service worker */ }
   }
 }
 

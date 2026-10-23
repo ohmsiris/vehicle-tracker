@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, fleet, history, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
+from app import dashboard, events, fleet, history, home, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -106,6 +106,11 @@ def index() -> FileResponse:
     # The page itself holds no data and no secrets; every API call it makes
     # is token-gated.
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(STATIC_DIR / "icons" / "favicon.ico", media_type="image/x-icon")
 
 
 @app.get("/api/meta")
@@ -899,6 +904,15 @@ def api_today(fresh: bool = False, x_app_token: str = Header(default=""), token:
     """What needs attention today -- the numbers beside the menu, the bar at the top of every page, the timed reminders."""
     _check_token(x_app_token, token)
     return _mgr_call(mgr_jobs.today_summary, fresh=fresh)
+
+
+@app.get("/api/home")
+def api_home(fresh: bool = False, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The home page: every card in one request (app/home.py)."""
+    _check_token(x_app_token, token)
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    return home.load(fresh=fresh)
 
 
 @app.get("/api/plan/options")
