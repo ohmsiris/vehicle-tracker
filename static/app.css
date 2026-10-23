@@ -782,7 +782,7 @@ table.pl-chart { border-collapse: separate; border-spacing: 0; width: 100%; min-
 .pl-grp-row, .pl-km-row { padding: 8px 0; border-top: 1px solid var(--line); }
 .pl-km-row.custom { background: var(--warn-soft); margin: 0 -8px; padding: 8px; border-radius: var(--radius-sm); }
 .pl-grp-row input, .pl-km-row input { width: 100%; }
-.plsetgrid > .plset:first-child, .plsetgrid > .pl-trucks-card { grid-column: 1 / -1; }
+.plsetgrid > .plset:first-child, .plsetgrid > .pl-wide, .plsetgrid > .pl-trucks-card { grid-column: 1 / -1; }
 .pl-grp-row.custom strong { color: var(--accent); }
 .pl-trucks { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 4px 16px; margin: 6px 0 10px; }
 .pl-trucks-branch { grid-column: 1 / -1; margin-top: 10px; font-weight: 600; }
@@ -1010,3 +1010,5 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 .req-update { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
 .progress-history { display: grid; gap: 4px; margin-top: 12px; max-height: 220px; overflow-y: auto; }
 .progress-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
+
+.pl-own-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }

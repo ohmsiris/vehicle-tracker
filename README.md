@@ -460,6 +460,16 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   every active truck by branch with a dropdown. Picking only marks the row yellow; nothing changes until "บันทึกการเปลี่ยนกลุ่ม
   (N คัน)" and a confirmation listing each change (`PUT /api/plan/vehicle-groups`). The truck's page only shows its group.
   A group whose months / km per day were changed has a "ค่าเริ่มต้น" button (`DELETE /api/plan/groups?code=`).
+- **Maintenance items of our own** (`schema_v18.sql`, table `service_custom_items`; `#plan-settings` › "รายการที่เพิ่มเอง"):
+  something new learnt about what a truck needs (timing belt, battery, fire extinguisher) is added in the app, no code change.
+  An item has a name, km for the small rule set and / or the big one (empty = not for that kind of truck), optionally a fixed
+  number of months (months only, no km = every truck), a table group, the words a bill line says when it was done (the name
+  counts too; a top-up "(เติม)" never does) and the repair category it gets when ticked as done. It then behaves like a
+  built-in item: in every matching truck's chart, calculator, reminders ("เลือกทั้งหมด" includes it), "บันทึกว่าทำแล้ว", the km
+  per rule set can be changed in the lists (with a "เพิ่มเอง" badge). "เอาออก" hides it (records already made stay). The built-in
+  items stay in `app/service_plan.py`; `all_items()`, `km_table()` and `classify_line()` merge both.
+- The settings page layout: reminders (full width), the groups (full width), then รถเล็ก (left) and รถใหญ่ (right), our own
+  items, and which truck follows which group.
 - **Reminders cover every item by default** ("เลือกทั้งหมด" on the settings card); untick what you do not want.
 - **Real driving** only matters when it is known: odometer readings, GPS distance for a period (**+ ระยะทาง**, 12
   trucks seeded by `scripts/seed_gps.py`) -- then a truck that drives more than its group assumes gets its due date

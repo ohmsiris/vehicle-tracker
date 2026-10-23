@@ -213,7 +213,7 @@ function plSettingMsg(msg, text) { msg.textContent = text; msg.className = "erro
 function renderSettings() {
   const data = pl.settings;
   if (!data) return;
-  const groups = el("section", { class: "card plset" },
+  const groups = el("section", { class: "card plset pl-wide" },
     el("h3", { text: "กลุ่มของรถ: ระยะกม. หนึ่งรอบ เท่ากับกี่เดือน" }),
     el("p", { class: "muted small", text: "รถแต่ละคันอยู่ในหนึ่งกลุ่ม (เลือกได้ที่ “รถแต่ละคันใช้กลุ่มไหน” ด้านล่าง) เดือนของทุกรายการคำนวณจากตรงนี้ เช่น 2 เดือน ต่อ 10,000 กม. แปลว่ารายการ 40,000 กม. ทำทุก 8 เดือน ใส่เดือน หรือ กม./วัน อย่างใดอย่างหนึ่ง (ถ้าใส่ทั้งสองอย่างใช้เดือน)" }),
     el("div", { class: "pl-grp-head small muted" }, el("span", { text: "กลุ่ม" }), el("span", { text: "เดือนต่อรอบ" }), el("span", { text: "หรือ กม./วัน" }), el("span", {})),
@@ -223,7 +223,7 @@ function renderSettings() {
       el("h3", { text: `${rule}: ระยะกม. ของแต่ละรายการ` }),
       el("p", { class: "muted small", text: rule === "รถเล็ก" ? "D-Max, Revo" : "NLR / NMR / NPR, รถ 6 ล้อ, รถ 10 ล้อ (Hino / Isuzu)" }),
       ...items.map((it) => kmRow(rule, it))));
-  fill($("plSetList"), reminderCard(), groups, ...rules, trucksCard());
+  fill($("plSetList"), reminderCard(), groups, ...rules, ownItemsCard(), trucksCard());
 }
 
 function groupRow(g) {
@@ -249,6 +249,51 @@ function groupRow(g) {
       el("div", { class: "muted small", text: `${g.trucks} คัน · ตอนนี้ ${plMonths(g.months)} ต่อ ${baht(g.step_km)} กม. ≈ ${g.implied_km_per_day ? Math.round(g.implied_km_per_day) : "–"} กม./วัน${defText ? ` · ค่าเริ่มต้น ${defText}` : ""}` })),
     mo, kd, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }),
       g.customised ? el("button", { class: "btn small", type: "button", text: "ค่าเริ่มต้น", onclick: reset }) : null, msg));
+}
+
+// Items we add ourselves: something new learnt about what a truck needs (a timing belt, the battery, the fire extinguisher).
+// They join every truck's plan table and reminders like the built-in ones, and are found on bills by their words.
+function ownItemsCard() {
+  const data = pl.settings;
+  const items = data.own_items || [];
+  const applies = (r) => [r.km_small ? `รถเล็กทุก ${baht(r.km_small)} กม.` : null, r.km_big ? `รถใหญ่ทุก ${baht(r.km_big)} กม.` : null,
+    r.months ? `ทุก ${plMonths(Number(r.months))}${!r.km_small && !r.km_big ? " (รถทุกคัน)" : ""}` : null].filter(Boolean).join(" · ");
+  return el("section", { class: "card plset pl-wide" },
+    el("div", { class: "mchead" }, el("h3", { text: "รายการที่เพิ่มเอง" }), el("span", { class: "grow" }),
+      el("button", { class: "btn small", type: "button", text: "+ เพิ่มรายการ", onclick: () => openOwnItemDialog(null) })),
+    el("p", { class: "muted small", text: "เจอข้อมูลใหม่ว่าควรทำอะไรเพิ่ม เช่น สายพานไทม์มิ่ง แบตเตอรี่ ถังดับเพลิง — เพิ่มที่นี่ แล้วจะขึ้นในตารางและการเตือนของรถที่เกี่ยวข้องทุกคัน เหมือนรายการอื่น และถ้าบิลเขียนคำที่ตั้งไว้ ระบบจะนับว่าทำแล้ว" }),
+    ...(items.length ? items.map((r) => el("div", { class: "pl-own-row" },
+      el("div", {}, el("strong", { text: r.label }), el("div", { class: "muted small", text: [applies(r), r.group_name, (r.words || []).length ? `คำในบิล: ${r.words.join(", ")}` : null].filter(Boolean).join(" · ") })),
+      el("div", { class: "pl-set-actions" },
+        el("button", { class: "btn small", type: "button", text: "แก้ไข", onclick: () => openOwnItemDialog(r) }),
+        el("button", { class: "btn small danger", type: "button", text: "เอาออก", onclick: () => removeOwnItem(r) }))))
+      : [el("p", { class: "muted small", text: "ยังไม่มีรายการที่เพิ่มเอง" })]));
+}
+
+function openOwnItemDialog(row) {
+  const data = pl.settings;
+  pl.dlg = { kind: "ownitem", key: row ? row.key : null, draft: {
+    label: row ? row.label : "", group_name: row ? row.group_name : "อื่นๆ", km_small: row && row.km_small ? row.km_small : "", km_big: row && row.km_big ? row.km_big : "",
+    months: row && row.months ? Number(row.months) : "", words: row ? (row.words || []).join(", ") : "", category: row ? row.category : "อื่นๆ" } };
+  const d = pl.dlg.draft;
+  fill($("pdlgBody"),
+    el("p", { class: "muted small", text: row ? "แก้ไขรายการนี้ — รายการที่ทำไปแล้วในอดีตยังอยู่เหมือนเดิม" : "ใส่อย่างน้อยหนึ่งอย่าง: กม. ของรถเล็ก / รถใหญ่ หรือจำนวนเดือน" }),
+    el("div", { class: "mfields" },
+      mfield(d, "label", "ชื่อรายการ", { wide: true, maxlength: 80, placeholder: "เช่น สายพานไทม์มิ่ง" }),
+      mfield(d, "km_small", "รถเล็ก (D-Max, Revo): ทุกกี่ กม.", { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถเล็ก" }),
+      mfield(d, "km_big", "รถใหญ่ (NLR, 6 / 10 ล้อ): ทุกกี่ กม.", { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถใหญ่" }),
+      mfield(d, "months", "ทุกกี่เดือน (ไม่บังคับ)", { type: "number", placeholder: "เช่น 12" }),
+      mselect(d, "group_name", "อยู่ในกลุ่มไหนของตาราง", (data.item_groups || []).map((g) => [g, g]), { blank: "อื่นๆ" }),
+      mfield(d, "words", "คำที่เจอในบิลแล้วนับว่าทำแล้ว (คั่นด้วย ,) — ชื่อรายการนับอยู่แล้ว", { wide: true, maxlength: 400, placeholder: "เช่น ไทม์มิ่ง, timing belt" }),
+      mselect(d, "category", "หมวดของบิลเมื่อกด “บันทึกว่าทำแล้ว”", (data.categories || []).map((c) => [c, c]), { blank: "อื่นๆ" })),
+    el("p", { class: "muted small", text: "ใส่กม. อย่างเดียว = เดือนคิดจากกลุ่มของรถแต่ละคัน · ใส่เดือนอย่างเดียว (ไม่ใส่กม.) = ใช้กับรถทุกคัน เช่น ถังดับเพลิงทุก 12 เดือน · ใส่ทั้งสองอย่าง = ใช้เดือนที่ใส่ และกม. อย่างไหนถึงก่อน" }));
+  plOpenDialog(row ? "แก้ไขรายการ" : "เพิ่มรายการบำรุงรักษา", "บันทึก");
+}
+
+async function removeOwnItem(row) {
+  if (!confirm(`เอา “${row.label}” ออกจากแผนใช่ไหม?\n(ประวัติที่ทำไปแล้วยังอยู่ ตารางและการเตือนจะไม่มีรายการนี้อีก)`)) return;
+  try { pl.settings = await api(`/api/plan/custom-items/${row.key}`, { method: "DELETE" }); } catch (err) { alert(err.message); return; }
+  await loadSettings();
 }
 
 // Which truck follows which group. Picking only marks the row; nothing changes until "บันทึก" and a confirmation,
@@ -322,8 +367,12 @@ function kmRow(rule, it) {
     } catch (err) { plSettingMsg(msg, err.message); return; }
     renderSettings();
   };
+  const own = it.own ? el("span", { class: "badge", text: "เพิ่มเอง" }) : null;
+  if (it.default_km === null) {                           // our own item counted in months only: nothing to change here (edit it in "รายการที่เพิ่มเอง")
+    return el("div", { class: "pl-km-row" }, el("div", {}, el("strong", { text: it.label }), " ", own, el("div", { class: "muted small", text: `ทุก ${plMonths(it.months)} (ไม่ได้ตั้งเป็นกม.)` })), el("span", {}), el("span", {}));
+  }
   return el("div", { class: `pl-km-row${it.customised ? " custom" : ""}` },
-    el("div", {}, el("strong", { text: it.label }), el("div", { class: "muted small", text: `ค่าเริ่มต้น ${baht(it.default_km)} กม.` })),
+    el("div", {}, el("strong", { text: it.label }), " ", own, el("div", { class: "muted small", text: `ค่าเริ่มต้น ${baht(it.default_km)} กม.${it.months ? ` · ทุก ${plMonths(it.months)} ด้วย` : ""}` })),
     km, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }),
       it.customised ? el("button", { class: "btn small", type: "button", text: "คืนค่าเริ่มต้น", onclick: reset }) : null, msg));
 }
@@ -553,6 +602,12 @@ async function savePlanDialog() {
         performed_by: d.performed_by, notes: d.notes }));
     } else if (dlg.kind === "snooze") {
       await api("/api/plan/snooze", jsonOpts("POST", { vehicle_id: dlg.vehicle.id, item_key: dlg.item.key, days: d.days }));
+    } else if (dlg.kind === "ownitem") {
+      pl.settings = await api(dlg.key ? `/api/plan/custom-items/${dlg.key}` : "/api/plan/custom-items", jsonOpts(dlg.key ? "PATCH" : "POST", {
+        label: d.label, group_name: d.group_name, km_small: d.km_small, km_big: d.km_big, months: d.months, words: d.words, category: d.category }));
+      $("planDialog").close();
+      await loadSettings();                          // (also re-reads the reminder list: the new item is in it)
+      return;
     } else {
       await api("/api/plan/readings", jsonOpts("POST", { vehicle_id: dlg.vehicle.id, kind: d.kind, start_date: d.kind === "gps" ? d.start_date : "", end_date: d.end_date, km: d.km, notes: d.notes }));
     }

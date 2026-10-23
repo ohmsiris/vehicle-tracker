@@ -394,3 +394,74 @@ def test_several_trucks_can_change_group_in_one_save():
 
 def test_every_item_is_reminded_about_unless_changed():
     assert sp.DEFAULT_REMIND_ITEMS is None
+
+
+# ------------------------------------------------- items of our own (schema_v18)
+@pytest.fixture
+def own(monkeypatch):
+    rows = [
+        {"key": "c_belt", "label": "สายพานไทม์มิ่ง", "group_name": "เครื่องยนต์", "category": "เครื่องยนต์", "km_small": 100_000, "km_big": None,
+         "months": None, "words": ["ไทม์มิ่ง", "timing belt"], "sort_order": 100, "active": True},
+        {"key": "c_fire", "label": "ถังดับเพลิง", "group_name": "ตัวถัง / ไฟฟ้า / ความปลอดภัย", "category": "อื่นๆ", "km_small": None, "km_big": None,
+         "months": 12, "words": [], "sort_order": 101, "active": True},
+        {"key": "c_gone", "label": "รายการที่เลิกใช้", "km_small": 5_000, "km_big": 5_000, "months": None, "words": [], "active": False},
+    ]
+    monkeypatch.setitem(sp._CUSTOM, "rows", rows)
+    monkeypatch.setitem(sp._CUSTOM, "at", 1e18)
+    return rows
+
+
+def test_our_items_join_the_plan_of_the_trucks_they_apply_to(own):
+    small = {i["key"]: i for i in sp.effective_plan(S2)}
+    big = {i["key"]: i for i in sp.effective_plan(B5)}
+    assert "c_belt" in small and "c_belt" not in big                                  # km for the small rule set only
+    assert small["c_belt"]["interval_km"] == 100_000 and small["c_belt"]["interval_months"] == pytest.approx(20)   # 10 steps of 2 months
+    assert small["c_fire"]["interval_km"] is None and small["c_fire"]["interval_months"] == 12 and big["c_fire"]["interval_months"] == 12
+    assert "c_gone" not in small                                                      # hidden items are not in anyone's plan
+    assert list(sp.all_items())[:len(sp.ITEMS)] == list(sp.ITEMS)                     # the built-in order is untouched
+
+
+def test_a_months_only_item_falls_due_by_the_calendar(own):
+    plan = sp.vehicle_plan(TRUCK, group=S2, records=[rec("c_fire", "2026-01-10")], readings=[], overrides=[], today=TODAY)
+    fire = next(i for i in plan["items"] if i["key"] == "c_fire")
+    assert fire["due_date"] == "2027-01-10" and fire["due_by"] == "months" and fire["km_left"] is None
+
+
+def test_our_words_find_the_item_on_a_bill_but_not_a_top_up(own):
+    assert sp.classify_line("เปลี่ยนชุดสายพานไทม์มิ่ง") == "c_belt"
+    assert sp.classify_line("Timing  Belt kit") == "c_belt"
+    assert sp.classify_line("ถังดับเพลิง 10 ปอนด์") == "c_fire"                         # its own name counts as a word
+    assert sp.classify_line("น้ำมันเครื่อง") == "engine_oil"                            # the built-in rules still win
+    assert sp.classify_line("ไทม์มิ่ง (เติม)") is None
+
+
+def test_recording_our_item_uses_its_category(own):
+    clean = sp.clean_service({"vehicle_id": VID, "items": ["c_belt", "engine_oil"], "done_date": "2026-10-22"}, today=TODAY)
+    assert clean["items"] == ["engine_oil", "c_belt"]
+    payload = sp.service_payload(clean, clean["items"])
+    assert {ln["description"]: ln["category"] for ln in payload["line_items"]} == {"น้ำมันเครื่อง": "ไส้กรองและของเหลว", "สายพานไทม์มิ่ง": "เครื่องยนต์"}
+    with pytest.raises(sp.InvalidPlan):
+        sp.clean_service({"vehicle_id": VID, "items": ["c_gone"], "done_date": "2026-10-22"}, today=TODAY)
+
+
+def test_settings_lists_our_items_and_lets_km_be_changed_only_where_there_is_km(own):
+    small = {i["key"]: i for i in sp.rule_set_items(sp.SMALL)}
+    assert small["c_belt"]["own"] is True and small["c_fire"]["default_km"] is None and small["c_fire"]["months"] == 12
+    assert sp.clean_interval({"vehicle_class": sp.SMALL, "item_key": "c_belt", "interval_km": "90000"})["interval_km"] == 90_000
+    with pytest.raises(sp.InvalidPlan):
+        sp.clean_interval({"vehicle_class": sp.SMALL, "item_key": "c_fire", "interval_km": "1000"})        # months only
+    with pytest.raises(sp.InvalidPlan):
+        sp.clean_interval({"vehicle_class": sp.BIG, "item_key": "c_belt", "interval_km": "1000"})         # not for the big trucks
+
+
+def test_cleaning_a_new_item():
+    out = sp.clean_custom_item({"label": "  แบตเตอรี่  ", "km_small": "", "km_big": "80000", "months": "24", "words": "แบต, แบตเตอรี่ ,แบต", "category": "ระบบไฟฟ้า"}, others=[])
+    assert out["label"] == "แบตเตอรี่" and out["km_small"] is None and out["km_big"] == 80_000 and out["months"] == 24
+    assert out["words"] == ["แบต", "แบตเตอรี่"] and out["category"] == "ระบบไฟฟ้า"
+    for bad in ({"label": ""}, {"label": "น้ำมันเครื่อง", "months": 3}, {"label": "x"}, {"label": "x", "months": 1, "category": "ไม่มี"}):
+        with pytest.raises(sp.InvalidPlan):
+            sp.clean_custom_item(bad, others=[])
+    with pytest.raises(sp.InvalidPlan, match="อยู่แล้ว"):
+        sp.clean_custom_item({"label": "แบตเตอรี่", "months": 12}, others=[{"label": "แบต เตอรี่"}])        # spaces are ignored
+    edit = sp.clean_custom_item({"months": ""}, existing={"label": "a", "km_small": 1000}, others=[])
+    assert edit == {"months": None}

@@ -995,6 +995,25 @@ def api_plan_reset_group(code: str = Query(...), x_app_token: str = Header(defau
     return _plan_call(service_plan.reset_group, code)
 
 
+@app.post("/api/plan/custom-items")
+def api_plan_new_item(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """A maintenance item of our own (ตั้งค่าระยะ > รายการที่เพิ่มเอง)."""
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.create_custom_item, body)
+
+
+@app.patch("/api/plan/custom-items/{key}")
+def api_plan_edit_item(key: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.update_custom_item, key, body)
+
+
+@app.delete("/api/plan/custom-items/{key}")
+def api_plan_delete_item(key: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.delete_custom_item, key)
+
+
 @app.put("/api/plan/vehicle-groups")
 def api_plan_vehicle_groups(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """Which truck follows which group: the settings page saves several trucks at once."""
