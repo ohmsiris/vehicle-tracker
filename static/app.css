@@ -185,6 +185,9 @@ table.lines td.unit input { width: 66px; }
 table.lines td.price input, table.lines td.total input { width: 92px; }
 table.lines td.cat select { min-width: 140px; }
 .addrow { margin-top: 10px; }
+.addrow-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-top: 10px; }
+.addrow-bar .addrow { margin-top: 0; }
+.vat-toggle { margin: 0; }
 
 .totals { display: flex; flex-wrap: wrap; gap: 10px 30px; align-items: baseline; background: var(--accent-soft); border-color: transparent; }
 .totals .big { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }

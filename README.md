@@ -287,6 +287,11 @@ One page, two modes (switch at the top):
   board's "ซ่อมแล้ว" dialog has a **ช่างทำเอง → กรอกบันทึก** button that opens this
   form with the request already ticked.
 
+**VAT on a repair bill**: under each bill's lines a tick "บิลนี้ยังไม่รวม VAT — เพิ่มบรรทัด VAT 7% ให้" adds a "VAT 7%" line
+(category อื่นๆ) worth 7 % of that bill's other lines and keeps it in step while the lines change; type your own amount in
+that line and it stays as typed; unticking or deleting the line removes it. A VAT line the reader already found counts as
+ticked, so VAT cannot be added twice. The bill total follows the lines as usual (`static/app.js`, `vatToggle`).
+
 ## Repair flow: reported -> at a shop -> back -> bill
 
 ```
