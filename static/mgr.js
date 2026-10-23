@@ -334,13 +334,14 @@ async function loadMgrRecurring() {
 
 function recurringCard(r) {
   return el("div", { class: `card mgrec${r.active ? "" : " off"}` },
-    el("div", { class: "mgrec-top" },
-      mgTypeChip({ type_label: r.type_label, type_color: r.type_color }),
-      el("strong", { text: r.title }), r.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null, r.active ? null : el("span", { class: "badge", text: "พักไว้" })),
-    el("div", { class: "muted" }, `${r.described}${r.time_of_day ? ` · ${mgTrim(r.time_of_day)} น.` : ""}${r.place ? ` · ${r.place}` : ""}`),
-    el("div", { class: "muted small", text: [r.next_due ? `ครั้งถัดไป ${beDate(r.next_due)}` : (r.mode === "after_done" ? "ครั้งถัดไป: นับจากวันที่ทำเรื่องล่าสุดเสร็จ" : "ไม่มีครั้งถัดไป"),
-      r.lead_days ? `สร้างล่วงหน้า ${r.lead_days} วัน` : null, r.mode === "after_done" ? "นับต่อจากวันที่ทำเสร็จ" : null].filter(Boolean).join(" · ") }),
-    el("div", { class: "req-actions" },
+    el("div", { class: "mgrec-main" },
+      el("div", { class: "mgrec-top" },
+        mgTypeChip({ type_label: r.type_label, type_color: r.type_color }),
+        el("strong", { text: r.title }), r.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null, r.active ? null : el("span", { class: "badge", text: "พักไว้" })),
+      el("div", { class: "muted small", text: [`${r.described}${r.time_of_day ? ` ${mgTrim(r.time_of_day)} น.` : ""}`, r.place || null,
+        r.next_due ? `ครั้งถัดไป ${beDate(r.next_due)}` : (r.mode === "after_done" ? "ครั้งถัดไป: นับจากวันที่ทำเรื่องล่าสุดเสร็จ" : "ไม่มีครั้งถัดไป"),
+        r.lead_days ? `สร้างล่วงหน้า ${r.lead_days} วัน` : null].filter(Boolean).join(" · ") })),
+    el("div", { class: "req-actions mgrec-actions" },
       el("button", { class: "btn small", type: "button", text: "แก้ไข", onclick: () => openMgRecurringDialog(r) }),
       el("button", { class: "btn small", type: "button", text: r.active ? "พักไว้" : "เปิดใช้", onclick: async () => { await mgRecSave(r.id, { active: !r.active }); } }),
       el("button", { class: "btn small danger", type: "button", text: "ลบ", onclick: async () => {

@@ -823,9 +823,11 @@ a.btn.call .callnum { font-weight: 400; color: var(--muted); }
 .mgwait { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
 .mgh { margin: 14px 0 6px; font-size: 14px; }
 .mgcheckrow { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin-bottom: 6px; }
-.mgrec { padding: 14px 18px; }
+.mgrec { padding: 8px 14px; display: flex; align-items: center; justify-content: space-between; gap: 6px 14px; flex-wrap: wrap; }
+.mgrec-main { min-width: 0; flex: 1 1 320px; }
+.mgrec-actions { margin: 0; flex: 0 0 auto; }
 .mgrec.off { opacity: .65; }
-.mgrec-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.mgrec-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 1px; }
 .mgrule { margin: 4px 0 12px; }
 .mgchip.on { background: var(--accent); color: var(--accent-text); }
 .mgdays .mgchip { min-width: 40px; text-align: center; padding: 4px 8px; }
@@ -903,3 +905,4 @@ input[type=time], input[type=tel] { width: 100%; padding: 9px 12px; font: inheri
 .sttest input { width: 100%; margin: 8px 0; }
 .sttest-out { min-height: 1.4em; margin-bottom: 6px; }
 @media (max-width: 720px) { .strow { grid-template-columns: 1fr auto; } .strow input:first-child { grid-column: 1 / -1; } .strow.head { grid-template-columns: 1fr auto; } }
+#mgrRecList { gap: 8px; }
