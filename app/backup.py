@@ -5,7 +5,7 @@ Free plan.
 
 What it writes (under backups/ -- gitignored, it is business data):
 
-    backups/files/<event_id>/<attachment_id>.jpg   every bill photo / PDF, shared by all backups
+    backups/files/<event_id>/<attachment_id>.jpg   every bill photo / PDF (repair bills AND purchase bills), shared by all backups
     backups/<YYYY-MM-DD_HHMM>/data/<table>.json    every table, one JSON file each
     backups/<YYYY-MM-DD_HHMM>/MANIFEST.json        row counts, file counts, problems found
 
@@ -30,7 +30,8 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("vehicle_tracker.backup")
 
-# table -> stable ordering column (needed for safe paging)
+# table -> stable ordering column (needed for safe paging): its primary key. EVERY table of the app is here, in the order
+# schema_v2 .. v17 made them; a table added later must be added here too (tests/test_backup.py checks this against the schema files).
 TABLES: dict[str, str] = {
     "categories": "name.asc",
     "vehicles": "id.asc",
@@ -38,7 +39,35 @@ TABLES: dict[str, str] = {
     "event_attachments": "id.asc",
     "bill_line_items": "id.asc",
     "repair_requests": "id.asc",
+    "repair_request_updates": "id.asc",
+    "drivers": "id.asc",
+    "machines": "id.asc",
+    "machine_parts": "id.asc",
+    "machine_events": "id.asc",
+    "service_groups": "code.asc",
+    "vehicle_plans": "vehicle_id.asc",
+    "service_records": "id.asc",
+    "km_readings": "id.asc",
+    "service_intervals": "vehicle_class.asc,item_key.asc",
+    "service_snoozes": "vehicle_id.asc,item_key.asc",
+    "mgr_types": "key.asc",
+    "mgr_places": "id.asc",
+    "mgr_recurring": "id.asc",
+    "mgr_tickets": "id.asc",
+    "mgr_settings": "key.asc",
+    "mgr_notifications": "key.asc",
+    "shops": "id.asc",
+    "shop_aliases": "id.asc",
+    "shop_contacts": "id.asc",
+    "purchase_bills": "id.asc",
+    "purchase_lines": "id.asc",
+    "purchase_attachments": "id.asc",
+    "stock_items": "id.asc",
+    "stock_item_aliases": "id.asc",
+    "stock_moves": "id.asc",
 }
+# the tables whose rows point at a file in Storage (storage_path, byte_size): bill photos and purchase-bill photos
+FILE_TABLES = ("event_attachments", "purchase_attachments")
 BANGKOK = ZoneInfo("Asia/Bangkok")
 
 
@@ -68,8 +97,16 @@ def run_backup(
     problems: list[str] = []
     counts: dict[str, int] = {}
     tables: dict[str, list[dict]] = {}
+    missing_tables: list[str] = []
     for table, order in TABLES.items():
-        rows = select_all(table, {"select": "*", "order": order})
+        try:
+            rows = select_all(table, {"select": "*", "order": order})
+        except Exception as exc:
+            if "HTTP 404" in str(exc):                 # the table is not in this database yet (a schema file not run): nothing to save, not a failure
+                missing_tables.append(table)
+                rows = []
+            else:
+                raise
         # was_low_confidence is a GENERATED column: it can't be written back, so it isn't saved
         if table == "bill_line_items":
             rows = [{k: v for k, v in r.items() if k != "was_low_confidence"} for r in rows]
@@ -77,9 +114,10 @@ def run_backup(
         counts[table] = len(rows)
         tables[table] = rows
 
-    downloaded = skipped = 0
+    downloaded = already = 0
     total_bytes = 0
-    for att in tables["event_attachments"]:
+    attachments = [att for table in FILE_TABLES for att in tables[table]]
+    for att in attachments:
         rel = att["storage_path"]
         # the path comes from our own database, but never let it write outside the backup folder
         target = (files_dir / rel).resolve()
@@ -87,7 +125,7 @@ def run_backup(
             problems.append(f"unsafe storage path skipped: {rel!r}")
             continue
         if target.exists() and target.stat().st_size == att.get("byte_size"):
-            skipped += 1
+            already += 1
             total_bytes += target.stat().st_size
             continue
         try:
@@ -113,7 +151,8 @@ def run_backup(
         "taken_at": now.isoformat(),
         "ok": not problems,
         "rows": counts,
-        "files": {"expected": len(tables["event_attachments"]), "downloaded_now": downloaded, "already_had": skipped, "bytes": total_bytes},
+        "files": {"expected": len(attachments), "downloaded_now": downloaded, "already_had": already, "bytes": total_bytes},
+        "tables_not_in_this_database": missing_tables,
         "problems": problems,
     }
     (run_dir / "MANIFEST.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")

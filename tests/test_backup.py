@@ -112,3 +112,40 @@ def test_empty_database_backs_up_cleanly(tmp_path):
     f.tables = {t: [] for t in backup.TABLES}
     m = go(f, tmp_path)
     assert m["ok"] and m["files"]["expected"] == 0 and all(n == 0 for n in m["rows"].values())
+
+
+def test_purchase_bill_photos_are_saved_too(tmp_path):
+    f = Fake()
+    f.tables["purchase_attachments"] = [{"id": "p1", "storage_path": "purchases/b1/1.jpg", "byte_size": 4}]
+    f.blobs["purchases/b1/1.jpg"] = b"abcd"
+    m = go(f, tmp_path)
+    assert m["ok"] and m["files"] == {"expected": 3, "downloaded_now": 3, "already_had": 0, "bytes": 12}
+    assert (tmp_path / "files" / "purchases" / "b1" / "1.jpg").read_bytes() == b"abcd"
+
+
+def test_a_table_that_is_not_in_the_database_yet_is_noted_not_fatal(tmp_path):
+    f = Fake()
+    real = f.select_all
+
+    def select_all(table, params):
+        if table == "stock_moves":
+            raise RuntimeError("select stock_moves failed: HTTP 404 {\"code\":\"PGRST205\"}")
+        if table == "vehicles":
+            raise RuntimeError("select vehicles failed: HTTP 500 boom")        # any other failure is NOT swallowed
+        return real(table, params)
+
+    with pytest.raises(RuntimeError):
+        backup.run_backup(select_all, f.download, tmp_path, now=NOW)
+    f.tables["vehicles"] = []
+    m = backup.run_backup(lambda t, p: (_ for _ in ()).throw(RuntimeError("HTTP 404")) if t == "stock_moves" else real(t, p), f.download, tmp_path / "ok", now=NOW)
+    assert m["ok"] and m["tables_not_in_this_database"] == ["stock_moves"] and m["rows"]["stock_moves"] == 0
+
+
+def test_every_table_the_schema_files_create_is_in_the_backup():
+    import re
+    created = set()
+    for sql in Path(__file__).resolve().parent.parent.glob("schema*.sql"):
+        text = sql.read_text(encoding="utf-8")
+        created |= set(re.findall(r"create table (?:if not exists )?(?:public\.)?(\w+)", text, re.I))
+    created -= {"service_custom_items"}                                     # made by schema_v18 and dropped again by schema_v20
+    assert created - set(backup.TABLES) == set(), "a table is not backed up: add it to app/backup.py TABLES"

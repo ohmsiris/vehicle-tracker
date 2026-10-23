@@ -284,14 +284,15 @@ database but NOT the photos (Storage). So take your own:
 .venv/Scripts/python.exe scripts/backup.py
 ```
 
-Writes `backups/files/` (every photo/PDF, downloaded once, never again) and
-`backups/<date_time>/data/*.json` (every table, a full copy each run) plus a
-`MANIFEST.json`. Each run is verified (rows read back, every file's size
-compared with the database). Read-only against Supabase; `backups/` is
-gitignored because it is business data -- copy it somewhere other than this
-computer (a USB drive, Google Drive). Restoring = re-inserting these JSON rows
-and re-uploading `files/` into a Supabase project that has schemas 1-4 applied;
-the `was_low_confidence` column is not saved because the database recomputes it.
+Writes `backups/files/` (every photo/PDF -- repair bills and purchase bills -- downloaded once, never again) and
+`backups/<date_time>/data/*.json` (EVERY table, 32 of them, a full copy each run) plus a `MANIFEST.json`. Each run is verified
+(rows read back, every file's size compared with the database). Read-only against Supabase; `backups/` is gitignored because it is
+business data -- copy it somewhere other than this computer (a USB drive, Google Drive). Restoring = re-inserting these JSON rows
+(parents before children, in the order of `TABLES` in `app/backup.py`) and re-uploading `files/` into a Supabase project that has
+all the schema files applied; the `was_low_confidence` column is not saved because the database recomputes it.
+A table added by a later schema file MUST be added to `TABLES` (a test compares it with the schema files, so forgetting fails).
+Where the photos live: Supabase Storage, bucket `event-files` (public bucket, so a photo's link opens without a login; the
+link contains a random id and only the app shows it), in the same Singapore project as the database.
 
 ## Recording: bill or mechanic's own work ("บันทึกซ่อม")
 

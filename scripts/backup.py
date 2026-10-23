@@ -24,6 +24,8 @@ def main() -> int:
         return 2
     m = run_backup(supabase.select_all, supabase.storage_download, ROOT / "backups")
     print("Rows   :", ", ".join(f"{t} {n}" for t, n in m["rows"].items()))
+    if m.get("tables_not_in_this_database"):
+        print("Not in this database yet (nothing to save):", ", ".join(m["tables_not_in_this_database"]))
     f = m["files"]
     print(f"Files  : {f['expected']} expected, {f['downloaded_now']} downloaded now, {f['already_had']} already had ({f['bytes'] / 1_000_000:.1f} MB total)")
     if m["ok"]:
