@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, fleet, history, line_push, logbook, logsource, machinery, mgr, mgr_jobs, repair_requests, service_plan, shops, summarize, supabase
+from app import dashboard, events, fleet, history, logbook, logsource, machinery, mgr, mgr_jobs, repair_requests, service_plan, shops, summarize, supabase
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(_app):
     _startup_checks()
-    mgr_jobs.start_scheduler()          # the manager's reminders (a no-op unless Supabase is configured)
+    mgr_jobs.start_scheduler()          # makes the recurring tickets (a no-op unless Supabase is configured)
     yield
 
 
@@ -632,13 +632,13 @@ def api_mgr_delete_recurring(recurring_id: str, x_app_token: str = Header(defaul
 
 @app.get("/api/mgr/settings")
 def api_mgr_settings(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
-    """The settings page: types and places (including switched-off ones), reminder settings, whether LINE is set up."""
+    """The settings page: types and places (including switched-off ones) and the reminder settings."""
     _check_token(x_app_token, token)
 
     def load():
         ready = mgr.has_v12()
         return {"ready": ready, "types": mgr.list_types(include_inactive=True) if ready else [], "places": mgr.list_places(include_inactive=True) if ready else [],
-                "settings": mgr.get_settings() if ready else mgr.DEFAULT_SETTINGS, "line_configured": line_push.configured()}
+                "settings": mgr.get_settings() if ready else mgr.DEFAULT_SETTINGS}
     return _mgr_call(load)
 
 
@@ -672,15 +672,11 @@ def api_mgr_edit_place(place_id: str, body: dict = Body(...), x_app_token: str =
     return _mgr_call(mgr.save_place, place_id, body)
 
 
-@app.post("/api/mgr/line/test")
-def api_mgr_line_test(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
-    """Sends one test message to the owner's LINE (the button on the settings page)."""
+@app.get("/api/today")
+def api_today(fresh: bool = False, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """What needs attention today -- the numbers beside the menu, the bar at the top of every page, the timed reminders."""
     _check_token(x_app_token, token)
-    try:
-        line_push.push_text("ทดสอบ: ระบบเตือนงานผู้จัดการส่งข้อความถึง LINE ได้แล้ว")
-    except line_push.LinePushError as exc:
-        raise HTTPException(422, str(exc))
-    return {"ok": True}
+    return _mgr_call(mgr_jobs.today_summary, fresh=fresh)
 
 
 @app.get("/api/plan/options")

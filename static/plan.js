@@ -118,7 +118,7 @@ async function loadPreview() {
     return;
   }
   fill($("plPreviewText"), r.text || `ไม่มีรายการที่ต้องเตือนในวันนั้น (เตือนเฉพาะที่เหลือไม่เกิน ${r.soon_days} วัน)`);
-  fill($("plPreviewMeta"), `${r.items.length} รายการที่จะเตือน${r.snoozed.length ? ` · ที่เลื่อนเตือนไว้ ${r.snoozed.length}` : ""} · ${r.enabled ? "เปิดเตือนอยู่" : "ปิดการเตือนอยู่"} — ข้อความจริงส่งทาง LINE ตอนเช้าเฉพาะรายการใหม่ของแต่ละขั้น`);
+  fill($("plPreviewMeta"), `${r.items.length} รายการที่จะเตือน${r.snoozed.length ? ` · ที่เลื่อนเตือนไว้ ${r.snoozed.length}` : ""} · ${r.enabled ? "เปิดเตือนอยู่" : "ปิดการเตือนอยู่"} — แถบสรุปด้านบนของทุกหน้าจะแสดงรายการเหล่านี้ (ไม่ส่ง LINE)`);
 }
 
 function renderOverview() {
@@ -188,8 +188,7 @@ function reminderCard() {
   const msg = el("span", { class: "muted small" });
   return el("section", { class: "card plset" },
     el("h3", { text: "เตือนรอบซ่อมบำรุง" }),
-    el("p", { class: "muted small", text: `เตือน 3 ขั้น: เหลือไม่เกิน N วัน → ถึงวันครบกำหนด → เลยกำหนด (เตือนซ้ำทุก 3 วันจนกว่าจะทำหรือเลื่อนเตือน) ส่งพร้อมสรุปตอนเช้าทาง LINE` }),
-    r.line_configured ? null : el("div", { class: "edit-banner", text: "ยังไม่ได้ต่อ LINE — การเตือนจะส่งได้เมื่อตั้งค่า LINE แล้ว (ดูหน้า ผู้จัดการ › ตั้งค่า) แต่ดูตัวอย่างข้อความได้ที่แถบ “ดูล่วงหน้า” ในหน้าแผนซ่อมบำรุง" }),
+    el("p", { class: "muted small", text: "เตือน 3 ขั้น: เหลือไม่เกิน N วัน → ถึงวันครบกำหนด → เลยกำหนด แสดงที่แถบสรุปด้านบนของทุกหน้าและตัวเลขข้างเมนู “แผนซ่อมบำรุง” จนกว่าจะทำหรือกด “เลื่อนเตือน” — ลองดูล่วงหน้าได้ที่แถบเลื่อนในหน้าแผนซ่อมบำรุง" }),
     el("label", { class: "inline" }, enabled, "เปิดการเตือนรอบซ่อมบำรุง"),
     el("div", { class: "mgset-time" }, el("label", { for: "plrSoon", text: "เริ่มเตือนเมื่อเหลือไม่เกิน (วัน)" }), soon),
     el("p", { class: "muted small", text: "เตือนเรื่องอะไรบ้าง (ปกติเฉพาะเปลี่ยนน้ำมันเครื่อง)" }),
@@ -363,6 +362,7 @@ async function deleteReading(r) {
 // ================================================================== dialogs
 async function plAfterSave() {
   $("planDialog").close();
+  if (typeof loadToday === "function") loadToday(true);
   if (!$("planView").hidden) await loadOverview();
   await plRefreshTruck();
 }

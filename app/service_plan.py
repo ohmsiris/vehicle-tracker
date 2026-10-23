@@ -25,14 +25,14 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from app import events, line_push, logsource, mgr, supabase
+from app import events, logsource, mgr, supabase
 
 SMALL, BIG = "รถเล็ก", "รถใหญ่"
 RULE_SETS = [SMALL, BIG]
 NEEDS_V10 = "ต้องรัน schema_v10.sql และ schema_v11.sql ใน Supabase ก่อน จึงจะใช้แผนซ่อมบำรุงได้"
 NEEDS_V13 = "ต้องรัน schema_v13.sql ใน Supabase ก่อน จึงจะเลื่อนเตือนได้"
 SOON_DAYS = 10                       # "due soon" = due within this many days (changeable in the settings)
-DEFAULT_REMIND_ITEMS = ["engine_oil"]   # which items are reminded about by LINE (changeable in the settings)
+DEFAULT_REMIND_ITEMS = ["engine_oil"]   # which items are reminded about (changeable in the settings)
 OVERDUE_REPEAT_DAYS = 3              # an overdue item is reminded about again every this many days
 MAX_SNOOZE_DAYS = 90
 MAX_AS_OF_DAYS = 400                 # how far ahead the "look ahead" slider may go
@@ -822,7 +822,7 @@ def set_group(data: dict) -> dict:
 
 # ------------------------------------------------------- reminder settings
 def _plan_settings() -> dict:
-    """soon_days (how many days ahead "coming close" starts), enabled, items (which items are reminded about by LINE)."""
+    """soon_days (how many days ahead "coming close" starts), enabled, items (which items are reminded about)."""
     saved: dict = {}
     try:
         saved = mgr.get_settings() if mgr.has_v12() else {}
@@ -838,7 +838,7 @@ def _plan_settings() -> dict:
 
 
 def reminder_settings() -> dict:
-    return {**_plan_settings(), "line_configured": line_push.configured(), "ready": mgr.has_v12() if supabase.configured() else False,
+    return {**_plan_settings(), "ready": mgr.has_v12() if supabase.configured() else False,
             "all_items": [{"key": k, "label": v[0]} for k, v in ITEMS.items()]}
 
 
@@ -980,7 +980,7 @@ def _km_text(x: dict) -> str:
 
 
 def reminder_text(reminders: list[dict], today: date, soon_days: int) -> str:
-    """The plain-text LINE message for a list of reminders."""
+    """The reminders as plain text (what the preview under the look-ahead slider shows)."""
     months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
     lines = [f"เตือนรอบซ่อมบำรุงรถ · {today.day} {months[today.month - 1]} {today.year + 543}", ""]
     for stage, title, phrase in (("due", "ครบกำหนดวันนี้", lambda x: ""), ("overdue", "เลยกำหนดแล้ว", lambda x: f" · เลย {-x['days_left']} วัน"),
@@ -1001,9 +1001,3 @@ def reminder_preview(*, today: Optional[date] = None) -> dict:
                if it.get("snoozed_until") and it["key"] in cfg["items"]]
     return {"as_of": today.isoformat(), "soon_days": cfg["soon_days"], "enabled": cfg["enabled"], "items": found, "snoozed": snoozed,
             "text": reminder_text(found, today, cfg["soon_days"]) if found else ""}
-
-
-def reminder_candidates(today: date) -> list[dict]:
-    """For the LINE job: the same list, for today."""
-    cfg = _plan_settings()
-    return collect_reminders(overview(today=today)["vehicles"], today, cfg["soon_days"], cfg["items"])

@@ -1,31 +1,33 @@
 """
-The manager's reminders, pushed to LINE as plain text (one way: nothing reads replies, no AI):
+What needs the manager's attention today, worked out on the server for the whole site:
 
-  * a morning summary at the time set in the settings (default 08:00): what is overdue, due today, which follow-ups
-    have come up, what is urgent, and how much is in progress
-  * a reminder at a ticket's own time ("due 14:00" -> pushed at 14:00)
+  * the numbers beside the menu items, and the summary bar at the top of every page (overdue / due today / follow-ups that
+    have come up / urgent -- and the cars coming close to an oil change)
+  * the reminders of tickets that have their own time ("due 14:00"), shown on screen when that time comes
 
-It also makes the recurring tickets that have come due, every minute -- so the board is right even if nobody opens it.
+There is no LINE and no other push: the phone is on do-not-disturb, so the reminders live where the owner already looks --
+in this site, and (if switched on in the settings) as a browser notification while the site is open.
 
-Each push is "claimed" in mgr_notifications first (a unique key), so a restart or a second instance can never send the
-same message twice. build_digest() and the rules for what is sent are pure functions, unit-tested; run_tick() takes the
-database and LINE as arguments so the whole decision can be tested without either.
+A background loop makes the recurring tickets that have come due, every minute, so the board is right even if nobody
+opened it. build_digest(), due_timed() and summarize_tickets() are pure functions, unit-tested.
 """
 import logging
 import os
 import threading
 import time
 from datetime import date, datetime, timedelta
-from typing import Callable, Optional
+from typing import Optional
 
-from app import line_push, mgr, service_plan, supabase
+from app import mgr, service_plan, supabase
 
 logger = logging.getLogger("vehicle_tracker.mgr_jobs")
 
 TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
-TIMED_WINDOW = timedelta(hours=3)         # a timed reminder that is more than this late (the app was off) is dropped
+TIMED_WINDOW = timedelta(hours=3)         # a timed reminder that is more than this late (the page was closed) is dropped
 TICK_SECONDS = 60
+CACHE_SECONDS = 20
 MAX_LINES = 12                            # per section: the rest is "... and N more"
+PLAN_ITEMS_SHOWN = 12
 
 
 def be(d: date) -> str:
@@ -67,8 +69,8 @@ def _section(title: str, rows: list[dict], today: date, **kw) -> list[str]:
     return out + [""]
 
 
-def build_digest(tickets: list[dict], today: date) -> Optional[str]:
-    """The morning summary, or None when there is nothing to say. `tickets` = the active ones (todo / doing / waiting)."""
+def _groups(tickets: list[dict], today: date) -> dict:
+    """The active tickets sorted into: overdue, due today, follow-ups that have come up, urgent (the rest), in progress."""
     active = [t for t in tickets if t.get("status") in mgr.ACTIVE]
 
     def key(t):
@@ -80,16 +82,22 @@ def build_digest(tickets: list[dict], today: date) -> Optional[str]:
     follow = sorted([t for t in active if t["id"] not in listed and (d := _parse(t.get("remind_on"))) and d <= today], key=key)
     listed |= {t["id"] for t in follow}
     urgent = sorted([t for t in active if t.get("urgent") and t["id"] not in listed], key=key)
-    doing = [t for t in active if t.get("status") == "doing"]
-    if not (overdue or due_today or follow or urgent):
+    return {"active": active, "overdue": overdue, "today": due_today, "follow_ups": follow, "urgent": urgent,
+            "doing": [t for t in active if t.get("status") == "doing"]}
+
+
+def build_digest(tickets: list[dict], today: date) -> Optional[str]:
+    """The day's summary as text, or None when there is nothing to say. `tickets` = the active ones (todo / doing / waiting)."""
+    g = _groups(tickets, today)
+    if not (g["overdue"] or g["today"] or g["follow_ups"] or g["urgent"]):
         return None
     lines = [f"สรุปงานวันนี้ · {be(today)}", ""]
-    lines += _section("เลยกำหนด", overdue, today, show_due=True)
-    lines += _section("วันนี้", due_today, today)
-    lines += _section("ถึงวันติดตาม", follow, today)
-    lines += _section("ด่วน", urgent, today)
-    if doing:
-        lines.append(f"กำลังทำอยู่ {len(doing)} เรื่อง")
+    lines += _section("เลยกำหนด", g["overdue"], today, show_due=True)
+    lines += _section("วันนี้", g["today"], today)
+    lines += _section("ถึงวันติดตาม", g["follow_ups"], today)
+    lines += _section("ด่วน", g["urgent"], today)
+    if g["doing"]:
+        lines.append(f"กำลังทำอยู่ {len(g['doing'])} เรื่อง")
     return "\n".join(lines).strip()
 
 
@@ -111,94 +119,55 @@ def timed_text(t: dict) -> str:
     return f"ถึงเวลา {_hhmm(t['due_time'])}: {t['title']}{where}" + ("\n❗ด่วน" if t.get("urgent") else "")
 
 
-def run_tick(now: datetime, *, settings: dict, active_tickets: Callable[[], list[dict]], claim: Callable[[str], bool],
-             release: Callable[[str], None], push: Callable[[str], None]) -> dict:
-    """One pass of the reminder job. Returns what it did: {"digest": bool, "timed": n}."""
-    done = {"digest": False, "timed": 0}
-    wants_digest, wants_timed = settings.get("digest_enabled", True), settings.get("timed_enabled", True)
-    tickets = active_tickets() if (wants_digest or wants_timed) else []
-    if wants_digest:
-        h, m = (int(x) for x in str(settings.get("digest_time", "08:00")).split(":")[:2])
-        if (now.hour, now.minute) >= (h, m):
-            key = f"digest:{now.date().isoformat()}"
-            text = build_digest(tickets, now.date())
-            if text and claim(key):
-                try:
-                    push(text)
-                    done["digest"] = True
-                except Exception:
-                    release(key)                                  # try again next minute
-                    logger.exception("morning summary not sent")
-    if wants_timed:
-        for t in due_timed(tickets, now):
-            key = f"time:{t['id']}:{now.date().isoformat()}"
-            if claim(key):
-                try:
-                    push(timed_text(t))
-                    done["timed"] += 1
-                except Exception:
-                    release(key)
-                    logger.exception("timed reminder not sent")
-    return done
+def summarize_tickets(tickets: list[dict], today: date) -> dict:
+    """The numbers and the timed reminders for the top bar / menu badges."""
+    g = _groups(tickets, today)
+    timed = sorted([t for t in g["active"] if _parse(t.get("due_date")) == today and t.get("due_time")], key=lambda t: str(t["due_time"]))
+    return {"ready": True, "total": len(g["active"]), "overdue": len(g["overdue"]), "today": len(g["today"]), "follow_ups": len(g["follow_ups"]),
+            "urgent": len(g["urgent"]), "doing": len(g["doing"]), "text": build_digest(tickets, today) or "",
+            "timed": [{"id": t["id"], "title": t["title"], "time": _hhmm(t["due_time"]), "place": t.get("place"), "urgent": bool(t.get("urgent"))} for t in timed]}
 
 
-def run_plan_reminders(now: datetime, *, settings: dict, compute: Callable[[date], list[dict]], text: Callable[[list[dict], date, int], str],
-                       claim: Callable[[str], bool], release: Callable[[str], None], push: Callable[[str], None]) -> int:
-    """The car-maintenance reminders, once a day after the summary time: items that have come within the window ("soon"),
-    are due today, or are overdue (again every few days), as ONE message. Each stage of each due date is claimed first, so a
-    restart never repeats it. Returns how many items were sent."""
-    if not settings.get("plan_reminders", True):
-        return 0
-    h, m = (int(x) for x in str(settings.get("digest_time", "08:00")).split(":")[:2])
-    if (now.hour, now.minute) < (h, m):
-        return 0
-    run_key = f"plan-run:{now.date().isoformat()}"
-    if not claim(run_key):
-        return 0
-    fresh: list[dict] = []
-    try:
-        fresh = [r for r in compute(now.date()) if claim(r["key"])]
-        if fresh:
-            push(text(fresh, now.date(), int(settings.get("plan_soon_days", service_plan.SOON_DAYS))))
-        return len(fresh)
-    except Exception:
-        for r in fresh:
-            release(r["key"])
-        release(run_key)                                  # try again next minute
-        logger.exception("car-maintenance reminders not sent")
-        return 0
+def summarize_plan(found: list[dict], enabled: bool, soon_days: int) -> dict:
+    counts = {"overdue": 0, "due": 0, "soon": 0}
+    for x in found:
+        counts[x["stage"]] += 1
+    return {"enabled": enabled, "soon_days": soon_days, "counts": counts, "total": len(found),
+            "items": [{"vehicle_id": x["vehicle_id"], "truck": x["truck"], "label": x["label"], "stage": x["stage"], "days_left": x["days_left"], "km_left": x["km_left"],
+                       "km_real": x["km_real"], "key": x["key"]} for x in found[:PLAN_ITEMS_SHOWN]]}
 
 
-# ------------------------------------------------------------------ wiring
-def _claim(key: str) -> bool:
-    """True if this process is the one to send `key` (the first to insert it)."""
-    return bool(supabase.insert("mgr_notifications", [{"key": key}], on_conflict="key", ignore_duplicates=True))
+_cache: dict = {"at": 0.0, "value": None}
 
 
-def _release(key: str) -> None:
-    supabase.delete("mgr_notifications", {"key": f"eq.{key}"})
+def today_summary(*, fresh: bool = False) -> dict:
+    """Everything the top bar and the menu badges need, cached for a few seconds (the car side reads every truck)."""
+    now = time.time()
+    if not fresh and _cache["value"] is not None and now - _cache["at"] < CACHE_SECONDS:
+        return _cache["value"]
+    today = mgr.today_th()
+    out = {"as_of": today.isoformat(), "now": datetime.now(mgr.THAI_TZ).strftime("%H:%M"), "mgr": {"ready": False}, "plan": {"enabled": False, "counts": {"overdue": 0, "due": 0, "soon": 0}, "total": 0, "items": []}}
+    if mgr.has_v12():
+        out["mgr"] = {**summarize_tickets(_active(), today), "timed_enabled": bool(mgr.get_settings().get("timed_enabled", True))}
+    if service_plan.has_v10():
+        preview = service_plan.reminder_preview(today=today)
+        out["plan"] = summarize_plan(preview["items"], preview["enabled"], preview["soon_days"])
+    _cache.update(at=now, value=out)
+    return out
 
 
 def _active() -> list[dict]:
     return supabase.select_all("mgr_tickets", {"select": "*", "status": "in.(todo,doing,waiting)", "order": "seq.asc"})
 
 
-def tick() -> dict:
-    """Recurring tickets, then (if LINE is set up) the reminders. Never raises."""
-    result = {"created": 0, "digest": False, "timed": 0}
+# ------------------------------------------------------------------ background loop
+def tick() -> int:
+    """Makes the recurring tickets that have come due. Never raises."""
     try:
-        if not mgr.has_v12():
-            return result
-        result["created"] = mgr.generate_recurring()
-        if line_push.configured():
-            now = datetime.now(mgr.THAI_TZ)
-            cfg = mgr.get_settings()
-            result.update(run_tick(now, settings=cfg, active_tickets=_active, claim=_claim, release=_release, push=line_push.push_text))
-            result["plan"] = run_plan_reminders(now, settings=cfg, compute=service_plan.reminder_candidates, text=service_plan.reminder_text,
-                                                claim=_claim, release=_release, push=line_push.push_text)
+        return mgr.generate_recurring() if mgr.has_v12() else 0
     except Exception:
-        logger.exception("manager job tick failed")
-    return result
+        logger.exception("recurring tickets job failed")
+        return 0
 
 
 _started = False
@@ -219,5 +188,5 @@ def start_scheduler() -> bool:
             time.sleep(TICK_SECONDS)
 
     threading.Thread(target=loop, name="mgr-jobs", daemon=True).start()
-    logger.info("manager reminders: started (LINE %s)", "on" if line_push.configured() else "not configured")
+    logger.info("recurring tickets: loop started")
     return True

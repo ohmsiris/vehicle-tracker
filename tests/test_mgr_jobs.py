@@ -1,10 +1,6 @@
 from datetime import date, datetime
 
-import httpx
-import pytest
-
-from app import line_push, mgr_jobs as j
-from app.config import settings
+from app import mgr_jobs as j
 
 TODAY = date(2026, 10, 24)
 
@@ -54,78 +50,33 @@ def test_timed_reminders_are_for_today_when_their_time_has_come():
     assert j.timed_text(tickets[1]) == "ถึงเวลา 14:00: ถึงเวลา"
 
 
-class Fakes:
-    def __init__(self, tickets, settings=None, fail=False):
-        self.tickets, self.sent, self.claimed, self.fail = tickets, [], set(), fail
-        self.settings = settings or {"digest_time": "08:00", "digest_enabled": True, "timed_enabled": True}
-
-    def claim(self, key):
-        if key in self.claimed:
-            return False
-        self.claimed.add(key)
-        return True
-
-    def release(self, key):
-        self.claimed.discard(key)
-
-    def push(self, text):
-        if self.fail:
-            raise line_push.LinePushError("down")
-        self.sent.append(text)
-
-    def tick(self, now):
-        return j.run_tick(now, settings=self.settings, active_tickets=lambda: self.tickets, claim=self.claim, release=self.release, push=self.push)
+# ------------------------------------------------------------ the top bar and the menu numbers
+def test_the_numbers_for_the_top_bar():
+    tickets = [t(1, "เลย", due_date="2026-10-20"), t(2, "วันนี้", due_date="2026-10-24", due_time="14:00:00", place="โรงงาน"),
+               t(3, "ติดตาม", status="waiting", remind_on="2026-10-23"), t(4, "ด่วนล้วน", urgent=True), t(5, "ทำอยู่", status="doing"),
+               t(6, "ไกล", due_date="2026-12-01"), t(7, "ปิด", status="done", due_date="2026-10-20")]
+    s = j.summarize_tickets(tickets, TODAY)
+    assert (s["total"], s["overdue"], s["today"], s["follow_ups"], s["urgent"], s["doing"]) == (6, 1, 1, 1, 1, 1)
+    assert s["timed"] == [{"id": "t2", "title": "วันนี้", "time": "14:00", "place": "โรงงาน", "urgent": False}]
+    assert s["ready"] and "เลยกำหนด (1)" in s["text"]
 
 
-def test_the_digest_goes_out_once_a_day_and_not_before_its_time():
-    f = Fakes([t(1, "วันนี้", due_date="2026-10-24")])
-    assert f.tick(datetime(2026, 10, 24, 7, 59))["digest"] is False
-    assert f.tick(datetime(2026, 10, 24, 8, 0))["digest"] is True
-    assert f.tick(datetime(2026, 10, 24, 8, 1))["digest"] is False and f.tick(datetime(2026, 10, 24, 20, 0))["digest"] is False
-    assert len(f.sent) == 1
-    assert f.tick(datetime(2026, 10, 25, 8, 0))["digest"] is True              # tomorrow it is overdue: a new day, a new summary
-    assert "เลยกำหนด (1)" in f.sent[1]
+def test_a_quiet_day_has_zero_everywhere():
+    s = j.summarize_tickets([t(1, "ไกล", due_date="2026-12-01")], TODAY)
+    assert (s["overdue"], s["today"], s["follow_ups"], s["urgent"]) == (0, 0, 0, 0) and s["text"] == "" and s["timed"] == []
 
 
-def test_a_failed_push_is_retried_not_lost():
-    f = Fakes([t(1, "วันนี้", due_date="2026-10-24")], fail=True)
-    assert f.tick(datetime(2026, 10, 24, 8, 0))["digest"] is False and f.claimed == set()
-    f.fail = False
-    assert f.tick(datetime(2026, 10, 24, 8, 1))["digest"] is True
+def test_the_car_side_is_counted_by_stage():
+    found = [{"stage": "overdue", "vehicle_id": "v1", "truck": "#1 1ฒถ 8966", "label": "น้ำมันเครื่อง", "days_left": -3, "km_left": -400, "km_real": False, "key": "a"},
+             {"stage": "soon", "vehicle_id": "v2", "truck": "#2 x", "label": "น้ำมันเครื่อง", "days_left": 6, "km_left": 900, "km_real": True, "key": "b"},
+             {"stage": "soon", "vehicle_id": "v3", "truck": "#3 y", "label": "น้ำมันเครื่อง", "days_left": 9, "km_left": None, "km_real": False, "key": "c"}]
+    p = j.summarize_plan(found, True, 10)
+    assert p["counts"] == {"overdue": 1, "due": 0, "soon": 2} and p["total"] == 3 and p["soon_days"] == 10 and p["enabled"]
+    assert [x["truck"] for x in p["items"]] == ["#1 1ฒถ 8966", "#2 x", "#3 y"]
+    many = [{**found[1], "key": str(i)} for i in range(20)]
+    assert len(j.summarize_plan(many, True, 10)["items"]) == j.PLAN_ITEMS_SHOWN and j.summarize_plan(many, True, 10)["total"] == 20
 
 
-def test_timed_reminders_go_out_once_each():
-    f = Fakes([t(1, "โทรหาธนาคาร", due_date="2026-10-24", due_time="14:00")], settings={"digest_time": "08:00", "digest_enabled": False, "timed_enabled": True})
-    assert f.tick(datetime(2026, 10, 24, 14, 0))["timed"] == 1
-    assert f.tick(datetime(2026, 10, 24, 14, 1))["timed"] == 0
-    assert f.sent == ["ถึงเวลา 14:00: โทรหาธนาคาร"]
-
-
-def test_both_can_be_switched_off():
-    f = Fakes([t(1, "x", due_date="2026-10-24", due_time="08:00")], settings={"digest_enabled": False, "timed_enabled": False})
-    assert f.tick(datetime(2026, 10, 24, 12, 0)) == {"digest": False, "timed": 0} and f.sent == []
-
-
-# ------------------------------------------------------------------ LINE
-def test_line_push_is_plain_text_to_the_owner(monkeypatch):
-    seen = {}
-
-    def handler(request):
-        seen["auth"], seen["body"] = request.headers["authorization"], request.read()
-        return httpx.Response(200, json={})
-    object.__setattr__(settings, "line_channel_access_token", "tok")
-    object.__setattr__(settings, "owner_line_user_id", "Uabc")
-    assert line_push.configured()
-    line_push.push_text("สวัสดี", client=httpx.Client(transport=httpx.MockTransport(handler)))
-    assert seen["auth"] == "Bearer tok" and b'"to":"Uabc"' in seen["body"] and b'"type":"text"' in seen["body"]
-
-
-def test_line_push_errors_are_reported():
-    object.__setattr__(settings, "line_channel_access_token", "tok")
-    object.__setattr__(settings, "owner_line_user_id", "Uabc")
-    with pytest.raises(line_push.LinePushError, match="401"):
-        line_push.push_text("x", client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(401, json={}))))
-    object.__setattr__(settings, "line_channel_access_token", "")
-    assert not line_push.configured()
-    with pytest.raises(line_push.LinePushError, match="ยังไม่ได้ตั้งค่า"):
-        line_push.push_text("x")
+def test_there_is_no_line_any_more():
+    import importlib.util
+    assert importlib.util.find_spec("app.line_push") is None

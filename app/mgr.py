@@ -8,7 +8,7 @@ suppliers, money, fixing things, dealing with the outside world, rounds and insp
 * A ticket's type is picked by the AI from what was typed (app/mgr_ai.py) unless it was chosen by hand.
 * Recurring tickets (every Monday, the 1st and 15th, every 3 months ...) create their tickets by themselves:
   see app/mgr_recurring.py; generate_recurring() is idempotent (one ticket per occurrence).
-* app/mgr_jobs.py pushes the morning summary and timed reminders to LINE (plain text, no replies).
+* app/mgr_jobs.py works out what needs attention today (the bar at the top of every page, the menu numbers, the timed reminders).
 
 Everything that decides whether a change is allowed is a pure function (clean_ticket, transition, ...), unit-tested;
 the database calls are thin. Until schema_v12.sql has been run reads come back empty and writes say what is missing.

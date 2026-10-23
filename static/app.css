@@ -870,3 +870,22 @@ a.btn.call .callnum { font-weight: 400; color: var(--muted); }
 /* the manager's board: filter by place */
 .mgplaces { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
 .mgset-id select { width: auto; max-width: 11em; }
+
+/* ------------------------------------------------------------- forms: every field the same height, check boxes beside their text */
+input[type=time] { width: 100%; padding: 9px 12px; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.mfields select, .mfields input:not([type=checkbox]):not([type=radio]):not([type=color]), .adddate input { height: 46px; box-sizing: border-box; }
+.mgcheck { display: inline-flex; align-items: center; gap: 8px; margin: 6px 0; font-weight: 400; }
+.mgcheck input { width: auto; margin: 0; }
+.mghint { margin: -4px 0 10px; }
+/* ------------------------------------------------------------- today: the bar at the top and the numbers beside the menu */
+.todaybar { background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px; display: flex; gap: 8px 18px; flex-wrap: wrap; align-items: center; }
+.todaybar.calm { background: var(--ok-soft); border-color: transparent; }
+.todaybar a { color: var(--text); text-decoration: none; font-weight: 600; }
+.todaybar a:hover { text-decoration: underline; }
+.todaybar .tb-part { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.todaybar .tb-x { margin-left: auto; background: none; border: 0; font-size: 18px; cursor: pointer; color: var(--muted); }
+.navbadge { margin-left: auto; min-width: 20px; text-align: center; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--bad); color: #fff; }
+.navbadge.warn { background: var(--warn-line); color: #3b2a00; }
+.toast { position: fixed; right: 16px; bottom: 16px; z-index: 50; max-width: min(380px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line-strong); border-left: 4px solid var(--accent); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg, 0 8px 28px rgba(0,0,0,.18)); padding: 12px 14px; white-space: pre-wrap; }
+.mgbar { grid-template-columns: minmax(180px, 2fr) auto; }
+.todaybar[hidden], .toast[hidden] { display: none; }

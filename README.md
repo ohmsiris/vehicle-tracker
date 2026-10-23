@@ -428,7 +428,7 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
 
 ## The manager's board ("ผู้จัดการ")
 
-`schema_v12.sql`, `app/mgr.py`, `app/mgr_recurring.py`, `app/mgr_ai.py`, `app/mgr_jobs.py`, `app/line_push.py`,
+`schema_v12.sql`, `app/mgr.py`, `app/mgr_recurring.py`, `app/mgr_ai.py`, `app/mgr_jobs.py`, `static/today.js`,
 `static/mgr.js`. The owner's own ticket system -- the same idea as the repair board, for follow-ups, money, fixing things,
 the outside world, rounds and inspections. A group at the top of the sidebar with three pages:
 
@@ -446,12 +446,12 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
   end, and two modes: by the calendar, or **counted from the day the last one was finished** (one at a time). Tickets are created by
   the server (`mgr.generate_recurring`, every minute and whenever the board loads); one ticket per occurrence is enforced by a
   unique index, an occurrence missed by more than 3 days is skipped rather than piled up.
-- **ตั้งค่า** (`#mgr-settings`): the LINE reminders, the types, the places.
-- **LINE reminders** (`mgr_jobs`): plain text, one way (nothing reads replies, no AI chat). A morning summary at the set time
-  (default 08:00): overdue / due today / follow-ups that have come up / urgent / how many are in progress; and a reminder at a
-  ticket's own time. Each push is claimed in `mgr_notifications` first, so it is never sent twice. Needs
-  `LINE_CHANNEL_ACCESS_TOKEN` and `OWNER_LINE_USER_ID` (the old Ticketing bot's `OHM_LINE_USER_ID` works too) on Railway and in
-  `.env`; until then nothing is sent and the settings page says so. The background loop starts with the app
-  (`DISABLE_SCHEDULER=1` switches it off, e.g. for a second local copy).
+- **ตั้งค่า** (`#mgr-settings`): the reminders (on screen), the types, the places (branches, shops, other).
+- **Reminders are on screen, never LINE** (the phone is on do-not-disturb): `app/mgr_jobs.py` + `static/today.js`, from
+  `GET /api/today`. A bar at the top of every page (the board's overdue / due-today / follow-up / urgent tickets, and the cars
+  coming close to an oil change, each linking to the ticket or truck), red / amber numbers beside "บอร์ดของฉัน" and
+  "แผนซ่อมบำรุง" in the menu, a message on screen when a ticket's own time comes, and -- if switched on in ผู้จัดการ ›
+  ตั้งค่า -- a browser notification (only while the site is open in a tab). A background loop makes the recurring tickets
+  every minute (`DISABLE_SCHEDULER=1` switches it off, e.g. for a second local copy).
 - The old Ticketing bot is not removed yet: besides tickets it also reads bills, slips and supply photos and keeps the
   preventive-maintenance catalogue.

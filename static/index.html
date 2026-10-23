@@ -69,6 +69,7 @@
 </aside>
 
 <main>
+  <div id="todayBar" class="todaybar" hidden></div>
   <div id="tokenBox" class="card" hidden>
     <label for="tokenInput">รหัสเข้าใช้งาน</label>
     <div class="row">
@@ -460,8 +461,8 @@
     <div class="edit-banner" id="mgNeedsV12" hidden>ยังใช้บอร์ดผู้จัดการไม่ได้ — ต้องรันไฟล์ <strong>schema_v12.sql</strong> ใน Supabase ก่อน</div>
     <div class="card mgbar">
       <input id="mgQ" type="search" placeholder="ค้นหา: เรื่อง รายละเอียด ชื่อคนที่รอ" autocomplete="off" aria-label="ค้นหา">
-      <select id="mgFilter" aria-label="ประเภท"><option value="">ทุกประเภท</option></select>
       <div id="mgSummary" class="mgsummary"></div>
+      <div id="mgTypes" class="mgplaces" role="group" aria-label="กรองตามประเภท"></div>
       <div id="mgPlaces" class="mgplaces" role="group" aria-label="กรองตามสถานที่"></div>
     </div>
     <div class="kanban mgkanban" id="mgKanban">
@@ -476,7 +477,7 @@
   <section id="mgrRecurringView" hidden>
     <div class="page-head">
       <h2 class="page-title">งานประจำ</h2>
-      <p class="muted small">เรื่องที่ต้องทำซ้ำๆ — ทุกวัน ทุกวันจันทร์ วันที่ 1 และ 15 ทุก 3 เดือน ทุกปี ถึงวันแล้วระบบสร้างเรื่องบนบอร์ดให้เอง (และเตือนผ่าน LINE ถ้าตั้งเวลาไว้)</p>
+      <p class="muted small">เรื่องที่ต้องทำซ้ำๆ — ทุกวัน ทุกวันจันทร์ วันที่ 1 และ 15 ทุก 3 เดือน ทุกปี ถึงวันแล้วระบบสร้างเรื่องบนบอร์ดให้เอง (ถ้าตั้งเวลาไว้ จะเตือนบนหน้าจอตอนถึงเวลานั้น)</p>
     </div>
     <p class="error" id="mgrRecError" hidden></p>
     <div class="edit-banner" id="mgrRecNeedsV12" hidden>ยังใช้ไม่ได้ — ต้องรันไฟล์ <strong>schema_v12.sql</strong> ใน Supabase ก่อน</div>
@@ -799,6 +800,7 @@
 <script src="/static/machinery.js"></script>
 <script src="/static/plan.js"></script>
 <script src="/static/mgr.js"></script>
+<script src="/static/today.js"></script>
 <script src="/static/manual.js"></script>
 <script src="/static/app.js"></script>
 </body>

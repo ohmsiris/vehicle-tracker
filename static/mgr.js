@@ -3,7 +3,7 @@
 // ผู้จัดการ: the manager's own ticket board, the recurring tickets and the settings.
 //   #mgr             the board: ต้องทำ -> กำลังทำ -> รอคนอื่น / รอผล -> เสร็จ (drag a card, or use its buttons)
 //   #mgr-recurring   recurring tickets (every Monday, the 1st and 15th, every 3 months ...)
-//   #mgr-settings    LINE reminders, the ticket types, the places
+//   #mgr-settings    the reminders (on screen), the ticket types, the places
 // Data: /api/mgr/* (app/mgr.py). The type of a new ticket is picked by the AI unless chosen here.
 // Loaded BEFORE app.js: nothing here runs at load time.
 
@@ -39,6 +39,7 @@ async function loadMgrBoard() {
   $("mgNeedsV12").hidden = mg.data.ready !== false;
   fillMgSelects();
   renderMgBoard();
+  if (typeof loadToday === "function") loadToday(true);
   return true;
 }
 
@@ -52,13 +53,11 @@ function mgPlaceOptions() {
 }
 
 function fillMgSelects() {
-  const keepT = $("mgType").value, keepP = $("mgPlace").value, keepF = $("mgFilter").value;
+  const keepT = $("mgType").value, keepP = $("mgPlace").value;
   $("mgType").replaceChildren(el("option", { value: "", text: "ให้ระบบเลือกประเภท (AI)" }), ...mg.data.types.map((t) => el("option", { value: t.key, text: t.label })));
   $("mgPlace").replaceChildren(el("option", { value: "", text: "สถานที่ (ไม่ระบุ)" }), ...mgPlaceOptions());
-  $("mgFilter").replaceChildren(el("option", { value: "", text: "ทุกประเภท" }), ...mg.data.types.map((t) => el("option", { value: t.key, text: t.label })));
   $("mgType").value = keepT;
   $("mgPlace").value = keepP;
-  $("mgFilter").value = keepF;
 }
 
 function mgSortKey(a, b) {
@@ -81,6 +80,7 @@ function renderMgBoard() {
     $(`mgCount_${key}`).textContent = key === "done" ? String(by.done.length) : String(by[key].length);
     fill($(`mgList_${key}`), ...(by[key].length ? by[key].map(mgCard) : [el("p", { class: "muted empty small", text: key === "done" ? "ยังไม่มีงานที่เสร็จ" : "ว่าง" })]));
   }
+  renderMgTypes();
   renderMgPlaces();
   const overdue = d.tickets.filter((t) => t.due_date && t.due_date < d.today).length;
   const followUps = d.tickets.filter((t) => t.status === "waiting" && t.remind_on && t.remind_on <= d.today).length;
@@ -88,6 +88,16 @@ function renderMgBoard() {
     el("strong", { text: `${d.tickets.length} เรื่องที่ยังเปิดอยู่` }),
     overdue ? el("span", { class: "badge urgent", text: `เลยกำหนด ${overdue}` }) : null,
     followUps ? el("span", { class: "badge warn", text: `ถึงวันติดตาม ${followUps}` }) : null);
+}
+
+// A row of chips to filter by the kind of ticket (instead of a drop-down, which opens upwards at the bottom of the screen).
+function renderMgTypes() {
+  const counts = new Map();
+  for (const t of mg.data.tickets) counts.set(t.type_key, (counts.get(t.type_key) || 0) + 1);
+  const chip = (value, label, n, color) => el("button", { class: `chipbtn mgchip${mg.filterType === value ? " on" : ""}`, type: "button", style: color ? `--c:${color}` : null,
+    onclick: () => { mg.filterType = mg.filterType === value ? "" : value; renderMgBoard(); } }, color ? el("span", { class: "mgdot" }) : null, n === null ? label : `${label} (${n})`);
+  fill($("mgTypes"), chip("", "ทุกประเภท", mg.data.tickets.length, null),
+    ...mg.data.types.filter((t) => counts.has(t.key) || mg.filterType === t.key).map((t) => chip(t.key, t.label, counts.get(t.key) || 0, t.color)));
 }
 
 // A row of chips to filter by where the work is: all, the two branches, the shops / places that have something open, "no place".
@@ -218,7 +228,7 @@ function openMgEdit(t) {
   mg.draft = { title: t.title, notes: t.notes || "", type_key: t.type_key || "", place: t.place || "", urgent: !!t.urgent, due_date: t.due_date || "", due_time: mgTrim(t.due_time),
     remind_on: t.remind_on || "", waiting_on: t.waiting_on || "", waiting_phone: t.waiting_phone || "", checklist: (t.checklist || []).map((c) => ({ ...c })) };
   const d = mg.draft;
-  const urgent = el("label", { class: "inline mfield" }, el("input", { type: "checkbox", id: "mgdUrgent" }), "ด่วน");
+  const urgent = el("label", { class: "inline mgcheck" }, el("input", { type: "checkbox", id: "mgdUrgent" }), "ด่วน");
   urgent.querySelector("input").checked = d.urgent;
   urgent.querySelector("input").addEventListener("change", (e) => { d.urgent = e.target.checked; });
   fill($("mgDlgBody"),
@@ -366,7 +376,7 @@ function openMgRecurringDialog(r) {
   mg.waiting = null;
   mg.recDraft = mgDraftFromRecurring(r);
   const d = mg.recDraft;
-  const urgent = el("label", { class: "inline mfield" }, el("input", { type: "checkbox" }), "ด่วน");
+  const urgent = el("label", { class: "inline mgcheck" }, el("input", { type: "checkbox" }), "ด่วน");
   urgent.querySelector("input").checked = d.urgent;
   urgent.querySelector("input").addEventListener("change", (e) => { d.urgent = e.target.checked; });
   const unitSel = mselect(d, "unit", "ความถี่", [["day", "ทุกวัน / ทุก N วัน"], ["week", "ทุกสัปดาห์ (เลือกวัน)"], ["month", "ทุกเดือน"], ["year", "ทุกปี"]], { blank: "—", onChange: drawMgRule });
@@ -377,14 +387,20 @@ function openMgRecurringDialog(r) {
       mselect(d, "place", "สถานที่", mg.data.places.map((x) => [x.label, x.label]), { blank: "— ไม่ระบุ —" }),
       mfield(d, "notes", "รายละเอียด", { area: true, wide: true, maxlength: 2000 }), urgent),
     el("h4", { class: "mgh", text: "ทำเมื่อไหร่" }),
-    el("div", { class: "mfields" }, unitSel, mfield(d, "every", "ทุกๆ (ครั้ง)", { type: "number" })),
+    el("div", { class: "mfields" }, unitSel, mfield(d, "every", "ทุกกี่ครั้ง (1 = ทุกครั้ง, 2 = เว้นหนึ่งครั้ง)", { type: "number" })),
     el("div", { id: "mgRule", class: "mgrule" }),
     el("div", { class: "mfields" },
-      mfield(d, "time_of_day", "เวลา (ถ้ามี จะส่ง LINE เตือนตอนนั้น)", { type: "time" }),
-      mfield(d, "lead_days", "สร้างเรื่องล่วงหน้า (วัน)", { type: "number" }),
-      mselect(d, "mode", "นับรอบแบบ", [["calendar", "ตามปฏิทิน (ถึงวันก็สร้าง)"], ["after_done", "นับจากวันที่ทำเสร็จ (ทีละเรื่อง)"]], { blank: "—" }),
-      mfield(d, "start_date", "เริ่มวันที่ (ไม่บังคับ)", { type: "date", caption: true }),
-      mfield(d, "end_date", "สิ้นสุดวันที่ (ไม่บังคับ)", { type: "date", caption: true })));
+      mfield(d, "time_of_day", "เวลา (ไม่บังคับ)", { type: "time" }),
+      mfield(d, "lead_days", "ให้ขึ้นบอร์ดก่อนถึงวันกี่วัน", { type: "number" })),
+    el("p", { class: "muted small mghint", text: "0 = ขึ้นบอร์ดในวันนั้นเลย · 3 = ขึ้นบอร์ดล่วงหน้า 3 วัน จะได้เห็นก่อน" }),
+    el("h4", { class: "mgh", text: "รอบถัดไป" }),
+    el("div", { class: "mfields" }, mselect(d, "mode", "นับจาก", [["calendar", "ตามปฏิทิน — เช่น ทุกวันจันทร์ ก็ขึ้นทุกวันจันทร์ ไม่ว่าครั้งก่อนจะทำหรือยัง"],
+      ["after_done", "หลังทำครั้งก่อนเสร็จ — ทำเสร็จวันไหน ค่อยนับรอบใหม่จากวันนั้น (ขึ้นทีละเรื่อง)"]], { blank: "—", wide: true })),
+    el("h4", { class: "mgh", text: "ใช้ช่วงไหน" }),
+    el("div", { class: "mfields" },
+      mfield(d, "start_date", "เริ่มตั้งแต่วันที่", { type: "date", caption: true }),
+      mfield(d, "end_date", "ถึงวันที่", { type: "date", caption: true })),
+    el("p", { class: "muted small mghint", text: "ไม่ใส่ = เริ่มตั้งแต่วันนี้ และไม่มีวันหยุด" }));
   drawMgRule();
   openMgDialog(r ? "แก้ไขงานประจำ" : "เพิ่มงานประจำ", "บันทึก", "recurring");
 }
@@ -465,29 +481,26 @@ function mgSettingRow(inputs, onSave, extra = null) {
 
 function renderMgrSettings() {
   const s = mg.set;
-  // LINE reminders
-  const digestOn = el("input", { type: "checkbox", id: "mgsDigestOn" }); digestOn.checked = !!s.settings.digest_enabled;
+  // reminders: on screen, never LINE (the phone is on do-not-disturb)
   const timedOn = el("input", { type: "checkbox", id: "mgsTimedOn" }); timedOn.checked = !!s.settings.timed_enabled;
-  const time = el("input", { type: "time", id: "mgsTime", value: mgTrim(s.settings.digest_time) || "08:00" });
+  const browserOn = el("input", { type: "checkbox", id: "mgsBrowserOn" }); browserOn.checked = todayNotifyOn();
+  const note = el("span", { class: "muted small", text: todayNotifyStatus() });
+  browserOn.addEventListener("change", async () => { note.textContent = (await todaySetNotify(browserOn.checked)) || todayNotifyStatus(); browserOn.checked = todayNotifyOn(); });
   const lineMsg = el("span", { class: "muted small" });
   const card1 = el("section", { class: "card mgset" },
-    el("h3", { text: "เตือนผ่าน LINE" }),
-    el("p", { class: s.line_configured ? "muted small" : "edit-banner", text: s.line_configured ? "ต่อ LINE แล้ว — ส่งเป็นข้อความธรรมดา ตอบกลับไม่ได้ ไม่มี AI คุยกับคุณ"
-      : "ยังไม่ได้ต่อ LINE — ต้องตั้งค่า LINE_CHANNEL_ACCESS_TOKEN และ OWNER_LINE_USER_ID (ที่ Railway และไฟล์ .env) ระบบถึงจะส่งเตือนได้" }),
-    el("label", { class: "inline" }, digestOn, "ส่งสรุปงานตอนเช้า (เลยกำหนด / วันนี้ / ถึงวันติดตาม / ด่วน)"),
-    el("div", { class: "mgset-time" }, el("label", { for: "mgsTime", text: "ส่งตอน" }), time),
-    el("label", { class: "inline" }, timedOn, "เตือนตามเวลาของแต่ละเรื่อง (เรื่องที่ตั้งเวลาไว้ จะส่งตอนถึงเวลานั้น)"),
+    el("h3", { text: "การแจ้งเตือน" }),
+    el("p", { class: "muted small", text: "ไม่ส่ง LINE — แจ้งเตือนอยู่ในเว็บนี้เอง: ตัวเลขข้างเมนู แถบสรุปด้านบนทุกหน้า (เรื่องเลยกำหนด / วันนี้ / ถึงวันติดตาม / รถใกล้ถึงรอบน้ำมัน) และถ้าเปิดไว้ ก็มีแจ้งเตือนของเบราว์เซอร์เด้งขึ้นมาเมื่อถึงเวลาของแต่ละเรื่อง (ต้องเปิดหน้าเว็บนี้ค้างไว้)" }),
+    el("label", { class: "inline" }, timedOn, "เตือนตามเวลาของแต่ละเรื่อง (เรื่องที่ตั้งเวลาไว้ จะเตือนตอนถึงเวลานั้น)"),
+    el("label", { class: "inline" }, browserOn, "ให้เบราว์เซอร์เครื่องนี้เด้งแจ้งเตือนด้วย"), note,
     el("div", { class: "pl-set-actions" },
       el("button", { class: "btn small primary", type: "button", text: "บันทึก", onclick: async () => {
         try {
-          mg.set = { ...mg.set, ...(await api("/api/mgr/settings", jsonOpts("PUT", { digest_enabled: digestOn.checked, timed_enabled: timedOn.checked, digest_time: time.value })).then((x) => ({ settings: x }))) };
+          mg.set = { ...mg.set, settings: await api("/api/mgr/settings", jsonOpts("PUT", { timed_enabled: timedOn.checked })) };
           lineMsg.textContent = "บันทึกแล้ว"; lineMsg.className = "muted small";
+          loadToday(true);
         } catch (err) { lineMsg.textContent = err.message; lineMsg.className = "error small"; }
       } }),
-      el("button", { class: "btn small", type: "button", text: "ส่งข้อความทดสอบถึง LINE", disabled: !s.line_configured, onclick: async () => {
-        if (!confirm("ส่งข้อความทดสอบไปที่ LINE ของคุณเลยใช่ไหม?")) return;
-        try { await api("/api/mgr/line/test", { method: "POST" }); lineMsg.textContent = "ส่งแล้ว — ดูที่ LINE"; lineMsg.className = "muted small"; } catch (err) { lineMsg.textContent = err.message; lineMsg.className = "error small"; }
-      } }), lineMsg));
+      el("button", { class: "btn small", type: "button", text: "ลองแจ้งเตือน", onclick: () => todayTest() }), lineMsg));
 
   // types
   const typeRow = (t) => {
@@ -536,7 +549,6 @@ function initMgr() {
   bindDateField($("mgDue"), $("mgDueCap"));
   bindDateField($("mgRemind"), $("mgRemindCap"));
   $("mgQ").addEventListener("input", () => { mg.q = $("mgQ").value; if (mg.data) renderMgBoard(); });
-  $("mgFilter").addEventListener("change", () => { mg.filterType = $("mgFilter").value; if (mg.data) renderMgBoard(); });
   $("mgDlgCancel").addEventListener("click", () => $("mgDialog").close());
   $("mgDlgSave").addEventListener("click", () => (mg.dlgKind === "recurring" ? saveMgRecurring() : saveMgDialog()));
   $("mgRecAdd").addEventListener("click", () => openMgRecurringDialog(null));

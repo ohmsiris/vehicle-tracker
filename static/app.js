@@ -632,6 +632,7 @@ async function loadMeta() {
     $("tokenBox").hidden = true;
     fillVehicleSelect($("vehicleSelect"));
     fillVehicleSelect($("addVehicle"));
+    if (typeof startToday === "function") startToday();          // the bar at the top and the numbers beside the menu
   } catch (err) {
     $("tokenBox").hidden = false;
     $("vehicleSelect").replaceChildren(el("option", { value: "", text: err.status === 403 || err.status === 503 ? "ต้องใส่รหัสเข้าใช้งานก่อน" : "โหลดรายชื่อรถไม่สำเร็จ" }));

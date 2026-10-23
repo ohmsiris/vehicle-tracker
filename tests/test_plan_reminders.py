@@ -1,8 +1,7 @@
-from datetime import date, datetime, timedelta
+from datetime import date
 
 import pytest
 
-from app import mgr_jobs as j
 from app import service_plan as sp
 
 TODAY = date(2026, 10, 24)
@@ -153,52 +152,3 @@ def test_reminder_settings_are_validated():
     for bad in ({"soon_days": 0}, {"soon_days": 99}, {"soon_days": "x"}, {"items": ["nope"]}, {"items": "engine_oil"}):
         with pytest.raises(sp.InvalidPlan):
             sp.clean_reminder_settings(bad)
-
-
-# ------------------------------------------------------------ the daily push
-class Fakes:
-    def __init__(self, found, settings=None, fail=False):
-        self.found, self.fail, self.sent, self.claimed = found, fail, [], set()
-        self.settings = settings or {"plan_reminders": True, "digest_time": "08:00", "plan_soon_days": 10}
-
-    def claim(self, key):
-        if key in self.claimed:
-            return False
-        self.claimed.add(key)
-        return True
-
-    def release(self, key):
-        self.claimed.discard(key)
-
-    def push(self, text):
-        if self.fail:
-            raise RuntimeError("down")
-        self.sent.append(text)
-
-    def run(self, now):
-        return j.run_plan_reminders(now, settings=self.settings, compute=lambda d: self.found, text=lambda f, d, s: f"{len(f)} items",
-                                    claim=self.claim, release=self.release, push=self.push)
-
-
-FOUND = [{"key": "k1"}, {"key": "k2"}]
-
-
-def test_the_plan_reminders_go_once_a_day_after_the_summary_time():
-    f = Fakes(FOUND)
-    assert f.run(datetime(2026, 10, 24, 7, 59)) == 0
-    assert f.run(datetime(2026, 10, 24, 8, 0)) == 2 and f.sent == ["2 items"]
-    assert f.run(datetime(2026, 10, 24, 9, 0)) == 0                              # already done today
-    f.found = [{"key": "k2"}, {"key": "k3"}]
-    assert f.run(datetime(2026, 10, 25, 8, 0)) == 1                              # tomorrow: only what is new (k2 was sent already)
-
-
-def test_a_failed_push_is_retried_with_nothing_lost():
-    f = Fakes(FOUND, fail=True)
-    assert f.run(datetime(2026, 10, 24, 8, 0)) == 0 and f.claimed == set()
-    f.fail = False
-    assert f.run(datetime(2026, 10, 24, 8, 1)) == 2
-
-
-def test_the_plan_reminders_can_be_switched_off():
-    f = Fakes(FOUND, settings={"plan_reminders": False, "digest_time": "08:00"})
-    assert f.run(datetime(2026, 10, 24, 12, 0)) == 0 and f.sent == []
