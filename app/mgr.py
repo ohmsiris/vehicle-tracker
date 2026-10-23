@@ -171,6 +171,8 @@ def transition(ticket: dict, action: str, data: Optional[dict] = None, *, today:
         if values.get("remind_on") and values["remind_on"] < today.isoformat():
             raise InvalidTicket("วันติดตามต้องไม่ใช่วันที่ผ่านมาแล้ว")
         return {"status": "waiting", **values, **stamp}
+    if action == "resume" and status in ("done", "cancelled"):      # "needs more doing": a closed job goes straight back to doing
+        return {"status": "doing", "done_at": None, **stamp}
     if action in ("todo", "resume"):
         if status not in ACTIVE:
             raise InvalidTicket("งานนี้ปิดไปแล้ว — ใช้ “เปิดใหม่”")

@@ -77,6 +77,13 @@ def test_cancel_and_reopen():
     assert reopened["status"] == "todo" and reopened["done_at"] is None
 
 
+def test_a_closed_job_can_go_straight_back_to_doing():
+    for status in ("done", "cancelled"):
+        back = mgr.transition(ticket(status), "resume", today=TODAY, now=NOW)
+        assert back["status"] == "doing" and back["done_at"] is None
+        assert mgr.move_action(ticket(status), "doing") == "resume"
+
+
 @pytest.mark.parametrize("status,action", [("doing", "start"), ("done", "done"), ("cancelled", "wait"), ("done", "cancel"), ("todo", "reopen"), ("done", "todo"), ("todo", "fly")])
 def test_moves_that_make_no_sense_are_refused(status, action):
     with pytest.raises(mgr.InvalidTicket):
