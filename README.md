@@ -240,11 +240,17 @@ health check (`/health`); `.python-version` pins Python 3.12.
    `ANTHROPIC_API_KEY`, `APP_TOKEN` (a long random string), `SUPABASE_URL`,
    `SUPABASE_SERVICE_KEY`. Never set any `DEV_*` variable there (it would swap
    the dashboard for made-up data; the app logs an error at start-up if it sees one).
-3. **Settings -> Networking -> Generate Domain.** Open `https://<domain>/?token=<APP_TOKEN>`
-   once; the token is stored for that browser tab and removed from the address bar.
+3. **Settings -> Networking -> Generate Domain** (region: Singapore, next to the Supabase project). Open
+   `https://<domain>/?token=<APP_TOKEN>` once; the key is kept on that device (localStorage, so a phone does not ask
+   again) and removed from the address bar. To forget it on a device, clear that site's data.
 4. Check: `/health` returns `{"ok": true}`; a wrong or missing token is refused;
    then record one real multi-page bill end to end (extraction takes 30-70 s, so
    this also proves the host doesn't cut long requests).
+
+Run ONE instance only (the recurring-ticket timer lives inside the process; a rolling deploy overlaps two for a
+moment, which is safe: the tickets have a unique index). A local copy that points at the same database must set
+`DISABLE_SCHEDULER=1`. Generate the key on your own machine, not in chat:
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
 The app logs `MISSING SETTINGS: ...` at start-up if a variable is absent.
 Pages are served over HTTPS with `Referrer-Policy: no-referrer`, `nosniff` and

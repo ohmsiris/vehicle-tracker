@@ -550,12 +550,25 @@ function resetAfterSave() {
   loadBoard();            // the requests this bill closed move off the board
 }
 
+// --------------------------------------------------------------- the access key
+// Kept on this device (localStorage) so a phone does not ask for it again every time the tab is closed; an older key
+// kept for the tab only (sessionStorage) is picked up once. Storage can be blocked (private window): then it is just
+// remembered until the tab closes.
+function storedToken() {
+  try { return localStorage.getItem("vt_token") || sessionStorage.getItem("vt_token") || ""; } catch (e) { return ""; }
+}
+
+function saveToken(token) {
+  try { localStorage.setItem("vt_token", token); } catch (e) { /* blocked: the in-memory copy still works for this visit */ }
+  try { sessionStorage.setItem("vt_token", token); } catch (e) { /* ignore */ }
+}
+
 // --------------------------------------------------------------- init
 async function init() {
   const bootHash = location.hash;       // a bookmarked / reloaded truck or bill page: kept through start-up, routed to once the data is loaded
   const params = new URLSearchParams(location.search);
-  state.token = params.get("token") || sessionStorage.getItem("vt_token") || "";
-  if (params.get("token")) { sessionStorage.setItem("vt_token", state.token); history.replaceState(null, "", location.pathname + (params.get("sample") ? "?sample=1" : "") + location.hash); }
+  state.token = params.get("token") || storedToken();
+  if (params.get("token")) { saveToken(state.token); history.replaceState(null, "", location.pathname + (params.get("sample") ? "?sample=1" : "") + location.hash); }
 
   wireDrop("billDrop", "billInput", state.billFiles, true);
   wireDrop("refDrop", "refInput", state.refFiles, false);
@@ -595,7 +608,7 @@ async function init() {
     }
     recategorize(eligible);
   });
-  $("tokenSave").addEventListener("click", () => { state.token = $("tokenInput").value.trim(); sessionStorage.setItem("vt_token", state.token); loadMeta().then(loadBoard); });
+  $("tokenSave").addEventListener("click", () => { state.token = $("tokenInput").value.trim(); saveToken(state.token); loadMeta().then(loadBoard); });
 
   showView("board");                    // (clears the hash, as every non-truck page does)
   if (bootHash) history.replaceState(null, "", location.pathname + location.search + bootHash);
