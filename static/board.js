@@ -13,7 +13,8 @@ const board = {
   recent: [],      // completed / cancelled, newest first
   fixers: [],      // names/shops seen before (suggestions)
   shops: [],       // the shops you send trucks to (server list: app/shops.py)
-  drag: null,      // the card being dragged between columns
+  drag: null,      // the card being dragged between columns (or a "coming due" truck: { due: true, ... })
+  due: [],         // trucks close to their maintenance round (from /api/plan/reminders), one entry per truck
   attached: [],    // request ids the bill being entered will complete
   attachedInfo: null,
 };
@@ -154,6 +155,72 @@ async function loadBoard() {
   renderFixes();
   if (typeof renderManualFixes === "function") renderManualFixes();
   if (typeof renderWhere === "function") renderWhere();
+  if (!$("boardView").hidden) loadDueStrip();
+}
+
+// ---- รถใกล้ถึงคิวบำรุง: the trucks whose maintenance round is close (or past), as small cards above the board.
+// Drag one into "รอซ่อม" (or press "เข้าคิว") and it becomes a repair request for what is due.
+const DUE_PREFIX = "ถึงรอบบำรุง: ";
+
+async function loadDueStrip() {
+  let r;
+  try {
+    r = await api("/api/plan/reminders");
+  } catch {
+    $("dueStrip").hidden = true;                           // the plan is optional: no strip rather than an error
+    return;
+  }
+  const queued = new Set(board.active.filter((x) => (x.problem || "").startsWith(DUE_PREFIX)).map((x) => x.vehicle_id));
+  const byTruck = new Map();
+  for (const it of r.items || []) {
+    if (queued.has(it.vehicle_id)) continue;               // already in the queue for its round
+    if (!byTruck.has(it.vehicle_id)) byTruck.set(it.vehicle_id, { due: true, vehicle_id: it.vehicle_id, truck: it.truck, branch: it.branch, items: [] });
+    byTruck.get(it.vehicle_id).items.push(it);
+  }
+  board.due = [...byTruck.values()].sort((a, b) => Math.min(...a.items.map((i) => i.days_left)) - Math.min(...b.items.map((i) => i.days_left)));
+  renderDueStrip();
+}
+
+const dueText = (i) => (i.stage === "overdue" ? `เลย ${-i.days_left} วัน` : i.stage === "due" ? "ครบวันนี้" : `อีก ${i.days_left} วัน`);
+
+function renderDueStrip() {
+  $("dueStrip").hidden = false;
+  if (!board.due.length) { fill($("dueList"), el("p", { class: "muted small", text: "ไม่มีรถที่ใกล้ถึงรอบบำรุงตอนนี้" })); return; }
+  fill($("dueList"), ...board.due.map((d) => {
+    const late = d.items.some((i) => i.stage !== "soon");
+    const card = el("div", { class: `duecard${late ? " late" : ""}`, title: "ลากลงไปที่ “รอซ่อม” เพื่อเข้าคิว" },
+      el("div", { class: "duecard-top" }, el("a", { href: `#truck=${d.vehicle_id}`, text: d.truck }), d.branch ? el("span", { class: "muted small", text: d.branch }) : null),
+      el("div", { class: "duecard-items small" }, ...d.items.slice(0, 3).map((i) => el("span", { class: `badge ${i.stage === "soon" ? "warn" : "urgent"}`, text: `${i.label} · ${dueText(i)}` })),
+        d.items.length > 3 ? el("span", { class: "muted small", text: `+${d.items.length - 3}` }) : null),
+      el("button", { class: "btn small", type: "button", text: "เข้าคิว ↓", onclick: () => queueDue(d) }));
+    card.draggable = true;
+    card.addEventListener("dragstart", (e) => {
+      board.drag = d;
+      e.dataTransfer.setData("text/plain", d.vehicle_id);
+      e.dataTransfer.effectAllowed = "copy";
+      card.classList.add("dragging");
+      document.querySelector(".kanban").classList.add("dragging", "dragging-due");
+    });
+    card.addEventListener("dragend", () => {
+      board.drag = null;
+      card.classList.remove("dragging");
+      document.querySelector(".kanban").classList.remove("dragging", "dragging-due");
+      document.querySelectorAll(".kcol.dragover").forEach((c) => c.classList.remove("dragover"));
+    });
+    return card;
+  }));
+}
+
+async function queueDue(d) {
+  const veh = state.vehicles.find((v) => v.id === d.vehicle_id);
+  if (!veh) { showBoardError("ไม่พบรถคันนี้ในรายชื่อรถ"); return; }
+  const problem = DUE_PREFIX + d.items.map((i) => i.label).join(", ");
+  const already = board.active.filter((r) => r.vehicle_id === d.vehicle_id);
+  if (already.length && !confirm(`รถคันนี้มีงานที่ยังไม่ปิดอยู่แล้ว ${already.length} งาน:\n${already.map((r) => `• ${r.problem}`).join("\n")}\n\nเพิ่ม “${problem}” อีกงานใช่ไหม?`)) return;
+  try {
+    await api("/api/requests", jsonOpts("POST", { vehicle_id: d.vehicle_id, problem, reported_by: null, urgent: false, shop: null, request_date: todayISO() }));
+  } catch (err) { showBoardError(err.message); return; }
+  await loadBoard();
 }
 
 // --------------------------------------------------------------- rendering
@@ -281,7 +348,10 @@ function wireColumns() {
       col.classList.remove("dragover");
       const r = board.drag;
       board.drag = null;
-      if (r) moveTo(r, col.dataset.status);
+      if (r && r.due) {
+        if (col.dataset.status === "open") queueDue(r);
+        else showBoardError("ลากรถที่ใกล้ถึงรอบลงไปที่ “รอซ่อม” ก่อน แล้วค่อยส่งอู่");
+      } else if (r) moveTo(r, col.dataset.status);
     });
   });
 }
@@ -578,6 +648,8 @@ async function submitNewRequest(e) {
       shop: $("addShop").value || null, request_date: $("addDate").value || null,
     }));
     resetAddForm();
+    $("addOk").textContent = `เข้าคิวแล้ว: ${truckLabel(veh)} — ${problem} · ดูได้ที่ “สถานะงานซ่อม”`;
+    $("addOk").hidden = false;
     await loadBoard();
   } catch (e2) {
     err.textContent = e2.message;
@@ -597,6 +669,7 @@ function startBillFor(r) {
   $("vehicleSelect").value = idx >= 0 ? String(idx) : "";
   renderAttachNote();
   showView("capture");
+  setMode("bill");
 }
 
 function renderAttachNote() {
@@ -634,6 +707,8 @@ const selectedFixIds = () => [...document.querySelectorAll("#fixesList input:che
 function initBoard() {
   fillVehicleSelect($("addVehicle"));
   $("addForm").addEventListener("submit", submitNewRequest);
+  $("addForm").addEventListener("input", () => { $("addOk").hidden = true; });
+  $("boardAddBtn").addEventListener("click", () => { showView("capture"); setMode("queue"); $("addVehicle").focus(); });
   // Picking a truck suggests its main driver as the reporter -- until you type a different name yourself.
   $("addReporter").addEventListener("input", () => { $("addReporter").dataset.typed = "1"; });
   $("addVehicle").addEventListener("change", () => {

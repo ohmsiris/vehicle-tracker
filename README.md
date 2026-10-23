@@ -154,8 +154,18 @@ fleet roster, dashboard);
 sidebar collapses with the menu button (remembered per device) and is a
 slide-in drawer on a phone.
 
-The **รถ** group is ordered by what you do, with a line between each part: **ภาพรวม** (overview) · **งานซ่อม**, **บันทึกซ่อม**
-(input) · **รถอยู่ที่ไหน**, **สมุดงานซ่อม** (output) · **ทะเบียนรถ**, **แผนซ่อมบำรุง** (editing).
+The **รถ** group is ordered by what you do, with a line between each part: **ภาพรวม**, **สถานะงานซ่อม** (overview and status:
+the repair board) · **บันทึกงานซ่อม / คิวซ่อม** (input) · **รถอยู่ที่ไหน**, **สมุดงานซ่อม** (output) · **ทะเบียนรถ**, **แผนซ่อมบำรุง**,
+**ตั้งค่า** (editing).
+
+**Input is one page** (`บันทึกงานซ่อม / คิวซ่อม`) with three tabs: **แจ้งซ่อม / เข้าคิว** (a repair request: truck, problem,
+reporter, date, optionally already sent to a shop -- it opens on this tab), **มีบิล / ใบเสร็จ** and **ช่างทำเอง**. A bill started
+from a board card or a truck always lands on the bill tab.
+
+**รถใกล้ถึงคิวบำรุง** (top of สถานะงานซ่อม): the trucks the maintenance plan says are close to / past a round (the same list as
+the reminders, `/api/plan/reminders`), one small card per truck with what is due. Drag a card into **รอซ่อม** (or press
+"เข้าคิว ↓") and it becomes a repair request "ถึงรอบบำรุง: น้ำมันเครื่อง, …"; a truck already queued that way is not shown again.
+"+ แจ้งซ่อม" goes to the request tab.
 
 **Who to call**: on the board and "รถอยู่ที่ไหน" the server works out who to ring about each request (`fleet.call_target`): the truck's main driver -- or, for a factory truck (รถหน้าโรง, which has no driver), whoever reported the problem (ผู้แจ้ง), found among the drivers by nickname / name / first name when exactly one matches and has a number. A driver's number is a tap-to-call button (`tel:`) on the truck's page, the drivers list, the board cards
 and "รถอยู่ที่ไหน". The shops' numbers are kept in the database and edited on the settings page (see "Settings" below), shown as call buttons under each shop on "รถอยู่ที่ไหน" and in the "ส่งซ่อมที่…"

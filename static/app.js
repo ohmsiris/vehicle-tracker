@@ -564,7 +564,7 @@ async function init() {
   $("confirmBtn").addEventListener("click", confirmSave);
   $("newBtn").addEventListener("click", () => showView("capture"));
   $("toBoardBtn").addEventListener("click", () => showView("board"));
-  $("navBoard").addEventListener("click", () => showView("board"));
+  $("navBoard").addEventListener("click", () => { showView("board"); loadDueStrip(); });
   $("navBills").addEventListener("click", () => showView(lastBillView));
   $("navDash").addEventListener("click", () => { showView("dash"); loadDashboard(); });
   $("navRoster").addEventListener("click", () => goHash("#roster"));

@@ -781,11 +781,9 @@ table.pl-chart { border-collapse: separate; border-spacing: 0; width: 100%; min-
 .pl-grp-row input, .pl-km-row input { width: 100%; }
 .plsetgrid > .plset:first-child, .plsetgrid > .pl-trucks-card { grid-column: 1 / -1; }
 .pl-grp-row.custom strong { color: var(--accent); }
-.pl-trucks-card input[type=search] { width: 100%; max-width: 360px; margin: 6px 0 4px; }
 .pl-trucks { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 4px 16px; margin: 6px 0 10px; }
 .pl-trucks-branch { grid-column: 1 / -1; margin-top: 10px; font-weight: 600; }
 .pl-truck { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; align-items: center; margin: 0; padding: 3px 6px; border-radius: var(--radius-sm); font-weight: 400; }
-.pl-truck[hidden] { display: none; }
 .pl-truck.changed { background: var(--warn-soft); }
 .pl-truck-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl-truck select { width: 100%; padding-top: 4px; padding-bottom: 4px; }
@@ -916,3 +914,17 @@ input[type=time], input[type=tel] { width: 100%; padding: 9px 12px; font: inheri
 .sttest-out { min-height: 1.4em; margin-bottom: 6px; }
 @media (max-width: 720px) { .strow { grid-template-columns: 1fr auto; } .strow input:first-child { grid-column: 1 / -1; } .strow.head { grid-template-columns: 1fr auto; } }
 #mgrRecList { gap: 8px; }
+
+/* ------------------------------------------------------------- board: trucks close to their maintenance round */
+.duestrip { padding: 12px 16px; }
+.duehead { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+.duehead h2 { margin: 0; }
+.duelist { display: flex; gap: 10px; overflow-x: auto; padding: 10px 2px 4px; }
+.duecard { flex: 0 0 auto; width: 230px; display: grid; gap: 6px; align-content: start; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--warn-line); border-radius: var(--radius-sm); background: var(--surface); cursor: grab; }
+.duecard.late { border-left-color: var(--bad); }
+.duecard.dragging { opacity: .5; }
+.duecard-top { display: flex; gap: 6px; align-items: baseline; }
+.duecard-top a { font-weight: 600; color: var(--text); text-decoration: none; }
+.duecard-items { display: flex; flex-wrap: wrap; gap: 4px; }
+.duecard .btn { justify-self: start; }
+.kanban.dragging-due .kcol[data-status="open"] { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: var(--radius); }

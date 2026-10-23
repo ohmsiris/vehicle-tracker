@@ -172,6 +172,7 @@ function billForVehicle(v) {
   const idx = state.vehicles.findIndex((x) => x.id === v.vehicle_id);
   $("vehicleSelect").value = idx >= 0 ? String(idx) : "";
   showView("capture");
+  setMode("bill");
 }
 
 function requestForVehicle(v) {

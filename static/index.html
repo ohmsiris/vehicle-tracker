@@ -44,9 +44,9 @@
     </button>
     <nav class="side-items" id="sideCars">
       <button id="navDash" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>ภาพรวม</span></button>
+      <button id="navBoard" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>สถานะงานซ่อม</span></button>
       <div class="side-sep" role="separator"></div>
-      <button id="navBoard" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>งานซ่อม</span></button>
-      <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกซ่อม</span></button>
+      <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกงานซ่อม / คิวซ่อม</span></button>
       <div class="side-sep" role="separator"></div>
       <button id="navWhere" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg><span>รถอยู่ที่ไหน</span></button>
       <button id="navLog" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>สมุดงานซ่อม</span></button>
@@ -80,24 +80,12 @@
 
   <!-- ============ Repair board ============ -->
   <section id="boardView">
-    <div class="card">
-      <h2>เพิ่มงานซ่อม <span class="muted small">(ใบแจ้งซ่อมกระดาษยังใช้ตามเดิม — ลงที่นี่เพื่อตามงานต่อ)</span></h2>
-      <form id="addForm" class="addgrid" autocomplete="off">
-        <select id="addVehicle" aria-label="รถ"><option value="">กำลังโหลดรายชื่อรถ…</option></select>
-        <input id="addProblem" type="text" placeholder="ปัญหา เช่น เบรกหลังมีเสียง" maxlength="500" aria-label="ปัญหา">
-        <input id="addReporter" type="text" placeholder="ผู้แจ้ง (ไม่บังคับ)" maxlength="100" aria-label="ผู้แจ้ง">
-        <label class="inline"><input id="addUrgent" type="checkbox"> ด่วน</label>
-        <button class="btn primary" type="submit">เพิ่ม</button>
-        <div class="addextra">
-          <div class="adddate">
-            <label for="addDate">วันที่คนขับแจ้งซ่อม <span class="muted small">(ถ้าเพิ่งมาลงทีหลัง เลือกวันที่ในใบแจ้ง)</span></label>
-            <input id="addDate" type="date">
-            <div id="addDateCap" class="datecap"></div>
-          </div>
-          <select id="addShop" aria-label="ส่งซ่อมที่ไหน"><option value="">ยังไม่ได้ส่งอู่ (รอซ่อม)</option></select>
-        </div>
-      </form>
-      <p class="error" id="addError" hidden></p>
+    <div class="card duestrip" id="dueStrip" hidden>
+      <div class="duehead">
+        <h2>รถใกล้ถึงคิวบำรุง <span class="muted small">ลากการ์ดลงไปที่ “รอซ่อม” เพื่อเข้าคิว (หรือกด “เข้าคิว”)</span></h2>
+        <button id="boardAddBtn" class="btn small" type="button">+ แจ้งซ่อม</button>
+      </div>
+      <div id="dueList" class="duelist"></div>
     </div>
 
     <p class="error" id="boardError" hidden></p>
@@ -168,8 +156,8 @@
   <!-- ============ Bills: step 1, capture ============ -->
   <section id="captureView" hidden>
     <div class="page-head">
-      <h2 class="page-title">บันทึกซ่อม</h2>
-      <p class="muted small">มีบิลจากร้าน → อัปโหลดให้ระบบอ่าน · ช่างทำเองไม่มีบิล → กรอกเอง</p>
+      <h2 class="page-title">บันทึกงานซ่อม / คิวซ่อม</h2>
+      <p class="muted small">รถเสีย → แจ้งซ่อม เข้าคิว · มีบิลจากร้าน → อัปโหลดให้ระบบอ่าน · ช่างทำเองไม่มีบิล → กรอกเอง</p>
     </div>
 
     <div id="attachNote" class="card note" hidden>
@@ -178,11 +166,36 @@
     </div>
 
     <div class="modeswitch" role="tablist" aria-label="ประเภทการบันทึก">
+      <button id="modeQueue" class="modebtn" type="button" role="tab" aria-selected="false">📋 แจ้งซ่อม / เข้าคิว</button>
       <button id="modeBill" class="modebtn active" type="button" role="tab" aria-selected="true">🧾 มีบิล / ใบเสร็จ</button>
       <button id="modeManual" class="modebtn" type="button" role="tab" aria-selected="false">🔧 ช่างทำเอง (กรอกเอง)</button>
     </div>
 
-    <div class="card">
+    <!-- ---- mode: a repair request (the queue) ---- -->
+    <div id="queueMode" hidden>
+      <div class="card">
+        <h2>แจ้งซ่อม / เข้าคิว <span class="muted small">(ใบแจ้งซ่อมกระดาษยังใช้ตามเดิม — ลงที่นี่เพื่อตามงานต่อ)</span></h2>
+        <form id="addForm" class="addgrid" autocomplete="off">
+          <select id="addVehicle" aria-label="รถ"><option value="">กำลังโหลดรายชื่อรถ…</option></select>
+          <input id="addProblem" type="text" placeholder="ปัญหา เช่น เบรกหลังมีเสียง" maxlength="500" aria-label="ปัญหา">
+          <input id="addReporter" type="text" placeholder="ผู้แจ้ง (ไม่บังคับ)" maxlength="100" aria-label="ผู้แจ้ง">
+          <label class="inline"><input id="addUrgent" type="checkbox"> ด่วน</label>
+          <button class="btn primary" type="submit">เพิ่ม</button>
+          <div class="addextra">
+            <div class="adddate">
+              <label for="addDate">วันที่คนขับแจ้งซ่อม <span class="muted small">(ถ้าเพิ่งมาลงทีหลัง เลือกวันที่ในใบแจ้ง)</span></label>
+              <input id="addDate" type="date">
+              <div id="addDateCap" class="datecap"></div>
+            </div>
+            <select id="addShop" aria-label="ส่งซ่อมที่ไหน"><option value="">ยังไม่ได้ส่งอู่ (รอซ่อม)</option></select>
+          </div>
+        </form>
+        <p class="error" id="addError" hidden></p>
+        <p class="muted small" id="addOk" hidden></p>
+      </div>
+    </div>
+
+    <div class="card" id="vehicleCard">
       <label for="vehicleSelect">รถคันที่ซ่อม</label>
       <select id="vehicleSelect"><option value="">กำลังโหลดรายชื่อรถ…</option></select>
       <p class="muted small" id="vehicleNote">ไม่แน่ใจ? ข้ามไปได้ ระบบจะเดาจากป้ายทะเบียนในบิล</p>
@@ -253,7 +266,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="photosCard">
       <h2>รูปอื่นๆ <span class="muted small">(รถ จุดที่เสีย อะไหล่ — เก็บไว้เฉยๆ ไม่ต้องอ่านข้อมูล)</span></h2>
       <div class="drop" id="refDrop" tabindex="0" role="button">
         <span>แตะเพื่อเลือกรูป หรือลากมาวางที่นี่</span>

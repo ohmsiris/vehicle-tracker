@@ -8,7 +8,7 @@
 // Loaded BEFORE app.js; nothing here runs at load time. Uses helpers from the other
 // scripts (state, board, el, $, lineRow, recategorize, selectedVehicle ...) at call time.
 
-const manual = { mode: "bill", saving: false };
+const manual = { mode: "queue", saving: false };   // the recording page opens on "แจ้งซ่อม / เข้าคิว"
 
 // Quick buttons for the jobs the mechanic does most. Categories must be names from the
 // categories table (the server refuses anything else).
@@ -32,16 +32,19 @@ const isBlankRow = (tr) => !tr.querySelector("[data-f=description]").value.trim(
 // ------------------------------------------------------------------- mode
 function setMode(mode) {
   manual.mode = mode;
-  const man = mode === "manual";
-  $("billMode").hidden = man;
+  const man = mode === "manual", queue = mode === "queue";
+  $("queueMode").hidden = !queue;
+  $("vehicleCard").hidden = queue;                      // the request form has its own truck box
+  $("photosCard").hidden = queue;
+  $("billMode").hidden = man || queue;
   $("manualMode").hidden = !man;
-  $("extractBtn").hidden = man;
+  $("extractBtn").hidden = man || queue;
   $("manualSaveBtn").hidden = !man;
   $("vehicleNote").hidden = man;
-  $("modeBill").classList.toggle("active", !man);
-  $("modeManual").classList.toggle("active", man);
-  $("modeBill").setAttribute("aria-selected", String(!man));
-  $("modeManual").setAttribute("aria-selected", String(man));
+  for (const [id, on] of [["modeQueue", queue], ["modeBill", mode === "bill"], ["modeManual", man]]) {
+    $(id).classList.toggle("active", on);
+    $(id).setAttribute("aria-selected", String(on));
+  }
   $("captureError").hidden = true;
   showErrorIn("manualError", "");
   setCatStatus("");
@@ -206,8 +209,10 @@ function startManualFor(request, who, dateISO) {
 
 // --------------------------------------------------------------------- init
 function initManual() {
+  $("modeQueue").addEventListener("click", () => setMode("queue"));
   $("modeBill").addEventListener("click", () => setMode("bill"));
   $("modeManual").addEventListener("click", () => setMode("manual"));
+  setMode(manual.mode);
   $("mAddRow").addEventListener("click", () => addManualRow({}));
   // Typed names get a category automatically when you leave the box; this does every row at once (or retries).
   // Rows whose category came from a shortcut button, or that you picked yourself, are left alone.

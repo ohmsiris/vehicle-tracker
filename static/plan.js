@@ -262,7 +262,6 @@ function trucksCard() {
   const msg = el("span", { class: "muted small" });
   const saveBtn = el("button", { class: "btn small primary", type: "button", text: "บันทึก", disabled: true });
   const undoBtn = el("button", { class: "btn small", type: "button", text: "ยกเลิกที่แก้", hidden: true });
-  const q = el("input", { type: "search", placeholder: "ค้นหา: เบอร์รถ ทะเบียน", "aria-label": "ค้นหารถ" });
   const rows = [];
   const sync = () => {
     saveBtn.disabled = staged.size === 0;
@@ -285,10 +284,6 @@ function trucksCard() {
     rows.push({ v, row, sel });
     list.append(row);
   }
-  q.addEventListener("input", () => {
-    const t = q.value.trim().toLowerCase();
-    for (const { v, row } of rows) row.hidden = !!t && ![v.vehicle_number, v.plate_number, v.nickname].filter(Boolean).join(" ").toLowerCase().includes(t);
-  });
   undoBtn.addEventListener("click", () => {
     for (const { v, row, sel } of rows) { sel.value = v.group_code || ""; row.classList.remove("changed"); }
     staged.clear();
@@ -309,7 +304,7 @@ function trucksCard() {
   return el("section", { class: "card plset pl-trucks-card" },
     el("h3", { text: "รถแต่ละคันใช้กลุ่มไหน" }),
     el("p", { class: "muted small", text: "เลือกกลุ่มของแต่ละคัน แถวที่แก้จะเป็นสีเหลือง ยังไม่เปลี่ยนจริงจนกว่าจะกด “บันทึกการเปลี่ยนกลุ่ม” และยืนยัน" }),
-    q, list, el("div", { class: "pl-set-actions pl-trucks-actions" }, saveBtn, undoBtn, msg));
+    list, el("div", { class: "pl-set-actions pl-trucks-actions" }, saveBtn, undoBtn, msg));
 }
 
 function kmRow(rule, it) {
