@@ -364,3 +364,25 @@ def test_clean_vehicle_group():
         sp.clean_vehicle_group({"vehicle_id": VID, "group_code": "ZZ"}, known=GROUPS)
     with pytest.raises(sp.InvalidPlan):
         sp.clean_vehicle_group({"vehicle_id": "nope", "group_code": "S2"}, known=GROUPS)
+
+
+# ------------------------------------------------- the settings page: groups and which truck follows which
+def test_a_group_is_customised_only_when_its_numbers_differ_from_the_built_in_ones():
+    s2 = next(g for g in sp.DEFAULT_GROUPS if g["code"] == "S2")
+    assert not sp.group_customised({**s2, "months_per_step": "2"})          # the database gives numbers as text
+    assert sp.group_customised({**s2, "months_per_step": 3})
+    assert all("เดือน ต่อ" not in g["label"] for g in sp.DEFAULT_GROUPS)    # the numbers are shown beside the name, not in it
+
+
+def test_several_trucks_can_change_group_in_one_save():
+    known = sp.merge_groups([])
+    a, b = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+    out = sp.clean_vehicle_groups({"changes": [{"vehicle_id": a, "group_code": "S3"}, {"vehicle_id": b, "group_code": ""}]}, known=known)
+    assert out == [(a, "S3"), (b, None)]
+    for bad in ({"changes": []}, {"changes": [{"vehicle_id": a, "group_code": "ZZ"}]}, {}):
+        with pytest.raises(sp.InvalidPlan):
+            sp.clean_vehicle_groups(bad, known=known)
+
+
+def test_every_item_is_reminded_about_unless_changed():
+    assert sp.DEFAULT_REMIND_ITEMS is None

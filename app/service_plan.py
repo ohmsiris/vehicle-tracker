@@ -32,7 +32,7 @@ RULE_SETS = [SMALL, BIG]
 NEEDS_V10 = "ต้องรัน schema_v10.sql และ schema_v11.sql ใน Supabase ก่อน จึงจะใช้แผนซ่อมบำรุงได้"
 NEEDS_V13 = "ต้องรัน schema_v13.sql ใน Supabase ก่อน จึงจะเลื่อนเตือนได้"
 SOON_DAYS = 10                       # "due soon" = due within this many days (changeable in the settings)
-DEFAULT_REMIND_ITEMS = ["engine_oil"]   # which items are reminded about (changeable in the settings)
+DEFAULT_REMIND_ITEMS = None   # which items are reminded about: None = every item (changeable in the settings)
 OVERDUE_REPEAT_DAYS = 3              # an overdue item is reminded about again every this many days
 MAX_SNOOZE_DAYS = 90
 MAX_AS_OF_DAYS = 400                 # how far ahead the "look ahead" slider may go
@@ -113,12 +113,12 @@ DEFAULT_KM = {
 
 # The groups: how many months one base step of km is worth. months_per_step None -> worked out from km_per_day.
 DEFAULT_GROUPS = [
-    {"code": "S2", "label": "รถเล็ก - รถสาย (2 เดือน ต่อ 10,000 กม.)", "rule_set": SMALL, "step_km": 10_000, "months_per_step": 2, "km_per_day": None, "sort_order": 1},
-    {"code": "S3", "label": "รถเล็ก - รถหน้าโรง (3 เดือน ต่อ 10,000 กม.)", "rule_set": SMALL, "step_km": 10_000, "months_per_step": 3, "km_per_day": None, "sort_order": 2},
-    {"code": "S6", "label": "รถเล็ก - นานสุดตามคู่มือ (6 เดือน ต่อ 10,000 กม.)", "rule_set": SMALL, "step_km": 10_000, "months_per_step": 6, "km_per_day": None, "sort_order": 3},
-    {"code": "B4", "label": "ใช้กฎรถใหญ่ - NLR (4 เดือน ต่อ 20,000 กม.)", "rule_set": BIG, "step_km": 20_000, "months_per_step": 4, "km_per_day": None, "sort_order": 4},
-    {"code": "B5", "label": "รถใหญ่ - รถสาย (5 เดือน ต่อ 20,000 กม.)", "rule_set": BIG, "step_km": 20_000, "months_per_step": 5, "km_per_day": None, "sort_order": 5},
-    {"code": "B6", "label": "รถใหญ่ - หน้าโรง / CP (6 เดือน ต่อ 20,000 กม.)", "rule_set": BIG, "step_km": 20_000, "months_per_step": 6, "km_per_day": None, "sort_order": 6},
+    {"code": "S2", "label": "รถเล็ก - รถสาย", "rule_set": SMALL, "step_km": 10_000, "months_per_step": 2, "km_per_day": None, "sort_order": 1},
+    {"code": "S3", "label": "รถเล็ก - รถหน้าโรง", "rule_set": SMALL, "step_km": 10_000, "months_per_step": 3, "km_per_day": None, "sort_order": 2},
+    {"code": "S6", "label": "รถเล็ก - นานสุดตามคู่มือ", "rule_set": SMALL, "step_km": 10_000, "months_per_step": 6, "km_per_day": None, "sort_order": 3},
+    {"code": "B4", "label": "ใช้กฎรถใหญ่ - NLR", "rule_set": BIG, "step_km": 20_000, "months_per_step": 4, "km_per_day": None, "sort_order": 4},
+    {"code": "B5", "label": "รถใหญ่ - รถสาย", "rule_set": BIG, "step_km": 20_000, "months_per_step": 5, "km_per_day": None, "sort_order": 5},
+    {"code": "B6", "label": "รถใหญ่ - หน้าโรง / CP", "rule_set": BIG, "step_km": 20_000, "months_per_step": 6, "km_per_day": None, "sort_order": 6},
     {"code": "KK1", "label": "แก่งคอย เบอร์ 1 (บ้านนา) - ตามกม./วันของคันเอง", "rule_set": BIG, "step_km": 20_000, "months_per_step": None, "km_per_day": 242.3, "sort_order": 7},
 ]
 GROUP_CODES = [g["code"] for g in DEFAULT_GROUPS]
@@ -583,6 +583,33 @@ def clean_group(data: dict, *, known: dict) -> dict:
     return {"code": code, "months_per_step": months, "km_per_day": kmpd}
 
 
+def default_group(code: str) -> Optional[dict]:
+    return next((g for g in DEFAULT_GROUPS if g["code"] == code), None)
+
+
+def group_customised(group: dict) -> bool:
+    """True when the months / km per day differ from the built-in values (the settings page offers "ค่าเริ่มต้น")."""
+    base = default_group(group["code"])
+    if not base:
+        return False
+    num = lambda x: None if x in (None, "") else float(x)
+    return num(group.get("months_per_step")) != num(base["months_per_step"]) or num(group.get("km_per_day")) != num(base["km_per_day"])
+
+
+def clean_vehicle_groups(data: dict, *, known: dict) -> list[tuple[str, Optional[str]]]:
+    """Several trucks moved to other groups at once (the settings page): [(vehicle_id, code or None)]."""
+    changes = data.get("changes")
+    if not isinstance(changes, list) or not changes:
+        raise InvalidPlan("ยังไม่ได้เปลี่ยนกลุ่มของรถคันไหน")
+    if len(changes) > 500:
+        raise InvalidPlan("เปลี่ยนได้ครั้งละไม่เกิน 500 คัน")
+    out = {}
+    for c in changes:
+        vehicle_id, code = clean_vehicle_group(c if isinstance(c, dict) else {}, known=known)
+        out[vehicle_id] = code
+    return list(out.items())
+
+
 def clean_vehicle_group(data: dict, *, known: dict) -> tuple[str, Optional[str]]:
     vehicle_id = _uuid(data.get("vehicle_id"), "รถ")
     code = str(data.get("group_code") or "").strip()
@@ -719,17 +746,34 @@ def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
             **plan, "group_code": code, "groups": choices, "history": history, "readings": readings}
 
 
-def set_vehicle_group(data: dict) -> dict:
-    _require()
-    vehicle_id, code = clean_vehicle_group(data, known=_groups())
-    if not _vehicles(only=vehicle_id):
-        raise InvalidPlan("ไม่พบรถคันนี้")
+def _save_vehicle_group(vehicle_id: str, code: Optional[str]) -> None:
     if code is None:
         supabase.delete("vehicle_plans", {"vehicle_id": f"eq.{vehicle_id}"})
     else:
         supabase.insert("vehicle_plans", [{"vehicle_id": vehicle_id, "group_code": code, "updated_at": datetime.now(timezone.utc).isoformat()}],
                         on_conflict="vehicle_id")
+
+
+def set_vehicle_group(data: dict) -> dict:
+    _require()
+    vehicle_id, code = clean_vehicle_group(data, known=_groups())
+    if not _vehicles(only=vehicle_id):
+        raise InvalidPlan("ไม่พบรถคันนี้")
+    _save_vehicle_group(vehicle_id, code)
     return vehicle_detail(vehicle_id)
+
+
+def set_vehicle_groups(data: dict) -> dict:
+    """The settings page: which truck follows which group, several trucks in one save."""
+    _require()
+    changes = clean_vehicle_groups(data, known=_groups())
+    ids = {v["id"] for v in _vehicles()}
+    unknown = [vid for vid, _c in changes if vid not in ids]
+    if unknown:
+        raise InvalidPlan("ไม่พบรถบางคัน (อาจถูกปิดใช้งานไปแล้ว) — โหลดหน้าใหม่แล้วลองอีกครั้ง")
+    for vehicle_id, code in changes:
+        _save_vehicle_group(vehicle_id, code)
+    return settings()
 
 
 def record_service(data: dict) -> dict:
@@ -790,9 +834,14 @@ def settings() -> dict:
     counts: dict = {}
     for code in _vehicle_groups().values():
         counts[code] = counts.get(code, 0) + 1
-    groups = [{**g, "months": group_months(g), "implied_km_per_day": group_km_per_day(g), "trucks": counts.get(g["code"], 0)}
+    groups = [{**g, "months": group_months(g), "implied_km_per_day": group_km_per_day(g), "trucks": counts.get(g["code"], 0),
+               "customised": group_customised(g), "default": {k: (default_group(g["code"]) or {}).get(k) for k in ("months_per_step", "km_per_day")}}
               for g in sorted(_groups().values(), key=lambda g: g.get("sort_order", 99))]
-    return {"ready": ready, "groups": groups, "rule_sets": {r: rule_set_items(r, overrides) for r in RULE_SETS}}
+    plans = _vehicle_groups()
+    vehicles = [{"id": v["id"], "plate_number": v.get("plate_number"), "vehicle_number": v.get("vehicle_number"), "nickname": v.get("nickname"),
+                 "branch": v.get("branch"), "vehicle_class": v.get("vehicle_class"), "group_code": plans.get(v["id"])}
+                for v in sorted(_vehicles(), key=lambda v: (v.get("branch") or "", _numkey(v.get("vehicle_number")), v.get("plate_number") or ""))] if ready else []
+    return {"ready": ready, "groups": groups, "rule_sets": {r: rule_set_items(r, overrides) for r in RULE_SETS}, "vehicles": vehicles}
 
 
 def set_interval(data: dict) -> dict:
@@ -807,6 +856,14 @@ def reset_interval(vehicle_class: str, item_key: str) -> dict:
     _require()
     supabase.delete("service_intervals", {"vehicle_class": f"eq.{vehicle_class}", "item_key": f"eq.{item_key}"})
     return settings()
+
+
+def reset_group(code: str) -> dict:
+    """Back to the built-in months / km per day of a group."""
+    base = default_group(code)
+    if not base:
+        raise InvalidPlan("ไม่พบกลุ่มนี้")
+    return set_group({"code": code, "months_per_step": base["months_per_step"], "km_per_day": base["km_per_day"]})
 
 
 def set_group(data: dict) -> dict:
@@ -834,7 +891,7 @@ def _plan_settings() -> dict:
         soon = SOON_DAYS
     items = saved.get("plan_remind_items")
     return {"soon_days": max(1, min(60, soon)), "enabled": bool(saved.get("plan_reminders", True)),
-            "items": [k for k in (items if isinstance(items, list) else DEFAULT_REMIND_ITEMS) if k in ITEMS]}
+            "items": [k for k in (items if isinstance(items, list) else (DEFAULT_REMIND_ITEMS or list(ITEMS))) if k in ITEMS]}
 
 
 def reminder_settings() -> dict:

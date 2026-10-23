@@ -809,6 +809,19 @@ def api_plan_set_group(body: dict = Body(...), x_app_token: str = Header(default
     return _plan_call(service_plan.set_group, body)
 
 
+@app.delete("/api/plan/groups")
+def api_plan_reset_group(code: str = Query(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.reset_group, code)
+
+
+@app.put("/api/plan/vehicle-groups")
+def api_plan_vehicle_groups(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Which truck follows which group: the settings page saves several trucks at once."""
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.set_vehicle_groups, body)
+
+
 @app.put("/api/plan/vehicles/{vehicle_id}/group")
 def api_plan_vehicle_group(vehicle_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

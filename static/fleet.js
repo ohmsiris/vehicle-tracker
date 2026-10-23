@@ -18,6 +18,7 @@ function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
   if (h === "roster") return openRoster();
   if (h === "plan") return openPlan();
+  if (h === "plan-settings") { pl.tab = "set"; return openPlan(); }
   if (h === "settings") return openAppSettings();
   if (h === "mgr") return openMgr();
   if (h === "mgr-recurring") return openMgrRecurring();

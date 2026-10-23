@@ -118,7 +118,7 @@ async function loadPreview() {
     return;
   }
   fill($("plPreviewText"), r.text || `ไม่มีรายการที่ต้องเตือนในวันนั้น (เตือนเฉพาะที่เหลือไม่เกิน ${r.soon_days} วัน)`);
-  fill($("plPreviewMeta"), `${r.items.length} รายการที่จะเตือน${r.snoozed.length ? ` · ที่เลื่อนเตือนไว้ ${r.snoozed.length}` : ""} · ${r.enabled ? "เปิดเตือนอยู่" : "ปิดการเตือนอยู่"} — แถบสรุปด้านบนของทุกหน้าจะแสดงรายการเหล่านี้ (ไม่ส่ง LINE)`);
+  fill($("plPreviewMeta"), `${r.items.length} รายการที่จะเตือน${r.snoozed.length ? ` · ที่เลื่อนเตือนไว้ ${r.snoozed.length}` : ""} · ${r.enabled ? "เปิดเตือนอยู่" : "ปิดการเตือนอยู่"} — ตัวเลขข้างเมนู “แผนซ่อมบำรุง” นับรายการเหล่านี้ (ไม่ส่ง LINE)`);
 }
 
 function renderOverview() {
@@ -139,7 +139,7 @@ function renderOverview() {
     return true;
   });
   const nothing = show === "due" && !rows.length;
-  fill($("plCount"), `${rows.length} คัน${nothing ? ` — ไม่มีรถที่ต้องทำตอนนี้${k.no_history ? ` · แต่ยังมี ${k.no_history} คันที่ไม่มีประวัติเลย (เลือก “ที่ยังไม่มีประวัติเลย” เพื่อดู)` : ""}` : ""}${k.no_group ? ` · ${k.no_group} คันยังไม่ได้เลือกกลุ่มแผน (เปิดหน้ารถเพื่อเลือก)` : ""}`);
+  fill($("plCount"), `${rows.length} คัน${nothing ? ` — ไม่มีรถที่ต้องทำตอนนี้${k.no_history ? ` · แต่ยังมี ${k.no_history} คันที่ไม่มีประวัติเลย (เลือก “ที่ยังไม่มีประวัติเลย” เพื่อดู)` : ""}` : ""}${k.no_group ? ` · ${k.no_group} คันยังไม่ได้เลือกกลุ่มแผน (เลือกได้ที่แท็บ “ตั้งค่าระยะ”)` : ""}`);
   fill($("plList"), ...(rows.length ? rows.map(planCard) : [el("p", { class: "muted empty", text: "ไม่พบรถที่ตรงกับตัวกรอง" })]));
 }
 
@@ -156,7 +156,7 @@ function planCard(v) {
       el("span", { class: "badge", title: v.group ? v.group.label : "", text: v.group ? `${v.group.code} · ${plMonths(v.group.months)} ต่อ ${baht(v.group.step_km)} กม.` : "ยังไม่ได้เลือกกลุ่มแผน" }),
       el("span", { class: "grow" }),
       v.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, attention.map((i) => i.key)) }) : null),
-    !v.has_plan ? el("p", { class: "muted small", text: "ยังไม่ได้เลือกกลุ่มแผน — เปิดหน้ารถแล้วเลือกกลุ่ม (หรือปล่อยว่างถ้าไม่ต้องทำตาราง)" })
+    !v.has_plan ? el("p", { class: "muted small" }, "ยังไม่ได้เลือกกลุ่มแผน — เลือกได้ที่ ", el("a", { href: "#plan-settings", text: "ตั้งค่าระยะ › รถแต่ละคันใช้กลุ่มไหน" }), " (หรือปล่อยว่างถ้าไม่ต้องทำตาราง)")
       : attention.length ? el("div", { class: "pl-chips" }, ...attention.map((i) => plChip(i, v)))
       : el("p", { class: "muted small", text: known ? `ปกติทุกรายการที่มีประวัติ (${known}/${v.items.length} รายการ)` : "ยังไม่มีประวัติเลย — กด “บันทึกว่าทำแล้ว” เพื่อเริ่มนับ" }),
     v.has_plan ? el("div", { class: "muted small", text: plKmPerDay(v.km_per_day) }) : null);
@@ -180,18 +180,23 @@ function reminderCard() {
   const enabled = el("input", { type: "checkbox", id: "plrOn" });
   enabled.checked = !!r.enabled;
   const soon = el("input", { type: "number", id: "plrSoon", min: "1", max: "60", step: "1", value: String(r.soon_days) });
+  const all = el("input", { type: "checkbox" });
   const boxes = r.all_items.map((it) => {
     const b = el("input", { type: "checkbox", "data-key": it.key });
     b.checked = r.items.includes(it.key);
+    b.addEventListener("change", () => { all.checked = boxes.every((l) => l.querySelector("input").checked); });
     return el("label", { class: "pl-pick" }, b, el("span", { text: it.label }));
   });
+  all.checked = boxes.every((l) => l.querySelector("input").checked);
+  all.addEventListener("change", () => { for (const l of boxes) l.querySelector("input").checked = all.checked; });
   const msg = el("span", { class: "muted small" });
   return el("section", { class: "card plset" },
     el("h3", { text: "เตือนรอบซ่อมบำรุง" }),
-    el("p", { class: "muted small", text: "เตือน 3 ขั้น: เหลือไม่เกิน N วัน → ถึงวันครบกำหนด → เลยกำหนด แสดงที่แถบสรุปด้านบนของทุกหน้าและตัวเลขข้างเมนู “แผนซ่อมบำรุง” จนกว่าจะทำหรือกด “เลื่อนเตือน” — ลองดูล่วงหน้าได้ที่แถบเลื่อนในหน้าแผนซ่อมบำรุง" }),
+    el("p", { class: "muted small", text: "เตือน 3 ขั้น: เหลือไม่เกิน N วัน → ถึงวันครบกำหนด → เลยกำหนด แสดงเป็นตัวเลขข้างเมนู “แผนซ่อมบำรุง” จนกว่าจะทำหรือกด “เลื่อนเตือน” — ลองดูล่วงหน้าได้ที่แถบเลื่อนในหน้าแผนซ่อมบำรุง" }),
     el("label", { class: "inline" }, enabled, "เปิดการเตือนรอบซ่อมบำรุง"),
     el("div", { class: "mgset-time" }, el("label", { for: "plrSoon", text: "เริ่มเตือนเมื่อเหลือไม่เกิน (วัน)" }), soon),
-    el("p", { class: "muted small", text: "เตือนเรื่องอะไรบ้าง (ปกติเฉพาะเปลี่ยนน้ำมันเครื่อง)" }),
+    el("p", { class: "muted small", text: "เตือนเรื่องอะไรบ้าง (ปกติเตือนทุกเรื่อง)" }),
+    el("label", { class: "pl-pick pl-pickall" }, all, el("strong", { text: "เลือกทั้งหมด" })),
     el("div", { class: "pl-picks" }, ...boxes),
     el("div", { class: "pl-set-actions" }, el("button", { class: "btn small primary", type: "button", text: "บันทึก", onclick: async () => {
       try {
@@ -210,7 +215,7 @@ function renderSettings() {
   if (!data) return;
   const groups = el("section", { class: "card plset" },
     el("h3", { text: "กลุ่มของรถ: ระยะกม. หนึ่งรอบ เท่ากับกี่เดือน" }),
-    el("p", { class: "muted small", text: "รถแต่ละคันอยู่ในหนึ่งกลุ่ม (เลือกที่หน้ารถ) เดือนของทุกรายการคำนวณจากตรงนี้ เช่น 2 เดือน ต่อ 10,000 กม. แปลว่ารายการ 40,000 กม. ทำทุก 8 เดือน ใส่เดือน หรือ กม./วัน อย่างใดอย่างหนึ่ง (ถ้าใส่ทั้งสองอย่างใช้เดือน)" }),
+    el("p", { class: "muted small", text: "รถแต่ละคันอยู่ในหนึ่งกลุ่ม (เลือกได้ที่ “รถแต่ละคันใช้กลุ่มไหน” ด้านล่าง) เดือนของทุกรายการคำนวณจากตรงนี้ เช่น 2 เดือน ต่อ 10,000 กม. แปลว่ารายการ 40,000 กม. ทำทุก 8 เดือน ใส่เดือน หรือ กม./วัน อย่างใดอย่างหนึ่ง (ถ้าใส่ทั้งสองอย่างใช้เดือน)" }),
     el("div", { class: "pl-grp-head small muted" }, el("span", { text: "กลุ่ม" }), el("span", { text: "เดือนต่อรอบ" }), el("span", { text: "หรือ กม./วัน" }), el("span", {})),
     ...data.groups.map(groupRow));
   const rules = Object.entries(data.rule_sets).map(([rule, items]) =>
@@ -218,7 +223,7 @@ function renderSettings() {
       el("h3", { text: `${rule}: ระยะกม. ของแต่ละรายการ` }),
       el("p", { class: "muted small", text: rule === "รถเล็ก" ? "D-Max, Revo" : "NLR / NMR / NPR, รถ 6 ล้อ, รถ 10 ล้อ (Hino / Isuzu)" }),
       ...items.map((it) => kmRow(rule, it))));
-  fill($("plSetList"), reminderCard(), groups, ...rules);
+  fill($("plSetList"), reminderCard(), groups, ...rules, trucksCard());
 }
 
 function groupRow(g) {
@@ -231,10 +236,80 @@ function groupRow(g) {
     } catch (err) { plSettingMsg(msg, err.message); return; }
     renderSettings();
   };
-  return el("div", { class: "pl-grp-row" },
+  const reset = async () => {
+    try {
+      pl.settings = await api(`/api/plan/groups?code=${encodeURIComponent(g.code)}`, { method: "DELETE" });
+    } catch (err) { plSettingMsg(msg, err.message); return; }
+    renderSettings();
+  };
+  const def = g.default || {};
+  const defText = def.months_per_step ? `${plMonths(def.months_per_step)}` : def.km_per_day ? `${def.km_per_day} กม./วัน` : "";
+  return el("div", { class: `pl-grp-row${g.customised ? " custom" : ""}` },
     el("div", {}, el("strong", { text: `${g.code}` }), el("span", { text: ` ${g.label}` }),
-      el("div", { class: "muted small", text: `${g.trucks} คัน · ตอนนี้ ${plMonths(g.months)} ต่อ ${baht(g.step_km)} กม. ≈ ${g.implied_km_per_day ? Math.round(g.implied_km_per_day) : "–"} กม./วัน` })),
-    mo, kd, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }), msg));
+      el("div", { class: "muted small", text: `${g.trucks} คัน · ตอนนี้ ${plMonths(g.months)} ต่อ ${baht(g.step_km)} กม. ≈ ${g.implied_km_per_day ? Math.round(g.implied_km_per_day) : "–"} กม./วัน${defText ? ` · ค่าเริ่มต้น ${defText}` : ""}` })),
+    mo, kd, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }),
+      g.customised ? el("button", { class: "btn small", type: "button", text: "ค่าเริ่มต้น", onclick: reset }) : null, msg));
+}
+
+// Which truck follows which group. Picking only marks the row; nothing changes until "บันทึก" and a confirmation,
+// because the group decides every interval of the truck.
+function trucksCard() {
+  const data = pl.settings;
+  if (!data.vehicles || !data.vehicles.length) return null;
+  const staged = new Map();                                       // vehicle id -> new group code ("" = no plan)
+  const byCode = Object.fromEntries(data.groups.map((g) => [g.code, g]));
+  const name = (code) => (code ? `${code}${byCode[code] ? ` ${byCode[code].label}` : ""}` : "ไม่ทำตาราง");
+  const msg = el("span", { class: "muted small" });
+  const saveBtn = el("button", { class: "btn small primary", type: "button", text: "บันทึก", disabled: true });
+  const undoBtn = el("button", { class: "btn small", type: "button", text: "ยกเลิกที่แก้", hidden: true });
+  const q = el("input", { type: "search", placeholder: "ค้นหา: เบอร์รถ ทะเบียน", "aria-label": "ค้นหารถ" });
+  const rows = [];
+  const sync = () => {
+    saveBtn.disabled = staged.size === 0;
+    saveBtn.textContent = staged.size ? `บันทึกการเปลี่ยนกลุ่ม (${staged.size} คัน)` : "บันทึก";
+    undoBtn.hidden = staged.size === 0;
+  };
+  const list = el("div", { class: "pl-trucks" });
+  let branch = null;
+  for (const v of data.vehicles) {
+    if (v.branch !== branch) { branch = v.branch; list.append(el("div", { class: "pl-trucks-branch muted small", text: branch || "ไม่ระบุสาขา" })); }
+    const sel = el("select", { "aria-label": `กลุ่มของ ${plLabel(v)}` },
+      el("option", { value: "", text: "— ไม่ทำตาราง —" }), ...data.groups.map((g) => el("option", { value: g.code, text: `${g.code} ${g.label}` })));
+    sel.value = v.group_code || "";
+    const row = el("label", { class: "pl-truck" }, el("span", { class: "pl-truck-name", text: plLabel(v) || "–" }), sel);
+    sel.addEventListener("change", () => {
+      if (sel.value === (v.group_code || "")) staged.delete(v.id); else staged.set(v.id, sel.value);
+      row.classList.toggle("changed", staged.has(v.id));
+      sync();
+    });
+    rows.push({ v, row, sel });
+    list.append(row);
+  }
+  q.addEventListener("input", () => {
+    const t = q.value.trim().toLowerCase();
+    for (const { v, row } of rows) row.hidden = !!t && ![v.vehicle_number, v.plate_number, v.nickname].filter(Boolean).join(" ").toLowerCase().includes(t);
+  });
+  undoBtn.addEventListener("click", () => {
+    for (const { v, row, sel } of rows) { sel.value = v.group_code || ""; row.classList.remove("changed"); }
+    staged.clear();
+    sync();
+  });
+  saveBtn.addEventListener("click", async () => {
+    const changes = [...staged].map(([id, code]) => ({ id, code, v: data.vehicles.find((x) => x.id === id) }));
+    const lines = changes.slice(0, 15).map((c) => `• ${plLabel(c.v)}: ${name(c.v.group_code)} → ${name(c.code)}`);
+    if (changes.length > 15) lines.push(`และอีก ${changes.length - 15} คัน`);
+    if (!confirm(`เปลี่ยนกลุ่มของรถ ${changes.length} คัน\n\n${lines.join("\n")}\n\nรอบเวลาของทุกรายการของรถเหล่านี้จะคำนวณใหม่ทั้งหมด ยืนยันไหม?`)) return;
+    saveBtn.disabled = true;
+    try {
+      pl.settings = await api("/api/plan/vehicle-groups", jsonOpts("PUT", { changes: changes.map((c) => ({ vehicle_id: c.id, group_code: c.code })) }));
+    } catch (err) { plSettingMsg(msg, err.message); saveBtn.disabled = false; return; }
+    if (typeof loadToday === "function") loadToday(true);
+    renderSettings();
+  });
+  return el("section", { class: "card plset pl-trucks-card" },
+    el("h3", { text: "รถแต่ละคันใช้กลุ่มไหน" }),
+    el("p", { class: "muted small", text: "เลือกกลุ่มของแต่ละคัน แถวที่แก้จะเป็นสีเหลือง ยังไม่เปลี่ยนจริงจนกว่าจะกด “บันทึกการเปลี่ยนกลุ่ม” และยืนยัน" }),
+    q, list, el("div", { class: "pl-set-actions pl-trucks-actions" }, saveBtn, undoBtn, msg));
 }
 
 function kmRow(rule, it) {
@@ -283,15 +358,15 @@ function truckPlanNodes(d) {
   const head = el("div", { class: "mchead" }, el("h3", { class: "section-title", text: "แผนซ่อมบำรุง" }), el("span", { class: "grow" }),
     d.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, []) }) : null,
     el("button", { class: "btn small", type: "button", text: "+ ระยะทาง (GPS / เลขไมล์)", onclick: () => openReadingDialog(v) }));
-  // The group decides every interval of this truck, so it is shown as plain text: changing it takes a button, a dialog and a confirmation.
+  // The group decides every interval of this truck: shown here, changed on the plan's settings (all trucks in one place, with a confirmation).
   const groupBar = el("div", { class: "card pl-groupbar" },
     el("div", { class: "pl-groupinfo" },
       el("div", { class: "muted small", text: "กลุ่มของรถคันนี้" }),
       el("div", {}, d.group ? el("strong", { text: `${d.group.code} · ${d.group.label}` }) : el("strong", { class: "muted", text: "ยังไม่ได้เลือกกลุ่ม (ไม่ทำตาราง)" })),
       d.group ? el("div", { class: "muted small", text: `ทุกรายการนับ ${plMonths(d.group.months)} ต่อ ${baht(d.group.step_km)} กม. (อย่างไหนถึงก่อน)` }) : null),
-    el("button", { class: "btn small", type: "button", text: d.group ? "เปลี่ยนกลุ่ม…" : "เลือกกลุ่ม…", onclick: () => openGroupDialog(d) }));
+    el("a", { class: "muted small", href: "#plan-settings", text: "เปลี่ยนกลุ่มได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ" }));
   if (!d.has_plan) {
-    return [head, groupBar, el("p", { class: "muted", text: "ยังไม่ได้เลือกกลุ่ม จึงยังไม่มีตาราง — กด “เลือกกลุ่ม…” (หรือปล่อยว่างถ้ารถคันนี้ไม่ต้องทำตาราง)" })];
+    return [head, groupBar, el("p", { class: "muted", text: "ยังไม่ได้เลือกกลุ่ม จึงยังไม่มีตาราง — เลือกได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ (หรือปล่อยว่างถ้ารถคันนี้ไม่ต้องทำตาราง)" })];
   }
   const odo = d.odometer ? ` · เลขไมล์ล่าสุด ${plKm(d.odometer.km)} (${beDate(d.odometer.date)})` : "";
   // History = the repair records themselves (bills and jobs recorded by hand): the same records as สมุดงานซ่อม, edited there.
@@ -452,23 +527,6 @@ function openRecordDialog(v, preset = []) {
   plOpenDialog("บันทึกว่าทำแล้ว", "บันทึก");
 }
 
-// Changing a truck's group changes every interval of that truck, so it is a deliberate step: pick, read the warning, confirm.
-function openGroupDialog(d) {
-  pl.dlg = { kind: "group", vehicle: d.vehicle, draft: { group_code: d.group_code || "" }, current: d.group_code || "" };
-  const sel = el("select", { id: "plGroupSel", "aria-label": "กลุ่มใหม่" },
-    el("option", { value: "", text: "— ไม่ทำตาราง —" }),
-    ...d.groups.map((g) => el("option", { value: g.code, text: `${g.code} · ${g.label}` })));
-  sel.value = pl.dlg.current;
-  const save = $("pdlgSave");
-  sel.addEventListener("change", () => { pl.dlg.draft.group_code = sel.value; save.disabled = sel.value === pl.dlg.current; });
-  fill($("pdlgBody"),
-    el("p", { class: "muted small", text: plLabel({ ...d.vehicle }) }),
-    el("div", { class: "edit-banner", text: "เปลี่ยนกลุ่มแล้ว รอบเวลาของทุกรายการของรถคันนี้จะคำนวณใหม่ทั้งหมด ถ้าไม่แน่ใจ ให้กดยกเลิก" }),
-    el("div", { class: "mfield" }, el("label", { for: "plGroupSel", text: "กลุ่มใหม่" }), sel));
-  plOpenDialog(d.group_code ? "เปลี่ยนกลุ่มของรถคันนี้" : "เลือกกลุ่มของรถคันนี้", "ยืนยันเปลี่ยนกลุ่ม");
-  save.disabled = true;                              // nothing to confirm until a different group is picked
-}
-
 function openReadingDialog(v) {
   pl.dlg = { kind: "reading", vehicle: v, draft: { kind: "gps", start_date: "", end_date: plToday(), km: "", notes: "" } };
   const d = pl.dlg.draft;
@@ -499,8 +557,6 @@ async function savePlanDialog() {
         performed_by: d.performed_by, notes: d.notes }));
     } else if (dlg.kind === "snooze") {
       await api("/api/plan/snooze", jsonOpts("POST", { vehicle_id: dlg.vehicle.id, item_key: dlg.item.key, days: d.days }));
-    } else if (dlg.kind === "group") {
-      await api(`/api/plan/vehicles/${dlg.vehicle.id}/group`, jsonOpts("PUT", { group_code: d.group_code }));
     } else {
       await api("/api/plan/readings", jsonOpts("POST", { vehicle_id: dlg.vehicle.id, kind: d.kind, start_date: d.kind === "gps" ? d.start_date : "", end_date: d.end_date, km: d.km, notes: d.notes }));
     }

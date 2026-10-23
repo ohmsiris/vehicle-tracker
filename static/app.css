@@ -779,7 +779,17 @@ table.pl-chart { border-collapse: separate; border-spacing: 0; width: 100%; min-
 .pl-grp-row, .pl-km-row { padding: 8px 0; border-top: 1px solid var(--line); }
 .pl-km-row.custom { background: var(--warn-soft); margin: 0 -8px; padding: 8px; border-radius: var(--radius-sm); }
 .pl-grp-row input, .pl-km-row input { width: 100%; }
-.plsetgrid > .plset:first-child { grid-column: 1 / -1; }
+.plsetgrid > .plset:first-child, .plsetgrid > .pl-trucks-card { grid-column: 1 / -1; }
+.pl-grp-row.custom strong { color: var(--accent); }
+.pl-trucks-card input[type=search] { width: 100%; max-width: 360px; margin: 6px 0 4px; }
+.pl-trucks { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 4px 16px; margin: 6px 0 10px; }
+.pl-trucks-branch { grid-column: 1 / -1; margin-top: 10px; font-weight: 600; }
+.pl-truck { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; align-items: center; margin: 0; padding: 3px 6px; border-radius: var(--radius-sm); font-weight: 400; }
+.pl-truck[hidden] { display: none; }
+.pl-truck.changed { background: var(--warn-soft); }
+.pl-truck-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-truck select { width: 100%; padding-top: 4px; padding-bottom: 4px; }
+.pl-trucks-actions { position: sticky; bottom: 0; background: var(--surface); padding: 8px 0; }
 @media (max-width: 960px) {
   .pl-grp-head { display: none; }
   .pl-grp-row { grid-template-columns: 1fr 1fr; }

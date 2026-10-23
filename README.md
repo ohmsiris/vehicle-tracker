@@ -416,8 +416,11 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   truck's engine filter that day -- `classify_line`; a top-up "(เติม)" and parts such as "สกรูแรงดันน้ำมันเครื่อง" are
   ignored) and records entered by hand; the mileage on the record is used when it has one. The truck's page lists them
   under "ประวัติที่ทำแล้ว" with a "ดู / แก้ไข" link to the record.
-- **The group is not a dropdown on the page**: it is shown as text, and "เปลี่ยนกลุ่ม…" opens a dialog with a warning
-  whose confirm button stays disabled until a different group is picked, so it cannot be changed by a mis-click.
+- **Which truck follows which group is set in one place**: `#plan` › ตั้งค่าระยะ › "รถแต่ละคันใช้กลุ่มไหน" (`#plan-settings`),
+  every active truck by branch with a dropdown. Picking only marks the row yellow; nothing changes until "บันทึกการเปลี่ยนกลุ่ม
+  (N คัน)" and a confirmation listing each change (`PUT /api/plan/vehicle-groups`). The truck's page only shows its group.
+  A group whose months / km per day were changed has a "ค่าเริ่มต้น" button (`DELETE /api/plan/groups?code=`).
+- **Reminders cover every item by default** ("เลือกทั้งหมด" on the settings card); untick what you do not want.
 - **Real driving** only matters when it is known: odometer readings, GPS distance for a period (**+ ระยะทาง**, 12
   trucks seeded by `scripts/seed_gps.py`) -- then a truck that drives more than its group assumes gets its due date
   brought forward. Otherwise the months decide.
