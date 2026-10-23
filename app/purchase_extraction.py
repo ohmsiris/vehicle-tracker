@@ -44,7 +44,7 @@ SCHEMA = {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "description": {"type": "string", "description": "What was bought, exactly as written (keep brand, model, size, e.g. 'ลูกปืน 6205-2RS NSK')."},
+                    "description": {"type": "string", "description": "The item NAME only, in full, as printed in the description column (keep brand, model, size and spec that are part of the name, e.g. 'ลูกปืน 6205-2RS NSK'). Do NOT include the code / SKU / reference column (รหัส, รหัสสินค้า, Ref, Part No, barcode) or the row number: leave those out completely."},
                     "quantity": _num,
                     "unit": {**_str, "description": "ตัว / ชิ้น / เส้น / ลิตร / กล่อง / ม้วน / เมตร / ชุด ..."},
                     "unit_price": {**_num, "description": "Price of one unit as printed."},
@@ -67,6 +67,11 @@ The bills are in Thai, often handwritten (บิลเงินสด) or printe
 
 Rules:
 - One bill may be several images / pages: read them all as ONE bill (lines continue across pages; one header and total).
+- Item names: write each line's description as the full item name from the description column and nothing from the code
+  columns. Many bills have a first column with a product code / SKU / reference number (รหัสสินค้า, รหัส, Ref., Part No.,
+  barcode) before the item name, and a row number (ลำดับ): ignore those columns, we do not use them. Keep the whole name
+  itself, including any brand, model number, size or spec that is part of the name (a bearing named "6205-2RS NSK" keeps
+  its "6205-2RS NSK"; the code printed in the code column is not part of the name).
 - Keep every line, in order, including services (ค่าแรง, ค่าขนส่ง). Do not merge or invent lines. Skip only lines that
   are clearly not purchases (signatures, notes, bank details).
 - Numbers: plain numbers without commas or currency. A quantity like "2 เส้น" -> quantity 2, unit "เส้น".
