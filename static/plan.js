@@ -257,26 +257,32 @@ function groupRow(g) {
 // belong to; they join every matching truck's plan table and reminders like the built-in ones, and bills find them by their words.
 function openOwnItemDialog(row, rule = null) {
   const data = pl.settings;
+  // Added from the รถเล็ก / รถใหญ่ list = for that kind of truck only, so the form just asks "how many km" and "how many months".
+  // (The choice stays in "ตัวเลือกเพิ่มเติม" for an item that is for both.)
+  const scope = row ? (row.applies_to || "all") : rule === "รถเล็ก" ? "small" : rule === "รถใหญ่" ? "big" : "all";
+  const kmOf = (r) => (r ? (scope === "big" ? r.km_big : scope === "small" ? r.km_small : (r.km_small || r.km_big)) : "") || "";
   pl.dlg = { kind: "ownitem", key: row ? row.key : null, draft: {
-    rule, label: row ? row.label : "", group_name: row ? row.group_name : "อื่นๆ", km_small: row && row.km_small ? row.km_small : "", km_big: row && row.km_big ? row.km_big : "",
+    scope, label: row ? row.label : "", group_name: row ? row.group_name : "อื่นๆ", km: kmOf(row),
     months: row && row.months ? Number(row.months) : "", words: row ? (row.words || []).join(", ") : "", category: row ? row.category : "อื่นๆ" } };
   const d = pl.dlg.draft;
+  const forWhom = { small: "รถเล็ก (D-Max, Revo)", big: "รถใหญ่ (NLR, 6 / 10 ล้อ)", all: "รถเล็กและรถใหญ่" };
+  const who = el("p", { class: "muted small", id: "ownWho" });
+  const showWho = () => { who.textContent = `ใช้กับ: ${forWhom[d.scope]}`; };
+  showWho();
   fill($("pdlgBody"),
+    who,
     el("div", { class: "mfields" },
       mfield(d, "label", "ชื่อรายการ", { wide: true, maxlength: 80, placeholder: "เช่น สายพานไทม์มิ่ง" }),
-      mfield(d, "km_small", "รถเล็ก (D-Max, Revo): ทุกกี่ กม.", { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถเล็ก" }),
-      mfield(d, "km_big", "รถใหญ่ (NLR, 6 / 10 ล้อ): ทุกกี่ กม.", { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถใหญ่" }),
+      mfield(d, "km", "ทุกกี่ กม.", { type: "number", placeholder: "เช่น 100000" }),
       mfield(d, "months", "หรือทุกกี่เดือน", { type: "number", placeholder: "เช่น 12" }),
-      mfield(d, "words", "คำในบิลที่นับว่าทำแล้ว (คั่นด้วย ,)", { maxlength: 400, placeholder: "ชื่อรายการนับอยู่แล้ว เช่น ไทม์มิ่ง, timing belt" })),
-    el("ul", { class: "muted small pl-hint" },
-      el("li", { text: "ใส่กม. อย่างเดียว = เดือนคิดจากกลุ่มของรถแต่ละคัน" }),
-      el("li", { text: "ใส่เดือนอย่างเดียว = ใช้กับรถทุกคัน เช่น ถังดับเพลิงทุก 12 เดือน" }),
-      el("li", { text: "ใส่ทั้งสองอย่าง = อย่างไหนถึงก่อน" })),
-    el("details", { class: "pl-more" }, el("summary", { class: "small", text: "ตัวเลือกเพิ่มเติม (กลุ่มในตาราง · หมวดของบิล)" }),
+      mfield(d, "words", "คำในบิลที่นับว่าทำแล้ว (คั่นด้วย ,)", { wide: true, maxlength: 400, placeholder: "ชื่อรายการนับอยู่แล้ว เช่น ไทม์มิ่ง, timing belt" })),
+    el("p", { class: "muted small", text: "ใส่กม. หรือเดือน อย่างใดอย่างหนึ่งก็ได้ ถ้าใส่ทั้งสองอย่างจะนับอย่างไหนถึงก่อน (ใส่กม. อย่างเดียว เดือนคิดจากกลุ่มของรถแต่ละคัน)" }),
+    el("details", { class: "pl-more" }, el("summary", { class: "small", text: "ตัวเลือกเพิ่มเติม (ใช้กับรถกลุ่มไหน · กลุ่มในตาราง · หมวดของบิล)" }),
       el("div", { class: "mfields" },
+        mselect(d, "scope", "ใช้กับ", [["small", forWhom.small], ["big", forWhom.big], ["all", forWhom.all]], { blank: forWhom.all, onChange: showWho }),
         mselect(d, "group_name", "อยู่ในกลุ่มไหนของตาราง", (data.item_groups || []).map((g) => [g, g]), { blank: "อื่นๆ" }),
         mselect(d, "category", "หมวดของบิลเมื่อกด “บันทึกว่าทำแล้ว”", (data.categories || []).map((c) => [c, c]), { blank: "อื่นๆ" }))));
-  plOpenDialog(row ? "แก้ไขรายการ" : "เพิ่มรายการบำรุงรักษา", "บันทึก");
+  plOpenDialog(row ? "แก้ไขรายการ" : `เพิ่มรายการ — ${rule || "รถทุกกลุ่ม"}`, "บันทึก");
   setTimeout(() => { const f = $("mf_label"); if (f && !row) f.focus(); }, 50);
 }
 
@@ -596,7 +602,8 @@ async function savePlanDialog() {
       await api("/api/plan/snooze", jsonOpts("POST", { vehicle_id: dlg.vehicle.id, item_key: dlg.item.key, days: d.days }));
     } else if (dlg.kind === "ownitem") {
       pl.settings = await api(dlg.key ? `/api/plan/custom-items/${dlg.key}` : "/api/plan/custom-items", jsonOpts(dlg.key ? "PATCH" : "POST", {
-        label: d.label, group_name: d.group_name, km_small: d.km_small, km_big: d.km_big, months: d.months, words: d.words, category: d.category }));
+        label: d.label, group_name: d.group_name, applies_to: d.scope || "all", km_small: d.scope === "big" ? "" : d.km, km_big: d.scope === "small" ? "" : d.km,
+        months: d.months, words: d.words, category: d.category }));
       $("planDialog").close();
       await loadSettings();                          // (also re-reads the reminder list: the new item is in it)
       return;

@@ -468,6 +468,9 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   built-in item: in every matching truck's chart, calculator, reminders ("เลือกทั้งหมด" includes it), "บันทึกว่าทำแล้ว", the km
   per rule set can be changed in the lists (no special badge: they are just more lines). "เอาออก" hides it (records already made stay). The built-in
   items stay in `app/service_plan.py`; `all_items()`, `km_table()` and `classify_line()` merge both.
+- The add form (`schema_v19.sql`: `applies_to` small / big / all): an item added from the รถเล็ก list is for the small trucks
+  only (and the same for รถใหญ่), so the form just asks "ทุกกี่ กม." and "หรือทุกกี่เดือน" (plus the words); "ใช้กับ" in
+  "ตัวเลือกเพิ่มเติม" can make it for both. Months only with no km: that kind of truck only (items made for both: every truck).
 - Bill matching notes: a line that starts with "อัดจารบี" (or "ค่าอัดจารบี") counts as the wheel-bearing grease service -- the
   mechanic greases everything in one go; a bare "จารบี 1 กระป๋อง" or "หัวอัดจาระบี" is a part and does not. The group rows on the
   settings page show what the group's engine-oil round is (km as set for its rule set, and what that is in months), so changing

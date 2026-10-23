@@ -107,12 +107,15 @@ def category_of(key: str) -> str:
 def km_table(rule_set: str) -> dict:
     """key -> km for one rule set: the built-in table plus our items that apply to it (km may be None for a months-only item)."""
     out = dict(DEFAULT_KM.get(rule_set, {}))
-    col = "km_small" if rule_set == SMALL else "km_big"
+    col, want = ("km_small", "small") if rule_set == SMALL else ("km_big", "big")
     for r in _custom():
+        scope = r.get("applies_to") or "all"
+        if scope not in ("all", want):
+            continue                                   # made for the other kind of truck
         if r.get(col):
             out[r["key"]] = int(r[col])
-        elif r.get("months") and not r.get("km_small") and not r.get("km_big"):
-            out[r["key"]] = None                       # months only: applies to every truck
+        elif r.get("months") and (scope == want or (not r.get("km_small") and not r.get("km_big"))):
+            out[r["key"]] = None                       # months only: this kind of truck (or every truck, for an item made for both)
     return out
 
 
@@ -992,10 +995,17 @@ def clean_custom_item(data: dict, *, existing: Optional[dict] = None, others: li
             out[col] = _int(data.get(col), what, maximum=1_000_000)
             if out[col] == 0:
                 out[col] = None
+    if creating or "applies_to" in data:
+        scope = data.get("applies_to") or "all"
+        if scope not in ("all", "small", "big"):
+            raise InvalidPlan("เลือกว่าใช้กับรถเล็ก รถใหญ่ หรือทั้งสอง")
+        out["applies_to"] = scope
     if creating or "months" in data:
         out["months"] = _positive(data.get("months"), "จำนวนเดือน", maximum=120)
     if creating or "words" in data:
         raw = data.get("words")
+        if raw is None:
+            raw = []
         if isinstance(raw, str):
             raw = [w for w in re.split(r"[,\n]", raw)]
         if not isinstance(raw, list):
@@ -1008,8 +1018,12 @@ def clean_custom_item(data: dict, *, existing: Optional[dict] = None, others: li
                 words.append(word)
         out["words"] = words[:20]
     final = {**(existing or {}), **out}
+    scope = final.get("applies_to") or "all"
+    for other, col in (("big", "km_small"), ("small", "km_big")):          # an item for one kind of truck has km for that kind only
+        if scope == other and final.get(col):
+            out[col] = final[col] = None
     if not (final.get("km_small") or final.get("km_big") or final.get("months")):
-        raise InvalidPlan("ใส่ระยะอย่างน้อยหนึ่งอย่าง: กม. ของรถเล็ก / รถใหญ่ หรือจำนวนเดือน")
+        raise InvalidPlan("ใส่ระยะอย่างน้อยหนึ่งอย่าง: กม. หรือจำนวนเดือน")
     return out
 
 

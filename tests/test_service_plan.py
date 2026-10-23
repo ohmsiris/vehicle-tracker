@@ -454,6 +454,21 @@ def test_settings_lists_our_items_and_lets_km_be_changed_only_where_there_is_km(
         sp.clean_interval({"vehicle_class": sp.BIG, "item_key": "c_belt", "interval_km": "1000"})         # not for the big trucks
 
 
+def test_an_item_made_for_one_kind_of_truck_stays_with_it(monkeypatch):
+    rows = [{"key": "c_a", "label": "แบต", "months": 24, "applies_to": "small", "km_small": None, "km_big": None, "words": [], "active": True},
+            {"key": "c_b", "label": "เพลา", "months": None, "applies_to": "big", "km_small": None, "km_big": 100_000, "words": [], "active": True},
+            {"key": "c_c", "label": "ทั้งคู่", "months": 6, "applies_to": "all", "km_small": 30_000, "km_big": 30_000, "words": [], "active": True}]
+    monkeypatch.setitem(sp._CUSTOM, "rows", rows)
+    monkeypatch.setitem(sp._CUSTOM, "at", 1e18)
+    small, big = sp.km_table(sp.SMALL), sp.km_table(sp.BIG)
+    assert "c_a" in small and small["c_a"] is None and "c_a" not in big                  # months only, small trucks only
+    assert "c_b" in big and big["c_b"] == 100_000 and "c_b" not in small
+    assert small["c_c"] == 30_000 and big["c_c"] == 30_000
+    assert sp.clean_custom_item({"label": "x", "applies_to": "small", "km_small": 1000, "km_big": 2000}, others=[])["km_big"] is None
+    with pytest.raises(sp.InvalidPlan):
+        sp.clean_custom_item({"label": "x", "applies_to": "everyone", "months": 3}, others=[])
+
+
 def test_cleaning_a_new_item():
     out = sp.clean_custom_item({"label": "  แบตเตอรี่  ", "km_small": "", "km_big": "80000", "months": "24", "words": "แบต, แบตเตอรี่ ,แบต", "category": "ระบบไฟฟ้า"}, others=[])
     assert out["label"] == "แบตเตอรี่" and out["km_small"] is None and out["km_big"] == 80_000 and out["months"] == 24
