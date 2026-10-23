@@ -46,7 +46,7 @@
       <button id="navDash" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>ภาพรวม</span></button>
       <button id="navBoard" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>สถานะงานซ่อม</span></button>
       <div class="side-sep" role="separator"></div>
-      <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกงานซ่อม / คิวซ่อม</span></button>
+      <button id="navBills" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>บันทึกงานซ่อม</span></button>
       <div class="side-sep" role="separator"></div>
       <button id="navWhere" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg><span>รถอยู่ที่ไหน</span></button>
       <button id="navLog" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>สมุดงานซ่อม</span></button>
@@ -156,7 +156,7 @@
   <!-- ============ Bills: step 1, capture ============ -->
   <section id="captureView" hidden>
     <div class="page-head">
-      <h2 class="page-title">บันทึกงานซ่อม / คิวซ่อม</h2>
+      <h2 class="page-title">บันทึกงานซ่อม</h2>
       <p class="muted small">รถเสีย → แจ้งซ่อม เข้าคิว · มีบิลจากร้าน → อัปโหลดให้ระบบอ่าน · ช่างทำเองไม่มีบิล → กรอกเอง</p>
     </div>
 
@@ -219,9 +219,8 @@
         <h2>ใครทำ เมื่อไหร่</h2>
         <div class="grid">
           <label class="field"><span>ผู้ซ่อม</span>
-            <input id="mWho" type="text" list="mWhoList" maxlength="200" autocomplete="off" placeholder="เช่น ช่างเอ๋">
-            <datalist id="mWhoList"></datalist>
-            <div id="mWhoChips" class="chips"></div>
+            <select id="mWhoSel" aria-label="ผู้ซ่อม"></select>
+            <input id="mWho" type="text" maxlength="200" autocomplete="off" placeholder="พิมพ์ชื่อผู้ซ่อม / ร้าน" hidden>
           </label>
           <label class="field"><span>วันที่ทำเสร็จ (ปีที่แสดงใต้ช่อง เป็น พ.ศ.)</span>
             <div><input id="mDate" type="date"><div id="mDateCap" class="datecap"></div></div>

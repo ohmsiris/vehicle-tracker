@@ -61,12 +61,40 @@ function showErrorIn(id, text) {
 function prepareManual() {
   if (!$("mDate").value) $("mDate").value = todayISO();
   $("mDateCap").textContent = dateCaption($("mDate").value);
-  if (!$("mWho").value) $("mWho").value = board.fixers[0] || "ช่างเอ๋";
-  $("mWhoList").replaceChildren(...board.fixers.map((n) => el("option", { value: n })));
-  $("mWhoChips").replaceChildren(...board.fixers.slice(0, 6).map((n) => el("button", { class: "chipbtn", type: "button", text: n, onclick: () => { $("mWho").value = n; } })));
+  fillWhoSelect();
+  if (!$("mWho").value) setWho("ช่างเอ๋");
   if (!mRows().length) addManualRow({});
   renderManualFixes();
   manualTotals();
+}
+
+// ---- who did it: the in-house mechanic first, then every shop (a shop with several departments -- the Isuzu dealership's
+// service centre and body shop -- once per department), then "อื่นๆ" to type a name. The text box mWho holds the value.
+const WHO_OTHER = "__other";
+
+function whoChoices() {
+  const dir = board.shopContacts || {};
+  const inHouse = board.shops.filter((s) => s === "ซ่อมในโรงงาน").flatMap((s) => ((dir[s] || {}).contacts || []).map((c) => c.label));
+  const shops = board.shops.filter((s) => s !== "ซ่อมในโรงงาน").flatMap((s) => {
+    const cs = (dir[s] || {}).contacts || [];
+    return cs.length > 1 ? cs.map((c) => `${s} (${c.label})`) : [s];
+  });
+  return [...new Set([...(inHouse.length ? inHouse : ["ช่างเอ๋"]), ...shops])];
+}
+
+function fillWhoSelect() {
+  const sel = $("mWhoSel");
+  const keep = sel.value;
+  sel.replaceChildren(...whoChoices().map((n) => el("option", { value: n, text: n })), el("option", { value: WHO_OTHER, text: "อื่นๆ (พิมพ์เอง)" }));
+  if (keep) sel.value = keep;
+}
+
+function setWho(name) {
+  const sel = $("mWhoSel");
+  const known = [...sel.options].some((o) => o.value === name && o.value !== WHO_OTHER);
+  sel.value = known ? name : WHO_OTHER;
+  $("mWho").value = name || "";
+  $("mWho").hidden = known;
 }
 
 // ------------------------------------------------------------------- rows
@@ -198,7 +226,8 @@ function startManualFor(request, who, dateISO) {
   $("vehicleSelect").value = idx >= 0 ? String(idx) : "";
   showView("capture");
   setMode("manual");
-  $("mWho").value = who || board.fixers[0] || "ช่างเอ๋";
+  fillWhoSelect();
+  setWho(who || "ช่างเอ๋");
   $("mDate").value = dateISO || todayISO();
   $("mDateCap").textContent = dateCaption($("mDate").value);
   const blank = mRows().find(isBlankRow);
@@ -214,6 +243,12 @@ function initManual() {
   $("modeManual").addEventListener("click", () => setMode("manual"));
   setMode(manual.mode);
   $("mAddRow").addEventListener("click", () => addManualRow({}));
+  $("mWhoSel").addEventListener("change", () => {
+    const other = $("mWhoSel").value === WHO_OTHER;
+    $("mWho").hidden = !other;
+    $("mWho").value = other ? "" : $("mWhoSel").value;
+    if (other) $("mWho").focus();
+  });
   // Typed names get a category automatically when you leave the box; this does every row at once (or retries).
   // Rows whose category came from a shortcut button, or that you picked yourself, are left alone.
   $("mRecat").addEventListener("click", () => {
