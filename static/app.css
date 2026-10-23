@@ -1011,4 +1011,5 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 .progress-history { display: grid; gap: 4px; margin-top: 12px; max-height: 220px; overflow-y: auto; }
 .progress-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
 
+.pl-add-row { padding: 12px 0 2px; border-top: 1px solid var(--line); margin-top: 4px; }
 .pl-own-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }

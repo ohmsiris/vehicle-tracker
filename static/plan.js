@@ -222,8 +222,9 @@ function renderSettings() {
     el("section", { class: "card plset" },
       el("h3", { text: `${rule}: ระยะกม. ของแต่ละรายการ` }),
       el("p", { class: "muted small", text: rule === "รถเล็ก" ? "D-Max, Revo" : "NLR / NMR / NPR, รถ 6 ล้อ, รถ 10 ล้อ (Hino / Isuzu)" }),
-      ...items.map((it) => kmRow(rule, it))));
-  fill($("plSetList"), reminderCard(), groups, ...rules, ownItemsCard(), trucksCard());
+      ...items.map((it) => kmRow(rule, it)),
+      el("div", { class: "pl-add-row" }, el("button", { class: "btn small", type: "button", text: "+ เพิ่มรายการ", onclick: () => openOwnItemDialog(null, rule) }))));
+  fill($("plSetList"), reminderCard(), groups, ...rules, trucksCard());
 }
 
 function groupRow(g) {
@@ -251,43 +252,28 @@ function groupRow(g) {
       g.customised ? el("button", { class: "btn small", type: "button", text: "ค่าเริ่มต้น", onclick: reset }) : null, msg));
 }
 
-// Items we add ourselves: something new learnt about what a truck needs (a timing belt, the battery, the fire extinguisher).
-// They join every truck's plan table and reminders like the built-in ones, and are found on bills by their words.
-function ownItemsCard() {
-  const data = pl.settings;
-  const items = data.own_items || [];
-  const applies = (r) => [r.km_small ? `รถเล็กทุก ${baht(r.km_small)} กม.` : null, r.km_big ? `รถใหญ่ทุก ${baht(r.km_big)} กม.` : null,
-    r.months ? `ทุก ${plMonths(Number(r.months))}${!r.km_small && !r.km_big ? " (รถทุกคัน)" : ""}` : null].filter(Boolean).join(" · ");
-  return el("section", { class: "card plset pl-wide" },
-    el("div", { class: "mchead" }, el("h3", { text: "รายการที่เพิ่มเอง" }), el("span", { class: "grow" }),
-      el("button", { class: "btn small", type: "button", text: "+ เพิ่มรายการ", onclick: () => openOwnItemDialog(null) })),
-    el("p", { class: "muted small", text: "เจอข้อมูลใหม่ว่าควรทำอะไรเพิ่ม เช่น สายพานไทม์มิ่ง แบตเตอรี่ ถังดับเพลิง — เพิ่มที่นี่ แล้วจะขึ้นในตารางและการเตือนของรถที่เกี่ยวข้องทุกคัน เหมือนรายการอื่น และถ้าบิลเขียนคำที่ตั้งไว้ ระบบจะนับว่าทำแล้ว" }),
-    ...(items.length ? items.map((r) => el("div", { class: "pl-own-row" },
-      el("div", {}, el("strong", { text: r.label }), el("div", { class: "muted small", text: [applies(r), r.group_name, (r.words || []).length ? `คำในบิล: ${r.words.join(", ")}` : null].filter(Boolean).join(" · ") })),
-      el("div", { class: "pl-set-actions" },
-        el("button", { class: "btn small", type: "button", text: "แก้ไข", onclick: () => openOwnItemDialog(r) }),
-        el("button", { class: "btn small danger", type: "button", text: "เอาออก", onclick: () => removeOwnItem(r) }))))
-      : [el("p", { class: "muted small", text: "ยังไม่มีรายการที่เพิ่มเอง" })]));
-}
-
-function openOwnItemDialog(row) {
+// Items we add ourselves (a timing belt, the battery, the fire extinguisher): added at the bottom of the รถเล็ก / รถใหญ่ list they
+// belong to; they join every matching truck's plan table and reminders like the built-in ones, and bills find them by their words.
+function openOwnItemDialog(row, rule = null) {
   const data = pl.settings;
   pl.dlg = { kind: "ownitem", key: row ? row.key : null, draft: {
-    label: row ? row.label : "", group_name: row ? row.group_name : "อื่นๆ", km_small: row && row.km_small ? row.km_small : "", km_big: row && row.km_big ? row.km_big : "",
+    rule, label: row ? row.label : "", group_name: row ? row.group_name : "อื่นๆ", km_small: row && row.km_small ? row.km_small : "", km_big: row && row.km_big ? row.km_big : "",
     months: row && row.months ? Number(row.months) : "", words: row ? (row.words || []).join(", ") : "", category: row ? row.category : "อื่นๆ" } };
   const d = pl.dlg.draft;
   fill($("pdlgBody"),
-    el("p", { class: "muted small", text: row ? "แก้ไขรายการนี้ — รายการที่ทำไปแล้วในอดีตยังอยู่เหมือนเดิม" : "ใส่อย่างน้อยหนึ่งอย่าง: กม. ของรถเล็ก / รถใหญ่ หรือจำนวนเดือน" }),
+    el("p", { class: "muted small", text: row ? "แก้ไขรายการนี้ — รายการที่ทำไปแล้วในอดีตยังอยู่เหมือนเดิม"
+      : rule ? `เพิ่มให้รถกลุ่ม “${rule}” — ใส่ กม. ของ${rule} ถ้าใช้กับอีกกลุ่มด้วยก็ใส่ช่องของอีกกลุ่ม หรือใส่จำนวนเดือนอย่างเดียวเพื่อใช้กับรถทุกคัน` : "ใส่อย่างน้อยหนึ่งอย่าง: กม. ของรถเล็ก / รถใหญ่ หรือจำนวนเดือน" }),
     el("div", { class: "mfields" },
       mfield(d, "label", "ชื่อรายการ", { wide: true, maxlength: 80, placeholder: "เช่น สายพานไทม์มิ่ง" }),
-      mfield(d, "km_small", "รถเล็ก (D-Max, Revo): ทุกกี่ กม.", { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถเล็ก" }),
-      mfield(d, "km_big", "รถใหญ่ (NLR, 6 / 10 ล้อ): ทุกกี่ กม.", { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถใหญ่" }),
+      mfield(d, "km_small", `รถเล็ก (D-Max, Revo): ทุกกี่ กม.${rule === "รถเล็ก" ? "" : " — ไม่บังคับ"}`, { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถเล็ก" }),
+      mfield(d, "km_big", `รถใหญ่ (NLR, 6 / 10 ล้อ): ทุกกี่ กม.${rule === "รถใหญ่" ? "" : " — ไม่บังคับ"}`, { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถใหญ่" }),
       mfield(d, "months", "ทุกกี่เดือน (ไม่บังคับ)", { type: "number", placeholder: "เช่น 12" }),
       mselect(d, "group_name", "อยู่ในกลุ่มไหนของตาราง", (data.item_groups || []).map((g) => [g, g]), { blank: "อื่นๆ" }),
       mfield(d, "words", "คำที่เจอในบิลแล้วนับว่าทำแล้ว (คั่นด้วย ,) — ชื่อรายการนับอยู่แล้ว", { wide: true, maxlength: 400, placeholder: "เช่น ไทม์มิ่ง, timing belt" }),
       mselect(d, "category", "หมวดของบิลเมื่อกด “บันทึกว่าทำแล้ว”", (data.categories || []).map((c) => [c, c]), { blank: "อื่นๆ" })),
     el("p", { class: "muted small", text: "ใส่กม. อย่างเดียว = เดือนคิดจากกลุ่มของรถแต่ละคัน · ใส่เดือนอย่างเดียว (ไม่ใส่กม.) = ใช้กับรถทุกคัน เช่น ถังดับเพลิงทุก 12 เดือน · ใส่ทั้งสองอย่าง = ใช้เดือนที่ใส่ และกม. อย่างไหนถึงก่อน" }));
-  plOpenDialog(row ? "แก้ไขรายการ" : "เพิ่มรายการบำรุงรักษา", "บันทึก");
+  plOpenDialog(row ? "แก้ไขรายการ" : `เพิ่มรายการบำรุงรักษา${rule ? ` — ${rule}` : ""}`, "บันทึก");
+  setTimeout(() => { const f = $("mf_label"); if (f && !row) f.focus(); }, 50);
 }
 
 async function removeOwnItem(row) {
@@ -368,13 +354,16 @@ function kmRow(rule, it) {
     renderSettings();
   };
   const own = it.own ? el("span", { class: "badge", text: "เพิ่มเอง" }) : null;
-  if (it.default_km === null) {                           // our own item counted in months only: nothing to change here (edit it in "รายการที่เพิ่มเอง")
-    return el("div", { class: "pl-km-row" }, el("div", {}, el("strong", { text: it.label }), " ", own, el("div", { class: "muted small", text: `ทุก ${plMonths(it.months)} (ไม่ได้ตั้งเป็นกม.)` })), el("span", {}), el("span", {}));
+  const row = it.own ? (pl.settings.own_items || []).find((r) => r.key === it.key) : null;
+  const ownButtons = row ? [el("button", { class: "btn small", type: "button", text: "แก้ไข", onclick: () => openOwnItemDialog(row, rule) }),
+    el("button", { class: "btn small danger", type: "button", text: "เอาออก", onclick: () => removeOwnItem(row) })] : [];
+  if (it.default_km === null) {                           // our own item counted in months only (applies to every truck): edit / remove it here
+    return el("div", { class: "pl-km-row own-months" }, el("div", {}, el("strong", { text: it.label }), " ", own, el("div", { class: "muted small", text: `ทุก ${plMonths(it.months)} · รถทุกคัน (ไม่ได้ตั้งเป็นกม.)` })), el("span", {}), el("div", { class: "pl-set-actions" }, ...ownButtons));
   }
   return el("div", { class: `pl-km-row${it.customised ? " custom" : ""}` },
     el("div", {}, el("strong", { text: it.label }), " ", own, el("div", { class: "muted small", text: `ค่าเริ่มต้น ${baht(it.default_km)} กม.${it.months ? ` · ทุก ${plMonths(it.months)} ด้วย` : ""}` })),
     km, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }),
-      it.customised ? el("button", { class: "btn small", type: "button", text: "คืนค่าเริ่มต้น", onclick: reset }) : null, msg));
+      it.customised ? el("button", { class: "btn small", type: "button", text: "คืนค่าเริ่มต้น", onclick: reset }) : null, ...ownButtons, msg));
 }
 
 // ================================================================== one truck's plan
