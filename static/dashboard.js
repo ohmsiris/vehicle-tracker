@@ -108,10 +108,9 @@ function renderKpis(d) {
   } else if (k.spend_last_month === 0 && d.months > 1) {
     vs = "เดือนก่อนไม่มีค่าซ่อม";
   }
-  $("kpiRow").replaceChildren(
-    kpi("ค่าซ่อมเดือนนี้", `${baht(k.spend_this_month)} ฿`, `จาก ${k.repairs_this_month} บิล/บันทึก · ${vs}`.replace(/ · $/, "")),
-    kpi(`ค่าซ่อม ${d.months} เดือน`, `${baht(k.spend_period)} ฿`, `จาก ${k.repairs_period} บิล/บันทึก`),
-    // these two come from the FOH requests you add -- a snapshot of right now, not a monthly count
+  // the state of the fleet comes first; the money is the second line
+  $("kpiStatus").replaceChildren(
+    // the first three come from the FOH requests you add -- a snapshot of right now, not a monthly count
     kpi("งานรอซ่อม · ตอนนี้", String(k.open_requests),
       k.open_requests ? (k.avg_days_to_fix === null ? "จากใบแจ้งซ่อมที่ใส่ไว้" : `แจ้ง→ซ่อมเฉลี่ย ${k.avg_days_to_fix} วัน`) : "ไม่มีงานค้าง",
       k.open_requests ? "warn" : "", "นับจากใบแจ้งซ่อมที่ใส่ในระบบเท่านั้น"),
@@ -124,6 +123,10 @@ function renderKpis(d) {
     // every repair once, however it was recorded -- does not depend on drivers filling in the FOH sheet
     kpi("ซ่อมเสร็จเดือนนี้", String(k.done_this_month.total), doneBreakdown(k.done_this_month), "",
       "นับครั้งซ่อมละ 1 จากทุกที่มา: บิล/บันทึก + งานที่ปิดโดยไม่มีบิล + งานที่ซ่อมแล้วรอบิล (ถ้าบิลเข้าภายหลังจะไม่นับซ้ำ)"),
+  );
+  $("kpiMoney").replaceChildren(
+    kpi("ค่าซ่อมเดือนนี้", `${baht(k.spend_this_month)} ฿`, `จาก ${k.repairs_this_month} บิล/บันทึก · ${vs}`.replace(/ · $/, "")),
+    kpi(`ค่าซ่อม ${d.months} เดือน`, `${baht(k.spend_period)} ฿`, `จาก ${k.repairs_period} บิล/บันทึก`),
   );
 }
 

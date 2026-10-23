@@ -70,7 +70,6 @@
 </aside>
 
 <main>
-  <div id="todayBar" class="todaybar" hidden></div>
   <div id="tokenBox" class="card" hidden>
     <label for="tokenInput">รหัสเข้าใช้งาน</label>
     <div class="row">
@@ -144,7 +143,10 @@
     </div>
     <p class="error" id="dashError" hidden></p>
 
-    <div id="kpiRow" class="kpis"></div>
+    <h3 class="kpi-group">สถานะรถ</h3>
+    <div id="kpiStatus" class="kpis"></div>
+    <h3 class="kpi-group">ค่าใช้จ่าย</h3>
+    <div id="kpiMoney" class="kpis kpis-money"></div>
 
     <div class="dashgrid">
       <div class="card wide"><h2>ค่าซ่อมรายเดือน <span class="muted small">(บาท)</span></h2><div id="chartMonthly"></div></div>

@@ -1,8 +1,7 @@
 "use strict";
 
 // What needs attention today -- on screen, never by LINE (the phone is on do-not-disturb):
-//   * a bar at the top of every page: the board's overdue / due-today / follow-up tickets and the cars coming close to an
-//     oil change (each with a link)
+//   (no bar across the top of the pages -- it was taken out: the numbers in the menu are enough)
 //   * red / amber numbers beside "บอร์ดของฉัน" and "แผนซ่อมบำรุง" in the menu
 //   * a small message on screen when a ticket's own time comes, and (if switched on in ผู้จัดการ › ตั้งค่า) a browser
 //     notification -- these only work while this site is open in a tab
@@ -89,27 +88,6 @@ function renderToday() {
   const planOn = p.enabled && p.total > 0;
   navBadge("navMgr", mgrN, m.ready && m.overdue > 0);
   navBadge("navPlan", planOn ? p.counts.overdue + p.counts.due + p.counts.soon : 0, planOn && p.counts.overdue + p.counts.due > 0);
-  const bar = document.getElementById("todayBar");
-  const hasMgr = m.ready && (m.overdue + m.today + m.follow_ups + m.urgent) > 0;
-  if ((!hasMgr && !planOn) || tdStore("vt_bar_hidden") === tdSignature(d)) { bar.hidden = true; return; }
-  const parts = [];
-  if (hasMgr) {
-    parts.push(el("span", { class: "tb-part" }, el("a", { href: "#mgr", text: "บอร์ดของฉัน" }),
-      m.overdue ? el("span", { class: "badge urgent", text: `เลยกำหนด ${m.overdue}` }) : null,
-      m.today ? el("span", { class: "badge warn", text: `วันนี้ ${m.today}` }) : null,
-      m.follow_ups ? el("span", { class: "badge warn", text: `ถึงวันติดตาม ${m.follow_ups}` }) : null,
-      m.urgent ? el("span", { class: "badge urgent", text: `ด่วน ${m.urgent}` }) : null));
-  }
-  if (planOn) {
-    const label = { overdue: "เลยกำหนด", due: "ครบวันนี้", soon: "อีก" };
-    parts.push(el("span", { class: "tb-part" }, el("a", { href: "#plan", text: "รถใกล้ถึงรอบ" }),
-      ...p.items.slice(0, 4).map((x) => el("a", { class: `badge ${x.stage === "soon" ? "warn" : "urgent"}`, href: `#truck=${x.vehicle_id}`, title: "เปิดหน้ารถ",
-        text: `${x.truck} · ${x.label} · ${x.stage === "soon" ? `${label.soon} ${x.days_left} วัน` : x.stage === "overdue" ? `${label.overdue} ${-x.days_left} วัน` : label.due}` })),
-      p.total > 4 ? el("span", { class: "muted small", text: `และอีก ${p.total - 4}` }) : null));
-  }
-  const close = el("button", { class: "tb-x", type: "button", title: "ซ่อนไว้จนกว่าจะมีอะไรเปลี่ยน", "aria-label": "ซ่อน", text: "✕", onclick: () => { tdStore("vt_bar_hidden", tdSignature(d)); bar.hidden = true; } });
-  fill(bar, ...parts, close);
-  bar.hidden = false;
 }
 
 // one browser notification per day for the summary (and again if the numbers change), never for the same thing twice
