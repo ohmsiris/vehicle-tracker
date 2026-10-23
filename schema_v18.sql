@@ -1,3 +1,4 @@
+-- NOTE: this feature was removed again; see schema_v20.sql (the table is dropped).
 -- ---------------------------------------------------------------------------
 -- schema_v18.sql -- maintenance items of our own, added in the app (แผนซ่อมบำรุง > ตั้งค่าระยะ)
 --

@@ -26,7 +26,6 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from app import events, logsource, mgr, supabase
-from app.extraction import CATEGORIES as ITEM_CATEGORIES      # the repair categories a recorded item can get
 
 SMALL, BIG = "รถเล็ก", "รถใหญ่"
 RULE_SETS = [SMALL, BIG]
@@ -69,60 +68,25 @@ ITEMS = {
     "valve_adjust": ("ปรับตั้งวาล์ว", "เครื่องยนต์"),
     "valve_cover_seal": ("ประเก็นฝาวาล์ว + ซีลฝาครอบหัวฉีด", "เครื่องยนต์"),
     "injector_washers": ("แหวนรองหัวฉีด", "เครื่องยนต์"),
+    "intake_manifold": ("ล้างท่อร่วมไอดี", "เครื่องยนต์"),
+    "engine_flush": ("ฟลัชชิ่งน้ำมันเครื่อง", "เครื่องยนต์"),
     "gearbox_oil": ("น้ำมันเกียร์", "ช่วงล่าง / ส่งกำลัง"),
     "diff_oil": ("น้ำมันเฟืองท้าย", "ช่วงล่าง / ส่งกำลัง"),
     "brake_clutch_fluid": ("น้ำมันเบรก / คลัตช์", "ช่วงล่าง / ส่งกำลัง"),
     "power_steering": ("น้ำมันพาวเวอร์", "ช่วงล่าง / ส่งกำลัง"),
     "wheel_grease": ("จาระบีลูกปืนล้อ", "ช่วงล่าง / ส่งกำลัง"),
+    "chassis_check": ("เช็คช่วงล่าง", "ช่วงล่าง / ส่งกำลัง"),
 }
 
 # The category each item gets when it is recorded as a repair (the names of the categories table).
 ITEM_CATEGORY = {key: "ไส้กรองและของเหลว" for key in ITEMS}
-ITEM_CATEGORY.update(valve_adjust="เครื่องยนต์", valve_cover_seal="เครื่องยนต์", injector_washers="เครื่องยนต์")
+ITEM_CATEGORY.update(valve_adjust="เครื่องยนต์", valve_cover_seal="เครื่องยนต์", injector_washers="เครื่องยนต์", intake_manifold="เครื่องยนต์",
+                     chassis_check="ช่วงล่าง")
 
-# ---- items of our own (schema_v18: added in the app). They behave exactly like the built-in ones above. The rows are kept
-# in this small cache (re-read every 30 s and after every change on the settings page), so the pure functions below
-# need no database: tests put rows straight into _CUSTOM.
-_CUSTOM = {"rows": [], "at": 0.0}
-CUSTOM_GROUPS = ["เครื่องยนต์", "ช่วงล่าง / ส่งกำลัง", "ตัวถัง / ไฟฟ้า / ความปลอดภัย", "อื่นๆ"]
-MAX_CUSTOM = 60
-
-
-def _custom() -> list[dict]:
-    return [r for r in _CUSTOM["rows"] if r.get("active", True)]
-
-
-def all_items() -> dict:
-    """key -> (label, group): the built-in items, then ours."""
-    return {**ITEMS, **{r["key"]: (r["label"], r.get("group_name") or "อื่นๆ") for r in sorted(_custom(), key=lambda r: (r.get("sort_order", 100), r["label"]))}}
-
-
-def category_of(key: str) -> str:
-    if key in ITEM_CATEGORY:
-        return ITEM_CATEGORY[key]
-    row = next((r for r in _custom() if r["key"] == key), None)
-    return (row or {}).get("category") or "อื่นๆ"
-
-
-def km_table(rule_set: str) -> dict:
-    """key -> km for one rule set: the built-in table plus our items that apply to it (km may be None for a months-only item)."""
-    out = dict(DEFAULT_KM.get(rule_set, {}))
-    col, want = ("km_small", "small") if rule_set == SMALL else ("km_big", "big")
-    for r in _custom():
-        scope = r.get("applies_to") or "all"
-        if scope not in ("all", want):
-            continue                                   # made for the other kind of truck
-        if r.get(col):
-            out[r["key"]] = int(r[col])
-        elif r.get("months") and (scope == want or (not r.get("km_small") and not r.get("km_big"))):
-            out[r["key"]] = None                       # months only: this kind of truck (or every truck, for an item made for both)
-    return out
-
-
-def _custom_months(key: str) -> Optional[float]:
-    row = next((r for r in _custom() if r["key"] == key), None)
-    return float(row["months"]) if row and row.get("months") else None
-
+# Items counted by the CALENDAR, the same for every truck: months, not km. (Every other item is km, and its months follow from the truck's
+# group -- how fast that kind of truck drives -- so they differ from truck to truck. A check or a flush should come round about the same
+# time for every truck whatever it drives, so these skip that conversion: exactly this many months after it was last done.)
+FIXED_MONTHS = {"engine_flush": 12, "chassis_check": 3}
 
 # rule set -> key -> km. The dealership's rules as the owner settled them (see Maintenance_Plan.xlsx):
 # small = D-Max / Revo, big = NLR / NMR / NPR, 6- and 10-wheelers. A missing key means no such service for that rule set.
@@ -139,6 +103,9 @@ DEFAULT_KM = {
         "power_steering": 40_000,
         "wheel_grease": 30_000,
         "injector_washers": 100_000,
+        "intake_manifold": 100_000,        # cleaned with the injector washers
+        "engine_flush": None,              # by the calendar (FIXED_MONTHS)
+        "chassis_check": None,
     },
     BIG: {
         "engine_oil": 20_000,
@@ -146,13 +113,15 @@ DEFAULT_KM = {
         "fuel_filter": 20_000,             # with the water trap
         "air_filter": 80_000,
         "coolant": 40_000,
-        "valve_adjust": 40_000,
+        "valve_adjust": 80_000,
         "valve_cover_seal": 80_000,
         "gearbox_oil": 40_000,
         "diff_oil": 40_000,
         "brake_clutch_fluid": 40_000,
         "power_steering": 40_000,
         "wheel_grease": 60_000,
+        "engine_flush": None,              # by the calendar (FIXED_MONTHS)
+        "chassis_check": None,
     },
 }
 
@@ -173,8 +142,7 @@ CHART_ROUNDS = {SMALL: 10, BIG: 8}
 
 
 def item_label(key: str) -> str:
-    items = all_items()
-    return items[key][0] if key in items else key
+    return ITEMS[key][0] if key in ITEMS else key
 
 
 def group_months(group: dict) -> Optional[float]:
@@ -212,27 +180,27 @@ def effective_plan(group: Optional[dict], overrides: Optional[list[dict]] = None
     """The items one truck needs: its rule set's km (with any saved change) and the months its group makes of them."""
     if not group:
         return []
-    base = km_table(group["rule_set"])
+    base = DEFAULT_KM.get(group["rule_set"])
     if not base:
         return []
     saved = {o["item_key"]: o for o in (overrides or []) if o.get("vehicle_class") == group["rule_set"] and o.get("interval_km")}
     out = []
-    for key, (label, grp) in all_items().items():
+    for key, (label, grp) in ITEMS.items():
         if key not in base:
             continue
         km = saved[key]["interval_km"] if key in saved else base[key]
-        months = _custom_months(key) or item_months(km, group)         # a fixed number of months we typed, else from the km
+        months = FIXED_MONTHS.get(key) or item_months(km, group)        # a calendar item: its own months; else from the km and the group
         out.append({"key": key, "label": label, "group": grp, "default_km": base[key], "interval_km": km,
-                    "interval_months": months, "customised": key in saved, "own": key not in ITEMS})
+                    "interval_months": months, "customised": key in saved})
     return out
 
 
 def rule_set_items(rule_set: str, overrides: Optional[list[dict]] = None) -> list[dict]:
     """For the settings page: one rule set's items with default and saved km."""
-    base = km_table(rule_set)
+    base = DEFAULT_KM.get(rule_set, {})
     saved = {o["item_key"]: o for o in (overrides or []) if o.get("vehicle_class") == rule_set and o.get("interval_km")}
     return [{"key": key, "label": label, "default_km": base[key], "interval_km": saved[key]["interval_km"] if key in saved else base[key],
-             "customised": key in saved, "own": key not in ITEMS, "months": _custom_months(key)} for key, (label, _g) in all_items().items() if key in base]
+             "customised": key in saved, "months": FIXED_MONTHS.get(key)} for key, (label, _g) in ITEMS.items() if key in base]
 
 
 # ------------------------------------------------- reading bills for history
@@ -258,8 +226,15 @@ _COMPILED = [(key, re.compile(_PREFIX + pat)) for key, pat in _LINE_RULES]
 # "อัดจารบี" on its own (no "ล้อ"): the mechanic greases everything in one go, so it counts as the wheel-bearing grease.
 # Only with อัด -- a bare "จารบี 1 กระป๋อง" is a part, not the service.
 _COMPILED.append(("wheel_grease", re.compile(r"^\s*(?:ค่า)?อัด\s*จา(?:ร|ระ)บี")))
+# Cleaning the intake manifold needs the word "ล้าง" (a bare "ท่อร่วมไอดี" line is the part).
+_COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?ล้าง\s*(?:ทำความสะอาด\s*)?ท่อ(?:ร่วม)?ไอดี")))
+# These two are found ANYWHERE in the line (the owner's own words): a flush; any suspension work (leaf springs, king pins, arms, shocks) counts
+# as the chassis having been looked at.
+_ANYWHERE = [
+    ("engine_flush", re.compile(r"ฟลัช(?:ชิ่ง|ชิง)|flush|ล้างภายในเครื่อง|ล้างระบบหล่อลื่น", re.I)),
+    ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจ)\s*ช่วงล่าง")),
+]
 _TOP_UP = re.compile(r"เติม")
-_squash = lambda t: re.sub(r"[\s\-_.]", "", str(t or "")).lower()
 
 
 def classify_line(description: Optional[str]) -> Optional[str]:
@@ -270,10 +245,9 @@ def classify_line(description: Optional[str]) -> Optional[str]:
     for key, pattern in _COMPILED:
         if pattern.match(text):
             return key
-    flat = _squash(text)
-    for r in _custom():                                  # our own items: the line contains one of its words (or its name)
-        if any(w and w in flat for w in (_squash(x) for x in [*(r.get("words") or []), r["label"]])):
-            return r["key"]
+    for key, pattern in _ANYWHERE:
+        if pattern.search(text):
+            return key
     return None
 
 
@@ -564,8 +538,7 @@ def clean_records(data: dict, *, today: date) -> list[dict]:
     keys = data.get("items")
     if not isinstance(keys, list) or not keys:
         raise InvalidPlan("เลือกรายการที่ทำอย่างน้อย 1 อย่าง")
-    known = all_items()
-    unknown = [k for k in keys if k not in known]
+    unknown = [k for k in keys if k not in ITEMS]
     if unknown:
         raise InvalidPlan(f"ไม่รู้จักรายการ: {', '.join(map(str, unknown))}")
     done = _date(data.get("done_date"), "วันที่ทำ", today=today)
@@ -582,12 +555,11 @@ def clean_service(data: dict, *, today: date) -> dict:
     keys = data.get("items")
     if not isinstance(keys, list) or not keys:
         raise InvalidPlan("เลือกรายการที่ทำอย่างน้อย 1 อย่าง")
-    known = all_items()
-    unknown = [k for k in keys if k not in known]
+    unknown = [k for k in keys if k not in ITEMS]
     if unknown:
         raise InvalidPlan(f"ไม่รู้จักรายการ: {', '.join(map(str, unknown))}")
     done = _date(data.get("done_date"), "วันที่ทำ", today=today)
-    return {"vehicle_id": vehicle_id, "items": [k for k in known if k in keys], "done_date": done,
+    return {"vehicle_id": vehicle_id, "items": [k for k in ITEMS if k in keys], "done_date": done,
             "odometer_km": _int(data.get("odometer_km"), "เลขไมล์", maximum=MAX_KM),
             "performed_by": _note(data.get("performed_by")), "notes": _note(data.get("notes"))}
 
@@ -604,7 +576,7 @@ def service_payload(clean: dict, keys: list[str]) -> dict:
     return {"vehicle_id": clean["vehicle_id"], "source": "manual", "attachments": [], "fixes_request_ids": [],
             "event": {"event_date": clean["done_date"].isoformat(), "mileage": clean["odometer_km"], "performed_by": clean["performed_by"],
                       "notes": clean["notes"], "summary": "บันทึกจากแผนซ่อมบำรุง: " + ", ".join(item_label(k) for k in keys)},
-            "line_items": [{"description": item_label(k), "category": category_of(k)} for k in keys]}
+            "line_items": [{"description": item_label(k), "category": ITEM_CATEGORY[k]} for k in keys]}
 
 
 def clean_reading(data: dict, *, today: date) -> dict:
@@ -631,8 +603,8 @@ def clean_interval(data: dict) -> dict:
     key = data.get("item_key")
     if rule_set not in RULE_SETS:
         raise InvalidPlan("ชุดกฎต้องเป็นรถเล็กหรือรถใหญ่")
-    if km_table(rule_set).get(key) is None:
-        raise InvalidPlan("รายการนี้ไม่ได้อยู่ในแผนของรถกลุ่มนี้ (หรือกำหนดเป็นเดือนอย่างเดียว)")
+    if DEFAULT_KM[rule_set].get(key) is None:
+        raise InvalidPlan("รายการนี้ไม่ได้อยู่ในแผนของรถกลุ่มนี้ (หรือนับเป็นเดือนอย่างเดียว)")
     km = _int(data.get("interval_km"), "ระยะทาง", maximum=1_000_000, allow_blank=False)
     if not km:
         raise InvalidPlan("ระยะทางต้องมากกว่า 0")
@@ -709,24 +681,11 @@ def has_v10() -> bool:
 def _require() -> None:
     if not has_v10():
         raise InvalidPlan(NEEDS_V10)
-    _sync_custom()
-
-
-def _sync_custom(force: bool = False) -> None:
-    """Re-read our own items (every 30 s, or at once after a change). Without the table (schema_v18) there are none."""
-    now = time.time()
-    if not force and now - _CUSTOM["at"] < 30:
-        return
-    try:
-        _CUSTOM.update(rows=supabase.select_all("service_custom_items", {"select": "*", "order": "sort_order.asc,label.asc"}), at=now)
-    except supabase.SupabaseError:
-        _CUSTOM.update(rows=[], at=now)
 
 
 def options() -> dict:
-    _sync_custom()
     return {"ready": has_v10(), "rule_sets": RULE_SETS, "soon_days": _plan_settings()["soon_days"],
-            "items": [{"key": k, "label": v[0], "group": v[1]} for k, v in all_items().items()]}
+            "items": [{"key": k, "label": v[0], "group": v[1]} for k, v in ITEMS.items()]}
 
 
 def _bill_events() -> list[dict]:
@@ -742,7 +701,6 @@ def _group(rows: list[dict]) -> dict:
 
 
 def _groups() -> dict:
-    _sync_custom()
     rows = supabase.select_all("service_groups", {"select": "*", "order": "code.asc"}) if has_v10() else []
     return merge_groups(rows)
 
@@ -928,8 +886,7 @@ def settings() -> dict:
     vehicles = [{"id": v["id"], "plate_number": v.get("plate_number"), "vehicle_number": v.get("vehicle_number"), "nickname": v.get("nickname"),
                  "branch": v.get("branch"), "vehicle_class": v.get("vehicle_class"), "group_code": plans.get(v["id"])}
                 for v in sorted(_vehicles(), key=lambda v: (v.get("branch") or "", _numkey(v.get("vehicle_number")), v.get("plate_number") or ""))] if ready else []
-    return {"ready": ready, "groups": groups, "rule_sets": {r: rule_set_items(r, overrides) for r in RULE_SETS}, "vehicles": vehicles,
-            "own_items": [{**r, "words": list(r.get("words") or [])} for r in _custom()], "categories": ITEM_CATEGORIES, "item_groups": CUSTOM_GROUPS}
+    return {"ready": ready, "groups": groups, "rule_sets": {r: rule_set_items(r, overrides) for r in RULE_SETS}, "vehicles": vehicles}
 
 
 def set_interval(data: dict) -> dict:
@@ -965,124 +922,8 @@ def set_group(data: dict) -> dict:
     return settings()
 
 
-# ------------------------------------------------------- our own items (the settings page)
-def _label_key(text: str) -> str:
-    return re.sub(r"[\s\-_.]", "", str(text or "")).lower()
-
-
-def clean_custom_item(data: dict, *, existing: Optional[dict] = None, others: list[dict]) -> dict:
-    """A new item of our own (existing=None) or the fields present in `data`. At least one of km (small / big) or months."""
-    creating = existing is None
-    out: dict = {}
-    if creating or "label" in data:
-        label = re.sub(r"\s+", " ", str(data.get("label") or "")).strip()[:80]
-        if not label:
-            raise InvalidPlan("ใส่ชื่อรายการด้วย")
-        taken = [v[0] for v in ITEMS.values()] + [o["label"] for o in others]
-        if any(_label_key(label) == _label_key(t) for t in taken):
-            raise InvalidPlan(f"มีรายการชื่อ “{label}” อยู่แล้ว")
-        out["label"] = label
-    if creating or "group_name" in data:
-        group = str(data.get("group_name") or "อื่นๆ").strip()[:60] or "อื่นๆ"
-        out["group_name"] = group
-    if creating or "category" in data:
-        cat = str(data.get("category") or "อื่นๆ").strip()
-        if cat not in ITEM_CATEGORIES:
-            raise InvalidPlan("หมวดของบิลไม่ถูกต้อง")
-        out["category"] = cat
-    for col, what in (("km_small", "กม. ของรถเล็ก"), ("km_big", "กม. ของรถใหญ่")):
-        if creating or col in data:
-            out[col] = _int(data.get(col), what, maximum=1_000_000)
-            if out[col] == 0:
-                out[col] = None
-    if creating or "applies_to" in data:
-        scope = data.get("applies_to") or "all"
-        if scope not in ("all", "small", "big"):
-            raise InvalidPlan("เลือกว่าใช้กับรถเล็ก รถใหญ่ หรือทั้งสอง")
-        out["applies_to"] = scope
-    if creating or "months" in data:
-        out["months"] = _positive(data.get("months"), "จำนวนเดือน", maximum=120)
-    if creating or "words" in data:
-        raw = data.get("words")
-        if raw is None:
-            raw = []
-        if isinstance(raw, str):
-            raw = [w for w in re.split(r"[,\n]", raw)]
-        if not isinstance(raw, list):
-            raise InvalidPlan("คำที่เจอในบิลไม่ถูกต้อง")
-        words, seen = [], set()
-        for w in raw:
-            word = re.sub(r"\s+", " ", str(w or "")).strip()[:80]
-            if word and _label_key(word) not in seen:
-                seen.add(_label_key(word))
-                words.append(word)
-        out["words"] = words[:20]
-    final = {**(existing or {}), **out}
-    scope = final.get("applies_to") or "all"
-    for other, col in (("big", "km_small"), ("small", "km_big")):          # an item for one kind of truck has km for that kind only
-        if scope == other and final.get(col):
-            out[col] = final[col] = None
-    if not (final.get("km_small") or final.get("km_big") or final.get("months")):
-        raise InvalidPlan("ใส่ระยะอย่างน้อยหนึ่งอย่าง: กม. หรือจำนวนเดือน")
-    return out
-
-
-def create_custom_item(data: dict) -> dict:
-    _require()
-    _sync_custom(force=True)
-    rows = _CUSTOM["rows"]
-    if len(rows) >= MAX_CUSTOM:
-        raise InvalidPlan(f"เพิ่มรายการเองได้ไม่เกิน {MAX_CUSTOM} รายการ")
-    values = clean_custom_item(data, others=rows)
-    values["key"] = f"c_{uuid.uuid4().hex[:8]}"
-    values["sort_order"] = 100 + len(rows)
-    supabase.insert("service_custom_items", [values])
-    saved = _plan_settings_saved_items()
-    if saved is not None:                              # the reminders were narrowed to some items: the new one is on by default
-        mgr.save_settings({"plan_remind_items": [*saved, values["key"]]})
-    _sync_custom(force=True)
-    return settings()
-
-
-def _plan_settings_saved_items() -> Optional[list]:
-    try:
-        saved = mgr.get_settings() if mgr.has_v12() else {}
-    except supabase.SupabaseError:
-        return None
-    items = saved.get("plan_remind_items")
-    return list(items) if isinstance(items, list) else None
-
-
-def update_custom_item(key: str, data: dict) -> dict:
-    _require()
-    _sync_custom(force=True)
-    rows = _CUSTOM["rows"]
-    existing = next((r for r in rows if r["key"] == key), None)
-    if existing is None:
-        raise NotFound()
-    values = clean_custom_item(data, existing=existing, others=[r for r in rows if r["key"] != key])
-    if "active" in data:
-        values["active"] = bool(data["active"])
-    if values:
-        supabase.update("service_custom_items", {"key": f"eq.{key}"}, values)
-    _sync_custom(force=True)
-    return settings()
-
-
-def delete_custom_item(key: str) -> dict:
-    """Hidden, not erased: what was already recorded for it stays in the history."""
-    _require()
-    _sync_custom(force=True)
-    if not any(r["key"] == key for r in _CUSTOM["rows"]):
-        raise NotFound()
-    supabase.update("service_custom_items", {"key": f"eq.{key}"}, {"active": False})
-    _sync_custom(force=True)
-    return settings()
-
-
 # ------------------------------------------------------- reminder settings
 def _plan_settings() -> dict:
-    _sync_custom()
     """soon_days (how many days ahead "coming close" starts), enabled, items (which items are reminded about)."""
     saved: dict = {}
     try:
@@ -1095,12 +936,12 @@ def _plan_settings() -> dict:
         soon = SOON_DAYS
     items = saved.get("plan_remind_items")
     return {"soon_days": max(1, min(60, soon)), "enabled": bool(saved.get("plan_reminders", True)),
-            "items": [k for k in (items if isinstance(items, list) else (DEFAULT_REMIND_ITEMS or list(all_items()))) if k in all_items()]}
+            "items": [k for k in (items if isinstance(items, list) else (DEFAULT_REMIND_ITEMS or list(ITEMS))) if k in ITEMS]}
 
 
 def reminder_settings() -> dict:
     return {**_plan_settings(), "ready": mgr.has_v12() if supabase.configured() else False,
-            "all_items": [{"key": k, "label": v[0]} for k, v in all_items().items()]}
+            "all_items": [{"key": k, "label": v[0]} for k, v in ITEMS.items()]}
 
 
 def clean_reminder_settings(data: dict) -> dict:
@@ -1111,7 +952,7 @@ def clean_reminder_settings(data: dict) -> dict:
         out["plan_reminders"] = bool(data["enabled"])
     if "items" in data:
         items = data["items"]
-        if not isinstance(items, list) or any(k not in all_items() for k in items):
+        if not isinstance(items, list) or any(k not in ITEMS for k in items):
             raise InvalidPlan("รายการที่เตือนไม่ถูกต้อง")
         out["plan_remind_items"] = list(dict.fromkeys(items))
     return out
@@ -1178,7 +1019,7 @@ def _snoozes() -> dict:
 def clean_snooze(data: dict, *, today: date) -> dict:
     vehicle_id = _uuid(data.get("vehicle_id"), "รถ")
     key = data.get("item_key")
-    if key not in all_items():
+    if key not in ITEMS:
         raise InvalidPlan("ไม่รู้จักรายการ")
     days = _positive_int(data.get("days"), "จำนวนวันที่เลื่อน", 1, MAX_SNOOZE_DAYS)
     return {"vehicle_id": vehicle_id, "item_key": key, "until": (today + timedelta(days=days)).isoformat()}

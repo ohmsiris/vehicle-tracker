@@ -460,24 +460,22 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   every active truck by branch with a dropdown. Picking only marks the row yellow; nothing changes until "บันทึกการเปลี่ยนกลุ่ม
   (N คัน)" and a confirmation listing each change (`PUT /api/plan/vehicle-groups`). The truck's page only shows its group.
   A group whose months / km per day were changed has a "ค่าเริ่มต้น" button (`DELETE /api/plan/groups?code=`).
-- **Maintenance items of our own** (`schema_v18.sql`, table `service_custom_items`; "+ เพิ่มรายการ" at the bottom of the รถเล็ก / รถใหญ่ lists on `#plan-settings`):
-  something new learnt about what a truck needs (timing belt, battery, fire extinguisher) is added in the app, no code change.
-  An item has a name, km for the small rule set and / or the big one (empty = not for that kind of truck), optionally a fixed
-  number of months (months only, no km = every truck), a table group, the words a bill line says when it was done (the name
-  counts too; a top-up "(เติม)" never does) and the repair category it gets when ticked as done. It then behaves like a
-  built-in item: in every matching truck's chart, calculator, reminders ("เลือกทั้งหมด" includes it), "บันทึกว่าทำแล้ว", the km
-  per rule set can be changed in the lists (no special badge: they are just more lines). "เอาออก" hides it (records already made stay). The built-in
-  items stay in `app/service_plan.py`; `all_items()`, `km_table()` and `classify_line()` merge both.
-- The add form (`schema_v19.sql`: `applies_to` small / big / all): an item added from the รถเล็ก list is for the small trucks
-  only (and the same for รถใหญ่), so the form just asks "ทุกกี่ กม." and "หรือทุกกี่เดือน" (plus the words); "ใช้กับ" in
-  "ตัวเลือกเพิ่มเติม" can make it for both. Months only with no km: that kind of truck only (items made for both: every truck).
+- **Changing the maintenance items is done in the code** (`app/service_plan.py`), not in the app (an add-your-own-item form
+  existed for a day and was taken out; `schema_v20.sql` drops its table). To add an item: a line in `ITEMS` (name, table group),
+  its km per rule set in `DEFAULT_KM` (a missing key = not for that kind of truck), a category in `ITEM_CATEGORY` if it is not
+  "ไส้กรองและของเหลว", and how a bill line is recognised (`_LINE_RULES`: at the start of the line; `_ANYWHERE`: anywhere in it).
+  An item counted by the CALENDAR instead of km (the same for every truck whatever it drives) puts `None` in `DEFAULT_KM` and its
+  months in `FIXED_MONTHS`: that is how the flush (12 months) and the chassis check (3 months) work -- a km item's months follow
+  from the truck's group (its driving rate), so they differ from truck to truck; a calendar item does not.
+- Built in since: ล้างท่อร่วมไอดี (small trucks, 100,000 km, with the injector washers; a bill line needs "ล้าง" so the part is not
+  mistaken for it), ฟลัชชิ่งน้ำมันเครื่อง (12 months, every truck), เช็คช่วงล่าง (3 months, every truck; any bill line with แหนบ /
+  สลักคอม้า / ปีกนก / โช้ค or "เช็ค/ตรวจช่วงล่าง" counts as done). The big trucks' valve adjustment is every 80,000 km.
 - Bill matching notes: a line that starts with "อัดจารบี" (or "ค่าอัดจารบี") counts as the wheel-bearing grease service -- the
   mechanic greases everything in one go; a bare "จารบี 1 กระป๋อง" or "หัวอัดจาระบี" is a part and does not. The group rows on the
   settings page show what the group's engine-oil round is (km as set for its rule set, and what that is in months), so changing
   the oil km below is visible above (the group's own "months per 10,000 km" is the driving rate and does not change).
-- The settings page layout: reminders (full width), the groups (full width), then รถเล็ก (left) and รถใหญ่ (right) -- each with
-  its own "+ เพิ่มรายการ" at the bottom, and our own rows can be edited / removed right in the list -- and which truck follows
-  which group. Added so far: ฟลัชชิ่งน้ำมันเครื่อง, every 12 months, every truck.
+- The settings page layout: reminders (full width), the groups (full width), then รถเล็ก (left) and รถใหญ่ (right) with the km
+  of each item (calendar items show "ทุก N เดือน"), and which truck follows which group.
 - **Reminders cover every item by default** ("เลือกทั้งหมด" on the settings card); untick what you do not want.
 - **Real driving** only matters when it is known: odometer readings, GPS distance for a period (**+ ระยะทาง**, 12
   trucks seeded by `scripts/seed_gps.py`) -- then a truck that drives more than its group assumes gets its due date
