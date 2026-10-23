@@ -291,6 +291,12 @@ business data -- copy it somewhere other than this computer (a USB drive, Google
 (parents before children, in the order of `TABLES` in `app/backup.py`) and re-uploading `files/` into a Supabase project that has
 all the schema files applied; the `was_low_confidence` column is not saved because the database recomputes it.
 A table added by a later schema file MUST be added to `TABLES` (a test compares it with the schema files, so forgetting fails).
+**Automatic weekly run**: the Windows task "IceBox backup" (Task Scheduler) runs `scripts/run_backup.cmd` every Monday 11:00 (a
+missed run starts when the computer is next on; it needs the drive this folder is on to be plugged in) and writes the result to
+`backups/last_run.log`. Created with `Register-ScheduledTask`; delete it with `Unregister-ScheduledTask -TaskName "IceBox backup"`.
+Off-computer copy: a Google Drive folder "IceBox Backup" exists (with a README) but the connector available in chat can only pass
+files through the conversation, so it is not used for the 40 MB of photos; install Google Drive for Desktop and put / sync the
+`backups` folder there (or copy the folder to Drive by hand now and then).
 Where the photos live: Supabase Storage, bucket `event-files` (public bucket, so a photo's link opens without a login; the
 link contains a random id and only the app shows it), in the same Singapore project as the database.
 
