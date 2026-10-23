@@ -353,15 +353,14 @@ function kmRow(rule, it) {
     } catch (err) { plSettingMsg(msg, err.message); return; }
     renderSettings();
   };
-  const own = it.own ? el("span", { class: "badge", text: "เพิ่มเอง" }) : null;
   const row = it.own ? (pl.settings.own_items || []).find((r) => r.key === it.key) : null;
   const ownButtons = row ? [el("button", { class: "btn small", type: "button", text: "แก้ไข", onclick: () => openOwnItemDialog(row, rule) }),
     el("button", { class: "btn small danger", type: "button", text: "เอาออก", onclick: () => removeOwnItem(row) })] : [];
   if (it.default_km === null) {                           // our own item counted in months only (applies to every truck): edit / remove it here
-    return el("div", { class: "pl-km-row own-months" }, el("div", {}, el("strong", { text: it.label }), " ", own, el("div", { class: "muted small", text: `ทุก ${plMonths(it.months)} · รถทุกคัน (ไม่ได้ตั้งเป็นกม.)` })), el("span", {}), el("div", { class: "pl-set-actions" }, ...ownButtons));
+    return el("div", { class: "pl-km-row own-months" }, el("div", {}, el("strong", { text: it.label }), el("div", { class: "muted small", text: `ทุก ${plMonths(it.months)}` })), el("span", {}), el("div", { class: "pl-set-actions" }, ...ownButtons));
   }
   return el("div", { class: `pl-km-row${it.customised ? " custom" : ""}` },
-    el("div", {}, el("strong", { text: it.label }), " ", own, el("div", { class: "muted small", text: `ค่าเริ่มต้น ${baht(it.default_km)} กม.${it.months ? ` · ทุก ${plMonths(it.months)} ด้วย` : ""}` })),
+    el("div", {}, el("strong", { text: it.label }), el("div", { class: "muted small", text: `ค่าเริ่มต้น ${baht(it.default_km)} กม.${it.months ? ` · ทุก ${plMonths(it.months)} ด้วย` : ""}` })),
     km, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }),
       it.customised ? el("button", { class: "btn small", type: "button", text: "คืนค่าเริ่มต้น", onclick: reset }) : null, ...ownButtons, msg));
 }

@@ -466,7 +466,7 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   number of months (months only, no km = every truck), a table group, the words a bill line says when it was done (the name
   counts too; a top-up "(เติม)" never does) and the repair category it gets when ticked as done. It then behaves like a
   built-in item: in every matching truck's chart, calculator, reminders ("เลือกทั้งหมด" includes it), "บันทึกว่าทำแล้ว", the km
-  per rule set can be changed in the lists (with a "เพิ่มเอง" badge). "เอาออก" hides it (records already made stay). The built-in
+  per rule set can be changed in the lists (no special badge: they are just more lines). "เอาออก" hides it (records already made stay). The built-in
   items stay in `app/service_plan.py`; `all_items()`, `km_table()` and `classify_line()` merge both.
 - The settings page layout: reminders (full width), the groups (full width), then รถเล็ก (left) and รถใหญ่ (right) -- each with
   its own "+ เพิ่มรายการ" at the bottom, and our own rows can be edited / removed right in the list -- and which truck follows
