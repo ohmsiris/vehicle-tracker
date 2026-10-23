@@ -35,6 +35,8 @@ async function api(path, opts = {}) {
   if (!res.ok) {
     let detail = "";
     try { detail = (await res.json()).detail || ""; } catch (_) { /* not json */ }
+    if (res.status === 403) detail = "รหัสเข้าใช้งานไม่ถูกต้อง หรือยังไม่ได้ใส่ — ใส่รหัสในช่อง “รหัสเข้าใช้งาน” ด้านบนแล้วกดตกลง (หรือเปิดลิงก์ที่มี ?token=รหัส ต่อท้าย)";
+    else if (res.status === 503 && /APP_TOKEN/.test(detail)) detail = "เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า APP_TOKEN (ตั้งใน Railway › Variables แล้วรอให้ deploy เสร็จ)";
     const err = new Error(detail || `HTTP ${res.status}`);
     err.status = res.status;
     throw err;
