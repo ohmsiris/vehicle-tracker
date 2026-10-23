@@ -294,9 +294,11 @@ A table added by a later schema file MUST be added to `TABLES` (a test compares 
 **Automatic weekly run**: the Windows task "IceBox backup" (Task Scheduler) runs `scripts/run_backup.cmd` every Monday 11:00 (a
 missed run starts when the computer is next on; it needs the drive this folder is on to be plugged in) and writes the result to
 `backups/last_run.log`. Created with `Register-ScheduledTask`; delete it with `Unregister-ScheduledTask -TaskName "IceBox backup"`.
-Off-computer copy: a Google Drive folder "IceBox Backup" exists (with a README) but the connector available in chat can only pass
-files through the conversation, so it is not used for the 40 MB of photos; install Google Drive for Desktop and put / sync the
-`backups` folder there (or copy the folder to Drive by hand now and then).
+Off-computer copy: after a successful backup `scripts/run_backup.cmd` copies to the Google Drive folder "IceBox Backup" in
+My Drive, found through Google Drive for Desktop (it shows My Drive as a drive letter, E: on this computer, so the script looks for
+`<letter>:\My Drive\IceBox Backup`): the photos into `files\` (only new ones) and this run's database export into `runs\<date>\`.
+If Drive is not running the log says "NOT COPIED TO DRIVE". (The Drive connector inside the chat is not used for this: it can only
+pass file contents through the conversation, which is not reliable for 40 MB of photos.)
 Where the photos live: Supabase Storage, bucket `event-files` (public bucket, so a photo's link opens without a login; the
 link contains a random id and only the app shows it), in the same Singapore project as the database.
 
