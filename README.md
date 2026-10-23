@@ -471,10 +471,17 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
 `schema_v16.sql`, `app/purchasing.py`, `app/purchase_extraction.py`, `app/stock.py`, `static/buy.js`. Three pages in the
 **เครื่องจักร** group:
 
-- **บิลซื้อของ** (`#purchases`, new bill `#purchase-new`): a purchase bill / receipt from a supplier, read by Claude
-  (one call for all pages of one bill: seller, number, date -- พ.ศ. turned into ค.ศ. --, VAT mode, total, every line with
-  quantity, unit and amounts; unsure fields come back yellow) or typed in ("กรอกเอง"). Check it, then save; the photos go to
-  Storage under `purchases/`, the same file saved twice is caught (409, can still be saved on purpose). A bill can be deleted.
+- **บิลซื้อของ** (`#purchases` -- filters: search, supplier, branch, period --, new bill `#purchase-new`): a purchase bill /
+  receipt from a supplier, read by Claude (one call per bill: seller, number, date -- พ.ศ. turned into ค.ศ. --, VAT mode,
+  total, every line with quantity, unit and amounts; unsure fields come back yellow) or typed in ("กรอกเอง"). Several files
+  can be chosen at once: "แต่ละไฟล์เป็นบิลคนละใบ" (one bill per file) or "ทุกไฟล์เป็นบิลใบเดียวกัน" (pages of one bill). They
+  go into a **queue read in the background** (3 at a time, with a clock per bill; a number beside "บิลซื้อของ" in the menu
+  counts the unsaved ones) -- the user can open other pages and come back to "ตรวจและบันทึก" each one. The queue is kept in
+  the page's memory only (a refresh loses unsaved ones; the browser warns first). The check page shows the original photo
+  (↻ turns it for reading) above what was read. The reader copes with any orientation (tested at 0/90/180/270 degrees); EXIF
+  rotation is baked in on upload. Photos go to Storage under `purchases/`; the same file saved twice is caught (409, can
+  still be saved on purpose). A bill can be deleted. Which machine a part was for is NOT asked on the bill (a part often
+  serves several machines): the plan is a default parts template per machine, later.
 - **Suppliers** are shops of kind `supplier` (`shops.kind`), kept on **ตั้งค่า › ร้านค้า / ผู้ขาย** with the same words and
   numbers as the repair shops; the vendor on a bill is found by those words, an unknown one can be added from the bill.
   The car side (board, log, dashboard) only ever sees the repair shops.

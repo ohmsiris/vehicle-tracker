@@ -964,3 +964,27 @@ table.bu-lines-view { min-width: 640px; }
   .bubill { grid-template-columns: 1fr auto; }
   .prhist, .prunlinked { grid-template-columns: 1fr 1fr; }
 }
+
+/* ------------------------------------------------------------- buying: filter bars, the read queue, the original bill */
+.bufilters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+.bufilters.inner { padding: 0 0 10px; }
+.bufilters input[type=search] { flex: 1 1 260px; min-width: 0; font: inherit; font-size: 16px; padding: 12px 14px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.bufilters input[type=search]:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.bufilters select { flex: 0 1 190px; width: auto; min-width: 0; }
+.bufilters .push { margin-left: auto; }
+.bufilters .mgcheck { margin: 0; white-space: nowrap; }
+.bu-modes { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-top: 10px; }
+.bu-modes .mgcheck input { width: auto; }
+.bujobs { display: grid; gap: 8px; }
+.bujob { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; padding: 10px 16px; }
+.bujob.error { border-left: 4px solid var(--bad); }
+.bujob.ready { border-left: 4px solid var(--ok); }
+.bujob.reading, .bujob.queued { border-left: 4px solid var(--warn-line); }
+.bujob-actions { display: flex; gap: 8px; align-items: center; }
+.bujob-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spin { display: inline-block; width: 12px; height: 12px; margin-right: 6px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: buspin .8s linear infinite; vertical-align: -1px; }
+@keyframes buspin { to { transform: rotate(360deg); } }
+.bu-thumbs { display: flex; gap: 12px; overflow-x: auto; padding-top: 6px; }
+.bu-thumb { flex: 0 0 auto; position: relative; width: 220px; height: 260px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); overflow: hidden; display: grid; place-items: center; }
+.bu-thumb img { max-width: 100%; max-height: 100%; transition: transform .2s; }
+.bu-thumb .rot { position: absolute; top: 6px; right: 6px; }

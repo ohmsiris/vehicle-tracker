@@ -466,9 +466,14 @@
     </div>
     <p class="error" id="buError" hidden></p>
     <div class="edit-banner" id="buNeedsV16" hidden>ยังใช้ระบบซื้อของไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
-    <div class="card mpbar">
+    <div class="card bufilters">
       <input id="buQ" type="search" placeholder="ค้นหา: ร้าน เลขที่บิล" autocomplete="off" aria-label="ค้นหาบิล">
-      <button id="buNew" class="btn primary" type="button">+ บิลซื้อของใหม่</button>
+      <select id="buVendor" aria-label="ร้าน"><option value="">ทุกร้าน</option></select>
+      <select id="buBranch" aria-label="สาขา"><option value="">ทุกสาขา</option></select>
+      <select id="buPeriod" aria-label="ช่วงเวลา">
+        <option value="">ทุกช่วงเวลา</option><option value="month">เดือนนี้</option><option value="30">30 วันล่าสุด</option><option value="90">3 เดือนล่าสุด</option><option value="year">ปีนี้</option>
+      </select>
+      <button id="buNew" class="btn primary push" type="button">+ บิลซื้อของใหม่</button>
     </div>
     <p class="muted small" id="buCount"></p>
     <div id="buList" class="bulist"></div>
@@ -482,20 +487,29 @@
     <p class="error" id="bnError" hidden></p>
     <div class="edit-banner" id="bnNeedsV16" hidden>ยังใช้ระบบซื้อของไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
     <div id="bnUpload">
+      <p class="muted small" id="bnNotice" hidden></p>
       <div class="card">
         <div class="drop" id="bnDrop" tabindex="0" role="button">
-          <span>แตะเพื่อเลือกไฟล์บิล หรือลากมาวางที่นี่</span>
+          <span>แตะเพื่อเลือกไฟล์บิล หรือลากมาวางที่นี่ — เลือกหลายไฟล์พร้อมกันได้</span>
           <input id="bnInput" type="file" accept="image/*,application/pdf" multiple hidden>
         </div>
         <ul class="filelist" id="bnFiles"></ul>
+        <div class="bu-modes" id="bnModes" hidden>
+          <label class="mgcheck"><input type="radio" name="bnMode" value="each" checked> แต่ละไฟล์เป็นบิลคนละใบ</label>
+          <label class="mgcheck"><input type="radio" name="bnMode" value="one"> ทุกไฟล์เป็นบิลใบเดียวกัน (หลายหน้า)</label>
+        </div>
       </div>
       <div class="pl-set-actions">
         <button id="bnRead" class="btn primary big" type="button" disabled>อ่านบิล</button>
         <button id="bnManual" class="btn" type="button">กรอกเอง (ไม่มีบิล)</button>
-        <span class="muted small" id="bnBusy" hidden>กำลังอ่านบิล… อาจใช้เวลาสักครู่</span>
+      </div>
+      <div id="bnQueueBox" hidden>
+        <h3 class="section-title">บิลที่อ่านอยู่ / รอตรวจ <span class="muted small">(อ่านอยู่เบื้องหลัง — ไปหน้าอื่นได้ แล้วกลับมาตรวจทีหลัง · ถ้ารีเฟรชหน้าจอ รายการนี้จะหาย)</span></h3>
+        <div id="bnQueue" class="bujobs"></div>
       </div>
     </div>
     <div id="bnReview" hidden>
+      <div class="card bu-origin" id="bnOrigin" hidden><h2>บิลต้นฉบับ <span class="muted small">(เทียบกับที่ระบบอ่านได้ด้านล่าง · กด ↻ เพื่อหมุนรูปให้อ่านง่ายขึ้น)</span></h2><div id="bnThumbs" class="bu-thumbs"></div></div>
       <div class="card"><h2>บิล</h2><div id="bnHead"></div></div>
       <div class="card">
         <h2>รายการ <span class="muted small">(ช่องสีเหลือง = ระบบไม่แน่ใจ ตรวจอีกที · “เป็นของ” ใช้เทียบราคาระหว่างร้าน)</span></h2>
@@ -507,7 +521,9 @@
       <p class="error" id="bnSaveError" hidden></p>
       <div class="pl-set-actions">
         <button id="bnSave" class="btn primary big" type="button">บันทึกบิล</button>
-        <button id="bnBack" class="btn" type="button">เริ่มใหม่</button>
+        <button id="bnBack" class="btn" type="button">← กลับไปรายการบิล</button>
+        <span class="grow"></span>
+        <button id="bnDiscard" class="btn danger" type="button">ทิ้งบิลนี้</button>
       </div>
     </div>
   </section>
@@ -520,12 +536,22 @@
     </div>
     <p class="error" id="prError" hidden></p>
     <div class="edit-banner" id="prNeedsV16" hidden>ยังใช้ระบบซื้อของไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
-    <div class="card mpbar">
+    <div class="card bufilters">
       <input id="prQ" type="search" placeholder="ค้นหา: ของ ร้าน เช่น ลูกปืน 6205, สายพาน B-82" autocomplete="off" aria-label="ค้นหาของ">
-      <select id="prVat" aria-label="ราคารวม VAT หรือไม่"><option value="inc">ราคาที่จ่ายจริง (รวม VAT)</option><option value="ex">ราคาก่อน VAT</option></select>
+      <select id="prCat" aria-label="หมวด"><option value="">ทุกหมวด</option></select>
+      <select id="prVendor" aria-label="ร้าน"><option value="">ทุกร้าน</option></select>
+      <select id="prVat" class="push" aria-label="ราคารวม VAT หรือไม่"><option value="inc">ราคาที่จ่ายจริง (รวม VAT)</option><option value="ex">ราคาก่อน VAT</option></select>
     </div>
     <div id="prList" class="prlist"></div>
-    <div id="prUnlinked" class="card prunlinked-box"></div>
+    <section id="prUnlinkedBox" class="card prunlinked-box" hidden>
+      <h3 class="section-title" id="prUnlinkedTitle"></h3>
+      <p class="muted small">เลือกว่าเป็นของรายการไหน — ระบบจะจำคำนี้ไว้ ครั้งหน้าบิลที่เขียนแบบเดียวกันจะรู้เองว่าเป็นของอะไร (ถ้าเป็นของใหม่ เลือก “+ รายการใหม่”)</p>
+      <div class="bufilters inner">
+        <input id="prUq" type="search" placeholder="ค้นหาในรายการที่ยังไม่ได้ระบุ" autocomplete="off" aria-label="ค้นหาบรรทัด">
+        <select id="prUv" aria-label="ร้าน"><option value="">ทุกร้าน</option></select>
+      </div>
+      <div id="prUnlinked"></div>
+    </section>
   </section>
 
   <!-- ============ Buying for the factory: the stock room (draft) ============ -->
@@ -536,9 +562,12 @@
     </div>
     <p class="error" id="skError" hidden></p>
     <div class="edit-banner" id="skNeedsV16" hidden>ยังใช้สต็อกไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
-    <div class="card mpbar">
+    <div class="card bufilters">
       <input id="skQ" type="search" placeholder="ค้นหา: ชื่อ หมวด สเปค ที่เก็บ" autocomplete="off" aria-label="ค้นหาของในสต็อก">
-      <button id="skAdd" class="btn" type="button">+ เพิ่มรายการ</button>
+      <select id="skCat" aria-label="หมวด"><option value="">ทุกหมวด</option></select>
+      <select id="skLoc" aria-label="ที่เก็บ"><option value="">ทุกที่เก็บ</option></select>
+      <label class="mgcheck"><input id="skLow" type="checkbox"> เฉพาะที่ควรสั่งเพิ่ม</label>
+      <button id="skAdd" class="btn push" type="button">+ เพิ่มรายการ</button>
     </div>
     <p class="muted small" id="skCount"></p>
     <div id="skList"></div>

@@ -1,48 +1,71 @@
 "use strict";
 
 // Buying for the factory (เครื่องจักร group):
-//   #purchases     the purchase bills from suppliers -- list, one bill's page, delete
-//   #purchase-new  read a bill with the AI (or type it in), check it, save
-//   #prices        what every thing cost where: the last price, the cheapest supplier, and the lines not linked yet
+//   #purchases     the purchase bills from suppliers -- list with filters, one bill's page, delete
+//   #purchase-new  pick bill files (one bill per file, or pages of one bill) -> they are READ IN THE BACKGROUND (a queue:
+//                  go to another page and come back) -> check each one against the original -> save
+//   #prices        what every thing cost where: the last price, the cheapest supplier, and the lines not identified yet
 //   #stock         the mechanics' stock room, a draft: what is on the shelf, in / out / counted
 // The suppliers are kept on the settings page (ตั้งค่า), with the words that find them on a bill.
 // Data: /api/purchases*, /api/prices, /api/stock* (app/purchasing.py, app/stock.py). Loaded BEFORE app.js.
+// The queue lives in this page's memory only: refreshing the browser loses bills that were read but not saved.
 
 const bu = {
   opts: null,              // { ready, suppliers, items, machines, branches }
-  files: [],               // the photos / PDF pages of the bill being read: { blob, name, type }
-  draft: null,             // the bill being checked
-  extraction: null,        // what the reader returned (saved with the bill)
+  pick: [],                // files chosen but not started: { blob, name, type }
+  mode: "each",            // "each": one bill per file · "one": all the files are pages of one bill
+  jobs: [],                // the queue: { id, files, status: queued|reading|ready|error, error, t0, extraction, server, review, manual }
+  cur: null,               // the job being checked
+  nextId: 1, running: 0, timer: null, notice: "",
   bills: [], prices: null, stock: null, vat: "inc",
   dlgSave: null,
 };
 
 const BU_VAT = [["none", "ไม่มี VAT"], ["excluded", "VAT 7% บวกเพิ่มท้ายบิล"], ["included", "ราคารวม VAT แล้ว"]];
 const BU_NEW_ITEM = "__new";
+const BU_PARALLEL = 3;
 const buMoney = (n) => (n === null || n === undefined || n === "" ? "–" : Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 }));
 const buQty = (n) => (n === null || n === undefined ? "–" : Number(n).toLocaleString("th-TH", { maximumFractionDigits: 3 }));
+const buClock = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
 async function buLoadOptions() {
   bu.opts = await api("/api/purchases/options");
   return bu.opts;
 }
 
-function buNeedsV16(id, ready) { $(id).hidden = ready !== false; }
+const buNeedsV16 = (id, ready) => { $(id).hidden = ready !== false; };
+
+// keep the chosen value of a filter while its options are rebuilt
+function buFillSelect(sel, blank, values) {
+  const keep = sel.value;
+  sel.replaceChildren(el("option", { value: "", text: blank }), ...values.map((v) => el("option", { value: v, text: v })));
+  sel.value = values.includes(keep) ? keep : "";
+}
 
 // ================================================================== the bills (#purchases)
 async function openPurchases() {
   showView("purchases");
   showErr("buError", "");
   let r;
-  try { r = await api("/api/purchases"); } catch (err) { showErr("buError", `โหลดบิลไม่สำเร็จ: ${err.message}`); return; }
+  try { r = await api("/api/purchases?limit=500"); } catch (err) { showErr("buError", `โหลดบิลไม่สำเร็จ: ${err.message}`); return; }
   buNeedsV16("buNeedsV16", r.ready);
   bu.bills = r.bills;
+  buFillSelect($("buVendor"), "ทุกร้าน", [...new Set(bu.bills.map((b) => b.vendor).filter(Boolean))].sort());
+  buFillSelect($("buBranch"), "ทุกสาขา", [...new Set(bu.bills.map((b) => b.branch).filter(Boolean))].sort());
   renderPurchases();
 }
 
+function buPeriodStart(kind) {
+  const t = todayISO();
+  if (kind === "month") return `${t.slice(0, 7)}-01`;
+  if (kind === "year") return `${t.slice(0, 4)}-01-01`;
+  return kind ? addDaysISO(t, -Number(kind)) : "";
+}
+
 function renderPurchases() {
-  const q = $("buQ").value.trim().toLowerCase();
-  const rows = bu.bills.filter((b) => !q || [b.vendor, b.vendor_name, b.bill_no].filter(Boolean).join(" ").toLowerCase().includes(q));
+  const q = $("buQ").value.trim().toLowerCase(), vendor = $("buVendor").value, branch = $("buBranch").value, from = buPeriodStart($("buPeriod").value);
+  const rows = bu.bills.filter((b) => (!q || [b.vendor, b.vendor_name, b.bill_no].filter(Boolean).join(" ").toLowerCase().includes(q))
+    && (!vendor || b.vendor === vendor) && (!branch || b.branch === branch) && (!from || b.bill_date >= from));
   const total = rows.reduce((s, b) => s + Number(b.total || 0), 0);
   fill($("buCount"), `${rows.length} บิล · รวม ${buMoney(total)} บาท`);
   fill($("buList"), ...(rows.length ? rows.map((b) => el("button", { class: "card bubill", type: "button", onclick: () => openPurchaseBill(b.id) },
@@ -50,7 +73,7 @@ function renderPurchases() {
     el("strong", { text: b.vendor || "ไม่ระบุร้าน" }),
     el("span", { class: "muted small", text: [b.bill_no ? `เลขที่ ${b.bill_no}` : null, `${b.lines} รายการ`, b.branch, b.source === "manual" ? "กรอกเอง" : null].filter(Boolean).join(" · ") }),
     el("span", { class: "bubill-total", text: `${buMoney(b.total)} ฿` })))
-    : [el("p", { class: "muted empty", text: bu.bills.length ? "ไม่พบบิลที่ตรงกับคำค้น" : "ยังไม่มีบิลซื้อของ — กด “+ บิลซื้อของใหม่”" })]));
+    : [el("p", { class: "muted empty", text: bu.bills.length ? "ไม่พบบิลที่ตรงกับตัวกรอง" : "ยังไม่มีบิลซื้อของ — กด “+ บิลซื้อของใหม่”" })]));
 }
 
 async function openPurchaseBill(id) {
@@ -65,7 +88,7 @@ async function openPurchaseBill(id) {
       el("thead", {}, el("tr", {}, ...["รายการในบิล", "เป็นของ", "จำนวน", "รวม", "ต่อหน่วยจริง"].map((t) => el("th", { text: t })))),
       el("tbody", {}, ...b.lines.map((ln) => el("tr", {},
         el("td", {}, ln.description, ln.machine_name || ln.used_for ? el("div", { class: "muted small", text: [ln.machine_name, ln.used_for].filter(Boolean).join(" · ") }) : null),
-        el("td", { class: ln.item_name ? "" : "muted", text: ln.item_name || "ยังไม่ผูก" }),
+        el("td", { class: ln.item_name ? "" : "muted", text: ln.item_name || "ยังไม่ระบุ" }),
         el("td", { text: `${buQty(ln.quantity)} ${ln.unit || ""}`.trim() }),
         el("td", { text: buMoney(ln.line_total) }),
         el("td", { text: ln.unit_cost === null ? "–" : `${buMoney(ln.unit_cost)} ฿` })))))),
@@ -80,29 +103,42 @@ async function openPurchaseBill(id) {
   ], null);
 }
 
-// ================================================================== a new bill (#purchase-new)
+// ================================================================== a new bill (#purchase-new): pick -> queue -> check
 async function openPurchaseNew() {
   showView("purchaseNew");
   showErr("bnError", "");
   try { await buLoadOptions(); } catch (err) { showErr("bnError", `โหลดข้อมูลไม่สำเร็จ: ${err.message}`); return; }
   buNeedsV16("bnNeedsV16", bu.opts.ready);
-  if (!bu.draft) buShowUpload();
+  if (bu.cur) buShowReview(); else buShowHome();
 }
 
-function buShowUpload() {
-  bu.draft = null;
-  bu.extraction = null;
+function buShowHome() {
+  bu.cur = null;
   $("bnUpload").hidden = false;
   $("bnReview").hidden = true;
-  buRenderFiles();
+  $("bnNotice").hidden = !bu.notice;
+  $("bnNotice").textContent = bu.notice;                 // stays until the next bill is started or opened (the page can be routed twice)
+  buRenderPick();
+  buRenderQueue();
 }
 
-function buRenderFiles() {
-  fill($("bnFiles"), ...bu.files.map((f, i) => el("li", {},
+function buShowReview() {
+  $("bnUpload").hidden = true;
+  $("bnReview").hidden = false;
+  buRenderOrigin();
+  buRenderReview();
+  window.scrollTo(0, 0);
+}
+
+function buRenderPick() {
+  fill($("bnFiles"), ...bu.pick.map((f, i) => el("li", {},
     el("span", { class: "name", text: (f.type === "application/pdf" ? "📄 " : "🧾 ") + f.name }),
     el("span", { class: "muted small", text: `${Math.max(1, Math.round(f.blob.size / 1024))} KB` }),
-    el("button", { class: "btn small", type: "button", text: "ลบ", onclick: () => { bu.files.splice(i, 1); buRenderFiles(); } }))));
-  $("bnRead").disabled = bu.files.length === 0;
+    el("button", { class: "btn small", type: "button", text: "ลบ", onclick: () => { bu.pick.splice(i, 1); buRenderPick(); } }))));
+  $("bnModes").hidden = bu.pick.length < 2;
+  const bills = bu.mode === "one" || bu.pick.length < 2 ? 1 : bu.pick.length;
+  $("bnRead").disabled = bu.pick.length === 0;
+  $("bnRead").textContent = bu.pick.length > 1 ? `อ่านบิล (${bills} ใบ)` : "อ่านบิล";
 }
 
 async function buAddFiles(list) {
@@ -110,30 +146,159 @@ async function buAddFiles(list) {
     const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
     if (!f.type.startsWith("image/") && !isPdf) continue;
     const blob = isPdf ? f : await prepareImage(f);
-    bu.files.push({ blob, name: f.name, type: isPdf ? "application/pdf" : blob.type || "image/jpeg" });
+    bu.pick.push({ blob, name: f.name, type: isPdf ? "application/pdf" : blob.type || "image/jpeg" });
   }
-  buRenderFiles();
+  buRenderPick();
 }
 
-async function buRead() {
-  const btn = $("bnRead");
-  if (btn.disabled) return;
-  btn.disabled = true;
-  showErr("bnError", "");
-  $("bnBusy").hidden = false;
-  const fd = new FormData();
-  for (const f of bu.files) fd.append("files", f.blob, f.name);
-  try {
-    const r = await api("/api/purchases/extract", { method: "POST", body: fd });
-    if (!bu.opts) await buLoadOptions();
-    bu.extraction = r.extraction;
-    buStartReview(r.draft);
-  } catch (err) {
-    showErr("bnError", `อ่านบิลไม่สำเร็จ: ${err.message}`);
-  } finally {
-    $("bnBusy").hidden = true;
-    btn.disabled = bu.files.length === 0;
+// ---- the background queue: up to BU_PARALLEL bills are read at once; it keeps running while another page is open
+function buStartJobs() {
+  if (!bu.pick.length) return;
+  bu.notice = "";
+  $("bnNotice").hidden = true;
+  const groups = bu.mode === "one" ? [bu.pick] : bu.pick.map((f) => [f]);
+  for (const files of groups) {
+    for (const f of files) f.url = f.url || URL.createObjectURL(f.blob);
+    bu.jobs.push({ id: bu.nextId++, files, status: "queued", error: "", t0: null, extraction: null, server: null, review: null, manual: false });
   }
+  bu.pick = [];
+  buRenderPick();
+  buRenderQueue();
+  buPump();
+}
+
+function buPump() {
+  while (bu.running < BU_PARALLEL) {
+    const job = bu.jobs.find((j) => j.status === "queued");
+    if (!job) break;
+    buRunJob(job);
+  }
+}
+
+async function buRunJob(job) {
+  job.status = "reading";
+  job.t0 = Date.now();
+  job.error = "";
+  bu.running++;
+  buTick();
+  buRenderQueue();
+  buBadge();
+  const fd = new FormData();
+  for (const f of job.files) fd.append("files", f.blob, f.name);
+  try {
+    if (!bu.opts) await buLoadOptions();
+    const r = await api("/api/purchases/extract", { method: "POST", body: fd });
+    job.extraction = r.extraction;
+    job.server = r.draft;
+    job.status = "ready";
+  } catch (err) {
+    job.status = "error";
+    job.error = err.message;
+  } finally {
+    bu.running--;
+    buRenderQueue();
+    buBadge();
+    buPump();
+  }
+}
+
+// a ticking clock on the jobs being read, only while there are some
+function buTick() {
+  if (bu.timer) return;
+  bu.timer = setInterval(() => {
+    if (!bu.jobs.some((j) => j.status === "reading")) { clearInterval(bu.timer); bu.timer = null; return; }
+    for (const s of document.querySelectorAll(".bujob-clock")) {
+      const job = bu.jobs.find((j) => String(j.id) === s.dataset.id);
+      if (job && job.t0) s.textContent = buClock(Date.now() - job.t0);
+    }
+  }, 1000);
+}
+
+// the number beside "บิลซื้อของ" in the menu: bills read or being read that are not saved yet
+function buBadge() {
+  if (typeof navBadge === "function") navBadge("navPurchases", bu.jobs.length, false);
+}
+
+function buJobTitle(job) {
+  return job.manual ? "กรอกเอง (ไม่มีบิล)" : job.files.map((f) => f.name).join(", ");
+}
+
+function buRenderQueue() {
+  $("bnQueueBox").hidden = bu.jobs.length === 0;
+  fill($("bnQueue"), ...bu.jobs.map((job) => {
+    const d = job.server || {};
+    const status = job.status === "reading" ? el("span", { class: "muted small" }, el("span", { class: "spin" }), "กำลังอ่านบิล… ", el("span", { class: "bujob-clock", "data-id": String(job.id), text: buClock(Date.now() - job.t0) }))
+      : job.status === "queued" ? el("span", { class: "muted small", text: "รอคิว…" })
+      : job.status === "error" ? el("span", { class: "error small", text: `อ่านไม่สำเร็จ: ${job.error}` })
+      : el("span", { class: "small", text: job.manual ? "กรอกค้างไว้ ยังไม่ได้บันทึก"
+        : `${d.vendor_name || "ไม่ทราบร้าน"} · ${d.date ? beDate(d.date) : "ไม่ทราบวันที่"} · ${(d.line_items || []).length} รายการ · ${buMoney(d.total)} ฿` });
+    const actions = [];
+    if (job.status === "ready") actions.push(el("button", { class: "btn small primary", type: "button", text: "ตรวจและบันทึก", onclick: () => buOpenJob(job) }));
+    if (job.status === "error") actions.push(el("button", { class: "btn small", type: "button", text: "ลองใหม่", onclick: () => { job.status = "queued"; buRenderQueue(); buPump(); } }));
+    if (job.status !== "reading") actions.push(el("button", { class: "btn small danger", type: "button", text: "เอาออก", onclick: () => buRemoveJob(job, true) }));
+    return el("div", { class: `card bujob ${job.status}` }, el("div", {}, el("div", { class: "bujob-name", text: buJobTitle(job) }), status), el("div", { class: "bujob-actions" }, ...actions));
+  }));
+}
+
+function buRemoveJob(job, ask) {
+  if (ask && !confirm(`เอาบิลนี้ออกจากรายการใช่ไหม? (ยังไม่ได้บันทึก)\n${buJobTitle(job)}`)) return;
+  for (const f of job.files) if (f.url) URL.revokeObjectURL(f.url);
+  bu.jobs = bu.jobs.filter((j) => j !== job);
+  if (bu.cur === job) bu.cur = null;
+  buRenderQueue();
+  buBadge();
+}
+
+function buOpenJob(job) {
+  bu.cur = job;
+  bu.notice = "";
+  if (!job.review) job.review = buMakeReview(job.server);
+  buShowReview();
+}
+
+// draft = what the server read (null to type a bill in by hand)
+function buMakeReview(draft) {
+  const d = draft || {};
+  const review = {
+    source: draft ? "bill" : "manual",
+    vendor_id: d.vendor_id || "", vendor_name: d.vendor_name || "", new_vendor: d.vendor_id ? "" : (d.vendor_name || ""),
+    bill_date: d.date || todayISO(), bill_no: d.bill_no || "", branch: "สระบุรี", vat_mode: d.vat_mode || "none",
+    subtotal: d.subtotal ?? "", vat_amount: d.vat_amount ?? "", discount: d.discount ?? "", total: d.total ?? "", notes: "", receive_stock: false,
+    low: d.low_confidence_fields || [],
+    lines: (d.line_items || []).map((ln) => {
+      const found = ln.item_id ? { id: ln.item_id } : buMatch(ln.description);          // the item list may have changed while the bill waited
+      return { ...buBlankLine(), ...ln, item_id: found ? found.id : "", auto_item: found ? found.id : "",
+        quantity: ln.quantity ?? "", unit: ln.unit || "", unit_price: ln.unit_price ?? "", line_total: ln.line_total ?? "" };
+    }),
+  };
+  if (!review.lines.length) review.lines.push(buBlankLine());
+  return review;
+}
+
+// ---- the original bill, next to what was read (images can be turned for reading; PDFs open in a tab)
+function buRenderOrigin() {
+  const job = bu.cur;
+  const files = job ? job.files : [];
+  $("bnOrigin").hidden = files.length === 0;
+  fill($("bnThumbs"), ...files.map((f) => {
+    if (f.type === "application/pdf") return el("div", { class: "bu-thumb" }, el("a", { class: "btn small", href: f.url, target: "_blank", rel: "noopener", text: `📄 ${f.name}` }));
+    let turns = f.turns || 0;
+    const img = el("img", { src: f.url, alt: f.name, title: "กดเพื่อดูภาพใหญ่" });
+    const apply = () => {
+      img.style.transform = `rotate(${turns * 90}deg)`;
+      const odd = turns % 2 === 1;
+      img.style.maxWidth = odd ? "260px" : "100%";
+      img.style.maxHeight = odd ? "220px" : "100%";
+    };
+    apply();
+    img.addEventListener("click", () => window.open(f.url, "_blank", "noopener"));
+    return el("div", { class: "bu-thumb" }, img,
+      el("button", { class: "btn small rot", type: "button", title: "หมุนรูป (เฉพาะที่ดูตรงนี้)", text: "↻", onclick: () => { turns = (turns + 1) % 4; f.turns = turns; apply(); } }));
+  }));
+}
+
+function buBlankLine() {
+  return { description: "", quantity: "", unit: "", unit_price: "", line_total: "", item_id: "", new_item: null, learn: false, unlinked_by_hand: false, used_for: "", low_confidence_fields: [] };
 }
 
 // The same rule as the server (app/shops.py explain): lower-case, no spaces / dots / dashes; "a+b" = both parts;
@@ -153,30 +318,8 @@ function buMatch(description) {
   return best;
 }
 
-function buBlankLine() {
-  return { description: "", quantity: "", unit: "", unit_price: "", line_total: "", item_id: "", new_item: null, learn: false, machine_id: "", used_for: "", low_confidence_fields: [] };
-}
-
-// draft = the reader's output (or null to type a bill in by hand)
-function buStartReview(draft) {
-  const d = draft || {};
-  bu.draft = {
-    source: draft ? "bill" : "manual",
-    vendor_id: d.vendor_id || "", vendor_name: d.vendor_name || "", new_vendor: d.vendor_id ? "" : (d.vendor_name || ""),
-    bill_date: d.date || todayISO(), bill_no: d.bill_no || "", branch: "สระบุรี", vat_mode: d.vat_mode || "none",
-    subtotal: d.subtotal ?? "", vat_amount: d.vat_amount ?? "", discount: d.discount ?? "", total: d.total ?? "", notes: "", receive_stock: false,
-    low: d.low_confidence_fields || [],
-    lines: (d.line_items || []).map((ln) => ({ ...buBlankLine(), ...ln, item_id: ln.item_id || "", auto_item: ln.item_id || "",
-      quantity: ln.quantity ?? "", unit: ln.unit || "", unit_price: ln.unit_price ?? "", line_total: ln.line_total ?? "" })),
-  };
-  if (!bu.draft.lines.length) bu.draft.lines.push(buBlankLine());
-  $("bnUpload").hidden = true;
-  $("bnReview").hidden = false;
-  buRenderReview();
-}
-
 function buRenderReview() {
-  const d = bu.draft;
+  const d = bu.cur.review;
   const flag = (key, node) => { if (d.low.includes(key)) node.classList.add("flagged"); return node; };
   const sups = bu.opts.suppliers.filter((s) => s.active !== false || s.id === d.vendor_id);
   const vendorSel = el("select", { id: "bnVendor" }, el("option", { value: "", text: "— ไม่ระบุร้าน —" }),
@@ -211,7 +354,7 @@ function buRenderReview() {
 }
 
 function buItemSelect(ln, onChange) {
-  const sel = el("select", { "aria-label": "เป็นของรายการไหน" }, el("option", { value: "", text: "— ยังไม่ผูก —" }),
+  const sel = el("select", { "aria-label": "เป็นของรายการไหน" }, el("option", { value: "", text: "— ยังไม่ระบุ —" }),
     el("option", { value: BU_NEW_ITEM, text: "+ รายการใหม่" }),
     ...bu.opts.items.filter((i) => i.active !== false || i.id === ln.item_id).map((i) => el("option", { value: i.id, text: i.name })));
   sel.value = ln.new_item ? BU_NEW_ITEM : (ln.item_id || "");
@@ -220,8 +363,7 @@ function buItemSelect(ln, onChange) {
 }
 
 function buRenderLines() {
-  const d = bu.draft;
-  const machines = bu.opts.machines.filter((m) => m.active !== false);
+  const d = bu.cur.review;
   const rows = d.lines.map((ln, i) => {
     const inp = (key, attrs = {}) => {
       const x = el("input", { type: attrs.type || "text", ...attrs });
@@ -250,9 +392,6 @@ function buRenderLines() {
       newName.hidden = !ln.new_item;
       if (ln.new_item) { newName.value = ln.new_item.name; newName.focus(); }
     });
-    const machine = el("select", { "aria-label": "ใช้กับเครื่อง" }, el("option", { value: "", text: "—" }), ...machines.map((m) => el("option", { value: m.id, text: m.name })));
-    machine.value = ln.machine_id || "";
-    machine.addEventListener("change", () => { ln.machine_id = machine.value; });
     return el("tr", {},
       el("td", { class: "n", text: String(i + 1) }),
       el("td", {}, inp("description", { maxlength: "300", "aria-label": "รายการ" })),
@@ -260,12 +399,11 @@ function buRenderLines() {
       el("td", {}, inp("unit", { maxlength: "20", "aria-label": "หน่วย" })),
       el("td", {}, inp("unit_price", { type: "number", "aria-label": "ราคาต่อหน่วย" })),
       el("td", {}, inp("line_total", { type: "number", "aria-label": "รวม" })),
-      el("td", { class: "bu-item" }, itemSel, newName, ln.auto_item && ln.item_id === ln.auto_item ? el("div", { class: "muted small", text: "จับคู่ให้แล้ว" }) : null),
-      el("td", {}, machine),
+      el("td", { class: "bu-item" }, itemSel, newName, ln.auto_item && ln.item_id === ln.auto_item ? el("div", { class: "muted small", text: "รู้แล้วว่าเป็นของอะไร" }) : null),
       el("td", {}, el("button", { class: "btn small", type: "button", title: "ลบบรรทัดนี้", text: "✕", onclick: () => { d.lines.splice(i, 1); if (!d.lines.length) d.lines.push(buBlankLine()); buRenderLines(); } })));
   });
   fill($("bnLines"), el("table", { class: "lines bu-lines" },
-    el("thead", {}, el("tr", {}, ...["#", "รายการในบิล", "จำนวน", "หน่วย", "ราคา/หน่วย", "รวม", "เป็นของ (สำหรับเทียบราคา)", "ใช้กับเครื่อง", ""].map((t) => el("th", { text: t })))),
+    el("thead", {}, el("tr", {}, ...["#", "รายการในบิล", "จำนวน", "หน่วย", "ราคา/หน่วย", "รวม", "เป็นของ (สำหรับเทียบราคา)", ""].map((t) => el("th", { text: t })))),
     el("tbody", {}, ...rows)));
   buRenderSum();
 }
@@ -276,7 +414,7 @@ function buLineAmount(ln) {
 }
 
 function buRenderSum() {
-  const d = bu.draft;
+  const d = bu.cur && bu.cur.review;
   if (!d) return;
   const sum = d.lines.reduce((s, ln) => s + buLineAmount(ln), 0);
   const expected = d.vat_mode === "excluded" ? sum * 1.07 : sum;
@@ -287,7 +425,8 @@ function buRenderSum() {
 }
 
 async function buSave(allowDuplicates = false) {
-  const d = bu.draft;
+  const job = bu.cur;
+  const d = job.review;
   const btn = $("bnSave");
   if (btn.disabled) return;
   showErr("bnSaveError", "");
@@ -296,15 +435,15 @@ async function buSave(allowDuplicates = false) {
     source: d.source, vendor_id: d.vendor_id || null, new_vendor: d.vendor_id ? null : (d.new_vendor || null), vendor_name: d.vendor_name || d.new_vendor || null,
     bill_date: d.bill_date, bill_no: d.bill_no, branch: d.branch, vat_mode: d.vat_mode || "none",
     subtotal: d.subtotal, vat_amount: d.vat_amount, discount: d.discount, total: d.total, notes: d.notes, receive_stock: d.receive_stock,
-    extraction: bu.extraction,
+    extraction: job.extraction,
     lines: lines.map((ln) => ({ description: ln.description, quantity: ln.quantity, unit: ln.unit, unit_price: ln.unit_price, line_total: ln.line_total,
-      item_id: ln.item_id || null, new_item: ln.new_item, learn: ln.learn, unlinked_by_hand: !!ln.unlinked_by_hand, machine_id: ln.machine_id || null, used_for: ln.used_for || null,
+      item_id: ln.item_id || null, new_item: ln.new_item, learn: ln.learn, unlinked_by_hand: !!ln.unlinked_by_hand, used_for: ln.used_for || null,
       low_confidence_fields: ln.low_confidence_fields || [] })),
   };
   const fd = new FormData();
   fd.append("payload", JSON.stringify(payload));
   if (allowDuplicates) fd.append("allow_duplicates", "true");
-  if (d.source === "bill") for (const f of bu.files) fd.append("files", f.blob, f.name);
+  if (d.source === "bill") for (const f of job.files) fd.append("files", f.blob, f.name);
   btn.disabled = true;
   try {
     await api("/api/purchases", { method: "POST", body: fd });
@@ -315,9 +454,10 @@ async function buSave(allowDuplicates = false) {
     return;
   }
   btn.disabled = false;
-  bu.files = [];
-  bu.draft = null;
-  goHash("#purchases");
+  bu.opts = null;                                        // a new supplier / item may have been made
+  buRemoveJob(job, false);
+  bu.notice = `บันทึกบิลแล้ว: ${d.new_vendor || d.vendor_name || "ไม่ระบุร้าน"} · ${beDate(d.bill_date)}`;
+  if (bu.jobs.length) goHash("#purchase-new"); else goHash("#purchases");
 }
 
 // ================================================================== prices (#prices)
@@ -332,16 +472,23 @@ async function loadPrices() {
     [bu.prices] = await Promise.all([api(`/api/prices?q=${encodeURIComponent($("prQ").value.trim())}`), bu.opts ? null : buLoadOptions()]);
   } catch (err) { showErr("prError", `โหลดราคาไม่สำเร็จ: ${err.message}`); return; }
   buNeedsV16("prNeedsV16", bu.prices.ready);
+  const bought = bu.prices.items.filter((it) => it.count > 0);
+  buFillSelect($("prCat"), "ทุกหมวด", [...new Set(bought.map((it) => it.category).filter(Boolean))].sort());
+  const vendors = [...new Set([...bought.flatMap((it) => it.by_vendor.map((v) => v.vendor)), ...bu.prices.unlinked.map((u) => u.vendor)].filter(Boolean))].sort();
+  buFillSelect($("prVendor"), "ทุกร้าน", vendors);
+  buFillSelect($("prUv"), "ทุกร้าน", [...new Set(bu.prices.unlinked.map((u) => u.vendor).filter(Boolean))].sort());
   renderPrices();
 }
 
-function buCost(x) { return bu.vat === "ex" ? x.unit_cost_ex_vat : x.unit_cost; }
+const buCost = (x) => (bu.vat === "ex" ? x.unit_cost_ex_vat : x.unit_cost);
 
 function renderPrices() {
   const p = bu.prices;
   if (!p) return;
   const per = (x, unit) => `${buMoney(buCost(x))} ฿${unit ? `/${unit}` : ""}`;
-  const cards = p.items.filter((it) => it.count > 0).map((it) => el("section", { class: "card prcard" },
+  const cat = $("prCat").value, vendor = $("prVendor").value;
+  const shown = p.items.filter((it) => it.count > 0 && (!cat || it.category === cat) && (!vendor || it.by_vendor.some((v) => v.vendor === vendor)));
+  const cards = shown.map((it) => el("section", { class: "card prcard" },
     el("div", { class: "prhead" }, el("strong", { text: it.name }), it.category ? el("span", { class: "badge", text: it.category }) : null,
       el("span", { class: "muted small", text: `ซื้อ ${it.count} ครั้ง` })),
     it.last ? el("div", { class: "prline" },
@@ -354,20 +501,27 @@ function renderPrices() {
       ...it.history.map((h) => el("div", { class: "prhist small" }, el("span", { text: beDate(h.bill_date) }), el("span", { text: h.vendor || "–" }),
         el("span", { class: "muted", text: h.description }), el("span", { text: `${buQty(h.quantity)} ${h.unit || ""}` }),
         el("strong", { text: buCost(h) === null ? "–" : `${buMoney(buCost(h))} ฿` }))))));
-  const unlinked = p.unlinked.map((ln) => {
-    const sel = buItemSelect({ item_id: "" }, async (v) => {
-      const body = v === BU_NEW_ITEM ? { new_item: { name: prompt("ชื่อรายการใหม่", ln.description) || "" } } : { item_id: v || null };
+  fill($("prList"), ...(cards.length ? cards : [el("p", { class: "muted empty", text: p.items.some((it) => it.count > 0) ? "ไม่พบของที่ตรงกับตัวกรอง" : "ยังไม่มีราคาของ — บันทึกบิลซื้อของแล้วเลือกว่าแต่ละบรรทัดเป็นของอะไร ราคาจะขึ้นที่นี่" })]));
+  renderUnlinked();
+}
+
+function renderUnlinked() {
+  const p = bu.prices;
+  const q = $("prUq").value.trim().toLowerCase(), v = $("prUv").value;
+  const rows = p.unlinked.filter((ln) => (!q || `${ln.description} ${ln.vendor || ""}`.toLowerCase().includes(q)) && (!v || ln.vendor === v));
+  $("prUnlinkedBox").hidden = p.unlinked.length === 0;
+  fill($("prUnlinkedTitle"), `บรรทัดที่ยังไม่ได้ระบุว่าเป็นของอะไร (${rows.length}${rows.length !== p.unlinked.length ? ` จาก ${p.unlinked.length}` : ""})`);
+  fill($("prUnlinked"), ...rows.map((ln) => {
+    const sel = buItemSelect({ item_id: "" }, async (val) => {
+      const body = val === BU_NEW_ITEM ? { new_item: { name: prompt("ชื่อรายการใหม่", ln.description) || "" } } : { item_id: val || null };
       if (body.new_item && !body.new_item.name) { sel.value = ""; return; }
-      try { bu.prices = await api(`/api/purchases/lines/${ln.id}`, jsonOpts("PATCH", body)); } catch (err) { showErr("prError", err.message); return; }
+      try { await api(`/api/purchases/lines/${ln.id}`, jsonOpts("PATCH", body)); } catch (err) { showErr("prError", err.message); return; }
       await buLoadOptions();
       await loadPrices();
     });
     return el("div", { class: "prunlinked" }, el("span", { class: "small", text: beDate(ln.bill_date) }), el("span", { text: ln.description }),
       el("span", { class: "muted small", text: `${ln.vendor || "–"} · ${buCost(ln) === null ? "–" : `${buMoney(buCost(ln))} ฿/${ln.unit || "หน่วย"}`}` }), sel);
-  });
-  fill($("prList"), ...(cards.length ? cards : [el("p", { class: "muted empty", text: "ยังไม่มีราคาของ — บันทึกบิลซื้อของแล้วผูกบรรทัดกับรายการ ราคาจะขึ้นที่นี่" })]));
-  fill($("prUnlinked"), ...(unlinked.length ? [el("h3", { class: "section-title", text: `บรรทัดที่ยังไม่ได้ผูกกับรายการ (${unlinked.length})` }),
-    el("p", { class: "muted small", text: "เลือกว่าเป็นของรายการไหน — ระบบจะจำคำนี้ไว้ ครั้งหน้าบิลที่เขียนแบบเดียวกันจะผูกให้เอง" }), ...unlinked] : []));
+  }));
 }
 
 // ================================================================== stock (#stock), a draft
@@ -380,13 +534,17 @@ async function openStock() {
 async function loadStock() {
   try { bu.stock = await api("/api/stock"); } catch (err) { showErr("skError", `โหลดสต็อกไม่สำเร็จ: ${err.message}`); return; }
   buNeedsV16("skNeedsV16", bu.stock.ready);
+  const active = bu.stock.items.filter((i) => i.active !== false);
+  buFillSelect($("skCat"), "ทุกหมวด", [...new Set(active.map((i) => i.category).filter(Boolean))].sort());
+  buFillSelect($("skLoc"), "ทุกที่เก็บ", [...new Set(active.map((i) => i.location).filter(Boolean))].sort());
   renderStock();
 }
 
 function renderStock() {
   const s = bu.stock;
-  const q = $("skQ").value.trim().toLowerCase();
-  const items = s.items.filter((i) => (i.active !== false) && (!q || [i.name, i.category, i.spec, i.location, ...(i.aliases || [])].filter(Boolean).join(" ").toLowerCase().includes(q)));
+  const q = $("skQ").value.trim().toLowerCase(), cat = $("skCat").value, loc = $("skLoc").value, onlyLow = $("skLow").checked;
+  const items = s.items.filter((i) => (i.active !== false) && (!q || [i.name, i.category, i.spec, i.location, ...(i.aliases || [])].filter(Boolean).join(" ").toLowerCase().includes(q))
+    && (!cat || i.category === cat) && (!loc || i.location === loc) && (!onlyLow || i.low));
   const low = items.filter((i) => i.low).length;
   fill($("skCount"), `${items.length} รายการ${low ? ` · ควรสั่งเพิ่ม ${low}` : ""}`);
   fill($("skList"), ...(items.length ? [el("div", { class: "bu-scroll" }, el("table", { class: "lines sktable" },
@@ -402,7 +560,7 @@ function renderStock() {
         el("button", { class: "btn small", type: "button", text: "+ รับเข้า", onclick: () => openStockMove(i, "in") }),
         el("button", { class: "btn small", type: "button", text: "− เบิก", onclick: () => openStockMove(i, "out") }),
         el("button", { class: "btn small", type: "button", text: "นับ", onclick: () => openStockMove(i, "count") })))))))]
-    : [el("p", { class: "muted empty", text: s.items.length ? "ไม่พบรายการที่ตรงกับคำค้น" : "ยังไม่มีรายการ — กด “+ เพิ่มรายการ” หรือบันทึกบิลซื้อของแล้วสร้างรายการจากบรรทัดในบิล" })]));
+    : [el("p", { class: "muted empty", text: s.items.length ? "ไม่พบรายการที่ตรงกับตัวกรอง" : "ยังไม่มีรายการ — กด “+ เพิ่มรายการ” หรือบันทึกบิลซื้อของแล้วสร้างรายการจากบรรทัดในบิล" })]));
 }
 
 const SK_FIELDS = [["name", "ชื่อรายการ", { wide: true, maxlength: 120 }], ["category", "หมวด (เช่น ลูกปืน สายพาน ไฟฟ้า)", { maxlength: 40 }], ["unit", "หน่วย", { maxlength: 20 }],
@@ -430,7 +588,7 @@ async function openStockItem(item) {
     const body = { ...Object.fromEntries(SK_FIELDS.map(([k]) => [k, d[k]])), aliases: String(d.aliases || "").split(",").map((w) => w.trim()).filter(Boolean) };
     bu.stock = await api(item ? `/api/stock/items/${item.id}` : "/api/stock/items", jsonOpts(item ? "PATCH" : "POST", body));
     bu.opts = null;                                    // the bill page's item list is stale now
-    renderStock();
+    await loadStock();
   });
 }
 
@@ -478,8 +636,8 @@ async function buDialogSave() {
 
 // ================================================================== init
 function initBuy() {
-  $("buQ").addEventListener("input", renderPurchases);
-  $("buNew").addEventListener("click", () => { bu.draft = null; goHash("#purchase-new"); });
+  for (const id of ["buQ", "buVendor", "buBranch", "buPeriod"]) $(id).addEventListener(id === "buQ" ? "input" : "change", renderPurchases);
+  $("buNew").addEventListener("click", () => goHash("#purchase-new"));
   const drop = $("bnDrop"), input = $("bnInput");
   drop.addEventListener("click", () => input.click());
   drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } });
@@ -487,20 +645,29 @@ function initBuy() {
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("over"));
   drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); buAddFiles([...e.dataTransfer.files]); });
-  $("bnRead").addEventListener("click", buRead);
+  for (const r of document.querySelectorAll("input[name=bnMode]")) r.addEventListener("change", () => { bu.mode = document.querySelector("input[name=bnMode]:checked").value; buRenderPick(); });
+  $("bnRead").addEventListener("click", buStartJobs);
   $("bnManual").addEventListener("click", async () => {
     if (!bu.opts) { try { await buLoadOptions(); } catch (err) { showErr("bnError", err.message); return; } }     // pressed before the page finished loading
-    bu.extraction = null;
-    buStartReview(null);
+    const job = { id: bu.nextId++, files: [], status: "ready", error: "", t0: null, extraction: null, server: null, review: buMakeReview(null), manual: true };
+    bu.jobs.push(job);
+    buBadge();
+    buOpenJob(job);
   });
-  $("bnAddLine").addEventListener("click", () => { bu.draft.lines.push(buBlankLine()); buRenderLines(); });
-  $("bnBack").addEventListener("click", () => { if (confirm("ทิ้งที่กรอกไว้ แล้วกลับไปเลือกไฟล์ใหม่ใช่ไหม?")) buShowUpload(); });
+  $("bnAddLine").addEventListener("click", () => { bu.cur.review.lines.push(buBlankLine()); buRenderLines(); });
+  $("bnBack").addEventListener("click", () => { bu.cur = null; buShowHome(); });
+  $("bnDiscard").addEventListener("click", () => { if (bu.cur) { const j = bu.cur; if (confirm("ทิ้งบิลนี้ทั้งใบ (ยังไม่ได้บันทึก) ใช่ไหม?")) { buRemoveJob(j, false); buShowHome(); } } });
   $("bnSave").addEventListener("click", () => buSave(false));
   let prTimer = null;
   $("prQ").addEventListener("input", () => { clearTimeout(prTimer); prTimer = setTimeout(loadPrices, 300); });
+  for (const id of ["prCat", "prVendor"]) $(id).addEventListener("change", renderPrices);
   $("prVat").addEventListener("change", () => { bu.vat = $("prVat").value; renderPrices(); });
-  $("skQ").addEventListener("input", renderStock);
+  $("prUq").addEventListener("input", renderUnlinked);
+  $("prUv").addEventListener("change", renderUnlinked);
+  for (const id of ["skQ", "skCat", "skLoc", "skLow"]) $(id).addEventListener(id === "skQ" ? "input" : "change", renderStock);
   $("skAdd").addEventListener("click", () => openStockItem(null));
   $("buDlgCancel").addEventListener("click", () => $("buDialog").close());
   $("buDlgSave").addEventListener("click", buDialogSave);
+  // bills read but not saved live in this page only: warn before a refresh or closing the tab throws them away
+  window.addEventListener("beforeunload", (e) => { if (bu.jobs.some((j) => j.status !== "error")) { e.preventDefault(); e.returnValue = ""; } });
 }
