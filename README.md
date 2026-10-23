@@ -478,7 +478,8 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
   go into a **queue read in the background** (3 at a time, with a clock per bill; a number beside "บิลซื้อของ" in the menu
   counts the unsaved ones) -- the user can open other pages and come back to "ตรวจและบันทึก" each one. The queue is kept in
   the page's memory only (a refresh loses unsaved ones; the browser warns first). The check page shows the original photo
-  (↻ turns it for reading) above what was read. The reader copes with any orientation (tested at 0/90/180/270 degrees); EXIF
+  above what was read; clicking it opens a **pop-up** (not a new tab: ↻ turns it, a click on the picture zooms, Esc / click outside /
+  "ปิด" closes), and saved bills open their photos the same way. The reader copes with any orientation (tested at 0/90/180/270 degrees); EXIF
   rotation is baked in on upload. Photos go to Storage under `purchases/`; the same file saved twice is caught (409, can
   still be saved on purpose). A bill can be deleted. Which machine a part was for is NOT asked on the bill (a part often
   serves several machines): the plan is a default parts template per machine, later.

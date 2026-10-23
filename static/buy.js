@@ -79,7 +79,7 @@ function renderPurchases() {
 async function openPurchaseBill(id) {
   let b;
   try { b = await api(`/api/purchases/${id}`); } catch (err) { showErr("buError", err.message); return; }
-  const files = b.attachments.map((a, i) => el("a", { class: "btn small", href: a.url, target: "_blank", rel: "noopener", text: a.mime_type === "application/pdf" ? `📄 ไฟล์ ${i + 1}` : `🧾 รูป ${i + 1}` }));
+  const files = b.attachments.map((a, i) => el("button", { class: "btn small", type: "button", onclick: () => buView(a.url, a.mime_type, `${b.vendor || "บิล"} · ${a.mime_type === "application/pdf" ? "ไฟล์" : "รูป"} ${i + 1}`), text: a.mime_type === "application/pdf" ? `📄 ไฟล์ ${i + 1}` : `🧾 รูป ${i + 1}` }));
   const vat = (BU_VAT.find(([k]) => k === b.vat_mode) || [, ""])[1];
   buOpenDialog(`${b.vendor || "ไม่ระบุร้าน"} · ${beDate(b.bill_date)}`, [
     el("p", { class: "muted small", text: [b.bill_no ? `เลขที่ ${b.bill_no}` : null, b.branch, vat, b.source === "manual" ? "กรอกเอง ไม่มีบิล" : null].filter(Boolean).join(" · ") }),
@@ -281,7 +281,7 @@ function buRenderOrigin() {
   const files = job ? job.files : [];
   $("bnOrigin").hidden = files.length === 0;
   fill($("bnThumbs"), ...files.map((f) => {
-    if (f.type === "application/pdf") return el("div", { class: "bu-thumb" }, el("a", { class: "btn small", href: f.url, target: "_blank", rel: "noopener", text: `📄 ${f.name}` }));
+    if (f.type === "application/pdf") return el("div", { class: "bu-thumb" }, el("button", { class: "btn small", type: "button", text: `📄 ${f.name}`, onclick: () => buView(f.url, f.type, f.name) }));
     let turns = f.turns || 0;
     const img = el("img", { src: f.url, alt: f.name, title: "กดเพื่อดูภาพใหญ่" });
     const apply = () => {
@@ -291,10 +291,33 @@ function buRenderOrigin() {
       img.style.maxHeight = odd ? "220px" : "100%";
     };
     apply();
-    img.addEventListener("click", () => window.open(f.url, "_blank", "noopener"));
+    img.addEventListener("click", () => buView(f.url, f.type, f.name, () => f.turns || 0, (t) => { f.turns = t; turns = t; apply(); }));
     return el("div", { class: "bu-thumb" }, img,
       el("button", { class: "btn small rot", type: "button", title: "หมุนรูป (เฉพาะที่ดูตรงนี้)", text: "↻", onclick: () => { turns = (turns + 1) % 4; f.turns = turns; apply(); } }));
   }));
+}
+
+// ---- the original bill in a pop-up: click the picture / press Esc to close, so checking is one click in and one out
+function buView(url, type, name, getTurns, setTurns) {
+  let turns = getTurns ? getTurns() : 0;
+  const body = $("buViewerBody");
+  body.classList.remove("zoomed");
+  $("buViewerName").textContent = name || "";
+  const isPdf = type === "application/pdf";
+  $("buViewerRot").hidden = isPdf;
+  $("buViewerZoom").hidden = isPdf;
+  if (isPdf) {
+    fill(body, el("iframe", { src: url, title: name || "บิล" }));
+  } else {
+    const img = el("img", { src: url, alt: name || "บิล" });
+    const apply = () => { img.style.transform = `rotate(${turns * 90}deg)`; };
+    apply();
+    img.addEventListener("click", () => { body.classList.toggle("zoomed"); });
+    $("buViewerRot").onclick = () => { turns = (turns + 1) % 4; apply(); if (setTurns) setTurns(turns); };
+    $("buViewerZoom").onclick = () => { body.classList.toggle("zoomed"); };
+    fill(body, img);
+  }
+  $("buViewer").showModal();
 }
 
 function buBlankLine() {
@@ -667,6 +690,9 @@ function initBuy() {
   for (const id of ["skQ", "skCat", "skLoc", "skLow"]) $(id).addEventListener(id === "skQ" ? "input" : "change", renderStock);
   $("skAdd").addEventListener("click", () => openStockItem(null));
   $("buDlgCancel").addEventListener("click", () => $("buDialog").close());
+  $("buViewerClose").addEventListener("click", () => $("buViewer").close());
+  $("buViewer").addEventListener("click", (e) => { if (e.target === $("buViewer")) $("buViewer").close(); });          // a click on the dim area closes it
+  $("buViewer").addEventListener("close", () => fill($("buViewerBody")));
   $("buDlgSave").addEventListener("click", buDialogSave);
   // bills read but not saved live in this page only: warn before a refresh or closing the tab throws them away
   window.addEventListener("beforeunload", (e) => { if (bu.jobs.some((j) => j.status !== "error")) { e.preventDefault(); e.returnValue = ""; } });

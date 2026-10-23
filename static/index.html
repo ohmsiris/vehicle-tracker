@@ -840,6 +840,18 @@
   </div>
 </dialog>
 
+<!-- Buying: the original bill in a pop-up (Esc, the close button or a click outside closes; a click on the picture zooms) -->
+<dialog id="buViewer" class="bu-viewer">
+  <div class="bu-viewer-bar">
+    <strong id="buViewerName"></strong>
+    <span class="grow"></span>
+    <button type="button" class="btn small" id="buViewerRot" title="หมุนรูป">↻ หมุน</button>
+    <button type="button" class="btn small" id="buViewerZoom" title="ขยาย / ย่อ">🔍 ขยาย</button>
+    <button type="button" class="btn small primary" id="buViewerClose">ปิด (Esc)</button>
+  </div>
+  <div class="bu-viewer-body" id="buViewerBody"></div>
+</dialog>
+
 <!-- Buying: a bill, a stock item, a stock move -->
 <dialog id="buDialog" class="wide">
   <h3 id="buDlgTitle"></h3>
