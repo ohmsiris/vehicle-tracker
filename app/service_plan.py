@@ -370,15 +370,15 @@ def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odom
     """The Isuzu-style chart for one truck. Columns: the latest event (what it did), then the next rounds, one base
     step of km / months apart. Rows: the items, with a cell per column: 'done' (done at the latest event), 'due' (falls
     due by that round), 'overdue' (already past due -- shown in the first round), 'unknown' (never recorded).
-    None when the truck has no history at all."""
+    A truck with no history still gets its chart: counting starts today, every item of the first column is '?' (nobody
+    knows when it was last done) and the next rounds show what falls due when -- so what to do for the truck is on the page."""
     dated = [parse_date(s["last_date"]) for s in statuses if s["last_date"]]
-    if not dated:
-        return None
-    t0 = max(dated)
+    no_history = not dated
+    t0 = max(dated) if dated else today
     months = group_months(group)
     rounds = CHART_ROUNDS.get(group["rule_set"], 8)
     visits = [add_months_f(t0, n * months) for n in range(1, rounds + 1)]
-    columns = [{"n": 0, "label": "ครั้งล่าสุด", "date": t0.isoformat(), "km": anchor_odometer}]
+    columns = [{"n": 0, "label": "ตอนนี้ (ไม่ทราบประวัติ)" if no_history else "ครั้งล่าสุด", "date": t0.isoformat(), "km": anchor_odometer}]
     for n, v in enumerate(visits, 1):
         columns.append({"n": n, "label": "ครั้งถัดไป" if n == 1 else f"{n} ครั้งถัดไป", "date": v.isoformat(),
                         "km": anchor_odometer + n * group["step_km"] if anchor_odometer is not None else None})
@@ -388,7 +388,16 @@ def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odom
         last = parse_date(s["last_date"]) if s["last_date"] else None
         if last and (t0 - last).days <= SAME_EVENT_DAYS:
             cells[0] = "done"
-        if s["state"] == "unknown":
+        if no_history:
+            cells[0] = "unknown"
+            if item.get("interval_months"):
+                due = add_months_f(t0, item["interval_months"])         # counting from today, as if it were all done now
+                while due <= visits[-1]:
+                    n = next(i for i, v in enumerate(visits, 1) if v >= due)
+                    if cells[n] is None:
+                        cells[n] = "due"
+                    due = add_months_f(due, item["interval_months"])
+        elif s["state"] == "unknown":
             cells[1] = "unknown"
         elif s["due_date"] and item.get("interval_months"):
             due, first = parse_date(s["due_date"]), True
@@ -399,7 +408,7 @@ def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odom
                 due, first = add_months_f(due, item["interval_months"]), False
         rows.append({"key": s["key"], "label": s["label"], "last_date": s["last_date"], "last_source": s["last_source"], "state": s["state"],
                      "due_date": s["due_date"], "interval_km": s["interval_km"], "interval_months": s["interval_months"], "cells": cells})
-    return {"columns": columns, "rows": rows}
+    return {"columns": columns, "rows": rows, "no_history": no_history}
 
 
 def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], readings: list[dict], overrides: list[dict],
@@ -431,6 +440,8 @@ def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], r
             if dated:
                 t0 = max(dated)
                 anchor = next((r["odometer_km"] for r in records if r.get("odometer_km") is not None and parse_date(r.get("done_date")) == t0), None)
+            elif odo:
+                anchor = odo["km"]                      # no history: the km columns count up from the latest reading
         out["chart"] = build_chart(group, plan, statuses, anchor, today) if plan else None
     return out
 

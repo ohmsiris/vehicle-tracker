@@ -370,6 +370,9 @@ def act_ticket(ticket_id: str, action: str, data: Optional[dict] = None) -> dict
     supabase.update("mgr_tickets", {"id": f"eq.{t['id']}"}, values)
     if values["status"] in ("done", "cancelled") and t.get("recurring_id"):
         _after_closed(t, today)
+    if values["status"] in ("done", "cancelled") and t.get("request_id"):
+        from app import repair_followup                  # (lazy: that module uses this one)
+        repair_followup.on_ticket_closed(t, values["status"])      # finishing "ask the driver" answers it on the repair board
     types = {x["key"]: x for x in list_types(include_inactive=True)}
     return _ticket_row(get_ticket(t["id"]), types)
 

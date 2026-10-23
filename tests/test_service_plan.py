@@ -220,9 +220,17 @@ def test_vehicle_without_a_group_has_no_plan():
     assert plan["items"] == [] and not plan["has_plan"] and plan["chart"] is None and plan["group"] is None
 
 
-def test_a_truck_with_no_history_has_no_chart():
+def test_a_truck_with_no_history_still_has_a_chart_full_of_question_marks():
     plan = sp.vehicle_plan(TRUCK, group=S2, records=[], readings=[], overrides=[], today=TODAY, with_chart=True)
-    assert plan["chart"] is None and plan["counts"]["unknown"] == len(plan["items"])
+    chart = plan["chart"]
+    assert plan["counts"]["unknown"] == len(plan["items"]) and chart["no_history"] is True
+    assert chart["columns"][0]["date"] == TODAY.isoformat() and "ไม่ทราบ" in chart["columns"][0]["label"]
+    assert all(r["cells"][0] == "unknown" and r["last_date"] is None for r in chart["rows"])
+    assert [i for i, c in enumerate(_row(chart, "engine_oil")["cells"]) if c == "due"] == list(range(1, sp.CHART_ROUNDS[sp.SMALL] + 1))
+    assert [i for i, c in enumerate(_row(chart, "coolant")["cells"]) if c == "due"] == [4, 8]          # what to do when, from today
+    with_km = sp.vehicle_plan(TRUCK, group=S2, records=[], readings=[{"kind": "odometer", "end_date": TODAY.isoformat(), "km": 120000}],
+                              overrides=[], today=TODAY, with_chart=True)["chart"]
+    assert with_km["columns"][0]["km"] == 120000 and with_km["columns"][1]["km"] == 130000
 
 
 def _chart(group, records, today=TODAY, readings=None):

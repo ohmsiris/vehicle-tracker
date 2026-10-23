@@ -119,9 +119,10 @@ function truckLabel(r) {
 // A phone number as a tap-to-call button (tel: link). `label` is the short text; the number is shown after it unless compact.
 const telHref = (phone) => `tel:${String(phone || "").replace(/[^\d+]/g, "")}`;
 
-function callLink(phone, label = "โทร", compact = false) {
-  return el("a", { class: "btn small call", href: telHref(phone), title: `โทร ${phone}` },
-    el("span", { text: `📞 ${label}` }), compact ? null : el("span", { class: "callnum", text: phone }));
+// The phone icon already says "call": the button shows only who (the number is in the tooltip).
+function callLink(phone, label = "", compact = false) {
+  return el("a", { class: "btn small call", href: telHref(phone), title: `โทร ${label ? `${label} ` : ""}${phone}`, "aria-label": `โทร ${label} ${phone}`.trim() },
+    el("span", { text: label ? `📞 ${label}` : "📞" }), compact ? null : el("span", { class: "callnum", text: phone }));
 }
 
 function jsonOpts(method, body) {
@@ -230,7 +231,7 @@ function renderBoard() {
     .filter((r) => r.status === "at_shop")
     .sort((a, b) => atShopDays(b) - atShopDays(a));          // away longest first
   const awaiting = board.active
-    .filter((r) => r.status === "awaiting_bill")
+    .filter((r) => r.status === "awaiting_bill" || (r.status === "completed" && r.check_status === "pending"))    // a bill that came first still leaves the driver question open
     .sort((a, b) => b.days_in_status - a.days_in_status);   // waiting longest first
 
   $("countOpen").textContent = open.length ? `(${open.length})` : "";
@@ -249,12 +250,111 @@ const atShopDays = (r) => (r.days_at_shop ?? (r.sent_date ? daysSince(r.sent_dat
 
 // แจ้ง -> ส่งอู่ -> กลับมา -> บิล: how far this request has got
 function stageRail(status) {
-  const reached = { open: 0, at_shop: 1, awaiting_bill: 2 }[status] ?? 0;
+  const reached = { open: 0, at_shop: 1, awaiting_bill: 2, completed: 3 }[status] ?? 0;
   return el("div", { class: "rail", "aria-hidden": "true" },
     ...["แจ้ง", "ส่งอู่", "กลับมา", "บิล"].map((t, i) => el("span", { class: `${i <= reached ? "on" : ""}${i === reached ? " cur" : ""}`.trim(), text: t })));
 }
 
+// ---- the question to ask the driver the day after a car came back from a shop (same card, no extra column)
+function checkBlock(r) {
+  if (!r.check_status) return null;
+  if (r.check_status !== "pending") {
+    const text = { ok: "ถามคนขับแล้ว: รถปกติ ✓", problem: "ถามคนขับแล้ว: ยังมีปัญหา (เปิดงานใหม่แล้ว)", skipped: "ข้ามการถามคนขับ" }[r.check_status];
+    return el("p", { class: "muted small req-checked", text: `${text}${r.checked_at ? ` · ${thDate(r.checked_at)}` : ""}` });
+  }
+  const today = todayISO();
+  const when = r.check_due > today ? ["", `ถามคนขับ ${thDate(r.check_due)}`] : r.check_due === today ? ["warn", "ถึงเวลาถามคนขับแล้ว วันนี้"] : ["bad", `ถามคนขับเลยกำหนด ${daysSince(r.check_due)} วัน`];
+  const call = callDriver(r) || el("a", { class: "small muted", href: `#truck=${r.vehicle_id}`, text: "ยังไม่มีเบอร์คนขับ — เพิ่มที่หน้ารถ" });
+  return el("div", { class: `req-check ${when[0]}`.trim() },
+    el("div", { class: "req-check-head" }, el("strong", { text: "รถปกติไหม?" }), el("span", { class: `small ${when[0] ? "" : "muted"}`, text: when[1] })),
+    el("div", { class: "req-actions" }, call,
+      el("button", { class: "btn small primary", type: "button", text: "รถปกติ ✓", onclick: () => answerCheck(r, "ok") }),
+      el("button", { class: "btn small", type: "button", text: "ยังมีปัญหา…", onclick: () => openCheckProblem(r) }),
+      el("button", { class: "btn small", type: "button", title: "ไม่ต้องถามคันนี้", text: "ข้าม", onclick: () => answerCheck(r, "skipped") })));
+}
+
+async function answerCheck(r, result, note = "") {
+  try {
+    await api(`/api/requests/${r.request_id}/check`, jsonOpts("POST", { result, note }));
+  } catch (err) {
+    showBoardError(err.message);
+    if (err.status === 422 || err.status === 409) await loadBoard();
+    return err.message;
+  }
+  await loadBoard();
+  return null;
+}
+
+let checkTarget = null;
+function openCheckProblem(r) {
+  checkTarget = r;
+  $("checkSummary").textContent = `${truckLabel(r)} · ${r.problem} — กลับจาก ${r.shop || r.fixed_by || "อู่"}`;
+  $("checkNote").value = "";
+  $("checkError").hidden = true;
+  $("checkDialog").showModal();
+  $("checkNote").focus();
+}
+
+async function submitCheckProblem() {
+  const err = await answerCheck(checkTarget, "problem", $("checkNote").value.trim());
+  if (err) { $("checkError").textContent = err; $("checkError").hidden = false; return; }
+  $("checkDialog").close();
+}
+
+// ---- progress notes on a car at a shop ("รออะไหล่ 2 วัน"), with an optional "ask again" reminder on the manager's board
+let progressTarget = null;
+const PROGRESS_CHIPS = ["ช่างยังไม่เริ่ม", "ช่างเริ่มซ่อมแล้ว", "รออะไหล่", "กำลังซ่อม", "ใกล้เสร็จ", "พร้อมรับรถ"];
+
+async function openProgress(r) {
+  progressTarget = r;
+  $("progressSummary").textContent = `${truckLabel(r)} · ${r.problem} — อยู่ที่ ${r.shop} ${atShopDays(r)} วัน`;
+  $("progressNote").value = "";
+  $("progressRemind").value = "";
+  $("progressError").hidden = true;
+  $("progressChips").replaceChildren(...PROGRESS_CHIPS.map((t) => el("button", { class: "chipbtn", type: "button", text: t, onclick: () => {
+    const box = $("progressNote");
+    box.value = box.value.trim() ? `${box.value.trim()} · ${t}` : t;
+    box.focus();
+  } })));
+  $("progressHistory").replaceChildren();
+  $("progressDialog").showModal();
+  await loadProgressHistory();
+}
+
+async function loadProgressHistory() {
+  let rows = [];
+  try { rows = await api(`/api/requests/${progressTarget.request_id}/updates`); } catch (err) { rows = []; }
+  $("progressHistory").replaceChildren(...(rows.length ? [el("div", { class: "muted small", text: `ที่ผ่านมา (${rows.length})` }), ...rows.map((u) => el("div", { class: "progress-row" },
+    el("span", { class: "muted small", text: `${thDate(u.created_at)} ${new Date(u.created_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}` }),
+    el("span", { text: u.note }),
+    el("button", { class: "btn small danger", type: "button", title: "ลบบันทึกนี้", text: "✕", onclick: async () => {
+      try { await api(`/api/requests/updates/${u.id}`, { method: "DELETE" }); } catch (err) { showBoardError(err.message); return; }
+      await loadProgressHistory();
+      await loadBoard();
+    } })))] : []));
+}
+
+async function submitProgress() {
+  const btn = $("progressSave");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    await api(`/api/requests/${progressTarget.request_id}/updates`, jsonOpts("POST", { note: $("progressNote").value.trim(), remind_days: $("progressRemind").value ? Number($("progressRemind").value) : null }));
+  } catch (err) {
+    $("progressError").textContent = err.message;
+    $("progressError").hidden = false;
+    btn.disabled = false;
+    return;
+  }
+  btn.disabled = false;
+  $("progressNote").value = "";
+  $("progressRemind").value = "";
+  await loadBoard();
+  await loadProgressHistory();
+}
+
 function requestCard(r, kind) {
+  const done = r.status === "completed";                      // back from a shop, bill already in (or none): only the driver question is left
   const days = kind === "open" ? daysSince(r.request_date) : kind === "at_shop" ? atShopDays(r) : r.days_in_status;
   const overdue = kind === "at_shop" && r.expected_return && r.expected_return < todayISO() ? daysSince(r.expected_return) : 0;
   const meta = kind === "open"
@@ -277,10 +377,12 @@ function requestCard(r, kind) {
       ? [
           el("button", { class: "btn primary", type: "button", text: "รถกลับมาแล้ว ✓", onclick: () => openReturnDialog(r) }),
           small("เปลี่ยนอู่ / วันที่", "แก้ไขข้อมูลการส่งซ่อม", () => openSendDialog(r)),
+          small("อัปเดตความคืบหน้า", "จดว่าอู่ทำถึงไหน (และตั้งเตือนให้ถามอีกครั้ง)", () => openProgress(r)),
           small("แก้ไข", "แก้ไขงาน เช่น เปลี่ยนรถ", () => openEditRequest(r)),
           small("← เรียกรถคืน", "ยังไม่ได้ส่งจริง กลับไปเป็นรอซ่อม", () => recallFromShop(r)),
           small("ยกเลิก", "ยกเลิกงานนี้", () => cancelRequest(r), "danger"),
         ]
+      : done ? []
       : [
           el("button", { class: "btn primary", type: "button", text: "เพิ่มบิล →", onclick: () => startBillFor(r) }),
           el("button", { class: "btn", type: "button", text: "ไม่มีบิล", onclick: () => openNoBillDialog(r) }),
@@ -298,16 +400,20 @@ function requestCard(r, kind) {
       ageChip(days, kind)),
     el("p", { class: "req-problem", text: r.problem }),
     el("p", { class: "muted small", text: meta.filter(Boolean).join(" · ") }),
-    stageRail(kind),
-    el("div", { class: "req-actions" }, ...actions, story, callDriver(r)));
-  wireDrag(card, r);
+    kind === "at_shop" && r.last_update ? el("p", { class: "req-update small" },
+      el("strong", { text: "ล่าสุด: " }), r.last_update, el("span", { class: "muted", text: ` · ${r.last_update_at ? (daysSince(r.last_update_at) === 0 ? "วันนี้" : `${daysSince(r.last_update_at)} วันก่อน`) : ""}${r.update_count > 1 ? ` · ทั้งหมด ${r.update_count} ครั้ง` : ""}` })) : null,
+    stageRail(done ? "completed" : kind),
+    kind === "awaiting_bill" ? checkBlock(r) : null,
+    done ? el("p", { class: "muted small", text: r.fixed_event_id ? "บิลบันทึกแล้ว ✓ — เหลือแค่ถามคนขับ" : "ปิดงานแล้ว (ไม่มีบิล) — เหลือแค่ถามคนขับ" }) : null,
+    el("div", { class: "req-actions" }, ...actions, story, kind === "awaiting_bill" && r.check_status === "pending" ? null : callDriver(r)));
+  if (!done) wireDrag(card, r);
   return card;
 }
 
 // Who to ring about a request (worked out by the server): the truck's driver, or for a factory truck the person who reported it.
 function callDriver(r) {
   const c = r.call;
-  return c ? callLink(c.phone, c.kind === "reporter" ? `โทรผู้แจ้ง ${c.name}` : `โทร ${c.name}`, true) : null;
+  return c ? callLink(c.phone, c.kind === "reporter" ? `ผู้แจ้ง ${c.name}` : c.name, true) : null;
 }
 
 // The timeline dialog lives with the maintenance log (logbook.js); a board row has the same fields.
@@ -731,6 +837,10 @@ function initBoard() {
   bindDateField($("shopDate"), $("shopDateCap"));
   bindDateField($("shopBack"), $("shopBackCap"));
   $("shopDate").addEventListener("change", () => { $("shopBack").min = $("shopDate").value; });
+  $("progressSave").addEventListener("click", submitProgress);
+  $("progressClose").addEventListener("click", () => $("progressDialog").close());
+  $("checkOk").addEventListener("click", submitCheckProblem);
+  $("checkCancel").addEventListener("click", () => $("checkDialog").close());
   $("returnCancel").addEventListener("click", () => $("returnDialog").close());
   $("returnOk").addEventListener("click", () => submitReturn("returned"));
   $("returnNoBill").addEventListener("click", () => submitReturn("returned_no_bill"));

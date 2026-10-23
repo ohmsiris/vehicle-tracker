@@ -228,6 +228,25 @@ twice -- the bill is the record and shows "จากงานแจ้งซ่�
 - Opening a bill from the log and pressing back returns to the log with the
   filters as you left them. URL: `#log`. API: `GET /api/log`, `GET /api/log.csv`.
 
+## After a car comes back from a shop, and while it is away
+
+`schema_v17.sql`, `app/repair_followup.py`, `static/board.js`. No new column on the repair board: it all lives on the cards.
+
+- **Ask the driver** (card in "กลับมาแล้ว — รอบิล"): when a car comes back from a shop (รถกลับมาแล้ว, with or without a bill) it
+  gets a question for the day after: "รถปกติไหม?" with the driver's call button (icon + name; "ยังไม่มีเบอร์คนขับ" with a
+  link to the truck page when there is none), **รถปกติ ✓**, **ยังมีปัญหา…** (asks what, and opens a new job in "รอซ่อม") and
+  **ข้าม**. It turns amber on the day and red when late. A car stays in that column until the question is answered, even if
+  its bill came first. Answers are kept (`check_status` pending / ok / problem / skipped).
+- **Manager board sync** (`mgr_tickets.request_id` + `request_kind`): returning a car makes two tickets for the day after --
+  "โทรถามคนขับ …" (type แก้ปัญหา / ซ่อม, with the driver's number so the card has a call button) and "ตามบิล … จาก <shop>"
+  (type ตามงาน, with the shop's number). They close each other's twin: answering the question closes its ticket; finishing the
+  ticket answers the question (ok; cancelled = skipped); a saved bill, "ไม่มีบิล" or cancelling closes the bill ticket; taking
+  the return back cancels both. Made best-effort, so the repair board works without the manager tables.
+- **อัปเดตความคืบหน้า** (card in "อยู่ที่อู่"): a progress note ("รออะไหล่ 2 วัน", quick chips), the latest one shows on the card
+  with its age, all of them are listed in the dialog (and can be deleted). Optionally "เตือนให้ถามอีกครั้ง" (tomorrow / 2 / 3 /
+  7 days) makes one "ถามความคืบหน้า …" ticket on the manager board; a newer reminder replaces it; returning the car closes it.
+- Call buttons everywhere show the phone icon and the name only (no word "โทร").
+
 ## Hosting (Railway)
 
 The app is one Python process with no local state (all data is in Supabase), so

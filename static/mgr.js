@@ -158,7 +158,7 @@ function mgCard(t) {
     el("p", { class: "req-problem", text: t.title }),
     t.notes ? el("p", { class: "muted small mgnotes", text: t.notes }) : null,
     meta.length ? el("div", { class: "mgmeta small" }, ...meta) : null,
-    t.status === "waiting" && (t.waiting_on || t.waiting_phone) ? el("div", { class: "mgwait small" }, el("span", { text: `รอ ${t.waiting_on || ""}` }), t.waiting_phone ? callLink(t.waiting_phone, "โทร", true) : null) : null,
+    (t.status === "waiting" || t.request_id) && (t.waiting_on || t.waiting_phone) ? el("div", { class: "mgwait small" }, el("span", { text: `${t.status === "waiting" ? "รอ" : "ติดต่อ"} ${t.waiting_on || ""}` }), t.waiting_phone ? callLink(t.waiting_phone, "", true) : null) : null,
     el("div", { class: "req-actions" }, ...actions));
   card.draggable = true;
   card.addEventListener("dragstart", (e) => { mg.dragId = t.id; e.dataTransfer.setData("text/plain", t.id); e.dataTransfer.effectAllowed = "move"; card.classList.add("dragging"); $("mgKanban").classList.add("dragging"); });

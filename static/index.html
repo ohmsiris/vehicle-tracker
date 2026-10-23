@@ -932,6 +932,38 @@
   </div>
 </dialog>
 
+<!-- Progress note on a car at a shop -->
+<dialog id="progressDialog" class="wide">
+  <h3>อัปเดตความคืบหน้า</h3>
+  <p id="progressSummary" class="muted small"></p>
+  <div id="progressChips" class="chips"></div>
+  <label for="progressNote">ความคืบหน้าตอนนี้</label>
+  <textarea id="progressNote" rows="2" maxlength="500" placeholder="เช่น ช่างบอกรออะไหล่ 2 วัน / กำลังเคาะสี / ใกล้เสร็จ"></textarea>
+  <label for="progressRemind">เตือนให้ถามอีกครั้ง <span class="muted small">(ขึ้นที่ “บอร์ดของฉัน”)</span></label>
+  <select id="progressRemind">
+    <option value="">ไม่ต้องเตือน</option><option value="1">พรุ่งนี้</option><option value="2">อีก 2 วัน</option><option value="3">อีก 3 วัน</option><option value="7">อีก 1 สัปดาห์</option>
+  </select>
+  <div id="progressHistory" class="progress-history"></div>
+  <p class="error" id="progressError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="progressClose">ปิด</button>
+    <button type="button" class="btn primary" id="progressSave">บันทึกความคืบหน้า</button>
+  </div>
+</dialog>
+
+<!-- The car came back from the shop but still has a problem -->
+<dialog id="checkDialog">
+  <h3>รถยังมีปัญหา</h3>
+  <p id="checkSummary" class="muted small"></p>
+  <label for="checkNote">คนขับบอกว่ามีปัญหาอะไร <span class="muted small">(จะเปิดเป็นงานซ่อมใหม่ในช่อง “รอซ่อม”)</span></label>
+  <textarea id="checkNote" rows="3" maxlength="500" placeholder="เช่น ยังมีน้ำหยดที่เดิม / เสียงดังใหม่ตอนเบรก"></textarea>
+  <p class="error" id="checkError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="checkCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="checkOk">เปิดงานซ่อมใหม่</button>
+  </div>
+</dialog>
+
 <!-- The truck is back from the shop -->
 <dialog id="returnDialog">
   <h3>รถกลับมาแล้ว</h3>

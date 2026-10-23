@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, fleet, history, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_requests, service_plan, shops, stock, summarize, supabase
+from app import dashboard, events, fleet, history, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -318,7 +318,7 @@ def _board_call(fn, *args, **kwargs):
         result = fn(*args, **kwargs)
         logsource.invalidate()          # (reads clear it too -- harmless, and a write can never be missed)
         return result
-    except repair_requests.InvalidRequest as exc:
+    except (repair_requests.InvalidRequest, repair_followup.InvalidFollowup) as exc:
         raise HTTPException(422, str(exc))
     except repair_requests.StaleRequest:
         raise HTTPException(409, "งานนี้ถูกเปลี่ยนสถานะไปแล้ว หน้าจอกำลังรีเฟรช")
@@ -369,6 +369,43 @@ def request_action(request_id: str, body: RequestAction, x_app_token: str = Head
         fixed_by=body.fixed_by, fixed_date=body.fixed_date, reason=body.reason,
         shop=body.shop, sent_date=body.sent_date, expected_return=body.expected_return,
     )
+
+
+class CheckAnswer(BaseModel):
+    result: str
+    note: str = Field(default="", max_length=600)
+
+
+class ProgressNote(BaseModel):
+    note: str = Field(default="", max_length=600)
+    remind_days: int | None = None
+
+
+@app.post("/api/requests/{request_id}/check")
+def request_check(request_id: str, body: CheckAnswer, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The driver was asked how the car is after the shop: ok / problem (opens a new job) / skipped."""
+    _check_token(x_app_token, token)
+    return _board_call(repair_followup.answer_check, request_id, body.result, body.note)
+
+
+@app.get("/api/requests/{request_id}/updates")
+def request_updates(request_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _board_call(repair_followup.list_updates, request_id)
+
+
+@app.post("/api/requests/{request_id}/updates")
+def request_add_update(request_id: str, body: ProgressNote, x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    """A progress note on a car at a shop (optionally with a reminder on the manager's board to ask again)."""
+    _check_token(x_app_token, token)
+    return _board_call(repair_followup.add_update, request_id, body.note, body.remind_days)
+
+
+@app.delete("/api/requests/updates/{update_id}")
+def request_delete_update(update_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    _board_call(repair_followup.delete_update, update_id)
+    return {"ok": True}
 
 
 # --------------------------------------------------------------- dashboard

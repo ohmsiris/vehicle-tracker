@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from app import shops, supabase
+from app import repair_followup, shops, supabase
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
 ACTIONS = ("fixed_awaiting_bill", "fixed_no_bill", "no_bill", "cancel", "reopen", "send_to_shop", "returned", "returned_no_bill")
@@ -107,7 +107,7 @@ def _clean_shop(raw) -> str:
 # --------------------------------------------------------------- pure rules
 def apply_action(request: dict, action: str, *, fixed_by: str = "", fixed_date=None,
                  reason: str = "", shop: str = "", sent_date=None, expected_return=None,
-                 today: Optional[date] = None) -> dict:
+                 today: Optional[date] = None, with_check: bool = False) -> dict:
     """
     Returns the column values to write for `action` on `request` (a
     repair_requests row), or raises InvalidRequest. Never touches the DB.
@@ -136,6 +136,8 @@ def apply_action(request: dict, action: str, *, fixed_by: str = "", fixed_date=N
         if when < sent:
             raise InvalidRequest("วันที่รถกลับมาต้องไม่ก่อนวันที่ส่งซ่อม")
         values = {"fixed_by": _clean(fixed_by, MAX_NAME_CHARS) or request.get("shop"), "fixed_date": when.isoformat()}
+        if with_check:                                # a car that came back from a shop: ask the driver the day after (schema_v17)
+            values.update(repair_followup.check_values(when))
         if action == "returned":
             return {**values, "status": "awaiting_bill"}
         return {**values, "status": "completed", "no_bill": True, "no_bill_reason": _clean(reason, MAX_PROBLEM_CHARS) or None}
@@ -174,6 +176,8 @@ def apply_action(request: dict, action: str, *, fixed_by: str = "", fixed_date=N
     if status == "at_shop":                       # recalled from the shop: back to waiting, shop details cleared
         return {"status": "open", "shop": None, "sent_date": None, "expected_return": None}
     cleared = {"fixed_by": None, "fixed_date": None, "no_bill": False, "no_bill_reason": None}
+    if with_check:
+        cleared.update(repair_followup.clear_check_values())
     if request.get("sent_date"):                  # it had been at a shop: undo only the "back" step
         return {"status": "at_shop", **cleared}
     return {"status": "open", **cleared}
@@ -304,12 +308,13 @@ def act(request_id: str, action: str, **fields) -> dict:
     current = get(request_id)
     if current is None:
         raise InvalidRequest("ไม่พบงานนี้")
-    values = apply_action(current, action, **fields)
+    values = apply_action(current, action, with_check=repair_followup.has_v17(), **fields)
     # Conditional on the status we read: if it changed in between (double
     # click, a second tab), nothing is written and the page refreshes.
     rows = supabase.update("repair_requests", {"id": f"eq.{request_id}", "status": f"eq.{current['status']}"}, values)
     if not rows:
         raise StaleRequest()
+    repair_followup.after_action(current, rows[0], action)        # the manager board's side of it (best effort)
     return rows[0]
 
 

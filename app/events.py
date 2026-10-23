@@ -220,6 +220,9 @@ def save_event(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicate
         supabase.storage_delete(uploaded)   # don't leave orphaned photos behind
         raise
 
+    from app import repair_followup                      # the bills the repair board was waiting for: their "chase the bill" tickets are done
+    repair_followup.on_bill_saved(payload.get("fixes_request_ids") or [])
+
     # A summary typed on the form (the manual-entry page has one). save_maintenance_event() doesn't take
     # it, so it is written right after; best effort -- the repair itself is already saved.
     typed = str(ev.get("summary") or "").strip()

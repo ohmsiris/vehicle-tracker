@@ -396,6 +396,7 @@ function planChart(d) {
     el("div", { class: "pl-ch-label", text: col.label }),
     el("div", { class: "pl-ch-date small", text: beDate(col.date) }),
     el("div", { class: "pl-ch-km small", text: col.km !== null && col.km !== undefined ? `${baht(col.km)} กม.` : (col.n === 0 ? "ไม่ทราบเลขไมล์" : "") })));
+  const noHistory = c.no_history ? el("div", { class: "edit-banner" }, "ยังไม่มีประวัติของรถคันนี้ — ตารางนับรอบจากวันนี้ ช่อง ? คือไม่ทราบว่าแต่ละรายการเคยทำเมื่อไหร่ (ควรตรวจ) ส่วนรอบถัดไปบอกว่าแต่ละรอบต้องทำอะไร พอมีบิลหรือกด “+ บันทึกว่าทำแล้ว” ตารางจะนับจากวันที่ทำจริง") : null;
   const body = c.rows.map((r) => el("tr", { class: r.state },
     el("th", { class: "pl-rowh", scope: "row" }, el("div", { class: "pl-rowname", text: r.label }),
       el("div", { class: "muted small", text: `ทุก ${[r.interval_km ? plKm(r.interval_km) : null, r.interval_months ? plMonths(r.interval_months) : null].filter(Boolean).join(" / ")}` })),
@@ -404,7 +405,7 @@ function planChart(d) {
       const spec = cell ? PL_CELL[cell] : null;
       return el("td", { class: `pl-cell${spec ? ` ${spec[1]}` : ""}`, title: spec ? `${r.label}: ${spec[2]}` : "", text: spec ? spec[0] : "" });
     })));
-  return el("div", { class: "card pl-chartbox" },
+  return el("div", { class: "card pl-chartbox" }, noHistory,
     el("div", { class: "pl-chartscroll" },
       el("table", { class: "pl-chart" },
         el("thead", {}, el("tr", {}, el("th", { class: "pl-rowh", text: "รายการ" }), el("th", { class: "pl-ch", text: "ทำล่าสุด" }), ...heads)),
