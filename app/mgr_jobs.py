@@ -134,7 +134,7 @@ def summarize_plan(found: list[dict], enabled: bool, soon_days: int) -> dict:
         counts[x["stage"]] += 1
     return {"enabled": enabled, "soon_days": soon_days, "counts": counts, "total": len(found),
             "items": [{"vehicle_id": x["vehicle_id"], "truck": x["truck"], "label": x["label"], "stage": x["stage"], "days_left": x["days_left"], "km_left": x["km_left"],
-                       "km_real": x["km_real"], "key": x["key"]} for x in found[:PLAN_ITEMS_SHOWN]]}
+                       "km_real": x["km_real"], "key": x["key"], "together": bool(x.get("together"))} for x in found[:PLAN_ITEMS_SHOWN]]}
 
 
 _cache: dict = {"at": 0.0, "value": None}

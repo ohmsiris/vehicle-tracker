@@ -1073,8 +1073,34 @@ def collect_reminders(rows: list[dict], today: date, soon_days: int, items: list
             out.append({"key": f"plan:{r['id']}:{it['key']}:{it['due_date']}:{tail}{suffix}", "stage": stage, "vehicle_id": r["id"], "truck": _truck_label(r),
                         "branch": r.get("branch"), "item_key": it["key"], "label": it["label"], "days_left": dl, "due_date": it["due_date"],
                         "km_left": km, "km_real": it.get("km_left") is not None})
+    out += _with_the_oil_change(rows, today, soon_days, items, out)
     order = {"overdue": 0, "due": 1, "soon": 2}
     return sorted(out, key=lambda x: (order[x["stage"]], x["days_left"], x["truck"]))
+
+
+def _with_the_oil_change(rows: list[dict], today: date, soon_days: int, items: list[str], found: list[dict]) -> list[dict]:
+    """The goal is that the scheduled items get done WITH an oil change, not on a day of their own. So when a truck's oil change is
+    coming up (it is in the reminders), every other item of that truck that would fall due before the NEXT oil change is added to
+    its reminders too, marked `together`: do it in the same visit instead of coming back for it. Items already reminded, snoozed
+    ones and ones with no starting date are left alone."""
+    out = []
+    for r in rows:
+        if not r.get("has_plan") or "engine_oil" not in items:
+            continue
+        oil = next((i for i in r["items"] if i["key"] == "engine_oil"), None)
+        if not oil or oil["state"] == "unknown" or oil.get("snoozed_until") or oil.get("days_left") is None or oil["days_left"] > soon_days:
+            continue
+        horizon = oil["days_left"] + (oil.get("interval_months") or 2) * DAYS_PER_MONTH       # the day of the next oil change after this one
+        have = {x["item_key"] for x in found if x["vehicle_id"] == r["id"]}
+        for it in r["items"]:
+            dl = it.get("days_left")
+            if it["key"] in have or it["key"] not in items or it["state"] == "unknown" or it.get("snoozed_until") or dl is None or dl <= soon_days or dl > horizon:
+                continue
+            km = it["km_left"] if it.get("km_left") is not None else it.get("est_km_left")
+            out.append({"key": f"plan:{r['id']}:{it['key']}:{it['due_date']}:with-oil", "stage": "soon", "vehicle_id": r["id"], "truck": _truck_label(r),
+                        "branch": r.get("branch"), "item_key": it["key"], "label": it["label"], "days_left": dl, "due_date": it["due_date"],
+                        "km_left": km, "km_real": it.get("km_left") is not None, "together": True})
+    return out
 
 
 def _km_text(x: dict) -> str:
@@ -1092,7 +1118,7 @@ def reminder_text(reminders: list[dict], today: date, soon_days: int) -> str:
                                  ("soon", f"ใกล้ถึงรอบ (ภายใน {soon_days} วัน)", lambda x: f" · อีก {x['days_left']} วัน")):
         rows = [x for x in reminders if x["stage"] == stage]
         if rows:
-            lines += [f"{title} ({len(rows)})"] + [f"• {x['truck']} — {x['label']}{phrase(x)}{_km_text(x)}" for x in rows] + [""]
+            lines += [f"{title} ({len(rows)})"] + [f"• {x['truck']} — {x['label']}{phrase(x)}{_km_text(x)}{' · ทำพร้อมน้ำมันเครื่อง' if x.get('together') else ''}" for x in rows] + [""]
     return "\n".join(lines).strip()
 
 

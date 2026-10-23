@@ -182,7 +182,7 @@ async function loadDueStrip() {
   renderDueStrip();
 }
 
-const dueText = (i) => (i.stage === "overdue" ? `เลย ${-i.days_left} วัน` : i.stage === "due" ? "ครบวันนี้" : `อีก ${i.days_left} วัน`);
+const dueText = (i) => (i.stage === "overdue" ? `เลย ${-i.days_left} วัน` : i.stage === "due" ? "ครบวันนี้" : `อีก ${i.days_left} วัน`) + (i.together ? " · ทำพร้อมน้ำมันเครื่อง" : "");
 
 function renderDueStrip() {
   $("dueStrip").hidden = false;

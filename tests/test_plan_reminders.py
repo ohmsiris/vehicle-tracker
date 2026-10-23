@@ -152,3 +152,40 @@ def test_reminder_settings_are_validated():
     for bad in ({"soon_days": 0}, {"soon_days": 99}, {"soon_days": "x"}, {"items": ["nope"]}, {"items": "engine_oil"}):
         with pytest.raises(sp.InvalidPlan):
             sp.clean_reminder_settings(bad)
+
+
+# ----------------------------------------- scheduled items get done WITH the oil change
+def bundle_row(oil_done, flush_done, flush_months=12, today=TODAY):
+    r = row(records=[rec("engine_oil", oil_done), rec("engine_flush", flush_done)], today=today)
+    return r
+
+
+def test_an_item_that_would_fall_due_before_the_next_oil_change_is_added_to_the_oil_reminder():
+    # oil done 2026-09-01 -> due 2026-11-01 (8 days away on 10-24); the flush is due 2026-11-25 = 32 days away: before the NEXT oil change (11-01 + 2 months)
+    r = bundle_row("2026-09-01", "2025-11-25")
+    got = {x["item_key"]: x for x in collect([r], items=("engine_oil", "engine_flush"))}
+    assert set(got) == {"engine_oil", "engine_flush"}
+    assert got["engine_flush"]["together"] is True and got["engine_flush"]["stage"] == "soon" and got["engine_flush"]["days_left"] == 32
+    assert "together" not in got["engine_oil"]
+    text = sp.reminder_text(list(got.values()), TODAY, 10)
+    assert "ฟลัชชิ่งน้ำมันเครื่อง" in text and "ทำพร้อมน้ำมันเครื่อง" in text
+
+
+def test_an_item_further_away_than_the_next_oil_change_waits_for_a_later_one():
+    r = bundle_row("2026-09-01", "2026-03-01")                  # flush due 2027-03-01: months away
+    assert [x["item_key"] for x in collect([r], items=("engine_oil", "engine_flush"))] == ["engine_oil"]
+
+
+def test_nothing_is_added_when_the_oil_change_is_not_coming_up_yet():
+    r = bundle_row("2026-10-15", "2025-11-25", today=date(2026, 10, 24))          # oil due 12-15: 52 days away, outside the 10-day window
+    assert collect([r], items=("engine_oil", "engine_flush")) == []
+
+
+def test_it_only_travels_with_the_oil_change_if_the_oil_change_is_reminded_about():
+    r = bundle_row("2026-09-01", "2025-11-25")
+    assert collect([r], items=("engine_flush",)) == []
+
+
+def test_a_snoozed_or_unstarted_item_is_not_added():
+    r = row(records=[rec("engine_oil", "2026-09-01")])                             # the flush has no starting date
+    assert [x["item_key"] for x in collect([r], items=("engine_oil", "engine_flush"))] == ["engine_oil"]

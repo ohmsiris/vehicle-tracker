@@ -486,6 +486,12 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   the oil km below is visible above (the group's own "months per 10,000 km" is the driving rate and does not change).
 - The settings page layout: reminders (full width), the groups (full width), then รถเล็ก (left) and รถใหญ่ (right) with the km
   of each item (calendar items show "ทุก N เดือน"), and which truck follows which group.
+- **Scheduled items travel with the oil change**: the aim is that the other items get done at an oil change, not on a day of their
+  own. When a truck's oil change is in the reminders (inside the "coming close" window), every other item of that truck that would
+  fall due before the NEXT oil change (its due date within the oil interval after this one) is added to its reminders, marked
+  "ทำพร้อมน้ำมันเครื่อง" -- in the reminder text, the reminders list and the "รถใกล้ถึงคิวบำรุง" cards (so "เข้าคิว" puts them all in
+  the one repair request). Items already reminded, snoozed ones, ones with no starting date, and items not ticked in the reminder
+  list are not added (`_with_the_oil_change` in `app/service_plan.py`).
 - **Reminders cover every item by default** ("เลือกทั้งหมด" on the settings card); untick what you do not want.
 - **Real driving** only matters when it is known: odometer readings, GPS distance for a period (**+ ระยะทาง**, 12
   trucks seeded by `scripts/seed_gps.py`) -- then a truck that drives more than its group assumes gets its due date
