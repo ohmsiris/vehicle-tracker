@@ -226,8 +226,11 @@ _COMPILED = [(key, re.compile(_PREFIX + pat)) for key, pat in _LINE_RULES]
 # "อัดจารบี" on its own (no "ล้อ"): the mechanic greases everything in one go, so it counts as the wheel-bearing grease.
 # Only with อัด -- a bare "จารบี 1 กระป๋อง" is a part, not the service.
 _COMPILED.append(("wheel_grease", re.compile(r"^\s*(?:ค่า)?อัด\s*จา(?:ร|ระ)บี")))
-# Cleaning the intake manifold needs the word "ล้าง" (a bare "ท่อร่วมไอดี" line is the part).
-_COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?ล้าง\s*(?:ทำความสะอาด\s*)?ท่อ(?:ร่วม)?ไอดี")))
+# The intake manifold: a line that is the manifold itself ("ท่อร่วมไอดี", also "เปลี่ยน / ล้าง / ทำความสะอาด ท่อร่วมไอดี") counts -- a new one
+# is as clean as it gets. "ท่อไอดี" alone is a different part (the intake hose): only when it says ล้าง / ทำความสะอาด. A gasket line starts with
+# "ประเก็น" so it is not the manifold.
+_COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?(?:\s*(?:ถอด|เปลี่ยน|ล้าง|ทำความสะอาด))*\s*ท่อร่วมไอดี")))
+_COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?(?:\s*ถอด)?(?:\s*(?:ล้าง|ทำความสะอาด))+\s*ท่อไอดี")))
 # These two are found ANYWHERE in the line (the owner's own words): a flush; any suspension work (leaf springs, king pins, arms, shocks) counts
 # as the chassis having been looked at.
 _ANYWHERE = [

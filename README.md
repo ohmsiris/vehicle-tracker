@@ -467,8 +467,9 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   An item counted by the CALENDAR instead of km (the same for every truck whatever it drives) puts `None` in `DEFAULT_KM` and its
   months in `FIXED_MONTHS`: that is how the flush (12 months) and the chassis check (3 months) work -- a km item's months follow
   from the truck's group (its driving rate), so they differ from truck to truck; a calendar item does not.
-- Built in since: ล้างท่อร่วมไอดี (small trucks, 100,000 km, with the injector washers; a bill line needs "ล้าง" so the part is not
-  mistaken for it), ฟลัชชิ่งน้ำมันเครื่อง (12 months, every truck), เช็คช่วงล่าง (3 months, every truck; any bill line with แหนบ /
+- Built in since: ล้างท่อร่วมไอดี (small trucks, 100,000 km, with the injector washers; a line that is the manifold itself --
+  "ท่อร่วมไอดี", "เปลี่ยน / ล้าง / ทำความสะอาด ท่อร่วมไอดี" -- counts, since a new one is as clean as it gets; "ท่อไอดี" alone is the intake
+  hose and needs ล้าง / ทำความสะอาด; a gasket line does not count), ฟลัชชิ่งน้ำมันเครื่อง (12 months, every truck), เช็คช่วงล่าง (3 months, every truck; any bill line with แหนบ /
   สลักคอม้า / ปีกนก / โช้ค or "เช็ค/ตรวจช่วงล่าง" counts as done). The big trucks' valve adjustment is every 80,000 km.
 - Bill matching notes: a line that starts with "อัดจารบี" (or "ค่าอัดจารบี") counts as the wheel-bearing grease service -- the
   mechanic greases everything in one go; a bare "จารบี 1 กระป๋อง" or "หัวอัดจาระบี" is a part and does not. The group rows on the

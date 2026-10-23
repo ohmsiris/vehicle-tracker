@@ -441,7 +441,8 @@ def test_the_km_of_a_calendar_item_cannot_be_set_in_the_settings():
 @pytest.mark.parametrize("line,key", [
     ("ฟลัชชิ่งน้ำมันเครื่อง", "engine_flush"), ("flushing เครื่อง", "engine_flush"), ("ล้างภายในเครื่อง", "engine_flush"),
     ("เช็คช่วงล่าง", "chassis_check"), ("เปลี่ยนโช้คอัพหน้า", "chassis_check"), ("เสริมแหนบ", "chassis_check"), ("สลักคอม้า", "chassis_check"),
-    ("ล้างท่อร่วมไอดี", "intake_manifold"), ("ค่าล้างท่อไอดี", "intake_manifold"),
+    ("ล้างท่อร่วมไอดี", "intake_manifold"), ("ค่าล้างท่อไอดี", "intake_manifold"), ("ทำความสะอาดท่อร่วมไอดี", "intake_manifold"),
+    ("ล้างทำความสะอาดท่อไอดี", "intake_manifold"), ("ท่อร่วมไอดี", "intake_manifold"), ("เปลี่ยนท่อร่วมไอดี", "intake_manifold"),
     ("น้ำมันเครื่อง", "engine_oil"),                           # the older rules still win where they match
 ])
 def test_bill_lines_for_the_new_items(line, key):
@@ -449,4 +450,5 @@ def test_bill_lines_for_the_new_items(line, key):
 
 
 def test_the_parts_are_not_the_services():
-    assert sp.classify_line("ท่อร่วมไอดี (ใหม่)") is None and sp.classify_line("ประเก็นท่อร่วมไอดี") is None
+    assert sp.classify_line("ประเก็นท่อร่วมไอดี") is None                         # a gasket, not the manifold
+    assert sp.classify_line("ท่อไอดี") is None and sp.classify_line("เปลี่ยนท่อไอดี") is None   # the intake hose is another part
