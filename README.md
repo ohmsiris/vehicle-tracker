@@ -468,6 +468,10 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   built-in item: in every matching truck's chart, calculator, reminders ("เลือกทั้งหมด" includes it), "บันทึกว่าทำแล้ว", the km
   per rule set can be changed in the lists (no special badge: they are just more lines). "เอาออก" hides it (records already made stay). The built-in
   items stay in `app/service_plan.py`; `all_items()`, `km_table()` and `classify_line()` merge both.
+- Bill matching notes: a line that starts with "อัดจารบี" (or "ค่าอัดจารบี") counts as the wheel-bearing grease service -- the
+  mechanic greases everything in one go; a bare "จารบี 1 กระป๋อง" or "หัวอัดจาระบี" is a part and does not. The group rows on the
+  settings page show what the group's engine-oil round is (km as set for its rule set, and what that is in months), so changing
+  the oil km below is visible above (the group's own "months per 10,000 km" is the driving rate and does not change).
 - The settings page layout: reminders (full width), the groups (full width), then รถเล็ก (left) and รถใหญ่ (right) -- each with
   its own "+ เพิ่มรายการ" at the bottom, and our own rows can be edited / removed right in the list -- and which truck follows
   which group. Added so far: ฟลัชชิ่งน้ำมันเครื่อง, every 12 months, every truck.

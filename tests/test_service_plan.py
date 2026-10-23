@@ -102,7 +102,7 @@ def test_bill_lines_that_are_a_service(text, key):
 @pytest.mark.parametrize("text", [
     "น้ำมันเครื่อง (เติม)",                            # a top-up
     "สกรูแรงดันน้ำมันเครื่องข้างเสื้อสูบ", "เข็มขัดรัดท่อยางน้ำมันพาวเวอร์", "เหล็กยึดท่อกรองอากาศ",   # parts, not the service
-    "น้ำมันล้าง", "อัดจาระบี", "หัวอัดจาระบี", "เปลี่ยนหม้อน้ำ", "ลูกยางหม้อน้ำ(อีซูซุ)(ใหม่)-BP", "ค่าแรงเปลี่ยนถ่าย", "", None,
+    "น้ำมันล้าง", "หัวอัดจาระบี", "เปลี่ยนหม้อน้ำ", "ลูกยางหม้อน้ำ(อีซูซุ)(ใหม่)-BP", "ค่าแรงเปลี่ยนถ่าย", "", None,
 ])
 def test_bill_lines_that_are_not(text):
     assert sp.classify_line(text) is None
@@ -465,3 +465,19 @@ def test_cleaning_a_new_item():
         sp.clean_custom_item({"label": "แบตเตอรี่", "months": 12}, others=[{"label": "แบต เตอรี่"}])        # spaces are ignored
     edit = sp.clean_custom_item({"months": ""}, existing={"label": "a", "km_small": 1000}, others=[])
     assert edit == {"months": None}
+
+
+def test_a_bill_that_says_only_inject_grease_counts_as_the_wheel_grease_service():
+    for line in ("อัดจารบี", "อัดจาระบี", "ค่าอัดจารบี", "อัด จารบี ช่วงล่าง", "จาระบีลูกปืนล้อ"):
+        assert sp.classify_line(line) == "wheel_grease", line
+    assert sp.classify_line("จารบี 1 กระป๋อง") is None                  # a part, not the service
+
+
+def test_the_groups_say_what_their_oil_round_is(monkeypatch):
+    monkeypatch.setattr(sp, "has_v10", lambda: True)
+    monkeypatch.setattr(sp.supabase, "select_all", lambda table, params: [{"vehicle_class": sp.SMALL, "item_key": "engine_oil", "interval_km": 20_000, "interval_months": None}]
+                        if table == "service_intervals" else [])
+    monkeypatch.setattr(sp, "_vehicles", lambda *a, **k: [])
+    groups = {g["code"]: g for g in sp.settings()["groups"]}
+    assert groups["S2"]["oil_km"] == 20_000 and groups["S2"]["oil_months"] == pytest.approx(4)       # changed: 2 months per 10,000 km -> 4 months
+    assert groups["B5"]["oil_km"] == 20_000 and groups["B5"]["oil_months"] == pytest.approx(5)       # untouched

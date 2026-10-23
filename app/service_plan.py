@@ -252,6 +252,9 @@ _LINE_RULES = [
     ("injector_washers", r"แหวนรอง(?:หัวฉีด)?|(?:ปะ|ประ)เก็นหัวฉีด"),
 ]
 _COMPILED = [(key, re.compile(_PREFIX + pat)) for key, pat in _LINE_RULES]
+# "อัดจารบี" on its own (no "ล้อ"): the mechanic greases everything in one go, so it counts as the wheel-bearing grease.
+# Only with อัด -- a bare "จารบี 1 กระป๋อง" is a part, not the service.
+_COMPILED.append(("wheel_grease", re.compile(r"^\s*(?:ค่า)?อัด\s*จา(?:ร|ระ)บี")))
 _TOP_UP = re.compile(r"เติม")
 _squash = lambda t: re.sub(r"[\s\-_.]", "", str(t or "")).lower()
 
@@ -910,7 +913,12 @@ def settings() -> dict:
     counts: dict = {}
     for code in _vehicle_groups().values():
         counts[code] = counts.get(code, 0) + 1
-    groups = [{**g, "months": group_months(g), "implied_km_per_day": group_km_per_day(g), "trucks": counts.get(g["code"], 0),
+    def oil_of(g):                                       # the group's engine-oil round: the km (as set for its rule set) and what that is in months
+        saved = next((o["interval_km"] for o in overrides if o.get("vehicle_class") == g["rule_set"] and o.get("item_key") == "engine_oil" and o.get("interval_km")), None)
+        km = saved or DEFAULT_KM.get(g["rule_set"], {}).get("engine_oil")
+        return {"oil_km": km, "oil_months": item_months(km, g) if km else None}
+
+    groups = [{**g, **oil_of(g), "months": group_months(g), "implied_km_per_day": group_km_per_day(g), "trucks": counts.get(g["code"], 0),
                "customised": group_customised(g), "default": {k: (default_group(g["code"]) or {}).get(k) for k in ("months_per_step", "km_per_day")}}
               for g in sorted(_groups().values(), key=lambda g: g.get("sort_order", 99))]
     plans = _vehicle_groups()

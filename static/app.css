@@ -1013,3 +1013,7 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 
 .pl-add-row { padding: 12px 0 2px; border-top: 1px solid var(--line); margin-top: 4px; }
 .pl-own-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+
+.pl-hint { margin: 0 0 10px; padding-left: 18px; }
+.pl-more { margin-top: 6px; }
+.pl-more summary { cursor: pointer; padding: 4px 0; }

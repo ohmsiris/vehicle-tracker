@@ -247,7 +247,8 @@ function groupRow(g) {
   const defText = def.months_per_step ? `${plMonths(def.months_per_step)}` : def.km_per_day ? `${def.km_per_day} กม./วัน` : "";
   return el("div", { class: `pl-grp-row${g.customised ? " custom" : ""}` },
     el("div", {}, el("strong", { text: `${g.code}` }), el("span", { text: ` ${g.label}` }),
-      el("div", { class: "muted small", text: `${g.trucks} คัน · ตอนนี้ ${plMonths(g.months)} ต่อ ${baht(g.step_km)} กม. ≈ ${g.implied_km_per_day ? Math.round(g.implied_km_per_day) : "–"} กม./วัน${defText ? ` · ค่าเริ่มต้น ${defText}` : ""}` })),
+      el("div", { class: "muted small", text: `${g.trucks} คัน · ตอนนี้ ${plMonths(g.months)} ต่อ ${baht(g.step_km)} กม. ≈ ${g.implied_km_per_day ? Math.round(g.implied_km_per_day) : "–"} กม./วัน${defText ? ` · ค่าเริ่มต้น ${defText}` : ""}` }),
+      g.oil_km ? el("div", { class: "small", text: `→ น้ำมันเครื่องของกลุ่มนี้ทุก ${baht(g.oil_km)} กม. ≈ ${plMonths(g.oil_months === null ? null : Math.round(g.oil_months * 10) / 10)} (เปลี่ยนกม.ได้ที่รายการด้านล่าง)` }) : null),
     mo, kd, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }),
       g.customised ? el("button", { class: "btn small", type: "button", text: "ค่าเริ่มต้น", onclick: reset }) : null, msg));
 }
@@ -261,18 +262,21 @@ function openOwnItemDialog(row, rule = null) {
     months: row && row.months ? Number(row.months) : "", words: row ? (row.words || []).join(", ") : "", category: row ? row.category : "อื่นๆ" } };
   const d = pl.dlg.draft;
   fill($("pdlgBody"),
-    el("p", { class: "muted small", text: row ? "แก้ไขรายการนี้ — รายการที่ทำไปแล้วในอดีตยังอยู่เหมือนเดิม"
-      : rule ? `เพิ่มให้รถกลุ่ม “${rule}” — ใส่ กม. ของ${rule} ถ้าใช้กับอีกกลุ่มด้วยก็ใส่ช่องของอีกกลุ่ม หรือใส่จำนวนเดือนอย่างเดียวเพื่อใช้กับรถทุกคัน` : "ใส่อย่างน้อยหนึ่งอย่าง: กม. ของรถเล็ก / รถใหญ่ หรือจำนวนเดือน" }),
     el("div", { class: "mfields" },
       mfield(d, "label", "ชื่อรายการ", { wide: true, maxlength: 80, placeholder: "เช่น สายพานไทม์มิ่ง" }),
-      mfield(d, "km_small", `รถเล็ก (D-Max, Revo): ทุกกี่ กม.${rule === "รถเล็ก" ? "" : " — ไม่บังคับ"}`, { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถเล็ก" }),
-      mfield(d, "km_big", `รถใหญ่ (NLR, 6 / 10 ล้อ): ทุกกี่ กม.${rule === "รถใหญ่" ? "" : " — ไม่บังคับ"}`, { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถใหญ่" }),
-      mfield(d, "months", "ทุกกี่เดือน (ไม่บังคับ)", { type: "number", placeholder: "เช่น 12" }),
-      mselect(d, "group_name", "อยู่ในกลุ่มไหนของตาราง", (data.item_groups || []).map((g) => [g, g]), { blank: "อื่นๆ" }),
-      mfield(d, "words", "คำที่เจอในบิลแล้วนับว่าทำแล้ว (คั่นด้วย ,) — ชื่อรายการนับอยู่แล้ว", { wide: true, maxlength: 400, placeholder: "เช่น ไทม์มิ่ง, timing belt" }),
-      mselect(d, "category", "หมวดของบิลเมื่อกด “บันทึกว่าทำแล้ว”", (data.categories || []).map((c) => [c, c]), { blank: "อื่นๆ" })),
-    el("p", { class: "muted small", text: "ใส่กม. อย่างเดียว = เดือนคิดจากกลุ่มของรถแต่ละคัน · ใส่เดือนอย่างเดียว (ไม่ใส่กม.) = ใช้กับรถทุกคัน เช่น ถังดับเพลิงทุก 12 เดือน · ใส่ทั้งสองอย่าง = ใช้เดือนที่ใส่ และกม. อย่างไหนถึงก่อน" }));
-  plOpenDialog(row ? "แก้ไขรายการ" : `เพิ่มรายการบำรุงรักษา${rule ? ` — ${rule}` : ""}`, "บันทึก");
+      mfield(d, "km_small", "รถเล็ก (D-Max, Revo): ทุกกี่ กม.", { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถเล็ก" }),
+      mfield(d, "km_big", "รถใหญ่ (NLR, 6 / 10 ล้อ): ทุกกี่ กม.", { type: "number", placeholder: "ว่าง = ไม่ใช้กับรถใหญ่" }),
+      mfield(d, "months", "หรือทุกกี่เดือน", { type: "number", placeholder: "เช่น 12" }),
+      mfield(d, "words", "คำในบิลที่นับว่าทำแล้ว (คั่นด้วย ,)", { maxlength: 400, placeholder: "ชื่อรายการนับอยู่แล้ว เช่น ไทม์มิ่ง, timing belt" })),
+    el("ul", { class: "muted small pl-hint" },
+      el("li", { text: "ใส่กม. อย่างเดียว = เดือนคิดจากกลุ่มของรถแต่ละคัน" }),
+      el("li", { text: "ใส่เดือนอย่างเดียว = ใช้กับรถทุกคัน เช่น ถังดับเพลิงทุก 12 เดือน" }),
+      el("li", { text: "ใส่ทั้งสองอย่าง = อย่างไหนถึงก่อน" })),
+    el("details", { class: "pl-more" }, el("summary", { class: "small", text: "ตัวเลือกเพิ่มเติม (กลุ่มในตาราง · หมวดของบิล)" }),
+      el("div", { class: "mfields" },
+        mselect(d, "group_name", "อยู่ในกลุ่มไหนของตาราง", (data.item_groups || []).map((g) => [g, g]), { blank: "อื่นๆ" }),
+        mselect(d, "category", "หมวดของบิลเมื่อกด “บันทึกว่าทำแล้ว”", (data.categories || []).map((c) => [c, c]), { blank: "อื่นๆ" }))));
+  plOpenDialog(row ? "แก้ไขรายการ" : "เพิ่มรายการบำรุงรักษา", "บันทึก");
   setTimeout(() => { const f = $("mf_label"); if (f && !row) f.focus(); }, 50);
 }
 
