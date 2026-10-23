@@ -8,7 +8,7 @@
 // Loaded BEFORE app.js: nothing here runs at load time.
 
 const mg = {
-  data: null, q: "", filterType: "", filterPlace: "",
+  data: null, q: "", filterType: "", filterPlace: "", showOlder: false,
   dragId: null,
   edit: null, draft: {}, waiting: null,
   rec: [], recEdit: null, recDraft: {},
@@ -20,6 +20,7 @@ const MG_WEEKDAYS = ["จันทร์", "อังคาร", "พุธ", "�
 const MG_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
 const mgTrim = (t) => (t ? String(t).slice(0, 5) : "");
 const mgTypeOf = (key) => (mg.data ? mg.data.types.find((t) => t.key === key) : null) || null;
+const mgClosedDay = (t) => (t.done_at ? new Date(new Date(t.done_at).getTime() + 7 * 3600000).toISOString().slice(0, 10) : "");   // the Thai calendar day it was closed
 const mgDaysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${mg.data.today}T00:00:00`)) / 86400000);
 
 // ============================================================ the board (#mgr)
@@ -73,12 +74,15 @@ function renderMgBoard() {
   const keep = (t) => (!mg.filterType || t.type_key === mg.filterType)
     && (!mg.filterPlace || (mg.filterPlace === "__none" ? !t.place : t.place === mg.filterPlace))
     && (!q || [t.title, t.notes, t.waiting_on, t.place, t.type_label].filter(Boolean).join(" ").toLowerCase().includes(q));
-  const by = { todo: [], doing: [], waiting: [], done: d.recent.filter(keep) };
+  const closed = d.recent.filter(keep);
+  const older = closed.filter((t) => mgClosedDay(t) !== d.today);          // the closed column starts empty each day: yesterday's are one click away
+  const by = { todo: [], doing: [], waiting: [], done: mg.showOlder ? closed : closed.filter((t) => mgClosedDay(t) === d.today) };
   for (const t of d.tickets.filter(keep)) by[t.status].push(t);
   for (const k of ["todo", "doing", "waiting"]) by[k].sort(mgSortKey);
   for (const [key] of MG_COLS) {
     $(`mgCount_${key}`).textContent = key === "done" ? String(by.done.length) : String(by[key].length);
-    fill($(`mgList_${key}`), ...(by[key].length ? by[key].map(mgCard) : [el("p", { class: "muted empty small", text: key === "done" ? "ยังไม่มีงานที่เสร็จ" : "ว่าง" })]));
+    fill($(`mgList_${key}`), ...(by[key].length ? by[key].map(mgCard) : [el("p", { class: "muted empty small", text: key === "done" ? "ยังไม่มีงานที่เสร็จวันนี้" : "ว่าง" })]),
+      key === "done" && older.length ? el("button", { class: "btn small", type: "button", text: mg.showOlder ? "ซ่อนของวันก่อนๆ" : `ดูที่ปิดไปก่อนหน้านี้ (${older.length})`, onclick: () => { mg.showOlder = !mg.showOlder; renderMgBoard(); } }) : null);
   }
   renderMgTypes();
   renderMgPlaces();
@@ -143,11 +147,11 @@ function mgCard(t) {
   const b = (text, fn, cls = "") => el("button", { class: `btn small ${cls}`.trim(), type: "button", text, onclick: fn });
   const primary = (text, fn) => el("button", { class: "btn primary", type: "button", text, onclick: fn });
   const actions = {
-    todo: [primary("เริ่มทำ →", () => mgAct(t, "start")), b("เสร็จ ✓", () => mgAct(t, "done")), b("รอผล…", () => openMgWaiting(t)), b("แก้ไข", () => openMgEdit(t)), b("ยกเลิก", () => mgCancel(t), "danger")],
-    doing: [primary("เสร็จ ✓", () => mgAct(t, "done")), b("รอผล…", () => openMgWaiting(t)), b("← ต้องทำ", () => mgAct(t, "todo")), b("แก้ไข", () => openMgEdit(t)), b("ยกเลิก", () => mgCancel(t), "danger")],
-    waiting: [primary("ได้ผลแล้ว → ทำต่อ", () => mgAct(t, "resume")), b("เสร็จ ✓", () => mgAct(t, "done")), b("เลื่อนวันติดตาม", () => openMgWaiting(t)), b("← ต้องทำ", () => mgAct(t, "todo")), b("แก้ไข", () => openMgEdit(t)), b("ยกเลิก", () => mgCancel(t), "danger")],
-    done: [b("← กลับไปทำต่อ", () => mgAct(t, "resume")), b("เปิดใหม่ (ต้องทำ)", () => mgAct(t, "reopen")), b("ดู / แก้ไข", () => openMgEdit(t))],
-    cancelled: [b("← กลับไปทำต่อ", () => mgAct(t, "resume")), b("เปิดใหม่ (ต้องทำ)", () => mgAct(t, "reopen")), b("ดู / แก้ไข", () => openMgEdit(t))],
+    todo: [primary("กำลังทำ →", () => mgAct(t, "start")), b("รอผล…", () => openMgWaiting(t)), b("เสร็จ ✓", () => mgAct(t, "done")), b("แก้ไข", () => openMgEdit(t)), b("ยกเลิก", () => mgCancel(t), "danger")],
+    doing: [primary("รอผล →", () => openMgWaiting(t)), b("← ต้องทำ", () => mgAct(t, "todo")), b("เสร็จ ✓", () => mgAct(t, "done")), b("แก้ไข", () => openMgEdit(t)), b("ยกเลิก", () => mgCancel(t), "danger")],
+    waiting: [primary("เสร็จ ✓", () => mgAct(t, "done")), b("← กำลังทำ", () => mgAct(t, "resume")), b("เลื่อนวันติดตาม", () => openMgWaiting(t)), b("แก้ไข", () => openMgEdit(t)), b("ยกเลิก", () => mgCancel(t), "danger")],
+    done: [b("← กำลังทำ", () => mgAct(t, "resume")), b("ดู / แก้ไข", () => openMgEdit(t))],
+    cancelled: [b("← กำลังทำ", () => mgAct(t, "resume")), b("เปิดใหม่ (ต้องทำ)", () => mgAct(t, "reopen")), b("ดู / แก้ไข", () => openMgEdit(t))],
   }[t.status];
   const card = el("div", { class: `req mgcard${t.urgent ? " urgent" : ""}${due && due.cls === "bad" ? " late" : ""}${followUp ? " followup" : ""}${open ? "" : " done"}`, "data-id": t.id },
     el("div", { class: "req-head" }, mgTypeChip(t), t.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null, followUp ? el("span", { class: "badge warn", text: "ถึงวันติดตามแล้ว" }) : null),
