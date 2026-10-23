@@ -165,12 +165,11 @@ def transition(ticket: dict, action: str, data: Optional[dict] = None, *, today:
             raise InvalidTicket("เริ่มทำได้เฉพาะงานที่อยู่ในช่อง “ต้องทำ”")
         return {"status": "doing", **stamp}
     if action == "wait":
-        if status not in ("todo", "doing", "waiting"):
-            raise InvalidTicket("งานนี้ปิดไปแล้ว")
         values = clean_ticket({k: data.get(k) for k in ("waiting_on", "waiting_phone", "remind_on") if k in data}, existing=ticket, type_keys=set())
         if values.get("remind_on") and values["remind_on"] < today.isoformat():
             raise InvalidTicket("วันติดตามต้องไม่ใช่วันที่ผ่านมาแล้ว")
-        return {"status": "waiting", **values, **stamp}
+        reopened = {"done_at": None} if status in ("done", "cancelled") else {}      # a closed job can go back to waiting
+        return {"status": "waiting", **values, **reopened, **stamp}
     if action == "resume" and status in ("done", "cancelled"):      # "needs more doing": a closed job goes straight back to doing
         return {"status": "doing", "done_at": None, **stamp}
     if action in ("todo", "resume"):

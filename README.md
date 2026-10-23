@@ -430,7 +430,7 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
 `static/mgr.js`. The owner's own ticket system -- the same idea as the repair board, for follow-ups, money, fixing things,
 the outside world, rounds and inspections. A group at the top of the sidebar with three pages:
 
-- **บอร์ดของฉัน** (`#mgr`): ต้องทำ -> กำลังทำ -> รอคนอื่น / รอผล -> เสร็จแล้ว; drag a card or use its buttons (every column has a forward and a back button; the first has only forward). The last column shows only what was closed today (Thai calendar day) and starts empty each day; a button under it shows the earlier ones. "รอผล…" asks who /
+- **บอร์ดของฉัน** (`#mgr`): ต้องทำ -> กำลังทำ -> รอคนอื่น / รอผล -> เสร็จแล้ว; drag a card or use its buttons (every column has a forward and a back button, one column at a time: ต้องทำ → กำลังทำ → รอผล → เสร็จแล้ว; the first has only forward). The last column shows only what was closed today (Thai calendar day) and starts empty each day; a button under it shows the earlier ones. "รอผล…" asks who /
   what it is waiting on (with a call button; the shops' numbers are offered), and a **follow-up date**: that day the card comes
   back to the top of its column marked "ถึงวันติดตามแล้ว". A ticket has a title, notes, type, place, urgent, due date + time, a
   follow-up date and a checklist. Done / cancelled tickets can be reopened.

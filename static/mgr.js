@@ -150,8 +150,8 @@ function mgCard(t) {
     todo: [primary("กำลังทำ →", () => mgAct(t, "start")), b("รอผล…", () => openMgWaiting(t)), b("เสร็จ ✓", () => mgAct(t, "done")), b("แก้ไข", () => openMgEdit(t)), b("ยกเลิก", () => mgCancel(t), "danger")],
     doing: [primary("รอผล →", () => openMgWaiting(t)), b("← ต้องทำ", () => mgAct(t, "todo")), b("เสร็จ ✓", () => mgAct(t, "done")), b("แก้ไข", () => openMgEdit(t)), b("ยกเลิก", () => mgCancel(t), "danger")],
     waiting: [primary("เสร็จ ✓", () => mgAct(t, "done")), b("← กำลังทำ", () => mgAct(t, "resume")), b("เลื่อนวันติดตาม", () => openMgWaiting(t)), b("แก้ไข", () => openMgEdit(t)), b("ยกเลิก", () => mgCancel(t), "danger")],
-    done: [b("← กำลังทำ", () => mgAct(t, "resume")), b("ดู / แก้ไข", () => openMgEdit(t))],
-    cancelled: [b("← กำลังทำ", () => mgAct(t, "resume")), b("เปิดใหม่ (ต้องทำ)", () => mgAct(t, "reopen")), b("ดู / แก้ไข", () => openMgEdit(t))],
+    done: [b("← รอผล", () => openMgWaiting(t)), b("ดู / แก้ไข", () => openMgEdit(t))],
+    cancelled: [b("← รอผล", () => openMgWaiting(t)), b("← กำลังทำ", () => mgAct(t, "resume")), b("เปิดใหม่ (ต้องทำ)", () => mgAct(t, "reopen")), b("ดู / แก้ไข", () => openMgEdit(t))],
   }[t.status];
   const card = el("div", { class: `req mgcard${t.urgent ? " urgent" : ""}${due && due.cls === "bad" ? " late" : ""}${followUp ? " followup" : ""}${open ? "" : " done"}`, "data-id": t.id },
     el("div", { class: "req-head" }, mgTypeChip(t), t.urgent ? el("span", { class: "badge urgent", text: "ด่วน" }) : null, followUp ? el("span", { class: "badge warn", text: "ถึงวันติดตามแล้ว" }) : null),
