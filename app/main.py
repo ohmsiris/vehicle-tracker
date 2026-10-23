@@ -1,5 +1,5 @@
 """
-Vehicle Maintenance & Bill Tracker -- backend.
+IceBox (vehicle maintenance, bills, factory purchasing) -- backend.
 
 POST /api/extract
     multipart: `files` (1..MAX_FILES_PER_BATCH bill photos/PDFs), optional
@@ -47,7 +47,7 @@ async def lifespan(_app):
     yield
 
 
-app = FastAPI(title="Vehicle Tracker", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app = FastAPI(title="IceBox", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
 MAX_PARALLEL_EXTRACTIONS = 4
 

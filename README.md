@@ -1,4 +1,4 @@
-# Vehicle Maintenance & Bill Tracker
+# IceBox -- vehicle maintenance, bills and factory purchasing
 
 Photograph or upload a repair bill (image or PDF) -> Claude reads it -> a human
 reviews and corrects it on a web page -> it is saved to Supabase (Postgres +
