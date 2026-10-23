@@ -27,7 +27,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, fleet, history, logbook, logsource, machinery, mgr, mgr_jobs, repair_requests, service_plan, shops, summarize, supabase
+from app import dashboard, events, fleet, history, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_requests, service_plan, shops, stock, summarize, supabase
+from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
 from app.config import settings
@@ -564,6 +565,148 @@ def _plan_call(fn, *args, **kwargs):
 def api_plan_record_service(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
     return _plan_call(service_plan.record_service, body)
+
+
+# ------------------------------------------------------------- buying for the factory: purchase bills, prices, stock
+def _buy_call(fn, *args, **kwargs):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return fn(*args, **kwargs)
+    except (purchasing.InvalidPurchase, stock.InvalidStock, shops.InvalidShop) as exc:
+        raise HTTPException(422, str(exc))
+    except (purchasing.NotFound, stock.NotFound):
+        raise HTTPException(404, "ไม่พบรายการนี้")
+    except supabase.SupabaseError:
+        logger.exception("purchasing call failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+def _read_uploads(files: list[UploadFile], limit: int) -> list[tuple[str, bytes]]:
+    if len(files) > limit:
+        raise HTTPException(413, f"too many files (max {limit})")
+    out = []
+    for f in files:
+        data = f.file.read(settings.max_file_bytes + 1)
+        if len(data) > settings.max_file_bytes:
+            raise HTTPException(413, f"{f.filename} is larger than {settings.max_file_bytes // (1024 * 1024)} MB")
+        out.append((f.filename or "upload", data))
+    return out
+
+
+@app.get("/api/purchases/options")
+def api_purchase_options(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(purchasing.options)
+
+
+@app.post("/api/purchases/extract")
+def api_purchase_extract(files: list[UploadFile] = File(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The photos / PDF pages of ONE purchase bill -> a draft for the review page (nothing is saved)."""
+    _check_token(x_app_token, token)
+    if not settings.anthropic_api_key:
+        raise HTTPException(503, "ANTHROPIC_API_KEY is not configured on the server")
+    raws = _read_uploads(files, settings.max_files_per_batch)
+    if not raws:
+        raise HTTPException(400, "no files uploaded")
+    prepared = []
+    for name, raw in raws:
+        try:
+            prepared.append(prepare_file(raw))
+        except UnsupportedFile as exc:
+            raise HTTPException(422, f"{name}: {exc}")
+    try:
+        extraction, usage = read_purchase_bill(prepared)
+    except Exception:
+        logger.exception("purchase extraction failed")
+        raise HTTPException(502, "ระบบอ่านบิลไม่สำเร็จ ลองอัปโหลดใหม่อีกครั้ง")
+    items = _buy_call(purchasing.items_with_aliases) if purchasing.has_v16() else []
+    return {"draft": purchasing.draft_from_extraction(extraction, items), "extraction": extraction, "usage": usage}
+
+
+@app.post("/api/purchases")
+def api_purchase_save(payload: str = Form(...), files: list[UploadFile] = File(default=[]), allow_duplicates: bool = Form(False),
+                      x_app_token: str = Header(default=""), token: str = Query(default="")):
+    _check_token(x_app_token, token)
+    try:
+        data = json.loads(payload)
+        if not isinstance(data, dict):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(400, "payload is not valid JSON")
+    raws = _read_uploads(files, settings.max_files_per_batch)
+    try:
+        return _buy_call(purchasing.save_bill, data, raws, allow_duplicates=allow_duplicates, extraction_model=EXTRACTION_MODEL)
+    except purchasing.DuplicateBill as exc:
+        return JSONResponse(status_code=409, content={"detail": "duplicate bill", "duplicates": exc.found})
+
+
+@app.get("/api/purchases")
+def api_purchases(limit: int = Query(default=100), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(purchasing.list_bills, limit)
+
+
+@app.get("/api/purchases/{bill_id}")
+def api_purchase(bill_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(purchasing.bill_detail, bill_id)
+
+
+@app.delete("/api/purchases/{bill_id}")
+def api_purchase_delete(bill_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    _buy_call(purchasing.delete_bill, bill_id)
+    return {"ok": True}
+
+
+@app.patch("/api/purchases/lines/{line_id}")
+def api_purchase_line(line_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(purchasing.link_line, line_id, body)
+
+
+@app.get("/api/prices")
+def api_prices(q: str = Query(default="", max_length=80), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(purchasing.prices, q)
+
+
+@app.get("/api/stock")
+def api_stock(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(stock.overview)
+
+
+@app.post("/api/stock/items")
+def api_stock_new_item(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(stock.create_item, body)
+
+
+@app.patch("/api/stock/items/{item_id}")
+def api_stock_edit_item(item_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(stock.update_item, item_id, body)
+
+
+@app.get("/api/stock/items/{item_id}/moves")
+def api_stock_moves(item_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    _check_token(x_app_token, token)
+    return _buy_call(stock.item_moves, item_id)
+
+
+@app.post("/api/stock/moves")
+def api_stock_move(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(stock.add_move, body)
+
+
+@app.delete("/api/stock/moves/{move_id}")
+def api_stock_move_delete(move_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    _buy_call(stock.delete_move, move_id)
+    return {"ok": True}
 
 
 # ------------------------------------------------------------- settings: the repair shops

@@ -2,6 +2,7 @@
 
 // ตั้งค่า (#settings): the things that used to be written in the code, changed here instead.
 //   * the repair shops: the name, the words that mean it on a bill, who to call
+//   * the suppliers (ร้านค้า / ผู้ขาย) the factory buys parts from: the same card, kind "supplier" (static/buy.js reads them)
 // One shop is one place: a dealership with several departments (ศูนย์บริการ, ศูนย์ซ่อมสีและตัวถัง) is a single shop whose
 // departments are its contacts. The bills keep the department as written; the log, the board and the dashboard see one shop.
 // Data: /api/settings/shops (app/shops.py). More settings can be added here later. Loaded BEFORE app.js.
@@ -26,7 +27,9 @@ async function loadAppSettings() {
 }
 
 function renderAppSettings() {
-  fill($("stShops"), shopTester(), ...st.data.shops.map(shopCard), newShopCard());
+  const kind = (s) => s.kind || "repair";
+  fill($("stShops"), shopTester(), ...st.data.shops.filter((s) => kind(s) === "repair").map(shopCard), newShopCard("repair"));
+  fill($("stSuppliers"), ...st.data.shops.filter((s) => kind(s) === "supplier").map(shopCard), newShopCard("supplier"));
 }
 
 // "ลองพิมพ์ชื่อในบิล": which shop a vendor text becomes, and by which word -- to check a word before trusting it
@@ -102,12 +105,13 @@ function shopCard(s) {
     el("div", { class: "pl-set-actions" }, el("button", { class: "btn small primary", type: "button", text: "บันทึก", onclick: save }), msg));
 }
 
-function newShopCard() {
-  const name = el("input", { type: "text", maxlength: "60", placeholder: "ชื่อร้าน / อู่ / ศูนย์ ใหม่", "aria-label": "ชื่อร้านใหม่" });
+function newShopCard(kind) {
+  const supplier = kind === "supplier";
+  const name = el("input", { type: "text", maxlength: "60", placeholder: supplier ? "ชื่อร้านค้า / ผู้ขายใหม่" : "ชื่อร้าน / อู่ / ศูนย์ ใหม่", "aria-label": "ชื่อร้านใหม่" });
   const msg = el("span", { class: "muted small" });
   const add = async () => {
     try {
-      st.data = await api("/api/settings/shops", jsonOpts("POST", { name: name.value }));
+      st.data = await api("/api/settings/shops", jsonOpts("POST", { name: name.value, kind }));
     } catch (err) { msg.textContent = err.message; msg.className = "error small"; return; }
     await stRefreshElsewhere();
     renderAppSettings();

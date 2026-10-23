@@ -65,6 +65,10 @@
     <nav class="side-items" id="sideMachinery">
       <button id="navMachIndex" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>ดัชนีเครื่องจักร</span></button>
       <button id="navMachLog" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>บันทึกซ่อมบำรุง</span></button>
+      <div class="side-sep" role="separator"></div>
+      <button id="navPurchases" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>บิลซื้อของ</span></button>
+      <button id="navPrices" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg><span>เทียบราคา</span></button>
+      <button id="navStock" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg><span>สต็อก (ร่าง)</span></button>
     </nav>
   </div>
 </aside>
@@ -454,6 +458,92 @@
     <div id="tkPlan" class="tkplan" hidden></div>
   </section>
 
+  <!-- ============ Buying for the factory: purchase bills ============ -->
+  <section id="purchasesView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">บิลซื้อของ</h2>
+      <p class="muted small">บิล / ใบเสร็จที่ซื้ออะไหล่และของใช้ซ่อมบำรุงในโรงงาน — อ่านบิลให้อัตโนมัติ เก็บราคาของแต่ละร้านไว้เทียบ (ร้านค้าแก้ได้ที่ ตั้งค่า › ร้านค้า / ผู้ขาย)</p>
+    </div>
+    <p class="error" id="buError" hidden></p>
+    <div class="edit-banner" id="buNeedsV16" hidden>ยังใช้ระบบซื้อของไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
+    <div class="card mpbar">
+      <input id="buQ" type="search" placeholder="ค้นหา: ร้าน เลขที่บิล" autocomplete="off" aria-label="ค้นหาบิล">
+      <button id="buNew" class="btn primary" type="button">+ บิลซื้อของใหม่</button>
+    </div>
+    <p class="muted small" id="buCount"></p>
+    <div id="buList" class="bulist"></div>
+  </section>
+
+  <section id="purchaseNewView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">บิลซื้อของใหม่</h2>
+      <p class="muted small">อัปโหลดรูปหรือ PDF ของบิล (หลายหน้าได้ ถ้าเป็นบิลใบเดียวกัน) ระบบอ่านให้ แล้วตรวจก่อนบันทึก — ไม่มีบิลก็กรอกเองได้</p>
+    </div>
+    <p class="error" id="bnError" hidden></p>
+    <div class="edit-banner" id="bnNeedsV16" hidden>ยังใช้ระบบซื้อของไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
+    <div id="bnUpload">
+      <div class="card">
+        <div class="drop" id="bnDrop" tabindex="0" role="button">
+          <span>แตะเพื่อเลือกไฟล์บิล หรือลากมาวางที่นี่</span>
+          <input id="bnInput" type="file" accept="image/*,application/pdf" multiple hidden>
+        </div>
+        <ul class="filelist" id="bnFiles"></ul>
+      </div>
+      <div class="pl-set-actions">
+        <button id="bnRead" class="btn primary big" type="button" disabled>อ่านบิล</button>
+        <button id="bnManual" class="btn" type="button">กรอกเอง (ไม่มีบิล)</button>
+        <span class="muted small" id="bnBusy" hidden>กำลังอ่านบิล… อาจใช้เวลาสักครู่</span>
+      </div>
+    </div>
+    <div id="bnReview" hidden>
+      <div class="card"><h2>บิล</h2><div id="bnHead"></div></div>
+      <div class="card">
+        <h2>รายการ <span class="muted small">(ช่องสีเหลือง = ระบบไม่แน่ใจ ตรวจอีกที · “เป็นของ” ใช้เทียบราคาระหว่างร้าน)</span></h2>
+        <div class="bu-scroll" id="bnLines"></div>
+        <button id="bnAddLine" class="btn small" type="button">+ เพิ่มบรรทัด</button>
+        <p class="small" id="bnSum"></p>
+      </div>
+      <div class="card" id="bnFoot"></div>
+      <p class="error" id="bnSaveError" hidden></p>
+      <div class="pl-set-actions">
+        <button id="bnSave" class="btn primary big" type="button">บันทึกบิล</button>
+        <button id="bnBack" class="btn" type="button">เริ่มใหม่</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Buying for the factory: compare prices ============ -->
+  <section id="pricesView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">เทียบราคา</h2>
+      <p class="muted small">ของแต่ละรายการซื้อที่ไหน ราคาเท่าไหร่ — ราคาต่อหน่วยคิดจากที่จ่ายจริง (รวม VAT และส่วนลดท้ายบิลแล้ว) ร้านที่ถูกที่สุดตอนนี้ขึ้นก่อน</p>
+    </div>
+    <p class="error" id="prError" hidden></p>
+    <div class="edit-banner" id="prNeedsV16" hidden>ยังใช้ระบบซื้อของไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
+    <div class="card mpbar">
+      <input id="prQ" type="search" placeholder="ค้นหา: ของ ร้าน เช่น ลูกปืน 6205, สายพาน B-82" autocomplete="off" aria-label="ค้นหาของ">
+      <select id="prVat" aria-label="ราคารวม VAT หรือไม่"><option value="inc">ราคาที่จ่ายจริง (รวม VAT)</option><option value="ex">ราคาก่อน VAT</option></select>
+    </div>
+    <div id="prList" class="prlist"></div>
+    <div id="prUnlinked" class="card prunlinked-box"></div>
+  </section>
+
+  <!-- ============ Buying for the factory: the stock room (draft) ============ -->
+  <section id="stockView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">สต็อก <span class="muted small">(ร่าง)</span></h2>
+      <p class="muted small">ห้องอะไหล่ช่างกำลังปรับปรุง — หน้านี้เป็นร่างไว้ก่อน: รายการของ คงเหลือ = รับเข้า − เบิก (± นับสต็อก) · ของที่ต่ำกว่าขั้นต่ำขึ้นว่าควรสั่งเพิ่ม</p>
+    </div>
+    <p class="error" id="skError" hidden></p>
+    <div class="edit-banner" id="skNeedsV16" hidden>ยังใช้สต็อกไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
+    <div class="card mpbar">
+      <input id="skQ" type="search" placeholder="ค้นหา: ชื่อ หมวด สเปค ที่เก็บ" autocomplete="off" aria-label="ค้นหาของในสต็อก">
+      <button id="skAdd" class="btn" type="button">+ เพิ่มรายการ</button>
+    </div>
+    <p class="muted small" id="skCount"></p>
+    <div id="skList"></div>
+  </section>
+
   <!-- ============ Settings: the repair shops ============ -->
   <section id="settingsView" hidden>
     <div class="page-head">
@@ -462,7 +552,10 @@
     </div>
     <p class="error" id="stError" hidden></p>
     <div class="edit-banner" id="stNeedsV15" hidden>ยังแก้ร้านในหน้านี้ไม่ได้ — ต้องรันไฟล์ <strong>schema_v15.sql</strong> ใน Supabase ก่อน</div>
+    <h3 class="section-title">ร้านซ่อม / อู่ / ศูนย์ <span class="muted small">(ที่ส่งรถไปซ่อม)</span></h3>
     <div id="stShops" class="stshops"></div>
+    <h3 class="section-title st-suppliers-head">ร้านค้า / ผู้ขาย <span class="muted small">(ที่ซื้ออะไหล่และของใช้ให้โรงงาน — ใช้กับ “บิลซื้อของ” และ “เทียบราคา”)</span></h3>
+    <div id="stSuppliers" class="stshops"></div>
   </section>
 
   <!-- ============ The manager's board ============ -->
@@ -718,6 +811,18 @@
   </div>
 </dialog>
 
+<!-- Buying: a bill, a stock item, a stock move -->
+<dialog id="buDialog" class="wide">
+  <h3 id="buDlgTitle"></h3>
+  <div id="buDlgBody"></div>
+  <p class="error" id="buDlgError" hidden></p>
+  <div class="dialog-actions">
+    <span class="grow"></span>
+    <button type="button" class="btn" id="buDlgCancel">ปิด</button>
+    <button type="button" class="btn primary" id="buDlgSave">บันทึก</button>
+  </div>
+</dialog>
+
 <!-- A part / spec of the machinery index -->
 <dialog id="partDialog" class="wide">
   <h3 id="pdTitle">อะไหล่ / สเปค</h3>
@@ -828,6 +933,7 @@
 <script src="/static/mgr.js"></script>
 <script src="/static/today.js"></script>
 <script src="/static/settings.js"></script>
+<script src="/static/buy.js"></script>
 <script src="/static/manual.js"></script>
 <script src="/static/app.js"></script>
 </body>

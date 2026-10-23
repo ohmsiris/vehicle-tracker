@@ -1,0 +1,214 @@
+"""
+The mechanics' stock room -- a first draft (the room is being renovated): the things kept (stock_items, the same list
+the purchase bills link their lines to), and every move in or out (stock_moves). What is on the shelf is the sum of the
+moves; nothing is stored twice.
+
+  in     + received (by hand, or from a purchase bill when "รับเข้าสต็อก" is ticked)
+  out    - taken for a job (optionally which machine)
+  count  a stock-take: the move that brings the shelf to what was counted (so the history explains every change)
+
+Pure rules (clean_item, clean_move, on_hand) are unit-tested; the database calls are thin. Needs schema_v16.sql.
+"""
+import re
+import uuid
+from datetime import date, timedelta
+from typing import Optional
+
+from app import supabase
+from app.purchasing import NEEDS_V16, _machines, has_v16, items_with_aliases, price_stats, today_th
+
+MAX_QTY = 1_000_000
+MOVE_KINDS = ("in", "out", "count")
+
+
+class InvalidStock(ValueError):
+    """User-fixable problem; str() is a Thai message safe to show."""
+
+
+class NotFound(Exception):
+    pass
+
+
+def _text(value, limit: int) -> str:
+    return re.sub(r"\s+", " ", str(value if value is not None else "")).strip()[:limit]
+
+
+def _qty(value, what: str, *, allow_zero: bool) -> Optional[float]:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        n = float(str(value).replace(",", "").strip())
+    except ValueError:
+        raise InvalidStock(f"{what}ต้องเป็นตัวเลข")
+    if n < 0 or (n == 0 and not allow_zero) or n > MAX_QTY:
+        raise InvalidStock(f"{what}ไม่ถูกต้อง")
+    return n
+
+
+def clean_item(data: dict, *, existing: Optional[dict] = None, others: list[dict]) -> dict:
+    """A new item (existing=None) or the fields present in `data`. Names and words are unique across items."""
+    creating = existing is None
+    out: dict = {}
+    if creating or "name" in data:
+        name = _text(data.get("name"), 120)
+        if not name:
+            raise InvalidStock("ใส่ชื่อรายการด้วย")
+        if any(o["name"].lower() == name.lower() for o in others):
+            raise InvalidStock(f"มีรายการชื่อ “{name}” อยู่แล้ว")
+        out["name"] = name
+    for key, limit in (("category", 40), ("unit", 20), ("spec", 200), ("location", 60), ("notes", 500)):
+        if creating or key in data:
+            out[key] = _text(data.get(key), limit) or None
+    if creating or "min_qty" in data:
+        out["min_qty"] = _qty(data.get("min_qty"), "จำนวนขั้นต่ำ", allow_zero=True)
+    if "active" in data:
+        out["active"] = bool(data["active"])
+    if "aliases" in data:
+        raw = data["aliases"]
+        if not isinstance(raw, list):
+            raise InvalidStock("คำที่ใช้เรียกไม่ถูกต้อง")
+        taken = {a.lower(): o["name"] for o in others for a in o.get("aliases", [])}
+        words, seen = [], set()
+        for w in raw:
+            word = _text(w, 120)
+            if not word or word.lower() in seen:
+                continue
+            if word.lower() in taken:
+                raise InvalidStock(f"คำว่า “{word}” เป็นของ “{taken[word.lower()]}” อยู่แล้ว")
+            seen.add(word.lower())
+            words.append(word)
+        out["aliases"] = words[:50]
+    return out
+
+
+def clean_move(data: dict, *, today: date, items: set, machines: set, on_hand_now: float = 0) -> dict:
+    kind = data.get("kind")
+    if kind not in MOVE_KINDS:
+        raise InvalidStock("เลือกว่ารับเข้า เบิกออก หรือนับสต็อก")
+    try:
+        item_id = str(uuid.UUID(str(data.get("item_id"))))
+    except ValueError:
+        raise InvalidStock("ไม่พบรายการนี้")
+    if item_id not in items:
+        raise InvalidStock("ไม่พบรายการนี้")
+    try:
+        d = date.fromisoformat(str(data.get("move_date") or today.isoformat()))
+    except ValueError:
+        raise InvalidStock("วันที่ไม่ถูกต้อง")
+    if d > today + timedelta(days=1) or d.year >= 2400:
+        raise InvalidStock("วันที่ไม่ถูกต้อง")
+    if kind == "count":
+        counted = _qty(data.get("qty"), "จำนวนที่นับได้", allow_zero=True)
+        if counted is None:
+            raise InvalidStock("ใส่จำนวนที่นับได้")
+        qty = round(counted - on_hand_now, 4)
+    else:
+        n = _qty(data.get("qty"), "จำนวน", allow_zero=False)
+        if n is None:
+            raise InvalidStock("ใส่จำนวนด้วย")
+        qty = n if kind == "in" else -n
+    machine_id = data.get("machine_id") or None
+    if machine_id and machine_id not in machines:
+        raise InvalidStock("ไม่พบเครื่องนี้")
+    return {"item_id": item_id, "move_date": d.isoformat(), "kind": kind, "qty": qty, "machine_id": machine_id,
+            "notes": _text(data.get("notes"), 300) or None}
+
+
+def on_hand(moves: list[dict]) -> dict:
+    """item id -> what is on the shelf."""
+    out: dict = {}
+    for m in moves:
+        out[m["item_id"]] = round(out.get(m["item_id"], 0) + float(m["qty"]), 4)
+    return out
+
+
+# ------------------------------------------------------------------ database
+def _require() -> None:
+    if not has_v16():
+        raise InvalidStock(NEEDS_V16)
+
+
+def _moves() -> list[dict]:
+    return supabase.select_all("stock_moves", {"select": "item_id,qty", "order": "id.asc"})
+
+
+def overview() -> dict:
+    if not (supabase.configured() and has_v16()):
+        return {"ready": False, "items": [], "machines": []}
+    items = items_with_aliases()
+    have = on_hand(_moves())
+    lines = supabase.select_all("purchase_lines", {"select": "item_id,unit_cost,unit_cost_ex_vat,quantity,unit,bill_id,created_at,purchase_bills(bill_date,vendor_name,vendor_id)",
+                                                   "item_id": "not.is.null", "order": "created_at.desc"})
+    from app import shops
+    names = {s["id"]: s["name"] for s in shops._load()}
+    by: dict = {}
+    for ln in lines:
+        b = ln.pop("purchase_bills", None) or {}
+        by.setdefault(ln["item_id"], []).append({**ln, "bill_date": b.get("bill_date"), "vendor": names.get(b.get("vendor_id")) or b.get("vendor_name")})
+    out = []
+    for it in items:
+        stats = price_stats(by.get(it["id"], []))
+        qty = have.get(it["id"], 0)
+        low = it.get("min_qty") is not None and qty < float(it["min_qty"])
+        out.append({**it, "on_hand": qty, "low": low, "last": stats["last"], "lowest": stats["lowest"]})
+    return {"ready": True, "items": out, "machines": _machines()}
+
+
+def create_item(data: dict) -> dict:
+    _require()
+    items = items_with_aliases()
+    values = clean_item(data, others=items)
+    aliases = values.pop("aliases", [])
+    row = supabase.insert("stock_items", [values])[0]
+    if aliases:
+        supabase.insert("stock_item_aliases", [{"item_id": row["id"], "alias": a} for a in aliases])
+    return overview()
+
+
+def update_item(item_id: str, data: dict) -> dict:
+    _require()
+    items = items_with_aliases()
+    existing = next((i for i in items if i["id"] == item_id), None)
+    if existing is None:
+        raise NotFound()
+    values = clean_item(data, existing=existing, others=[i for i in items if i["id"] != item_id])
+    aliases = values.pop("aliases", None)
+    if values:
+        supabase.update("stock_items", {"id": f"eq.{item_id}"}, values)
+    if aliases is not None:
+        supabase.delete("stock_item_aliases", {"item_id": f"eq.{item_id}"})
+        if aliases:
+            supabase.insert("stock_item_aliases", [{"item_id": item_id, "alias": a} for a in aliases])
+    return overview()
+
+
+def add_move(data: dict) -> dict:
+    _require()
+    items = {i["id"] for i in supabase.select_all("stock_items", {"select": "id", "order": "id.asc"})}
+    item_id = str(data.get("item_id") or "")
+    now = on_hand([m for m in _moves() if m["item_id"] == item_id]).get(item_id, 0)
+    row = clean_move(data, today=today_th(), items=items, machines={m["id"] for m in _machines()}, on_hand_now=now)
+    if row["kind"] == "count" and row["qty"] == 0:
+        return overview()                                     # counted what the system already had: nothing to write
+    supabase.insert("stock_moves", [row])
+    return overview()
+
+
+def item_moves(item_id: str) -> list[dict]:
+    _require()
+    try:
+        uuid.UUID(item_id)
+    except ValueError:
+        raise NotFound()
+    rows = supabase.select_all("stock_moves", {"select": "*", "item_id": f"eq.{item_id}", "order": "move_date.desc,created_at.desc"})
+    machines = {m["id"]: m["name"] for m in _machines()}
+    return [{**r, "machine_name": machines.get(r.get("machine_id"))} for r in rows]
+
+
+def delete_move(move_id: str) -> None:
+    _require()
+    try:
+        uuid.UUID(move_id)
+    except ValueError:
+        raise NotFound()
+    supabase.delete("stock_moves", {"id": f"eq.{move_id}"})

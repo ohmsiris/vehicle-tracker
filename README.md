@@ -466,6 +466,33 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
 - The old Ticketing bot is not removed yet: besides tickets it also reads bills, slips and supply photos and keeps the
   preventive-maintenance catalogue.
 
+## Buying for the factory ("บิลซื้อของ", "เทียบราคา", "สต็อก")
+
+`schema_v16.sql`, `app/purchasing.py`, `app/purchase_extraction.py`, `app/stock.py`, `static/buy.js`. Three pages in the
+**เครื่องจักร** group:
+
+- **บิลซื้อของ** (`#purchases`, new bill `#purchase-new`): a purchase bill / receipt from a supplier, read by Claude
+  (one call for all pages of one bill: seller, number, date -- พ.ศ. turned into ค.ศ. --, VAT mode, total, every line with
+  quantity, unit and amounts; unsure fields come back yellow) or typed in ("กรอกเอง"). Check it, then save; the photos go to
+  Storage under `purchases/`, the same file saved twice is caught (409, can still be saved on purpose). A bill can be deleted.
+- **Suppliers** are shops of kind `supplier` (`shops.kind`), kept on **ตั้งค่า › ร้านค้า / ผู้ขาย** with the same words and
+  numbers as the repair shops; the vendor on a bill is found by those words, an unknown one can be added from the bill.
+  The car side (board, log, dashboard) only ever sees the repair shops.
+- **Items** (`stock_items`): each bill line can say which thing it is ("เป็นของ"). Lines are matched by the item's words
+  (longest wins, `a+b` pairs, same rule as the shops), while typing and again on save; a line linked by hand teaches the
+  item its text, so the next bill that writes it the same way links itself. "+ รายการใหม่" makes an item from the line.
+- **What one unit really cost**: the bill's total is spread over the lines by amount (so VAT added at the bottom and a
+  discount on the whole bill count), divided by the quantity -- `unit_cost`, and `unit_cost_ex_vat` without the 7 %. A
+  total far from the lines is not trusted (only the VAT is added). Prices are compared on these, never the printed price.
+- **เทียบราคา** (`#prices`): per item the last price, the cheapest (where, when) and the latest price at each supplier,
+  cheapest first, with the purchase history; switch between paid (with VAT) and before VAT. Below: the lines not linked
+  to an item yet, each with a picker (that is how old bills get cleaned up).
+- **สต็อก (ร่าง)** (`#stock`): a draft while the supply room is renovated. On hand = the sum of `stock_moves`: + รับเข้า,
+  − เบิก (optionally for which machine), นับ (a stock-take writes the difference). A minimum shows "ควรสั่งเพิ่ม". Saving a
+  bill can receive its linked lines into stock ("รับของเข้าสต็อกด้วย", off by default); deleting the bill takes them out again.
+- Not built yet, on purpose: the slip reader / spending report (to be discussed -- likely from the confirmed bills, dated
+  when the work or purchase happened, not the bank), purchase orders. The parts index (`#machinery`) stays as it is for now.
+
 ## Settings ("ตั้งค่า", `#settings`)
 
 `schema_v15.sql`, `app/shops.py`, `static/settings.js`. The repair shops are no longer written in the code: they are in the

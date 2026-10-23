@@ -910,6 +910,7 @@ input[type=time], input[type=tel] { width: 100%; padding: 9px 12px; font: inheri
 .stword-add { display: inline-flex; gap: 6px; align-items: center; }
 .stword-add input { width: 14em; max-width: 60vw; }
 .stnew { border-style: dashed; }
+.st-suppliers-head { margin-top: 28px; }
 .sttest input { width: 100%; margin: 8px 0; }
 .sttest-out { min-height: 1.4em; margin-bottom: 6px; }
 @media (max-width: 720px) { .strow { grid-template-columns: 1fr auto; } .strow input:first-child { grid-column: 1 / -1; } .strow.head { grid-template-columns: 1fr auto; } }
@@ -928,3 +929,38 @@ input[type=time], input[type=tel] { width: 100%; padding: 9px 12px; font: inheri
 .duecard-items { display: flex; flex-wrap: wrap; gap: 4px; }
 .duecard .btn { justify-self: start; }
 .kanban.dragging-due .kcol[data-status="open"] { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: var(--radius); }
+
+/* ------------------------------------------------------------- buying: bills, prices, stock */
+.bulist { display: grid; gap: 8px; }
+.bubill { display: grid; grid-template-columns: 110px minmax(0, 1.2fr) minmax(0, 2fr) auto; gap: 4px 14px; align-items: center; text-align: left; padding: 10px 16px; font: inherit; color: inherit; cursor: pointer; width: 100%; }
+.bubill:hover { border-color: var(--accent); }
+.bubill-total { font-weight: 650; font-variant-numeric: tabular-nums; }
+.bu-scroll { overflow-x: auto; }
+table.bu-lines { min-width: 1100px; }
+table.bu-lines td.n { width: 28px; color: var(--muted); }
+table.bu-lines td:nth-child(2) { min-width: 240px; }
+table.bu-lines td:nth-child(3), table.bu-lines td:nth-child(5), table.bu-lines td:nth-child(6) { width: 100px; }
+table.bu-lines td:nth-child(4) { width: 80px; }
+table.bu-lines td.bu-item { min-width: 220px; }
+table.bu-lines td.bu-item input { margin-top: 4px; }
+table.bu-lines-view { min-width: 640px; }
+.bu-sum { font-weight: 650; text-align: right; }
+#bnSum { margin: 10px 0 0; }
+.prlist { display: grid; gap: 10px; }
+.prcard { padding: 12px 16px; display: grid; gap: 6px; }
+.prhead { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.prline { display: flex; gap: 6px 18px; flex-wrap: wrap; }
+.prlow { color: var(--ok); }
+.prhist { display: grid; grid-template-columns: 100px minmax(0, 1fr) minmax(0, 2fr) 90px 90px; gap: 8px; padding: 4px 0; border-top: 1px solid var(--line); align-items: center; }
+.prunlinked-box:empty { display: none; }
+.prunlinked { display: grid; grid-template-columns: 100px minmax(0, 2fr) minmax(0, 1.2fr) minmax(180px, 1fr); gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+.sktable { min-width: 860px; }
+.sktable tr.low td { background: var(--bad-soft); }
+.sk-actions { white-space: nowrap; }
+.sk-actions .btn { margin-right: 4px; }
+.linkbtn { border: 0; background: none; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; text-align: left; }
+.linkbtn:hover { text-decoration: underline; }
+@media (max-width: 720px) {
+  .bubill { grid-template-columns: 1fr auto; }
+  .prhist, .prunlinked { grid-template-columns: 1fr 1fr; }
+}

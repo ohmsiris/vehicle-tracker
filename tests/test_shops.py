@@ -86,7 +86,7 @@ def test_a_switched_off_shop_still_groups_its_old_bills_but_is_not_offered():
 
 def test_clean_shop_new_and_partial_edit():
     v = shops.clean_shop({"name": "  ร้านใหม่  ", "aliases": ["ใหม่", " ใหม่ ", "ร้านใหม่", ""], "contacts": [{"label": "ช่าง", "phone": "081-111-2222"}, {"label": "", "phone": ""}]}, others=[other("A")])
-    assert v == {"name": "ร้านใหม่", "aliases": ["ใหม่"], "contacts": [{"label": "ช่าง", "phone": "081-111-2222"}]}          # own name / duplicates / blanks dropped
+    assert v == {"name": "ร้านใหม่", "kind": "repair", "aliases": ["ใหม่"], "contacts": [{"label": "ช่าง", "phone": "081-111-2222"}]}          # own name / duplicates / blanks dropped
     assert shops.clean_shop({"active": False}, existing={"name": "A", "aliases": []}, others=[]) == {"active": False}
 
 
@@ -96,3 +96,15 @@ def test_clean_shop_refuses():
                          ({"name": "ใหม่", "contacts": [{"label": "x", "phone": "abc"}]}, "เบอร์โทร"), ({"name": "ใหม่", "sort_order": "x"}, "ตัวเลข")):
         with pytest.raises(shops.InvalidShop, match=message):
             shops.clean_shop(bad, others=[other("A"), other("B", ["ชมรม"])])
+
+
+def test_suppliers_live_in_the_same_list_but_the_car_side_never_sees_them(monkeypatch):
+    rows = [*shops.builtin_shops(), {"id": "s1", "name": "สหลูกปืน", "kind": "supplier", "aliases": ["ลูกปืน"], "contacts": [], "active": True}]
+    monkeypatch.setattr(shops, "snapshot", lambda: rows)
+    assert shops.canonical("ร้านลูกปืน ABC") == "ร้านลูกปืน ABC"                 # not folded into a repair shop
+    assert shops.find_supplier("ร้านลูกปืน ABC")["id"] == "s1"
+    assert shops.find_supplier("ชมรมย์การช่าง") is None
+    assert "สหลูกปืน" not in shops.choices()
+    with pytest.raises(shops.InvalidShop):
+        shops.clean_shop({"name": "x", "kind": "bank"}, others=[])
+    assert shops.clean_shop({"name": "x", "kind": "supplier"}, others=[])["kind"] == "supplier"

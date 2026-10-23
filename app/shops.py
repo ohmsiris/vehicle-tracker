@@ -9,6 +9,10 @@ the longest word wins. A word may be a pair with "+": "มงคล+ไดนา
 way to use a common word like "ไดนาโม" safely -- on its own it would match every dynamo shop. A name that matches nothing is
 kept as written (a new shop simply appears under its own name -- nothing is ever dropped).
 
+Two kinds live in the same list: "repair" (a place a truck is sent to -- everything above) and "supplier" (a shop the
+factory buys parts from, schema_v16.sql; matched on the purchase bills the same way, see app/purchasing.py). The
+car side only ever sees the repair shops.
+
 A dealership with several departments is ONE shop: its departments are contacts (ศูนย์บริการ / ศูนย์ซ่อมสีและตัวถัง), not
 separate shops. The department stays visible on the bill itself (the log shows the name as written).
 
@@ -25,6 +29,7 @@ IN_HOUSE = "ซ่อมในโรงงาน"
 MAX_NAME = 60
 MAX_ALIASES = 30
 MAX_CONTACTS = 12
+KINDS = ("repair", "supplier")
 SNAPSHOT_SECONDS = 30
 
 # The places a truck is sent to, in the order they are offered on the board.
@@ -90,7 +95,7 @@ def builtin_shops() -> list[dict]:
     """The built-in copy in the same shape as the database rows (with aliases and contacts inside)."""
     out = []
     for i, name in enumerate([*SHOPS, IN_HOUSE]):
-        out.append({"id": None, "name": name, "sort_order": 99 if name == IN_HOUSE else i + 1, "active": True, "in_house": name == IN_HOUSE,
+        out.append({"id": None, "name": name, "kind": "repair", "sort_order": 99 if name == IN_HOUSE else i + 1, "active": True, "in_house": name == IN_HOUSE,
                     "aliases": [w for w, shop in ALIASES if shop == name], "contacts": list(DIRECTORY.get(name, {}).get("contacts", []))})
     return out
 
@@ -154,14 +159,26 @@ def canonical_in(name: Optional[str], shops: list[dict]) -> str:
     return explain(name, shops)["shop"]
 
 
+def of_kind(kind: str, shops: Optional[list[dict]] = None) -> list[dict]:
+    return [s for s in (snapshot() if shops is None else shops) if s.get("kind", "repair") == kind]
+
+
 def canonical(name: Optional[str]) -> str:
-    """The shop for a name as written on a bill / typed by a person ('' if blank)."""
-    return canonical_in(name, snapshot())
+    """The repair shop for a name as written on a bill / typed by a person ('' if blank)."""
+    return canonical_in(name, of_kind("repair"))
+
+
+def find_supplier(name: Optional[str]) -> Optional[dict]:
+    """The supplier a vendor name on a purchase bill means (by its words), or None."""
+    hit = explain(name, of_kind("supplier"))
+    if not hit["matched"]:
+        return None
+    return next((s for s in of_kind("supplier") if s["name"] == hit["shop"]), None)
 
 
 def choices() -> list[str]:
     """What the board offers when sending a truck somewhere: the shops that are in use, then the in-house work."""
-    shops = [s for s in snapshot() if s.get("active", True)]
+    shops = [s for s in of_kind("repair") if s.get("active", True)]
     return [s["name"] for s in sorted(shops, key=lambda s: (s.get("in_house", False), s.get("sort_order", 99), s["name"]))]
 
 
@@ -173,7 +190,7 @@ def directory() -> dict:
 def board_places() -> list[dict]:
     """The shops as places for the manager's board (the in-house work is not somewhere you go)."""
     return [{"id": s.get("id"), "label": s["name"], "kind": "shop", "sort_order": 10 + i, "active": True}
-            for i, s in enumerate(x for x in snapshot() if x.get("active", True) and not x.get("in_house"))]
+            for i, s in enumerate(x for x in snapshot() if x.get("active", True) and not x.get("in_house"))]   # repair shops and suppliers: both are places to go
 
 
 # --------------------------------------------------------------- validation
@@ -193,6 +210,11 @@ def clean_shop(data: dict, *, existing: Optional[dict] = None, others: list[dict
         if any(_norm(o["name"]) == _norm(name) for o in others):
             raise InvalidShop(f"มีร้านชื่อ “{name}” อยู่แล้ว")
         out["name"] = name
+    if creating:
+        kind = data.get("kind") or "repair"
+        if kind not in KINDS:
+            raise InvalidShop("ประเภทร้านไม่ถูกต้อง")
+        out["kind"] = kind
     if "active" in data:
         out["active"] = bool(data["active"])
     if "sort_order" in data:
@@ -285,7 +307,10 @@ def create(data: dict) -> dict:
     _require()
     current = _load()
     values = clean_shop(data, others=current)
-    row = supabase.insert("shops", [{"name": values["name"], "sort_order": values.get("sort_order", 50), "active": values.get("active", True)}])[0]
+    row = {"name": values["name"], "sort_order": values.get("sort_order", 50), "active": values.get("active", True)}
+    if values["kind"] != "repair":
+        row["kind"] = values["kind"]                         # the column exists from schema_v16
+    row = supabase.insert("shops", [row])[0]
     _save_children(row["id"], values)
     refresh()
     return settings()
