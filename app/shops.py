@@ -5,8 +5,9 @@ Why it exists: the same shop is written differently on every bill ("ชมรม
 "บริษัท จึงกงเฮงอีซูซุ จำกัด (ศูนย์ซ่อมสีและตัวถัง แก่งคอย)" and "อิซูซุจึงกงเฮง แก่งคอย" are the same place), so filtering
 the log by shop, or adding up what was paid to one, needs them folded into one name. canonical() does that: a bill
 or typed name that contains one of a shop's words (its aliases, or its own name) is that shop; when several match,
-the longest word wins ("24 ไดนาโม" beats the "ไดนาโม" of มงคลไดนาโม). A name that matches nothing is kept as written (a
-new shop simply appears under its own name -- nothing is ever dropped).
+the longest word wins. A word may be a pair with "+": "มงคล+ไดนาโม" needs BOTH parts in the name (in any order), which is the
+way to use a common word like "ไดนาโม" safely -- on its own it would match every dynamo shop. A name that matches nothing is
+kept as written (a new shop simply appears under its own name -- nothing is ever dropped).
 
 A dealership with several departments is ONE shop: its departments are contacts (ศูนย์บริการ / ศูนย์ซ่อมสีและตัวถัง), not
 separate shops. The department stays visible on the bill itself (the log shows the name as written).
@@ -38,7 +39,7 @@ SHOPS: list[str] = [
 ]
 
 # (word, shop). A bill or typed name that contains the word (compared after lower-casing and removing spaces / dots /
-# dashes) is that shop; the longest matching word wins.
+# dashes) is that shop; the longest matching word wins. "a+b" = both a and b must be in the name.
 ALIASES: list[tuple[str, str]] = [
     ("ช่างเอ๋", IN_HOUSE),
     ("ในโรงงาน", IN_HOUSE),
@@ -48,8 +49,7 @@ ALIASES: list[tuple[str, str]] = [
     ("โชค", "โชคพัฒนา"),
     ("ช่างลิ้ม", "24 ไดนาโม"),
     ("ลิ้ม", "24 ไดนาโม"),
-    ("มงคล", "มงคลไดนาโม"),
-    ("ไดนาโม", "มงคลไดนาโม"),
+    ("มงคล+ไดนาโม", "มงคลไดนาโม"),                  # "ไดนาโม" alone is a common word (every dynamo shop): only the pair means this shop
     ("isuzu", "อิซูซุจึงกงเฮงแก่งคอย"),
     ("อีซูซุ", "อิซูซุจึงกงเฮงแก่งคอย"),
     ("อิซูซุ", "อิซูซุจึงกงเฮงแก่งคอย"),
@@ -126,21 +126,32 @@ def refresh() -> None:
 
 
 # --------------------------------------------------------------- the rules
-def _words(shops: list[dict]) -> list[tuple[str, str]]:
-    """(normalised word, shop name) for every shop's aliases and its own name, the longest word first."""
-    pairs = [(_norm(w), s["name"]) for s in shops for w in [*s.get("aliases", []), s["name"]] if _norm(w)]
-    return sorted(pairs, key=lambda p: -len(p[0]))
+def _parts(word: str) -> tuple:
+    """A word as the parts that must ALL be present: "มงคล+ไดนาโม" -> ("มงคล", "ไดนาโม"); a plain word -> one part."""
+    return tuple(p for p in (_norm(x) for x in str(word).split("+")) if p)
+
+
+def _words(shops: list[dict]) -> list[tuple[tuple, str, str]]:
+    """(parts, shop name, the word as written) for every shop's aliases and its own name, the most specific first
+    (the most letters in all its parts)."""
+    out = [(_parts(w), s["name"], w) for s in shops for w in [*s.get("aliases", []), s["name"]] if _parts(w)]
+    return sorted(out, key=lambda p: -sum(len(x) for x in p[0]))
+
+
+def explain(name: Optional[str], shops: Optional[list[dict]] = None) -> dict:
+    """Which shop a name is, and by which word -- what the settings page's test box shows."""
+    raw = (name or "").strip()
+    if not raw:
+        return {"shop": "", "word": None, "matched": False}
+    n = _norm(raw)
+    for parts, shop, word in _words(snapshot() if shops is None else shops):
+        if all(p in n for p in parts):
+            return {"shop": shop, "word": word, "matched": True}
+    return {"shop": raw, "word": None, "matched": False}
 
 
 def canonical_in(name: Optional[str], shops: list[dict]) -> str:
-    raw = (name or "").strip()
-    if not raw:
-        return ""
-    n = _norm(raw)
-    for word, shop in _words(shops):
-        if word in n:
-            return shop
-    return raw
+    return explain(name, shops)["shop"]
 
 
 def canonical(name: Optional[str]) -> str:
@@ -196,11 +207,12 @@ def clean_shop(data: dict, *, existing: Optional[dict] = None, others: list[dict
         words, seen = [], set()
         mine = _norm(out.get("name") or (existing or {}).get("name") or "")
         for w in raw:
-            word = _text(w, MAX_NAME)
-            key = _norm(word)
+            parts = [p.strip() for p in _text(w, MAX_NAME).split("+") if p.strip()]
+            word = "+".join(parts)
+            key = "+".join(sorted(_norm(p) for p in parts))
             if not key or key in seen or key == mine:
                 continue
-            clash = next((o["name"] for o in others if key == _norm(o["name"]) or key in {_norm(a) for a in o.get("aliases", [])}), None)
+            clash = next((o["name"] for o in others if key == _norm(o["name"]) or key in {"+".join(sorted(_parts(a))) for a in o.get("aliases", [])}), None)
             if clash:
                 raise InvalidShop(f"คำว่า “{word}” เป็นของร้าน “{clash}” อยู่แล้ว")
             seen.add(key)

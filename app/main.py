@@ -589,6 +589,13 @@ def api_settings_shops(x_app_token: str = Header(default=""), token: str = Query
     return _shops_call(shops.settings)
 
 
+@app.get("/api/settings/shops/test")
+def api_settings_shop_test(name: str = Query(default="", max_length=200), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """What shop a bill's vendor text is, and by which word (the settings page's test box)."""
+    _check_token(x_app_token, token)
+    return shops.explain(name)
+
+
 @app.post("/api/settings/shops")
 def api_settings_new_shop(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

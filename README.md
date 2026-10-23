@@ -459,7 +459,9 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
 `schema_v15.sql`, `app/shops.py`, `static/settings.js`. The repair shops are no longer written in the code: they are in the
 database (`shops`, `shop_aliases`, `shop_contacts`, filled from the old lists, so nothing changed) and edited in the app. A shop
 has a name, **words** (what a bill or a typed name may say: "จึงกงเฮง", "isuzu" ...; the shop's own name counts already; when
-several match, the longest wins) and **contacts** (phone numbers with a department or a person's name). A dealership with
+several match, the longest wins; a **pair** like `มงคล+ไดนาโม` needs both parts in the name, in any order -- the safe way to use a
+common word such as "ไดนาโม", which on its own matches no shop; the page has a test box that shows which shop and which word a bill's
+name resolves to) and **contacts** (phone numbers with a department or a person's name). A dealership with
 several departments is **one shop**: the Isuzu dealership is one place to go and one name in the log, the board and the
 dashboard, with ศูนย์บริการ and ศูนย์ซ่อมสีและตัวถัง as two contacts; each bill still keeps the department as written on it.
 Renaming a shop renames it in the repair requests and the manager's tickets, and keeps the old name as a word. A shop can be

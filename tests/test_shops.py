@@ -51,6 +51,21 @@ def test_one_dealership_with_two_departments_is_one_shop():
         assert shops.canonical(written) == "อิซูซุจึงกงเฮงแก่งคอย"
 
 
+def test_a_common_word_alone_matches_no_shop_but_a_pair_does():
+    assert shops.canonical("ไดนาโม") == "ไดนาโม"                   # unknown dynamo shop: kept as written, not put under มงคลไดนาโม
+    assert shops.canonical("ร้านไดนาโมบางปะอิน") == "ร้านไดนาโมบางปะอิน"
+    assert shops.canonical("ไดนาโม มงคล") == "มงคลไดนาโม"           # either order
+    assert shops.explain("ไดนาโม มงคล") == {"shop": "มงคลไดนาโม", "word": "มงคล+ไดนาโม", "matched": True}
+    assert shops.explain("ไดนาโม")["matched"] is False and shops.explain("")["shop"] == ""
+
+
+def test_pair_words_are_checked_for_clashes_like_plain_ones():
+    others = [other("มงคลไดนาโม", ["มงคล+ไดนาโม"])]
+    with pytest.raises(shops.InvalidShop):
+        shops.clean_shop({"aliases": ["ไดนาโม + มงคล"]}, existing={"name": "x", "aliases": []}, others=others)
+    assert shops.clean_shop({"aliases": [" a + b ", "b+a"]}, existing={"name": "x", "aliases": []}, others=[])["aliases"] == ["a+b"]
+
+
 def test_the_longest_word_wins():
     assert shops.canonical("ช่างลิ้ม 24 ไดนาโม") == "24 ไดนาโม" and shops.canonical("มงคล ไดนาโม") == "มงคลไดนาโม"
     custom = [{"name": "ไดนาโมใหญ่", "aliases": ["ไดนาโมใหญ่ลำลูกกา"], "active": True}, {"name": "ไดนาโม", "aliases": [], "active": True}]

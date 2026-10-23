@@ -904,4 +904,6 @@ input[type=time], input[type=tel] { width: 100%; padding: 9px 12px; font: inheri
 .stword-add { display: inline-flex; gap: 6px; align-items: center; }
 .stword-add input { width: 14em; max-width: 60vw; }
 .stnew { border-style: dashed; }
+.sttest input { width: 100%; margin: 8px 0; }
+.sttest-out { min-height: 1.4em; margin-bottom: 6px; }
 @media (max-width: 720px) { .strow { grid-template-columns: 1fr auto; } .strow input:first-child { grid-column: 1 / -1; } .strow.head { grid-template-columns: 1fr auto; } }
