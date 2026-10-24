@@ -46,6 +46,9 @@ _client_lazy = get_client
 # messy handwriting benefits meaningfully from it.
 MODEL = "claude-opus-5"
 MAX_PARSE_ATTEMPTS = 2
+# The model's thinking AND the JSON both count here: a long bill (45+ lines, ~150 tokens each) overran the old 8000 and the
+# answer was cut off mid-way -- shown to the user only as "could not read". 16000 is the most a non-streaming call allows with margin.
+MAX_OUTPUT_TOKENS = 16000
 
 # Header fields the model may flag as uncertain / per-line fields likewise.
 HEADER_CONFIDENCE_FIELDS = [
@@ -421,7 +424,7 @@ def extract_file(file_bytes: bytes, media_type: str, roster_text: str = "") -> t
         try:
             response = _client_lazy().messages.create(
                 model=MODEL,
-                max_tokens=8000,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 system=system_blocks,
                 messages=[
                     {
@@ -437,6 +440,8 @@ def extract_file(file_bytes: bytes, media_type: str, roster_text: str = "") -> t
                     "format": {"type": "json_schema", "schema": EXTRACTION_SCHEMA},
                 },
             )
+            if response.stop_reason == "max_tokens":
+                raise ValueError(f"the answer was cut off at {MAX_OUTPUT_TOKENS} tokens (bill too long to read in one go)")
             text_block = next(b.text for b in response.content if b.type == "text")
             bill = json.loads(text_block)
             _validate(bill)

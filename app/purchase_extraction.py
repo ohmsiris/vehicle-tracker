@@ -99,7 +99,7 @@ def read_bill(files: list[tuple[bytes, str]]) -> tuple[dict, dict]:
         try:
             response = _client_lazy().messages.create(
                 model=MODEL,
-                max_tokens=8000,
+                max_tokens=16000,
                 system=[{"type": "text", "text": SYSTEM_PROMPT}],
                 messages=[{"role": "user", "content": content}],
                 output_config={"effort": "high", "format": {"type": "json_schema", "schema": SCHEMA}},
