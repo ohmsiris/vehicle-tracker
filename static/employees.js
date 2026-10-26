@@ -10,11 +10,21 @@ const emp = { all: [], branches: [], positions: [], summary: null, ready: true, 
 
 const EMP_SORTS = {
   code: (a, b) => a.code.localeCompare(b.code),
-  name: (a, b) => a.full_name.localeCompare(b.full_name, "th"),
+  name: (a, b) => a.full_name.localeCompare(b.full_name, "th") || a.code.localeCompare(b.code),
   start: (a, b) => (a.start_date || "9999").localeCompare(b.start_date || "9999") || a.code.localeCompare(b.code),
 };
 const empNorm = (s) => String(s || "").toLowerCase().replace(/[\s\-_.()]/g, "");
-const empLabel = (e) => (e.nickname ? `${e.full_name} (${e.nickname})` : e.full_name);
+const empLabel = (e) => (e.nickname ? `${e.display_name} (${e.nickname})` : e.display_name);
+const EMP_GENDER_OF = { "นาย": "ชาย", "นาง": "หญิง", "นางสาว": "หญิง" };
+// the same reading as app/employees.py split_prefix: a title typed at the start of the name -> [title, the rest]
+const EMP_TITLES = [[/^\s*นางสาว\s*/, "นางสาว"], [/^\s*น\.ส\.\s*/, "นางสาว"], [/^\s*นาง\s*/, "นาง"], [/^\s*นาย\s*/, "นาย"], [/^\s*(?:miss|ms)\.?\s+/i, "นางสาว"], [/^\s*mrs\.?\s*/i, "นาง"], [/^\s*mr\.?\s*/i, "นาย"]];
+function empSplitTitle(name) {
+  for (const [re, title] of EMP_TITLES) {
+    const m = re.exec(name);
+    if (m && name.slice(m[0].length).trim()) return [title, name.slice(m[0].length).trim()];
+  }
+  return [null, name];
+}
 
 // ------------------------------------------------------------------ loading + the PIN
 async function empLoad() {
@@ -66,14 +76,16 @@ function fillEmpFilters() {
 function visibleEmployees() {
   const tokens = $("emSearch").value.trim().split(/\s+/).map(empNorm).filter(Boolean);
   const branch = $("emBranch").value, pos = $("emPosition").value, status = $("emStatus").value, sort = EMP_SORTS[$("emSort").value] || EMP_SORTS.code;
-  $("emClear").hidden = !(tokens.length || branch || pos || status !== "active" || $("emSort").value !== "code");
+  const gender = $("emGender").value;
+  $("emClear").hidden = !(tokens.length || branch || pos || gender || status !== "active" || $("emSort").value !== "code");
   return emp.all
     .filter((e) => (status === "all" ? true : status === "resigned" ? e.status === "resigned" : e.status !== "resigned"))
     .filter((e) => !branch || e.branch === branch)
     .filter((e) => !pos || (pos === "__none" ? !e.position : e.position === pos))
+    .filter((e) => !gender || (gender === "__none" ? !e.gender : e.gender === gender))
     .filter((e) => {
       if (!tokens.length) return true;
-      const hay = [e.code, e.full_name, e.nickname, e.position, e.phone, e.branch].map(empNorm).join("|");
+      const hay = [e.code, e.display_name, e.nickname, e.position, e.phone, e.branch].map(empNorm).join("|");
       return tokens.every((t) => hay.includes(t));
     })
     .sort(sort);
@@ -83,11 +95,12 @@ function renderEmployees() {
   const rows = visibleEmployees();
   const s = emp.summary || { active: 0, resigned: 0, by_position: [] };
   fill($("emCount"), `พบ ${rows.length} คน จากที่ทำงานอยู่ ${s.active} คน${s.resigned ? ` (ลาออกแล้ว ${s.resigned})` : ""}`,
-    s.by_position.length ? ` · ${s.by_position.map(([p, n]) => `${p} ${n}`).join(" · ")}` : null);
-  const head = el("tr", {}, ...["รหัส", "ชื่อ-สกุล", "สาขา", "ตำแหน่ง", "เริ่มงาน", ""].map((t) => el("th", { text: t })));
+    s.by_position.length ? ` · ${s.by_position.map(([p, n]) => `${p} ${n}`).join(" · ")}` : null,
+    s.by_gender ? ` · ชาย ${s.by_gender["ชาย"]} · หญิง ${s.by_gender["หญิง"]}${s.by_gender["ยังไม่ระบุ"] ? ` · ยังไม่ระบุเพศ ${s.by_gender["ยังไม่ระบุ"]}` : ""}` : null);
+  const head = el("tr", {}, ...["รหัส", "ชื่อ-สกุล", "เพศ", "สาขา", "ตำแหน่ง", "เริ่มงาน", ""].map((t) => el("th", { text: t })));
   const body = rows.map((e) => {
     const tr = el("tr", { class: `emprow${e.status === "resigned" ? " off" : ""}`, tabindex: "0", onclick: () => goHash(`#employee=${e.id}`) },
-      el("td", { class: "emcode", text: e.code }), el("td", { class: "emname", text: empLabel(e) }), el("td", { text: e.branch }),
+      el("td", { class: "emcode", text: e.code }), el("td", { class: "emname", text: empLabel(e) }), el("td", { text: e.gender }), el("td", { text: e.branch }),
       el("td", { text: e.position }), el("td", { text: e.start_date ? beDate(e.start_date) : "" }),
       el("td", {}, e.status === "resigned" ? el("span", { class: "badge", text: "ลาออกแล้ว" }) : null));
     tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter") goHash(`#employee=${e.id}`); });
@@ -100,14 +113,14 @@ function renderEmployees() {
 
 function clearEmpFilters() {
   $("emSearch").value = "";
-  for (const id of ["emBranch", "emPosition"]) $(id).value = "";
+  for (const id of ["emBranch", "emPosition", "emGender"]) $(id).value = "";
   $("emStatus").value = "active";
   $("emSort").value = "code";
   renderEmployees();
 }
 
 function exportEmployees() {
-  const cols = [["รหัส", (e) => e.code], ["ชื่อ-สกุล", (e) => e.full_name], ["ชื่อเล่น", (e) => e.nickname], ["สาขา", (e) => e.branch], ["ตำแหน่ง/แผนก", (e) => e.position],
+  const cols = [["รหัส", (e) => e.code], ["คำนำหน้า", (e) => e.prefix], ["ชื่อ-สกุล", (e) => e.full_name], ["เพศ", (e) => e.gender], ["ชื่อเล่น", (e) => e.nickname], ["สาขา", (e) => e.branch], ["ตำแหน่ง/แผนก", (e) => e.position],
     ["สถานะ", (e) => (e.status === "resigned" ? "ลาออกแล้ว" : "ทำงานอยู่")], ["วันเริ่มงาน (ค.ศ.)", (e) => e.start_date], ["วันที่ลาออก (ค.ศ.)", (e) => e.end_date],
     ["เบอร์โทร", (e) => e.phone], ["หมายเหตุ", (e) => e.notes]];
   const q = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
@@ -152,7 +165,7 @@ function renderEmployee() {
   const e = emp.current;
   const off = e.status === "resigned";
   fill($("empHead"),
-    el("div", { class: "tk-title" }, el("span", { class: "tk-no", text: e.code }), el("span", { class: "tk-plate", text: e.full_name }), e.nickname ? el("span", { class: "muted", text: `(${e.nickname})` }) : null),
+    el("div", { class: "tk-title" }, el("span", { class: "tk-no", text: e.code }), el("span", { class: "tk-plate", text: e.display_name }), e.nickname ? el("span", { class: "muted", text: `(${e.nickname})` }) : null),
     el("div", { class: "tk-sub muted", text: [e.branch ? `สาขา${e.branch}` : "", e.position].filter(Boolean).join(" · ") }),
     el("div", { class: "tk-badges" }, off ? el("span", { class: "badge", text: "ลาออกแล้ว" }) : el("span", { class: "badge ok", text: "ทำงานอยู่" }),
       e.position ? el("span", { class: "badge shop", text: e.position }) : null));
@@ -161,7 +174,7 @@ function renderEmployee() {
   const card = (title, ...rows) => el("section", { class: "card tkcard" }, el("h3", { text: title }), ...rows.filter(Boolean));
   const soon = (title, text) => el("section", { class: "card tkcard hsoon" }, el("div", { class: "hsoon-tag", text: "เร็วๆ นี้" }), el("h3", { text: title }), el("p", { class: "muted small", text }));
   fill($("empBody"),
-    card("ข้อมูลพนักงาน", kvAll("รหัส", e.code), kvAll("ชื่อ-สกุล", e.full_name), kvAll("ชื่อเล่น", e.nickname), kvAll("สาขา", e.branch), kvAll("ตำแหน่ง/แผนก", e.position),
+    card("ข้อมูลพนักงาน", kvAll("รหัส", e.code), kvAll("คำนำหน้า", e.prefix), kvAll("ชื่อ-สกุล", e.full_name), kvAll("เพศ", e.gender), kvAll("ชื่อเล่น", e.nickname), kvAll("สาขา", e.branch), kvAll("ตำแหน่ง/แผนก", e.position),
       kvAll("เบอร์โทร", "", e.phone ? el("span", { class: "kv-v" }, el("span", { text: `${e.phone} ` }), callLink(e.phone, "", true)) : null),
       kvAll("คนขับในระบบรถ", e.driver_name)),
     card("การทำงาน", kvAll("สถานะ", off ? "ลาออกแล้ว" : "ทำงานอยู่"), kvAll("วันเริ่มงาน", e.start_date ? beDate(e.start_date) : ""),
@@ -180,6 +193,9 @@ async function openEmpDialog(e) {
   $("emdPosList").replaceChildren(...emp.positions.map((p) => el("option", { value: p })));
   $("emdCode").value = e ? e.code : "";
   $("emdName").value = e ? e.full_name : "";
+  $("emdPrefix").value = e ? e.prefix : "";
+  $("emdGender").value = e ? e.gender : "";
+  $("emdNameHint").textContent = "";
   $("emdNick").value = e ? e.nickname : "";
   $("emdBranch").value = e ? e.branch : (emp.branches[0] || "");
   $("emdPosition").value = e ? e.position : "";
@@ -203,7 +219,7 @@ async function openEmpDialog(e) {
 async function saveEmployee() {
   const id = $("emdSave").dataset.id;
   const body = {
-    code: $("emdCode").value, full_name: $("emdName").value, nickname: $("emdNick").value, branch: $("emdBranch").value, position: $("emdPosition").value,
+    code: $("emdCode").value, full_name: $("emdName").value, prefix: $("emdPrefix").value, gender: $("emdGender").value, nickname: $("emdNick").value, branch: $("emdBranch").value, position: $("emdPosition").value,
     start_date: $("emdStart").value || null, phone: $("emdPhone").value, notes: $("emdNotes").value, driver_id: $("emdDriver").value || null,
   };
   $("emdSave").disabled = true;
@@ -268,13 +284,27 @@ async function deleteEmployee() {
 // ------------------------------------------------------------------ init
 function initEmployees() {
   $("emSearch").addEventListener("input", renderEmployees);
-  for (const id of ["emBranch", "emPosition", "emStatus", "emSort"]) $(id).addEventListener("change", renderEmployees);
+  for (const id of ["emBranch", "emPosition", "emGender", "emStatus", "emSort"]) $(id).addEventListener("change", renderEmployees);
   $("emClear").addEventListener("click", clearEmpFilters);
   $("emAdd").addEventListener("click", () => { emp.loaded ? openEmpDialog(null) : empLoad().then((ok) => ok && openEmpDialog(null)); });
   $("emExport").addEventListener("click", exportEmployees);
   $("emBack").addEventListener("click", () => goHash("#employees"));
   $("emdCancel").addEventListener("click", () => $("empDialog").close());
   $("emdSave").addEventListener("click", saveEmployee);
+  // a title typed in front of the name moves to the คำนำหน้า box at once (and the gender follows it)
+  $("emdName").addEventListener("input", () => {
+    const [title, rest] = empSplitTitle($("emdName").value);
+    if (!title) return;
+    $("emdPrefix").value = title;
+    $("emdGender").value = EMP_GENDER_OF[title];
+    $("emdName").value = rest;
+    $("emdNameHint").textContent = `แยกคำนำหน้า “${title}” ให้แล้ว — เพศ: ${EMP_GENDER_OF[title]}`;
+  });
+  $("emdPrefix").addEventListener("change", () => {
+    const g = EMP_GENDER_OF[$("emdPrefix").value];
+    if (g) $("emdGender").value = g;
+    $("emdNameHint").textContent = "";
+  });
   bindDateField($("emdStart"), $("emdStartCap"));
   $("emrCancel").addEventListener("click", () => $("empResignDialog").close());
   $("emrSave").addEventListener("click", submitResign);

@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import employees, fleet, supabase                      # noqa: E402
+from app.employees import split_prefix                          # noqa: E402
 
 POSITION_ALIASES = {"เสมียน": "เสมียนออฟฟิศ"}
 
@@ -71,13 +72,37 @@ def read_start_dates(path: str) -> dict:
     return out
 
 
+def fix_prefixes(apply: bool) -> None:
+    """People already in the table with no prefix and no gender: read the title (and the gender) out of the name. Never touches one that has a prefix."""
+    rows = [r for r in supabase.select_all("employees", {"select": "id,code,full_name,prefix,gender", "order": "code.asc"}) if not r.get("prefix") and not r.get("gender")]
+    changes, unknown = [], []
+    for r in rows:
+        prefix, name, gender = split_prefix(r["full_name"])
+        if prefix or gender:
+            changes.append((r, {"prefix": prefix, "full_name": name, "gender": gender}))
+        else:
+            unknown.append((r["code"], r["full_name"]))
+    print(f"to read: {len(rows)} · detected: {len(changes)} · not detectable: {len(unknown)}")
+    for code, name in unknown:
+        print("   no title / gender in the name:", code, name)
+    if apply:
+        for r, values in changes:
+            supabase.update("employees", {"id": f"eq.{r['id']}"}, values)
+        print(f"updated: {len(changes)}")
+    else:
+        print("dry run -- nothing written (add --apply)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--roster", required=True)
     ap.add_argument("--kk")
     ap.add_argument("--drivers")
     ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--fix-prefixes", action="store_true", help="only read the title / gender of people already in the table whose prefix is empty")
     args = ap.parse_args()
+    if args.fix_prefixes:
+        return fix_prefixes(args.apply)
 
     people = read_roster(args.roster)
     if args.kk:
@@ -99,7 +124,8 @@ def main() -> None:
         if p["code"] in existing:
             skipped += 1
             continue
-        row = {"code": p["code"], "full_name": re.sub(r"\s+", " ", p["full_name"]).strip(), "branch": p["branch"], "position": p.get("position"),
+        prefix, name, gender = split_prefix(p["full_name"])         # "นายจรูญ มินฉิมพลี" -> นาย + "จรูญ มินฉิมพลี" (+ the gender)
+        row = {"code": p["code"], "prefix": prefix, "gender": gender, "full_name": name, "branch": p["branch"], "position": p.get("position"),
                "start_date": p.get("start_date"), "notes": p.get("notes"), "status": "resigned" if p.get("resigned") else "active", "driver_id": None}
         if (p.get("position") or "").startswith("พขร"):
             ids = by_name.get(fleet._name_key(p["full_name"]), [])

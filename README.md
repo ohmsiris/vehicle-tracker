@@ -387,7 +387,9 @@ buttons as the board. It reads the board's own list, so the two never disagree.
 The staff of both branches in one table (`employees`, `schema_v21.sql`; `app/employees.py`, `static/employees.js`): code (the code on the pay sheets:
 SB-FR### factory, SB-PD### Saraburi drivers, SB-KK### Kaeng Khoi), name, nickname, branch, position/department, start date, phone, notes, and an
 optional link to the `drivers` row of a พขร. The list has the same big filter card as the other pages (search, branch, position, status, sort) and a CSV
-download; each person has a page. **Remove = ลาออก** (date + reason, and "กลับเข้าทำงาน" brings them back): nobody is deleted once anything points at
+download; each person has a page. **คำนำหน้า and เพศ** (`schema_v22.sql`): `prefix` (นาย / นาง / นางสาว) is its own field and `full_name` holds the name without it; documents write prefix + name (`display_name`: นายสมชาย ใจดี). The prefix is read from the name straight away -- typing "นางสาวพลอย รักดี" in the add box moves นางสาว to the คำนำหน้า box (also English Mr. / Mrs. / Miss and น.ส.; `split_prefix` in `app/employees.py`, mirrored in `static/employees.js`). `gender` (ชาย / หญิง) follows the prefix (นาย = ชาย; นาง, นางสาว = หญิง); a person with no prefix gets it from a hint in the name ("(หญิง)", "Mrs.") or by hand. The list can be filtered by เพศ and shows the head count by gender. `scripts/import_employees.py --roster x --fix-prefixes [--apply]` reads the title out of people already in the table.
+
+**Remove = ลาออก** (date + reason, and "กลับเข้าทำงาน" brings them back): nobody is deleted once anything points at
 them (`REFERENCED_BY` in `app/employees.py` -- the loans / letters tables add themselves there); "ลบ (เพิ่มผิด)" is only for a row added by mistake.
 
 **Second lock**: set `HR_PIN` on the server and every `/api/employees*` endpoint (and so the pages) also needs it (header `X-HR-Pin`; the page asks once per

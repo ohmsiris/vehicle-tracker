@@ -29,7 +29,8 @@ def make(**kw):
 
 def test_a_new_employee_is_cleaned():
     v = em.clean_employee(make(phone=" 081 234 5678 ", start_date="2026-09-01", notes="", nickname=""), others=OTHERS, today=TODAY)
-    assert v["code"] == "SB-FR200" and v["full_name"] == "นายสมชาย ใจดี" and v["branch"] == "สระบุรี" and v["position"] == "ผลิต"
+    assert v["code"] == "SB-FR200" and v["full_name"] == "สมชาย ใจดี" and v["prefix"] == "นาย" and v["gender"] == "ชาย"      # the title moved out of the name
+    assert v["branch"] == "สระบุรี" and v["position"] == "ผลิต"
     assert v["phone"] == "081 234 5678" and v["start_date"] == "2026-09-01" and v["notes"] is None and v["nickname"] is None and v["driver_id"] is None
     assert "status" not in v                                  # ลาออก / กลับเข้าทำงาน have their own steps
 
@@ -112,3 +113,51 @@ def test_every_endpoint_of_the_section_is_locked_by_the_pin(conf):
     assert c.delete("/api/employees/x", headers=h).status_code == 423
     assert c.get("/api/employees", headers={**h, "X-HR-Pin": "0000"}).status_code == 423
     assert c.get("/api/employees").status_code == 403           # no app token at all
+
+
+@pytest.mark.parametrize("name,prefix,rest,gender", [
+    ("นายจรูญ  มินฉิมพลี", "นาย", "จรูญ มินฉิมพลี", "ชาย"), ("นางสาวกัญญพัชร ศรีไชยมูล", "นางสาว", "กัญญพัชร ศรีไชยมูล", "หญิง"),
+    ("นางสำเนา ทิพเนตร", "นาง", "สำเนา ทิพเนตร", "หญิง"), ("นาง สาวิตรี", "นาง", "สาวิตรี", "หญิง"), ("น.ส. สมศรี ใจดี", "นางสาว", "สมศรี ใจดี", "หญิง"),
+    ("นายใหญ่( Mr. TUN LIN )", "นาย", "ใหญ่( Mr. TUN LIN )", "ชาย"), ("Mr. Aung Aung", "นาย", "Aung Aung", "ชาย"), ("Mrs. New San", "นาง", "New San", "หญิง"),
+    ("Miss Aay Aay Ma", "นางสาว", "Aay Aay Ma", "หญิง"),
+    ("ตุ๊กตา ( Mrs. THU ZAR WIN )", "นาง", "ตุ๊กตา ( Mrs. THU ZAR WIN )", "หญิง"),          # the title is inside the name: kept there, the gender is known
+    ("ปิยวรรณ (หญิง) ถิ่นช่วง", None, "ปิยวรรณ (หญิง) ถิ่นช่วง", "หญิง"),                    # only a hint: no prefix, the gender is
+    ("สุกัญญา", None, "สุกัญญา", None), ("นายกฤษดา", "นาย", "กฤษดา", "ชาย"), ("นาย", None, "นาย", None),
+])
+def test_the_prefix_and_gender_are_read_from_the_name(name, prefix, rest, gender):
+    assert em.split_prefix(name) == (prefix, rest, gender)
+
+
+def test_a_title_typed_into_the_name_box_moves_to_its_own_field():
+    v = em.clean_employee(make(full_name="นางสาวพลอย รักดี"), others=[], today=TODAY)
+    assert (v["prefix"], v["full_name"], v["gender"]) == ("นางสาว", "พลอย รักดี", "หญิง")
+    assert em.display_name(v["prefix"], v["full_name"]) == "นางสาวพลอย รักดี"
+
+
+def test_a_chosen_prefix_decides_the_gender_and_beats_one_in_the_name():
+    v = em.clean_employee(make(full_name="สมชาย ใจดี", prefix="นาย", gender="หญิง"), others=[], today=TODAY)
+    assert (v["prefix"], v["gender"]) == ("นาย", "ชาย")
+    v = em.clean_employee(make(full_name="นายสมชาย ใจดี", prefix="นาง"), others=[], today=TODAY)
+    assert (v["prefix"], v["full_name"], v["gender"]) == ("นาง", "สมชาย ใจดี", "หญิง")
+
+
+def test_without_a_prefix_the_gender_is_set_by_hand_or_left_empty():
+    v = em.clean_employee(make(full_name="สุกัญญา"), others=[], today=TODAY)
+    assert v["prefix"] is None and v["gender"] is None
+    assert em.clean_employee(make(full_name="สุกัญญา", gender="หญิง"), others=[], today=TODAY)["gender"] == "หญิง"
+    assert em.clean_employee(make(full_name="ปิยวรรณ (หญิง) ถิ่นช่วง"), others=[], today=TODAY)["gender"] == "หญิง"
+
+
+def test_clearing_the_prefix_on_an_edit_and_bad_values():
+    existing = {"id": "1", "code": "SB-FR001", "prefix": "นาย", "gender": "ชาย", "full_name": "จรูญ"}
+    v = em.clean_employee({"prefix": "", "gender": "หญิง"}, existing=existing, others=[], today=TODAY)
+    assert v == {"prefix": None, "gender": "หญิง"}
+    for bad, frag in (({"prefix": "คุณ"}, "นาย / นาง / นางสาว"), ({"gender": "x"}, "ชาย หรือ หญิง")):
+        with pytest.raises(em.InvalidEmployee, match=frag):
+            em.clean_employee(bad, existing=existing, others=[], today=TODAY)
+
+
+def test_the_head_count_also_counts_by_gender():
+    rows = [{"status": "active", "gender": "ชาย"}, {"status": "active", "gender": "หญิง"}, {"status": "active", "gender": "หญิง"},
+            {"status": "active"}, {"status": "resigned", "gender": "ชาย"}]
+    assert em.summarize(rows)["by_gender"] == {"ชาย": 1, "หญิง": 2, "ยังไม่ระบุ": 1}

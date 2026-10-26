@@ -131,6 +131,8 @@
       <div class="lggrid">
         <div><label for="emBranch">สาขา</label><select id="emBranch"><option value="">ทุกสาขา</option></select></div>
         <div><label for="emPosition">ตำแหน่ง / แผนก</label><select id="emPosition"><option value="">ทุกตำแหน่ง</option></select></div>
+        <div><label for="emGender">เพศ</label>
+          <select id="emGender"><option value="">ทุกเพศ</option><option value="ชาย">ชาย</option><option value="หญิง">หญิง</option><option value="__none">ยังไม่ระบุ</option></select></div>
         <div><label for="emStatus">สถานะ</label>
           <select id="emStatus"><option value="active">ทำงานอยู่</option><option value="resigned">ลาออกแล้ว</option><option value="all">ทั้งหมด</option></select></div>
         <div><label for="emSort">เรียงตาม</label>
@@ -914,8 +916,15 @@
   <h3 id="empDlgTitle">เพิ่มพนักงาน</h3>
   <label for="emdCode">รหัสพนักงาน <span class="muted small">(ตามที่ใช้ในสลิป เช่น SB-FR001)</span></label>
   <input id="emdCode" type="text" maxlength="24" autocomplete="off" placeholder="SB-FR001">
-  <label for="emdName">ชื่อ-สกุล</label>
+  <label for="emdName">ชื่อ-สกุล <span class="muted small">(พิมพ์ นาย / นาง / นางสาว นำหน้าได้ ระบบแยกให้เอง)</span></label>
   <input id="emdName" type="text" maxlength="120" autocomplete="off">
+  <div class="emd-two">
+    <div><label for="emdPrefix">คำนำหน้า</label>
+      <select id="emdPrefix"><option value="">— ไม่ระบุ —</option><option value="นาย">นาย</option><option value="นาง">นาง</option><option value="นางสาว">นางสาว</option></select></div>
+    <div><label for="emdGender">เพศ</label>
+      <select id="emdGender"><option value="">— ไม่ระบุ —</option><option value="ชาย">ชาย</option><option value="หญิง">หญิง</option></select></div>
+  </div>
+  <div id="emdNameHint" class="datecap"></div>
   <label for="emdNick">ชื่อเล่น <span class="muted small">(ไม่บังคับ)</span></label>
   <input id="emdNick" type="text" maxlength="40" autocomplete="off">
   <label for="emdBranch">สาขา</label>

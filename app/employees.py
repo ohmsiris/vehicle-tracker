@@ -21,7 +21,10 @@ from app.config import settings
 BRANCHES = fleet.BRANCHES
 STATUSES = ("active", "resigned")
 POSITION_PRESETS = ["ผลิต", "พขร.รถสาย", "พขร.รถหน้าโรง", "เด็กรถ", "ช่าง", "แพ็ค", "หัวหน้างาน", "ผู้ช่วยหัวหน้างาน", "เสมียนออฟฟิศ", "ล้างกระสอบ", "นับกระสอบ", "อีเวนต์"]
-NEEDS_V21 = "ยังใช้ส่วนพนักงานไม่ได้ — ต้องรันไฟล์ schema_v21.sql ใน Supabase ก่อน"
+NEEDS_V21 = "ยังใช้ส่วนพนักงานไม่ได้ — ต้องรันไฟล์ schema_v21.sql และ schema_v22.sql ใน Supabase ก่อน"
+PREFIXES = ("นาย", "นาง", "นางสาว")
+GENDERS = ("ชาย", "หญิง")
+GENDER_OF = {"นาย": "ชาย", "นาง": "หญิง", "นางสาว": "หญิง"}
 BANGKOK = timezone(timedelta(hours=7))
 CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9\-_/.]{1,23}$")
 
@@ -57,6 +60,34 @@ def check_pin(supplied: str) -> None:
 
 
 # ------------------------------------------------------------------ pure rules
+# The title at the start of a name, longest first (นางสาว before นาง). English ones are turned into the Thai title.
+_TITLES = [(re.compile(r"^\s*นางสาว\s*"), "นางสาว"), (re.compile(r"^\s*น\.ส\.\s*"), "นางสาว"), (re.compile(r"^\s*นาง\s*"), "นาง"),
+           (re.compile(r"^\s*นาย\s*"), "นาย"), (re.compile(r"^\s*(?:miss|ms)\.?\s+", re.I), "นางสาว"), (re.compile(r"^\s*mrs\.?\s*", re.I), "นาง"),
+           (re.compile(r"^\s*mr\.?\s*", re.I), "นาย")]
+# a title or sex written inside the name: "ตุ๊กตา ( Mrs. THU ZAR WIN )", "ปิยวรรณ (หญิง) ถิ่นช่วง"
+_HINTS = [(re.compile(r"\bmiss\b|\bms\.?\s", re.I), ("นางสาว", "หญิง")), (re.compile(r"\bmrs\.?\s", re.I), ("นาง", "หญิง")),
+          (re.compile(r"\bmr\.?\s", re.I), ("นาย", "ชาย")), (re.compile(r"\(\s*หญิง\s*\)"), (None, "หญิง")), (re.compile(r"\(\s*ชาย\s*\)"), (None, "ชาย"))]
+
+
+def split_prefix(name: str) -> tuple[Optional[str], str, Optional[str]]:
+    """(prefix, the name without it, gender) read from a full name. The prefix is None when the name starts with none; the gender is then
+    taken from a hint inside the name ("(หญิง)", "Mrs.") when there is one, else None -- for the owner to fill in."""
+    text = re.sub(r"\s+", " ", str(name or "")).strip()
+    for pattern, prefix in _TITLES:
+        m = pattern.match(text)
+        if m and text[m.end():].strip():
+            return prefix, text[m.end():].strip(), GENDER_OF[prefix]
+    for pattern, (prefix, gender) in _HINTS:
+        if pattern.search(text):
+            return prefix, text, gender
+    return None, text, None
+
+
+def display_name(prefix: Optional[str], full_name: str) -> str:
+    """How the name is written on a document: the title joined to the name (นายสมชาย ใจดี)."""
+    return f"{prefix or ''}{full_name}"
+
+
 def _clean(text, limit: int) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()[:limit]
 
@@ -99,11 +130,33 @@ def clean_employee(data: dict, *, existing: Optional[dict] = None, others: list[
         if any(str(o.get("code") or "").upper() == code for o in others):
             raise InvalidEmployee(f"มีรหัส {code} อยู่แล้ว")
         values["code"] = code
+    typed_prefix = _clean(data.get("prefix"), 10) if "prefix" in data else None
+    if typed_prefix and typed_prefix not in PREFIXES:
+        raise InvalidEmployee("คำนำหน้าต้องเป็น นาย / นาง / นางสาว")
+    if "gender" in data and _clean(data.get("gender"), 10) not in ("", *GENDERS):
+        raise InvalidEmployee("เพศต้องเป็น ชาย หรือ หญิง")
     if creating or "full_name" in data:
         name = _clean(data.get("full_name"), 120)
         if not name:
             raise InvalidEmployee("ใส่ชื่อ-สกุลด้วย")
+        found, rest, hint = split_prefix(name)
+        if found:                                           # a title typed into the name box moves to its own field, straight away
+            name = rest
+            typed_prefix = typed_prefix or found
+        elif hint and not typed_prefix and not data.get("gender"):
+            values["gender"] = hint
         values["full_name"] = name
+    if typed_prefix:
+        values["prefix"] = typed_prefix
+        values["gender"] = GENDER_OF[typed_prefix]           # นาย = ชาย; นาง / นางสาว = หญิง
+    elif "prefix" in data:
+        values["prefix"] = None
+    if not values.get("prefix") and "gender" in data:
+        values["gender"] = _clean(data.get("gender"), 10) or None
+    elif creating and "gender" not in values:
+        values["gender"] = None
+    if creating and "prefix" not in values:
+        values["prefix"] = None
     if creating or "branch" in data:
         branch = _clean(data.get("branch"), 40)
         if branch not in BRANCHES:
@@ -141,12 +194,15 @@ def summarize(rows: list[dict]) -> dict:
     by: dict = {}
     for r in live:
         by[r.get("position") or "ยังไม่ระบุ"] = by.get(r.get("position") or "ยังไม่ระบุ", 0) + 1
-    return {"active": len(live), "resigned": len(rows) - len(live), "by_position": sorted(by.items(), key=lambda kv: (-kv[1], kv[0]))}
+    genders = {g: sum(1 for r in live if r.get("gender") == g) for g in GENDERS}
+    genders["ยังไม่ระบุ"] = sum(1 for r in live if r.get("gender") not in GENDERS)
+    return {"active": len(live), "resigned": len(rows) - len(live), "by_position": sorted(by.items(), key=lambda kv: (-kv[1], kv[0])), "by_gender": genders}
 
 
 def present(row: dict, drivers: dict[str, dict]) -> dict:
     driver = drivers.get(row.get("driver_id") or "")
-    return {"id": row["id"], "code": row["code"], "full_name": row["full_name"], "nickname": row.get("nickname") or "", "branch": row["branch"],
+    return {"id": row["id"], "code": row["code"], "prefix": row.get("prefix") or "", "gender": row.get("gender") or "", "full_name": row["full_name"],
+            "display_name": display_name(row.get("prefix"), row["full_name"]), "nickname": row.get("nickname") or "", "branch": row["branch"],
             "position": row.get("position") or "", "status": row.get("status") or "active", "start_date": row.get("start_date"),
             "end_date": row.get("end_date"), "end_reason": row.get("end_reason") or "", "phone": row.get("phone") or "",
             "driver_id": row.get("driver_id"), "driver_name": driver["name"] if driver else "", "notes": row.get("notes") or ""}
@@ -162,7 +218,7 @@ def has_v21() -> bool:
     if now - _probe["at"] < 30:
         return _probe["ok"]
     try:
-        supabase.select("employees", {"select": "id", "limit": "1"})
+        supabase.select("employees", {"select": "id,prefix,gender", "limit": "1"})
         ok = True
     except supabase.SupabaseError:
         ok = False
@@ -187,7 +243,7 @@ def _drivers() -> dict[str, dict]:
 
 
 def options() -> dict:
-    return {"ready": has_v21(), "branches": BRANCHES, "positions": POSITION_PRESETS, "pin": pin_configured()}
+    return {"ready": has_v21(), "branches": BRANCHES, "positions": POSITION_PRESETS, "prefixes": list(PREFIXES), "pin": pin_configured()}
 
 
 def list_employees() -> dict:
