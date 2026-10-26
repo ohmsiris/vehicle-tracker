@@ -35,6 +35,9 @@ class Settings:
     supabase_service_key: str
     max_files_per_batch: int
     max_file_bytes: int
+    # Optional second lock for the พนักงาน section (salaries, loans, warnings): when set, those pages and
+    # endpoints also need this PIN. Empty = the app token alone opens them.
+    hr_pin: str = ""
 
 
 def load_settings() -> Settings:
@@ -46,6 +49,7 @@ def load_settings() -> Settings:
         supabase_service_key=_env("SUPABASE_SERVICE_KEY"),
         max_files_per_batch=int(_env("MAX_FILES_PER_BATCH", "12")),
         max_file_bytes=int(_env("MAX_FILE_BYTES", str(20 * 1024 * 1024))),
+        hr_pin=_env("HR_PIN"),
     )
 
 

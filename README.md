@@ -382,6 +382,25 @@ The trucks that are out at a shop right now, grouped by shop (most trucks first)
 days away, expected return, overdue flag, and the same "back" / "change shop"
 buttons as the board. It reads the board's own list, so the two never disagree.
 
+## Employees ("พนักงาน", `#employees`, `#employee=<id>`)
+
+The staff of both branches in one table (`employees`, `schema_v21.sql`; `app/employees.py`, `static/employees.js`): code (the code on the pay sheets:
+SB-FR### factory, SB-PD### Saraburi drivers, SB-KK### Kaeng Khoi), name, nickname, branch, position/department, start date, phone, notes, and an
+optional link to the `drivers` row of a พขร. The list has the same big filter card as the other pages (search, branch, position, status, sort) and a CSV
+download; each person has a page. **Remove = ลาออก** (date + reason, and "กลับเข้าทำงาน" brings them back): nobody is deleted once anything points at
+them (`REFERENCED_BY` in `app/employees.py` -- the loans / letters tables add themselves there); "ลบ (เพิ่มผิด)" is only for a row added by mistake.
+
+**Second lock**: set `HR_PIN` on the server and every `/api/employees*` endpoint (and so the pages) also needs it (header `X-HR-Pin`; the page asks once per
+browser tab). Unset = the app token alone opens the section. The employee table is in the weekly backup like every table.
+
+**First import** (already done once, 158 people): `scripts/import_employees.py --roster Roster.csv --kk <Kaeng Khoi pay workbook> --drivers <drivers pay workbook> [--apply]`.
+The roster (the Employee Roster sheet exported as CSV) is the main list; the Kaeng Khoi workbook adds the Kaeng Khoi staff (the roster has none); the drivers'
+workbook gives start dates (written in พ.ศ.). A code already in the table is skipped, so it can be re-run; a พขร. is linked to the `drivers` row with the
+same name when exactly one matches. The files themselves are not in git (they hold personal data).
+
+Planned next (shown as "เร็วๆ นี้" in the menu): เงินกู้ (borrow / repay ledger per person, repaid by salary deduction), ใบเตือน and บันทึกข้อความ (templates with
+the signature blocks, tracked per person), and payslip reading + checking.
+
 ## Fleet roster ("ทะเบียนรถ", `#roster`)
 
 The truck list has the same big filter card as the maintenance log: search, สาขา, ประเภทการใช้งาน, ขนาดรถ (รถเล็ก / รถใหญ่), สถานะ, a sort (number, last repair, total repair cost, most repairs), "only trucks with open work", and a clear button.

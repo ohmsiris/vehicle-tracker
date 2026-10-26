@@ -30,8 +30,11 @@ const fmtMoney = (n) => Number(n || 0).toLocaleString("th-TH", { minimumFraction
 const num = (v) => { const n = parseFloat(String(v).replace(/,/g, "")); return Number.isFinite(n) ? n : 0; };
 
 // --------------------------------------------------------------- api
+// The พนักงาน section's own PIN (when the server has one): kept for this browser tab only, sent with every request.
+const hrPinValue = () => { try { return sessionStorage.getItem("vt_hr_pin") || ""; } catch (e) { return ""; } };
+const saveHrPin = (pin) => { try { sessionStorage.setItem("vt_hr_pin", pin); } catch (e) { /* storage blocked: asked again on the next page */ } };
 async function api(path, opts = {}) {
-  const res = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), "X-App-Token": state.token } });
+  const res = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), "X-App-Token": state.token, ...(hrPinValue() ? { "X-HR-Pin": hrPinValue() } : {}) } });
   if (!res.ok) {
     let detail = "";
     try { detail = (await res.json()).detail || ""; } catch (_) { /* not json */ }
@@ -60,10 +63,10 @@ function initTheme() {
 
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
-const VIEW_NAMES = ["home", "board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "stock"];
+const VIEW_NAMES = ["home", "employees", "employee", "board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "stock"];
 // which sidebar entry lights up for each view
 const NAV_OF = {
-  home: "navHome", board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
+  home: "navHome", employees: "navEmployees", employee: "navEmployees", board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
   roster: "navRoster", truck: "navRoster", event: "navLog", log: "navLog", where: "navWhere", plan: "navPlan", mgr: "navMgr", mgrRecurring: "navMgrRecurring", mgrSettings: "navMgrSettings", settings: "navSettings", machinery: "navMachIndex", machine: "navMachIndex", machineLog: "navMachLog", purchases: "navPurchases", purchaseNew: "navPurchases", prices: "navPrices", stock: "navStock",
 };
 
@@ -660,6 +663,7 @@ async function init() {
   $("navPlan").addEventListener("click", () => goHash("#plan"));
   $("navSettings").addEventListener("click", () => goHash("#settings"));
   $("navMgr").addEventListener("click", () => goHash("#mgr"));
+  $("navEmployees").addEventListener("click", () => goHash("#employees"));
   $("navMgrRecurring").addEventListener("click", () => goHash("#mgr-recurring"));
   $("navMgrSettings").addEventListener("click", () => goHash("#mgr-settings"));
   $("navMachIndex").addEventListener("click", () => goHash("#machinery"));
@@ -693,6 +697,7 @@ async function init() {
   initFleet();
   initLog();
   initRoster();
+  initEmployees();
   initMachinery();
   initBuy();
   initPlan();

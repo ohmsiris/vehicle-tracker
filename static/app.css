@@ -1048,3 +1048,19 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 .bill .preview .bu-thumb img { width: auto; border: 0; box-shadow: none; background: transparent; }
 .rotop { grid-template-columns: minmax(0, 1fr) auto; }
 @media (max-width: 700px) { .rotop { grid-template-columns: 1fr; } }
+
+/* ---- พนักงาน */
+.sideitem:disabled { opacity: .55; cursor: default; }
+.sideitem:disabled:hover { background: transparent; color: var(--text-2); }
+.emptable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.emptable th { text-align: left; color: var(--muted); font-weight: 600; font-size: 13px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.emptable td { padding: 9px 12px; border-bottom: 1px solid var(--line); }
+.emprow { cursor: pointer; }
+.emprow:hover, .emprow:focus-visible { background: var(--accent-soft); outline: none; }
+.emprow.off td { color: var(--muted); }
+.emcode { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); }
+.emname { font-weight: 600; }
+.emprow.off .emname { font-weight: 400; }
+@media (max-width: 700px) { .emptable th:nth-child(3), .emptable td:nth-child(3), .emptable th:nth-child(5), .emptable td:nth-child(5) { display: none; } }
+.tkcard.hsoon { position: relative; }
+.sideitem .soon { white-space: nowrap; flex-shrink: 0; }

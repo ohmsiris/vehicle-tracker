@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, events, fleet, history, home, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
+from app import dashboard, employees, events, fleet, history, home, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -486,6 +486,79 @@ def _fleet_call(fn, *args):
     except supabase.SupabaseError:
         logger.exception("fleet change failed")
         raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+# ------------------------------------------------------------- พนักงาน (employees; salaries, loans, letters later)
+# Every endpoint here needs the app token AND, when HR_PIN is set on the server, the PIN (header X-HR-Pin).
+def _hr_call(pin: str, fn, *args):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        employees.check_pin(pin)
+        return fn(*args)
+    except employees.PinRequired:
+        raise HTTPException(423, "ส่วนพนักงานล็อกอยู่ — ใส่ PIN ก่อน")
+    except employees.InvalidEmployee as exc:
+        raise HTTPException(422, str(exc))
+    except employees.NotFound:
+        raise HTTPException(404, "ไม่พบข้อมูลนี้")
+    except supabase.SupabaseError:
+        logger.exception("employee change failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/employees/options")
+def api_employee_options(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Whether the section needs a PIN, and the choices -- readable without the PIN (the page asks for it from this)."""
+    _check_token(x_app_token, token)
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    return employees.options()
+
+
+@app.get("/api/employees")
+def api_employees(x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, employees.list_employees)
+
+
+@app.get("/api/employees/{employee_id}")
+def api_employee(employee_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, employees.get_employee, employee_id)
+
+
+@app.post("/api/employees")
+def api_create_employee(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, employees.create_employee, body)
+
+
+@app.patch("/api/employees/{employee_id}")
+def api_edit_employee(employee_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""),
+                      x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, employees.edit_employee, employee_id, body)
+
+
+@app.post("/api/employees/{employee_id}/resign")
+def api_resign_employee(employee_id: str, body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default=""),
+                        x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, employees.resign, employee_id, body)
+
+
+@app.post("/api/employees/{employee_id}/reinstate")
+def api_reinstate_employee(employee_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, employees.reinstate, employee_id)
+
+
+@app.delete("/api/employees/{employee_id}")
+def api_delete_employee(employee_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    _hr_call(x_hr_pin, employees.delete_employee, employee_id)
+    return {"ok": True}
 
 
 @app.post("/api/vehicles")

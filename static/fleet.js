@@ -11,12 +11,15 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "stock"];
+const FLEET_VIEWS = ["employees", "employee", "roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "stock"];
 
 // ------------------------------------------------------------------ routing
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
   if (h === "roster") return openRoster();
+  if (h === "employees") return openEmployees();
+  const emx = /^employee=(.+)$/.exec(h);
+  if (emx && UUID_RE.test(emx[1])) return openEmployee(emx[1]);
   if (h === "plan") return openPlan();
   if (h === "plan-settings") { pl.tab = "set"; return openPlan(); }
   if (h === "settings") return openAppSettings();
