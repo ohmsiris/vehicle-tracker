@@ -68,6 +68,8 @@ TABLES: dict[str, str] = {
     "employees": "id.asc",
     "employee_loans": "id.asc",
     "employee_loan_entries": "id.asc",
+    "employee_documents": "id.asc",
+    "hr_settings": "key.asc",
 }
 # the tables whose rows point at a file in Storage (storage_path, byte_size): bill photos and purchase-bill photos
 FILE_TABLES = ("event_attachments", "purchase_attachments")

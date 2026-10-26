@@ -181,9 +181,10 @@ function renderEmployee() {
       kvAll("อายุงาน", tenure(e.start_date, e.end_date) + (off ? "" : e.start_date ? " (ถึงวันนี้)" : "")),
       off ? kvAll("วันที่ลาออก", e.end_date ? beDate(e.end_date) : "") : null, off ? kvAll("เหตุผล", e.end_reason) : null, kvAll("หมายเหตุ", e.notes)),
     el("section", { class: "card tkcard" }, el("h3", { text: "เงินกู้ / หักเงินเดือน" }), el("div", { id: "empLoansBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
-    soon("ใบเตือน และบันทึกข้อความ", "เอกสารที่ออกให้คนนี้ พร้อมสถานะการเซ็นรับ และระดับการเตือน"),
+    el("section", { class: "card tkcard" }, el("h3", { text: "ใบเตือน / บันทึกข้อความ" }), el("div", { id: "empDocsBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     soon("ตรวจสลิปเงินเดือน", "อ่านสลิปแล้วตรวจกับค่าแรง เงินกู้ และเงินสะสมของคนนี้"));
   renderEmployeeLoans(e);
+  renderEmployeeDocs(e);
 }
 
 // ------------------------------------------------------------------ add / edit

@@ -11,7 +11,7 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["employees", "employee", "loans", "loan", "roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "stock"];
+const FLEET_VIEWS = ["employees", "employee", "loans", "loan", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "stock"];
 
 // ------------------------------------------------------------------ routing
 function route() {
@@ -19,6 +19,9 @@ function route() {
   if (h === "roster") return openRoster();
   if (h === "employees") return openEmployees();
   if (h === "loans") return openLoans();
+  if (h === "documents") return openDocuments();
+  const dcx = /^document=(.+)$/.exec(h);
+  if (dcx && UUID_RE.test(dcx[1])) return openDocument(dcx[1]);
   const lnx = /^loan=(.+)$/.exec(h);
   if (lnx && UUID_RE.test(lnx[1])) return openLoan(lnx[1]);
   const emx = /^employee=(.+)$/.exec(h);

@@ -422,6 +422,24 @@ repaid by salary deduction, no interest, no cap yet (`schema_v23.sql`; `app/loan
 - An employee with a loan can only be ลาออก, never deleted; a resigned employee cannot get a new loan. Each person's page has a loans card. Both tables are in the weekly backup.
 - Still to do: import the history from the "กู้เงินโรงงาน" sheet (needs the sheet exported as .xlsx), and check the deductions against the payslips.
 
+## Warning letters and memos ("ใบเตือน / บันทึกข้อความ", `#documents`, `#document=<id>`)
+
+หนังสือเตือน and บันทึกข้อความ for employees, tracked per person (`schema_v24.sql`; `app/documents.py`, `static/documents.js`; same HR_PIN lock as พนักงาน).
+
+- **The paper** is drawn on screen as A4 and printed from the browser (พิมพ์ / บันทึกเป็น PDF): **Angsana New 16 pt**, title 22 pt, letterhead (company, address, phone) 16 pt. The letterhead is per branch
+  (`LETTERHEADS` in `app/documents.py`: สระบุรี 72/9 หมู่ 8 ต.ตลิ่งชัน; แก่งคอย 150 หมู่ 8 ต.บ้านป่า, 18110). The name is always prefix + name (นายสมชาย ใจดี) from the employee record.
+- **หนังสือเตือน** follows the form already in use (เรื่อง การฝ่าฝืนคำสั่ง ระเบียบ หรือข้อบังคับ…, เรียน, รหัสพนักงาน, ตำแหน่ง, วันที่กระทำผิด, ความผิด, การลงโทษ, จึงแจ้งมาเพื่อทราบ, "ในนามบริษัท" + ผู้บริหาร signature,
+  "รับทราบความผิดและการลงโทษ โดยยอมรับว่ากระทำผิดจริง" + พนักงาน). Quick-pick chips for the usual offences and punishments; an optional witnesses block for an employee who will not sign.
+  **Level**: 0 ว่ากล่าวด้วยวาจา (recorded) / 1 / 2 / ครั้งสุดท้าย (3) -- the next one is suggested from the written warnings still counting (not cancelled), shown in the title.
+- **บันทึกข้อความ**: เรียน (default คุณเสาวลักษณ์ เทพพิทักษ์), เรื่อง, body with merge words {ชื่อ} {รหัส} {ตำแหน่ง} {สาขา} {ยอดเงิน} {เริ่มหัก} {ตารางหัก}; presets "ขออนุมัติหักเงินเดือน (ผ่อนชำระ)" and "ขอปรับอัตราค่าจ้าง";
+  a loan of that employee can be attached: the amount and the deduction table come from the loan page. Optional box for the employee to sign that they agree to the deduction. No approval step (the owner issues it).
+- **Number**: `SB001/2569` / `KK001/2569` = branch + running number + พ.ศ., counted per branch per year across both kinds, given when the paper is **issued** ("ออกเอกสาร"). A draft has none and can be edited / deleted.
+  **An issued paper is frozen** (`snapshot`: names, position, letterhead, signer, loan table as of that day) -- a wrong one is cancelled (kept in the history) and a new one made ("สร้างฉบับใหม่จากฉบับนี้").
+- **Signature**: the owner's signature is a PNG with a clear background (uploaded once on the documents page; any photo on white paper is converted) stored in `hr_settings`, not in git. It is printed only when
+  **"ใส่ลายเซ็น"** is ticked, also after issuing (a print choice).
+- **Status**: ร่าง → ออกแล้ว · รอเซ็น → เซ็นรับทราบแล้ว (date) / ปฏิเสธลงนาม (witnesses) / ยกเลิก. Print, have it signed on paper, then mark it. Each person's page lists their papers and warnings; an employee with papers can only be ลาออก.
+- Not built yet: scanned signed copies attached to a paper, signing on the screen, the other letters in the personnel folder (หนังสือเลิกจ้าง, หนังสือรับรองเงินเดือน, คืนเงินสะสม ...) -- the same engine can take them.
+
 ## Fleet roster ("ทะเบียนรถ", `#roster`)
 
 The truck list has the same big filter card as the maintenance log: search, สาขา, ประเภทการใช้งาน, ขนาดรถ (รถเล็ก / รถใหญ่), สถานะ, a sort (number, last repair, total repair cost, most repairs), "only trucks with open work", and a clear button.
