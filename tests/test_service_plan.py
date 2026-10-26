@@ -26,7 +26,7 @@ def test_the_dealership_km_for_small_and_big():
     assert (small["engine_filter"], big["engine_filter"]) == (10_000, 20_000)
     assert (small["fuel_filter"], big["fuel_filter"]) == (40_000, 20_000)
     assert (small["air_filter"], big["air_filter"]) == (40_000, 80_000)
-    assert (small["wheel_grease"], big["wheel_grease"]) == (30_000, 60_000)
+    assert (small["wheel_grease"], big["wheel_grease"]) == (30_000, 20_000)
     for key in ("gearbox_oil", "diff_oil", "brake_clutch_fluid", "power_steering", "coolant"):
         assert small[key] == 40_000 and big[key] == 40_000
     assert small["valve_adjust"] == 100_000 and big["valve_adjust"] == 80_000      # small: only the Isuzu 2.5 gets it (ONLY_FOR)
@@ -54,9 +54,9 @@ def test_the_owners_conversion_table():
     s3 = {i["key"]: i["interval_months"] for i in sp.effective_plan(S3)}
     assert (s3["engine_oil"], s3["wheel_grease"], s3["coolant"], s3["injector_washers"]) == (3, 9, 12, 30)
     b5 = {i["key"]: i["interval_months"] for i in sp.effective_plan(B5)}
-    assert (b5["engine_oil"], b5["gearbox_oil"], b5["wheel_grease"], b5["air_filter"]) == (5, 10, 15, 20)
+    assert (b5["engine_oil"], b5["gearbox_oil"], b5["wheel_grease"], b5["air_filter"]) == (5, 10, 5, 20)
     b6 = {i["key"]: i["interval_months"] for i in sp.effective_plan(B6)}
-    assert (b6["engine_oil"], b6["gearbox_oil"], b6["wheel_grease"], b6["air_filter"]) == (6, 12, 18, 24)
+    assert (b6["engine_oil"], b6["gearbox_oil"], b6["wheel_grease"], b6["air_filter"]) == (6, 12, 6, 24)
 
 
 def test_effective_plan_uses_the_rule_set_of_the_group():
@@ -397,7 +397,7 @@ def test_every_item_is_reminded_about_unless_changed():
 
 
 def test_a_bill_that_says_only_inject_grease_counts_as_the_wheel_grease_service():
-    for line in ("อัดจารบี", "อัดจาระบี", "ค่าอัดจารบี", "อัด จารบี ช่วงล่าง", "จาระบีลูกปืนล้อ"):
+    for line in ("อัดจารบี", "อัดจาระบี", "ค่าอัดจารบี", "อัด จารบี ช่วงล่าง", "จาระบีลูกปืนล้อ", "อัดจารบีทุกจุด"):
         assert sp.classify_line(line) == "wheel_grease", line
     assert sp.classify_line("จารบี 1 กระป๋อง") is None                  # a part, not the service
 

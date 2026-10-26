@@ -457,9 +457,9 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
 
 - **The plan** has two rule sets of km per item (`DEFAULT_KM`): **รถเล็ก** (D-Max, Revo) and **รถใหญ่** (NLR/NMR/NPR,
   6- and 10-wheelers). Oil and engine filter 10,000 / 20,000; diesel filter 40,000 / 20,000 (+ water trap on big); air
-  filter 40,000 / 80,000; gearbox, differential, brake/clutch, power steering and coolant 40,000; wheel grease 30,000 /
-  60,000; valve adjustment 40,000 (big only); valve cover gasket + injector seal 80,000 (big only); injector washers
-  100,000 (small only).
+  filter 40,000 / 80,000; gearbox, differential, brake/clutch, power steering and coolant 40,000; อัดจารบีทุกจุด (the wheel-grease item) 30,000 /
+  20,000; valve adjustment 80,000 (big) and 100,000 (small: the Isuzu 2.5 only); valve cover gasket + injector seal 80,000 (big only);
+  injector washers 100,000 (small only).
 - **Every item is "whichever comes first, km or months".** The months come from the truck's **group**
   (`service_groups`, `vehicle_plans`): how many months one base step of km (10,000 small / 20,000 big) is worth for that
   truck. S2 = route pickups, 2 months per 10,000 km (so the 40,000 items every 8 months); S3 factory pickups, 3; S6 the

@@ -74,7 +74,7 @@ ITEMS = {
     "diff_oil": ("น้ำมันเฟืองท้าย", "ช่วงล่าง / ส่งกำลัง"),
     "brake_clutch_fluid": ("น้ำมันเบรก / คลัตช์", "ช่วงล่าง / ส่งกำลัง"),
     "power_steering": ("น้ำมันพาวเวอร์", "ช่วงล่าง / ส่งกำลัง"),
-    "wheel_grease": ("จาระบีลูกปืนล้อ", "ช่วงล่าง / ส่งกำลัง"),
+    "wheel_grease": ("อัดจารบีทุกจุด", "ช่วงล่าง / ส่งกำลัง"),
     "chassis_check": ("เช็คช่วงล่าง", "ช่วงล่าง / ส่งกำลัง"),
 }
 
@@ -115,7 +115,7 @@ DEFAULT_KM = {
         "diff_oil": 40_000,
         "brake_clutch_fluid": 40_000,
         "power_steering": 40_000,
-        "wheel_grease": 60_000,
+        "wheel_grease": 20_000,            # with every oil change
         "engine_flush": 60_000,            # about once a year in B4
         "chassis_check": 20_000,           # at every oil change
     },
