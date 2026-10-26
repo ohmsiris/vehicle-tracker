@@ -293,11 +293,9 @@ function editCards() {
         " ใช้งานอยู่ ", el("span", { class: "muted small", text: "(เอาติ๊กออก = เลิกใช้ เช่น ขายแล้ว รถจะไม่ขึ้นในตัวเลือก แต่ประวัติซ่อมยังอยู่)" })) : null),
     tkCard("คนขับหลัก",
       selectField("เลือกคนขับ", "main_driver_id", [...current, ...options], { blank: "— ยังไม่มี —" }),
-      el("div", { class: "tk-link" },
-        el("button", { class: "btn small", type: "button", text: "+ คนขับใหม่", onclick: newDriverForTruck }),
-        chosen ? el("button", { class: "btn small", type: "button", text: "แก้ไขข้อมูลคนขับคนนี้", onclick: () => openDriverDialog(chosen) }) : null),
+      chosen && chosen.employee_id ? el("div", { class: "tk-link" }, el("button", { class: "btn small", type: "button", text: "ข้อมูลพนักงานคนนี้", onclick: () => goHash(`#employee=${chosen.employee_id}`) })) : null,
       chosen ? el("div", { class: "tk-driverinfo" }, kvAll("ชื่อเล่น", chosen.nickname), kvAll("เบอร์โทร", chosen.phone), kvAll("สาขา", chosen.branch)) : null,
-      el("p", { class: "muted small", text: "ชื่อ เบอร์โทร ของคนขับเป็นข้อมูลของตัวคนขับ แก้ได้ที่ “แก้ไขข้อมูลคนขับคนนี้” หรือในแท็บคนขับ" })),
+      el("p", { class: "muted small", text: "ชื่อ เบอร์โทร ของคนขับเป็นข้อมูลพนักงาน — แก้ที่หน้า พนักงาน (คนขับใหม่ก็เพิ่มที่นั่น ตำแหน่ง พนักงานขับรถสาย / หน้าโรง)" })),
     state.fleetV7 ? tkCard("ข้อมูลทะเบียน", el("div", { class: "tkfields" },
       field("วันจดทะเบียน", "registered_date", { type: "date", caption: true }),
       field("ประเภทตามทะเบียน", "registration_type", { placeholder: "เช่น รถบรรทุกส่วนบุคคลตู้บรรทุก" }),
@@ -322,20 +320,6 @@ function cancelTruckEdit() {
   tk.dirty = false;
   showErr("tkError", "");
   renderTruck();
-}
-
-async function newDriverForTruck() {
-  const name = (prompt("ชื่อคนขับใหม่ (ชื่อจริง)") || "").trim();
-  if (!name) return;
-  try {
-    const made = await api("/api/drivers", jsonOpts("POST", { name, branch: tk.draft.branch || null }));
-    await loadDrivers();
-    tk.draft.main_driver_id = made.driver_id;
-    tk.dirty = true;
-    renderTruck();
-  } catch (err) {
-    showErr("tkError", err.message);
-  }
 }
 
 async function saveTruck() {
@@ -386,7 +370,7 @@ function renderDrivers() {
   const showOff = $("drvShowOff").checked;
   const rows = ro.drivers.filter((d) => showOff || d.active);
   $("driverList").replaceChildren(...(rows.length ? rows.map(driverRow)
-    : [el("p", { class: "muted empty", text: "ยังไม่มีคนขับ — กด “+ เพิ่มคนขับ” หรือเลือกคนขับในหน้าข้อมูลรถ" })]));
+    : [el("p", { class: "muted empty", text: "ยังไม่มีคนขับ — เพิ่มที่หน้า พนักงาน (ตำแหน่ง พนักงานขับรถสาย / หน้าโรง) ระบบสร้างข้อมูลคนขับให้เอง" })]));
 }
 
 function driverRow(d) {
@@ -402,55 +386,7 @@ function driverRow(d) {
         onclick: () => goTruck(t.vehicle_id) })) : [el("span", { class: "muted small", text: d.active ? "ยังไม่ได้เป็นคนขับหลักของคันไหน" : "" })])),
     el("div", { class: "rr-actions" },
       d.phone ? callLink(d.phone, "", true) : null,
-      el("button", { class: "btn small", type: "button", text: "แก้ไข", onclick: () => openDriverDialog(d) }),
-      el("button", { class: `btn small${d.active ? " danger" : ""}`, type: "button", text: d.active ? "เลิกขับ" : "กลับมาขับ", onclick: () => toggleDriver(d) })));
-}
-
-async function toggleDriver(d) {
-  if (d.active && !confirm(`${d.name} เลิกขับแล้วใช่ไหม?${d.trucks.length ? `\nรถ ${d.trucks.length} คันที่เขาเป็นคนขับหลักจะไม่มีคนขับหลัก` : ""}`)) return;
-  try {
-    await api(`/api/drivers/${d.driver_id}`, jsonOpts("PATCH", { active: !d.active }));
-  } catch (err) {
-    showErr("rosterError", err.message);
-    return;
-  }
-  await refreshRoster();
-  await syncPickers(false);
-}
-
-function openDriverDialog(d) {
-  ro.editingDriver = d || null;
-  $("ddTitle").textContent = d ? `แก้ไขคนขับ · ${d.name}` : "เพิ่มคนขับ";
-  $("ddName").value = d ? d.name : "";
-  $("ddNickRow").hidden = !state.fleetV7;
-  $("ddNick").value = d ? d.nickname : "";
-  $("ddPhone").value = d ? d.phone : "";
-  $("ddNotes").value = d ? d.notes : "";
-  $("ddBranch").replaceChildren(el("option", { value: "", text: "— ไม่ระบุ —" }), ...(state.branches || []).map((b) => el("option", { value: b, text: b })));
-  $("ddBranch").value = d ? d.branch : "";
-  showErr("ddError", "");
-  $("drvDialog").showModal();
-}
-
-async function saveDriver() {
-  const body = { name: $("ddName").value, phone: $("ddPhone").value, branch: $("ddBranch").value, notes: $("ddNotes").value };
-  if (state.fleetV7) body.nickname = $("ddNick").value;
-  try {
-    if (ro.editingDriver) await api(`/api/drivers/${ro.editingDriver.driver_id}`, jsonOpts("PATCH", body));
-    else await api("/api/drivers", jsonOpts("POST", body));
-  } catch (err) {
-    showErr("ddError", err.message);
-    return;
-  }
-  $("drvDialog").close();
-  await loadDrivers();
-  if (!$("rosterView").hidden) { await refreshRoster(); }
-  await ensureVehicles(true);                                 // trucks carry their driver's name / phone
-  await syncPickers(false);
-  if (!$("truckView").hidden) {                               // the truck page redraws with the new driver details (typed values are kept in tk.draft)
-    tk.v = tk.v ? fleet.vehicles.find((x) => x.vehicle_id === tk.v.vehicle_id) || tk.v : null;
-    renderTruck();
-  }
+      d.employee_id ? el("button", { class: "btn small", type: "button", text: "ข้อมูลพนักงาน", title: "เปิดหน้าพนักงานของคนนี้ (แก้ไข / ลาออก ที่นั่น)", onclick: () => goHash(`#employee=${d.employee_id}`) }) : null));
 }
 
 // ------------------------------------------------------------------ tabs + init
@@ -469,11 +405,8 @@ function initRoster() {
   $("roAdd").addEventListener("click", () => goTruck("new"));
   $("roTabTrucks").addEventListener("click", () => showRosterTab("trucks"));
   $("roTabDrivers").addEventListener("click", () => showRosterTab("drivers"));
-  $("drvAdd").addEventListener("click", () => openDriverDialog(null));
   $("drvShowOff").addEventListener("change", renderDrivers);
   $("roExport").addEventListener("click", exportRoster);
-  $("ddCancel").addEventListener("click", () => $("drvDialog").close());
-  $("ddSave").addEventListener("click", saveDriver);
   $("tkBack").addEventListener("click", () => {
     if (tk.editing && tk.dirty && !confirm("ยังไม่ได้บันทึก ออกจากหน้านี้ใช่ไหม?")) return;
     tk.editing = false;

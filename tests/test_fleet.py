@@ -127,6 +127,7 @@ class Db:
             "vehicles": [truck(V1, "1กข 1", "1", usage=None, main_driver_id=None, notes=None), truck(V2, "2กข 2", "2", usage="รถสาย", main_driver_id=D1, notes=None)],
             "drivers": [{"id": D1, "name": "สมชาย", "active": True, "phone": None, "branch": None, "notes": None}],
             "repair_requests": [],
+            "employees": [],
         }
         self.inserted, self.updates = [], []
 
@@ -255,14 +256,9 @@ def test_fleet_endpoints_need_the_token_and_map_errors(monkeypatch):
     monkeypatch.setattr(main.fleet, "create_vehicle", lambda d: (_ for _ in ()).throw(fleet.InvalidFleet("ทะเบียนซ้ำ")))
     r = c.post("/api/vehicles?token=secret", json={"plate_number": "x"})
     assert r.status_code == 422 and "ทะเบียนซ้ำ" in r.text
-    monkeypatch.setattr(main.fleet, "edit_driver", lambda i, d: (_ for _ in ()).throw(fleet.NotFound()))
-    assert c.patch(f"/api/drivers/{D1}?token=secret", json={"name": "x"}).status_code == 404
-
-    def boom(d):
-        raise main.supabase.SupabaseError("secret internals")
-    monkeypatch.setattr(main.fleet, "create_driver", boom)
-    r = c.post("/api/drivers?token=secret", json={"name": "x"})
-    assert r.status_code == 502 and "internals" not in r.text
+    # a driver is added / edited under พนักงาน now: the old write endpoints say so
+    for r in (c.patch(f"/api/drivers/{D1}?token=secret", json={"name": "x"}), c.post("/api/drivers?token=secret", json={"name": "x"})):
+        assert r.status_code == 410 and "พนักงาน" in r.text
 
 
 def test_vehicle_endpoints_pass_the_body_through(monkeypatch):

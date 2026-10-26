@@ -31,14 +31,14 @@ def test_a_new_employee_is_cleaned():
     v = em.clean_employee(make(phone=" 081 234 5678 ", start_date="2026-09-01", notes="", nickname=""), others=OTHERS, today=TODAY)
     assert v["code"] == "SB-FR200" and v["full_name"] == "สมชาย ใจดี" and v["prefix"] == "นาย" and v["gender"] == "ชาย"      # the title moved out of the name
     assert v["branch"] == "สระบุรี" and v["position"] == "ผลิต"
-    assert v["phone"] == "081 234 5678" and v["start_date"] == "2026-09-01" and v["notes"] is None and v["nickname"] is None and v["driver_id"] is None
+    assert v["phone"] == "081 234 5678" and v["start_date"] == "2026-09-01" and v["notes"] is None and v["nickname"] is None and "driver_id" not in v
     assert "status" not in v                                  # ลาออก / กลับเข้าทำงาน have their own steps
 
 
 @pytest.mark.parametrize("data,fragment", [
     (make(code=""), "รหัสพนักงาน"), (make(code="ก-1"), "ตัวอักษรอังกฤษ"), (make(code="sb-fr001"), "มีรหัส SB-FR001 อยู่แล้ว"),
     (make(full_name="  "), "ชื่อ-สกุล"), (make(branch="กรุงเทพ"), "สาขา"), (make(start_date="2026-12-01"), "อนาคต"),
-    (make(start_date="2569-01-01"), "ค.ศ."), (make(start_date="xx"), "ไม่ถูกต้อง"), (make(driver_id="nope"), "รหัสไม่ถูกต้อง"),
+    (make(start_date="2569-01-01"), "ค.ศ."), (make(start_date="xx"), "ไม่ถูกต้อง"),
 ])
 def test_bad_input_is_refused_in_thai(data, fragment):
     with pytest.raises(em.InvalidEmployee, match=fragment):
@@ -161,3 +161,100 @@ def test_the_head_count_also_counts_by_gender():
     rows = [{"status": "active", "gender": "ชาย"}, {"status": "active", "gender": "หญิง"}, {"status": "active", "gender": "หญิง"},
             {"status": "active"}, {"status": "resigned", "gender": "ชาย"}]
     assert em.summarize(rows)["by_gender"] == {"ชาย": 1, "หญิง": 2, "ยังไม่ระบุ": 1}
+
+
+# ------------------------------------------------- a driver is ONE record, edited here
+class FakeDb:
+    """employees / drivers / vehicles as lists; just what sync_driver and delete_employee use."""
+    def __init__(self, employees=(), drivers=(), vehicles=()):
+        self.t = {"employees": [dict(r) for r in employees], "drivers": [dict(r) for r in drivers], "vehicles": [dict(r) for r in vehicles]}
+        self.n = 0
+
+    def _match(self, rows, match):
+        return [r for r in rows if all(r.get(k) == v[3:] for k, v in match.items())]
+
+    def select(self, table, params=None):
+        params = params or {}
+        return [dict(r) for r in self._match(self.t[table], {k: v for k, v in params.items() if isinstance(v, str) and v.startswith("eq.")})]
+
+    def insert(self, table, rows, **kw):
+        self.n += 1
+        row = {**rows[0], "id": f"new{self.n}"}
+        self.t[table].append(row)
+        return [row]
+
+    def update(self, table, match, values):
+        rows = self._match(self.t[table], match)
+        for r in rows:
+            r.update(values)
+        return rows
+
+    def delete(self, table, match):
+        for r in self._match(self.t[table], match):
+            self.t[table].remove(r)
+
+
+@pytest.fixture
+def fake(monkeypatch):
+    def make_db(**kw):
+        d = FakeDb(**kw)
+        for name in ("select", "insert", "update", "delete"):
+            monkeypatch.setattr(em.supabase, name, getattr(d, name))
+        monkeypatch.setattr(em.fleet, "has_v6", lambda: True)
+        monkeypatch.setattr(em.fleet, "has_v7", lambda: True)
+        monkeypatch.setattr(em.fleet, "_changed", lambda: None)
+        monkeypatch.setattr(em, "has_v21", lambda: True)
+        monkeypatch.setattr(em, "REFERENCED_BY", [])                  # (the loans module adds its table here; this fake has none)
+        monkeypatch.setattr(em, "_all", lambda: [dict(r) for r in d.t["employees"]])
+        monkeypatch.setattr(em, "_drivers", lambda: {r["id"]: r for r in d.t["drivers"]})
+        return d
+    return make_db
+
+
+E1, E2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+
+
+def emp(id_, **kw):
+    return {"id": id_, "code": f"SB-{id_}", "full_name": "สมชาย ใจดี", "nickname": "ชาย", "phone": "081", "branch": "สระบุรี", "position": "พนักงานขับรถสาย",
+            "status": "active", "driver_id": None, "notes": None, **kw}
+
+
+def test_a_driver_position_creates_the_driver_record_and_links_it(fake):
+    d = fake(employees=[emp(E1)])
+    em.sync_driver(d.t["employees"][0])
+    assert d.t["drivers"] == [{"id": "new1", "name": "สมชาย ใจดี", "phone": "081", "branch": "สระบุรี", "notes": None, "active": True, "nickname": "ชาย"}]
+    assert d.t["employees"][0]["driver_id"] == "new1"
+
+
+def test_other_positions_get_no_driver_record(fake):
+    d = fake(employees=[emp(E1, position="ผลิต")])
+    em.sync_driver(d.t["employees"][0])
+    assert d.t["drivers"] == [] and d.t["employees"][0]["driver_id"] is None
+
+
+def test_editing_the_employee_updates_the_driver_record(fake):
+    d = fake(employees=[emp(E1, driver_id="d1")], drivers=[{"id": "d1", "name": "เก่า", "phone": None, "active": True}])
+    em.edit_employee(E1, {"phone": "099 111", "nickname": "ใหม่"})
+    assert d.t["drivers"][0]["phone"] == "099 111" and d.t["drivers"][0]["nickname"] == "ใหม่" and d.t["drivers"][0]["name"] == "สมชาย ใจดี"
+
+
+def test_resigning_switches_the_driver_off_and_frees_their_trucks_and_coming_back_switches_on(fake):
+    d = fake(employees=[emp(E1, driver_id="d1")], drivers=[{"id": "d1", "name": "x", "active": True}], vehicles=[{"id": "v1", "vehicle_number": "6", "main_driver_id": "d1"}])
+    em.resign(E1, {"end_date": "2026-10-20"})
+    assert d.t["drivers"][0]["active"] is False and d.t["vehicles"][0]["main_driver_id"] is None
+    em.reinstate(E1)
+    assert d.t["drivers"][0]["active"] is True
+
+
+def test_an_employee_on_a_truck_cannot_be_deleted_but_a_mistake_takes_its_driver_record_with_it(fake):
+    d = fake(employees=[emp(E1, driver_id="d1"), emp(E2, driver_id="d2")], drivers=[{"id": "d1", "name": "a", "active": True}, {"id": "d2", "name": "b", "active": True}],
+             vehicles=[{"id": "v1", "vehicle_number": "6", "main_driver_id": "d1"}])
+    with pytest.raises(em.InvalidEmployee, match="#6"):
+        em.delete_employee(E1)
+    em.delete_employee(E2)
+    assert [e["id"] for e in d.t["employees"]] == [E1] and [x["id"] for x in d.t["drivers"]] == ["d1"]
+
+
+def test_the_driver_positions():
+    assert all(em.is_driver_position(p) for p in ("พนักงานขับรถ", "พนักงานขับรถสาย", "พนักงานขับรถหน้าโรง"))
+    assert not any(em.is_driver_position(p) for p in ("ผลิต", "", None, "ช่าง"))

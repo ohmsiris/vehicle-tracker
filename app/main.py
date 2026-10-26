@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, employees, events, fleet, history, home, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
+from app import dashboard, employees, events, fleet, history, home, loans, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -558,6 +558,82 @@ def api_reinstate_employee(employee_id: str, x_app_token: str = Header(default="
 def api_delete_employee(employee_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
     _check_token(x_app_token, token)
     _hr_call(x_hr_pin, employees.delete_employee, employee_id)
+    return {"ok": True}
+
+
+# ------------------------------------------------------------- เงินกู้ (loans): same lock as the rest of พนักงาน
+@app.get("/api/loans/options")
+def api_loan_options(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    return loans.options()
+
+
+@app.get("/api/loans")
+def api_loans(employee_id: str = "", x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, loans.list_loans, employee_id)
+
+
+@app.post("/api/loans/preview")
+def api_loan_preview(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, lambda: loans.preview(body, employees.today_th()))
+
+
+@app.get("/api/loans/month")
+def api_loan_month(month: str = "", x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, loans.month_deductions, month)
+
+
+@app.post("/api/loans/month/apply")
+def api_loan_month_apply(body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, loans.apply_month, body.get("month") or "", body.get("loan_ids") or None)
+
+
+@app.post("/api/loans")
+def api_create_loan(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, loans.create_loan, body)
+
+
+@app.get("/api/loans/{loan_id}")
+def api_loan(loan_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, loans.get_loan, loan_id)
+
+
+@app.patch("/api/loans/{loan_id}")
+def api_edit_loan(loan_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, loans.edit_loan, loan_id, body)
+
+
+@app.post("/api/loans/{loan_id}/entries")
+def api_loan_entry(loan_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, loans.add_entry, loan_id, body)
+
+
+@app.delete("/api/loans/{loan_id}/entries/{entry_id}")
+def api_loan_entry_delete(loan_id: str, entry_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, loans.delete_entry, loan_id, entry_id)
+
+
+@app.post("/api/loans/{loan_id}/cancel")
+def api_loan_cancel(loan_id: str, body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, loans.cancel_loan, loan_id, body)
+
+
+@app.delete("/api/loans/{loan_id}")
+def api_loan_delete(loan_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    _hr_call(x_hr_pin, loans.delete_loan, loan_id)
     return {"ok": True}
 
 
@@ -1116,16 +1192,19 @@ def api_drivers(include_inactive: bool = False, x_app_token: str = Header(defaul
     return _fleet_call(fleet.list_drivers, include_inactive)
 
 
+DRIVER_MOVED = "คนขับจัดการที่หน้า พนักงาน แล้ว — เพิ่ม/แก้ไขที่นั่น (ตำแหน่ง พนักงานขับรถสาย / หน้าโรง) ระบบสร้างและอัปเดตข้อมูลคนขับให้เอง"
+
+
 @app.post("/api/drivers")
-def api_create_driver(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+def api_create_driver(body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
-    return _fleet_call(fleet.create_driver, body)
+    raise HTTPException(410, DRIVER_MOVED)
 
 
 @app.patch("/api/drivers/{driver_id}")
-def api_edit_driver(driver_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+def api_edit_driver(driver_id: str, body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
-    return _fleet_call(fleet.edit_driver, driver_id, body)
+    raise HTTPException(410, DRIVER_MOVED)
 
 
 @app.get("/api/vehicles/{vehicle_id}/events")

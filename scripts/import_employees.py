@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import employees, fleet, supabase                      # noqa: E402
 from app.employees import split_prefix                          # noqa: E402
 
-POSITION_ALIASES = {"เสมียน": "เสมียนออฟฟิศ"}
+POSITION_ALIASES = {"เสมียน": "เสมียนออฟฟิศ", "พขร.": "พนักงานขับรถ", "พขร.รถสาย": "พนักงานขับรถสาย", "พขร.รถหน้าโรง": "พนักงานขับรถหน้าโรง"}
 
 
 def read_roster(path: str) -> list[dict]:
@@ -33,7 +33,7 @@ def read_roster(path: str) -> list[dict]:
             if len(row) < 5 or not re.match(r"^SB-", row[2].strip()):
                 continue
             branch = row[1].replace("สาขา", "").strip() or "สระบุรี"
-            position = row[4].strip()
+            position = POSITION_ALIASES.get(row[4].strip(), row[4].strip())
             e = {"code": row[2].strip().upper(), "full_name": row[3].strip(), "branch": branch, "position": position or None, "source": "roster"}
             if position == "พ้นสภาพ":                           # the roster marks someone who has left like this
                 e.update(position=None, resigned=True, notes="พ้นสภาพ ตามรายชื่อพนักงาน")
@@ -127,7 +127,7 @@ def main() -> None:
         prefix, name, gender = split_prefix(p["full_name"])         # "นายจรูญ มินฉิมพลี" -> นาย + "จรูญ มินฉิมพลี" (+ the gender)
         row = {"code": p["code"], "prefix": prefix, "gender": gender, "full_name": name, "branch": p["branch"], "position": p.get("position"),
                "start_date": p.get("start_date"), "notes": p.get("notes"), "status": "resigned" if p.get("resigned") else "active", "driver_id": None}
-        if (p.get("position") or "").startswith("พขร"):
+        if employees.is_driver_position(p.get("position")):
             ids = by_name.get(fleet._name_key(p["full_name"]), [])
             if len(ids) == 1:
                 row["driver_id"] = ids[0]
@@ -139,8 +139,8 @@ def main() -> None:
         by_branch[r["branch"]] = by_branch.get(r["branch"], 0) + 1
     print(f"people in the files: {len(people)}  ·  already in the table: {skipped}  ·  to add: {len(todo)} {by_branch}  ·  linked to a driver: {linked}  ·  with a start date: {sum(1 for r in todo if r.get('start_date'))}")
     print(f"marked as resigned: {[(r['code'], r['full_name']) for r in todo if r.get('status') == 'resigned']}")
-    drv_unlinked = [r["code"] for r in todo if (r.get("position") or "").startswith("พขร") and not r.get("driver_id")]
-    print(f"พขร. with no single matching driver row ({len(drv_unlinked)}): {drv_unlinked}")
+    drv_unlinked = [r["code"] for r in todo if employees.is_driver_position(r.get("position")) and not r.get("driver_id")]
+    print(f"drivers with no single matching driver row ({len(drv_unlinked)}): {drv_unlinked}  (scripts/merge_drivers.py ties them up)")
     if not args.apply:
         print("dry run -- nothing written (add --apply)")
         return

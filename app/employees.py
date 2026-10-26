@@ -3,7 +3,7 @@
 
 An employee is never deleted once anything points at them (loans, warning letters, memos): "removing" one is ลาออก
 (status 'resigned', with the date and the reason), and they can be brought back. A row added by mistake, with nothing
-pointing at it, can be deleted. A พขร. is also a row of `drivers` (who drives which truck); `driver_id` links the two.
+pointing at it, can be deleted. A พนักงานขับรถ is also a row of `drivers` (who drives which truck): that row is made and kept up to date from the employee (sync_driver), never edited on its own.
 
 Pure rules (clean_employee, clean_resign, summarize) are unit-tested; the database calls are thin. The section can have a
 second lock (settings.hr_pin / HR_PIN): check_pin() is called by every endpoint in this module's group.
@@ -20,7 +20,8 @@ from app.config import settings
 
 BRANCHES = fleet.BRANCHES
 STATUSES = ("active", "resigned")
-POSITION_PRESETS = ["ผลิต", "พขร.รถสาย", "พขร.รถหน้าโรง", "เด็กรถ", "ช่าง", "แพ็ค", "หัวหน้างาน", "ผู้ช่วยหัวหน้างาน", "เสมียนออฟฟิศ", "ล้างกระสอบ", "นับกระสอบ", "อีเวนต์"]
+DRIVER_POSITION = "พนักงานขับรถ"                  # a position that starts with this is a driver: it gets a row in `drivers` (who drives which truck)
+POSITION_PRESETS = ["ผลิต", "พนักงานขับรถสาย", "พนักงานขับรถหน้าโรง", "เด็กรถ", "ช่าง", "แพ็ค", "หัวหน้างาน", "ผู้ช่วยหัวหน้างาน", "เสมียนออฟฟิศ", "ล้างกระสอบ", "นับกระสอบ", "อีเวนต์"]
 NEEDS_V21 = "ยังใช้ส่วนพนักงานไม่ได้ — ต้องรันไฟล์ schema_v21.sql และ schema_v22.sql ใน Supabase ก่อน"
 PREFIXES = ("นาย", "นาง", "นางสาว")
 GENDERS = ("ชาย", "หญิง")
@@ -169,8 +170,6 @@ def clean_employee(data: dict, *, existing: Optional[dict] = None, others: list[
         values["notes"] = _clean(data.get("notes"), 500) or None
     if creating or "start_date" in data:
         values["start_date"] = _date(data.get("start_date"), "วันเริ่มงาน", today=today)
-    if creating or "driver_id" in data:
-        values["driver_id"] = _uuid_or_none(data.get("driver_id"))
     final = {**(existing or {}), **values}
     if final.get("end_date") and final.get("start_date") and final["end_date"] < final["start_date"]:
         raise InvalidEmployee("วันเริ่มงานต้องไม่หลังวันที่ลาออก")
@@ -275,26 +274,53 @@ def get_employee(employee_id: str) -> dict:
     return present(_get(employee_id), _drivers())
 
 
-def _check_driver(values: dict) -> None:
-    if values.get("driver_id") and values["driver_id"] not in _drivers():
-        raise InvalidEmployee("ไม่พบคนขับที่เลือก")
+# ---- the driver record: ONE place to edit. A พนักงานขับรถ is also a row of `drivers` (who drives which truck, who to call); that row is made and
+# kept up to date from the employee here, never edited on its own (the drivers tab only reads it), so the two cannot drift apart.
+def is_driver_position(position) -> bool:
+    return str(position or "").startswith(DRIVER_POSITION)
+
+
+def driver_fields(row: dict) -> dict:
+    fields = {"name": row["full_name"], "phone": row.get("phone"), "branch": row.get("branch"), "notes": row.get("notes"), "active": row.get("status") != "resigned"}
+    if fleet.has_v7():                                          # the nickname column of `drivers` comes with schema_v7
+        fields["nickname"] = row.get("nickname")
+    return fields
+
+
+def sync_driver(row: dict) -> Optional[str]:
+    """Make / update the driver record of this employee (a driver position, or already linked). Returns its id. A resigned employee's driver
+    record is switched off and their trucks lose their main driver, as when a driver stops driving."""
+    if not fleet.has_v6() or not (is_driver_position(row.get("position")) or row.get("driver_id")):
+        return row.get("driver_id")
+    fields = driver_fields(row)
+    did = row.get("driver_id")
+    if did:
+        supabase.update("drivers", {"id": f"eq.{did}"}, fields)
+        if not fields["active"]:
+            supabase.update("vehicles", {"main_driver_id": f"eq.{did}"}, {"main_driver_id": None})
+    else:
+        did = supabase.insert("drivers", [fields])[0]["id"]
+        supabase.update("employees", {"id": f"eq.{row['id']}"}, {"driver_id": did})
+    fleet._changed()
+    return did
 
 
 def create_employee(data: dict) -> dict:
     _require()
     values = clean_employee(data, others=_all())
-    _check_driver(values)
     row = supabase.insert("employees", [values])[0]
-    return present(row, _drivers())
+    sync_driver(row)
+    return present(_get(row["id"]), _drivers())
 
 
 def edit_employee(employee_id: str, data: dict) -> dict:
     _require()
     existing = _get(employee_id)
     values = clean_employee(data, existing=existing, others=[o for o in _all() if o["id"] != existing["id"]])
-    _check_driver(values)
     if values:
         supabase.update("employees", {"id": f"eq.{existing['id']}"}, values)
+    row = _get(existing["id"])
+    sync_driver(row)
     return present(_get(existing["id"]), _drivers())
 
 
@@ -302,6 +328,7 @@ def resign(employee_id: str, data: dict) -> dict:
     _require()
     existing = _get(employee_id)
     supabase.update("employees", {"id": f"eq.{existing['id']}"}, clean_resign(data, existing=existing))
+    sync_driver(_get(existing["id"]))
     return present(_get(existing["id"]), _drivers())
 
 
@@ -312,6 +339,7 @@ def reinstate(employee_id: str) -> dict:
     if existing.get("status") != "resigned":
         raise InvalidEmployee("คนนี้ยังทำงานอยู่")
     supabase.update("employees", {"id": f"eq.{existing['id']}"}, {"status": "active", "end_date": None, "end_reason": None})
+    sync_driver(_get(existing["id"]))
     return present(_get(existing["id"]), _drivers())
 
 
@@ -332,4 +360,12 @@ def delete_employee(employee_id: str) -> None:
     existing = _get(employee_id)
     if attached(existing["id"]):
         raise InvalidEmployee("ลบไม่ได้ — มีเงินกู้หรือเอกสารของคนนี้อยู่ ให้กด “ลาออก” แทน (ประวัติยังอยู่ครบ)")
+    did = existing.get("driver_id")
+    if did:
+        trucks = supabase.select("vehicles", {"select": "vehicle_number", "main_driver_id": f"eq.{did}"})
+        if trucks:
+            raise InvalidEmployee("ลบไม่ได้ — เป็นคนขับหลักของรถ #" + ", #".join(str(t.get("vehicle_number") or "?") for t in trucks) + " (เปลี่ยนคนขับหลักก่อน หรือกด “ลาออก”)")
     supabase.delete("employees", {"id": f"eq.{existing['id']}"})
+    if did:
+        supabase.delete("drivers", {"id": f"eq.{did}"})                 # the driver record made for this employee goes with them
+        fleet._changed()

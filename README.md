@@ -387,7 +387,9 @@ buttons as the board. It reads the board's own list, so the two never disagree.
 The staff of both branches in one table (`employees`, `schema_v21.sql`; `app/employees.py`, `static/employees.js`): code (the code on the pay sheets:
 SB-FR### factory, SB-PD### Saraburi drivers, SB-KK### Kaeng Khoi), name, nickname, branch, position/department, start date, phone, notes, and an
 optional link to the `drivers` row of a พขร. The list has the same big filter card as the other pages (search, branch, position, status, sort) and a CSV
-download; each person has a page. **คำนำหน้า and เพศ** (`schema_v22.sql`): `prefix` (นาย / นาง / นางสาว) is its own field and `full_name` holds the name without it; documents write prefix + name (`display_name`: นายสมชาย ใจดี). The prefix is read from the name straight away -- typing "นางสาวพลอย รักดี" in the add box moves นางสาว to the คำนำหน้า box (also English Mr. / Mrs. / Miss and น.ส.; `split_prefix` in `app/employees.py`, mirrored in `static/employees.js`). `gender` (ชาย / หญิง) follows the prefix (นาย = ชาย; นาง, นางสาว = หญิง); a person with no prefix gets it from a hint in the name ("(หญิง)", "Mrs.") or by hand. The list can be filtered by เพศ and shows the head count by gender. `scripts/import_employees.py --roster x --fix-prefixes [--apply]` reads the title out of people already in the table.
+download; each person has a page. **Drivers are employees** (`app/employees.py` `sync_driver`): a position that starts with **พนักงานขับรถ** (พนักงานขับรถสาย / พนักงานขับรถหน้าโรง / พนักงานขับรถ) gets a row in `drivers` (who drives which truck, who to call) made and kept up to date FROM the employee -- name, nickname, phone, branch, active -- so the two cannot drift apart. The ทะเบียนรถ › คนขับ tab only reads; "add / edit / ลาออก" is done on the พนักงาน page (`POST/PATCH /api/drivers` answer 410). Resigning switches the driver off and frees their trucks; an employee who is the main driver of a truck cannot be deleted. The one-time merge of the old drivers tab into the employees is `scripts/merge_drivers.py` (done: 32 drivers tied to their employee by name, 15 more driver records created for the other drivers, the names / nicknames / phones taken from the drivers tab).
+
+**คำนำหน้า and เพศ** (`schema_v22.sql`): `prefix` (นาย / นาง / นางสาว) is its own field and `full_name` holds the name without it; documents write prefix + name (`display_name`: นายสมชาย ใจดี). The prefix is read from the name straight away -- typing "นางสาวพลอย รักดี" in the add box moves นางสาว to the คำนำหน้า box (also English Mr. / Mrs. / Miss and น.ส.; `split_prefix` in `app/employees.py`, mirrored in `static/employees.js`). `gender` (ชาย / หญิง) follows the prefix (นาย = ชาย; นาง, นางสาว = หญิง); a person with no prefix gets it from a hint in the name ("(หญิง)", "Mrs.") or by hand. The list can be filtered by เพศ and shows the head count by gender. `scripts/import_employees.py --roster x --fix-prefixes [--apply]` reads the title out of people already in the table.
 
 **Remove = ลาออก** (date + reason, and "กลับเข้าทำงาน" brings them back): nobody is deleted once anything points at
 them (`REFERENCED_BY` in `app/employees.py` -- the loans / letters tables add themselves there); "ลบ (เพิ่มผิด)" is only for a row added by mistake.
@@ -402,6 +404,23 @@ same name when exactly one matches. The files themselves are not in git (they ho
 
 Planned next (shown as "เร็วๆ นี้" in the menu): เงินกู้ (borrow / repay ledger per person, repaid by salary deduction), ใบเตือน and บันทึกข้อความ (templates with
 the signature blocks, tracked per person), and payslip reading + checking.
+
+## Loans ("เงินกู้", `#loans`, `#loan=<id>`)
+
+What an employee owes the company -- a loan, an advance (เบิกล่วงหน้า), or an accident cost turned into a loan (like the "ขับรถตกข้างทาง" memo: 5,500 ฿ = 2,000 + 2,000 + 1,500) --
+repaid by salary deduction, no interest, no cap yet (`schema_v23.sql`; `app/loans.py`, `static/loans.js`; same HR_PIN lock as พนักงาน).
+
+- **A loan** = person, kind (เงินกู้ทั่วไป / อุบัติเหตุ-ความเสียหาย / เบิกล่วงหน้า / อื่นๆ), amount, date, reason, reference of the บันทึกข้อความ, approver, and a **repayment plan**.
+- **Six repayment modes**: เดือนละเท่ากัน (fixed instalment, the last one takes the rest) · แบ่งเท่า ๆ กัน N เดือน (whole baht, last month takes the rest) · % ของยอดกู้ต่อเดือน ·
+  หักก้อนเดียว · กำหนดเองทีละเดือน (type 2000, 2000, 1500) · ไม่กำหนดงวด (just record repayments when they happen).
+- **Delayed start**: "เริ่มหักตั้งแต่" = next month (default) / this month / skip 1–3 months / pick any month (`first_month`). The schedule is shown while the form is filled in (`/api/loans/preview`,
+  the same code that saves it).
+- **The ledger** holds what really happened: คืน (usually หักเงินเดือน, with the pay month), กู้เพิ่ม, ปรับยอด (signed). The balance is never stored: principal + adds + adjusts - repayments. Repayments are laid
+  over the schedule oldest month first, so every month is จ่ายแล้ว / จ่ายบางส่วน / ถึงกำหนด / เลยกำหนด / ยังไม่ถึง, and what is overdue is known. Paying off closes the loan; borrowing more reopens it.
+  A repayment above the balance is refused. "ยกเลิก" keeps a wrongly-entered or written-off loan in the history; "ลบ" only while nothing is recorded against it.
+- **ยอดที่ต้องหักเงินเดือน** (top of the page, by month, CSV): what payroll should deduct this month (and what was left unpaid from earlier months); "บันทึกว่าหักแล้วทั้งหมด" records each as a salary repayment.
+- An employee with a loan can only be ลาออก, never deleted; a resigned employee cannot get a new loan. Each person's page has a loans card. Both tables are in the weekly backup.
+- Still to do: import the history from the "กู้เงินโรงงาน" sheet (needs the sheet exported as .xlsx), and check the deductions against the payslips.
 
 ## Fleet roster ("ทะเบียนรถ", `#roster`)
 

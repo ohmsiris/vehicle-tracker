@@ -281,7 +281,12 @@ def list_drivers(include_inactive: bool = False) -> list[dict]:
             if v.get("main_driver_id") and v.get("active"):
                 trucks.setdefault(v["main_driver_id"], []).append(
                     {"vehicle_id": v["id"], "plate": v["plate_number"], "truck_number": v.get("vehicle_number") or "", "branch": v.get("branch") or ""})
-    rows = [{"driver_id": d["id"], "name": d["name"], "nickname": d.get("nickname") or "", "phone": d.get("phone") or "", "branch": d.get("branch") or "",
+    employee_of: dict = {}
+    try:                                                     # the employee each driver record belongs to (the driver is edited there)
+        employee_of = {e["driver_id"]: e["id"] for e in supabase.select_all("employees", {"select": "id,driver_id", "driver_id": "not.is.null", "order": "id.asc"})}
+    except supabase.SupabaseError:
+        pass
+    rows = [{"driver_id": d["id"], "employee_id": employee_of.get(d["id"]), "name": d["name"], "nickname": d.get("nickname") or "", "phone": d.get("phone") or "", "branch": d.get("branch") or "",
              "notes": d.get("notes") or "", "active": bool(d.get("active", True)), "trucks": trucks.get(d["id"], [])}
             for d in drivers.values() if include_inactive or d.get("active", True)]
     return sorted(rows, key=lambda r: (not r["active"], r["name"]))

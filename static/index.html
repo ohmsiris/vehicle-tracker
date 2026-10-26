@@ -54,7 +54,7 @@
     </button>
     <nav class="side-items" id="sideEmployees">
       <button id="navEmployees" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>รายชื่อพนักงาน</span></button>
-      <button class="sideitem" type="button" disabled title="ยังไม่ได้สร้าง"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10.2c0-1 1.1-1.7 2.5-1.7s2.5.7 2.5 1.7-1.1 1.5-2.5 1.8-2.5.8-2.5 1.8 1.1 1.7 2.5 1.7 2.5-.7 2.5-1.7"/></svg><span>เงินกู้</span><i class="soon">เร็วๆ นี้</i></button>
+      <button id="navLoans" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10.2c0-1 1.1-1.7 2.5-1.7s2.5.7 2.5 1.7-1.1 1.5-2.5 1.8-2.5.8-2.5 1.8 1.1 1.7 2.5 1.7 2.5-.7 2.5-1.7"/></svg><span>เงินกู้</span></button>
       <button class="sideitem" type="button" disabled title="ยังไม่ได้สร้าง"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4M10 12h6M10 16h6"/></svg><span>ใบเตือน / บันทึกข้อความ</span><i class="soon">เร็วๆ นี้</i></button>
       <button class="sideitem" type="button" disabled title="ยังไม่ได้สร้าง"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 9h8M8 13h5M9 17l2 2 4-4"/></svg><span>ตรวจสลิปเงินเดือน</span><i class="soon">เร็วๆ นี้</i></button>
     </nav>
@@ -146,6 +146,50 @@
     </div>
     <div class="rostercountbar"><p class="muted small" id="emCount"></p></div>
     <div id="empList"></div>
+  </section>
+
+  <!-- ============ Loans ============ -->
+  <section id="loansView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">เงินกู้พนักงาน</h2>
+      <p class="muted small">เงินกู้ เบิกล่วงหน้า และค่าความเสียหายที่แปลงเป็นเงินกู้ — คืนโดยหักเงินเดือน ไม่มีดอกเบี้ย เลือกวิธีคืนได้หลายแบบ และเลื่อนเดือนเริ่มหักได้</p>
+    </div>
+    <p class="error" id="loanError" hidden></p>
+    <div class="edit-banner" id="loanNeedsV23" hidden>ยังใช้เงินกู้ไม่ได้ — ต้องรันไฟล์ <strong>schema_v23.sql</strong> ใน Supabase ก่อน</div>
+    <div class="kpis" id="lnKpis"></div>
+    <div class="card" id="lnMonthBox">
+      <div class="hcard-head"><h2>ยอดที่ต้องหักเงินเดือน</h2>
+        <div class="lnmonthbar"><input id="lnMonth" type="month" aria-label="เดือน"><button id="lnMonthCsv" class="btn small" type="button">CSV</button>
+          <button id="lnApply" class="btn small primary" type="button">บันทึกว่าหักแล้วทั้งหมด</button></div></div>
+      <p class="muted small" id="lnMonthTotal"></p>
+      <div id="lnMonthList"></div>
+    </div>
+    <div class="card logfilters">
+      <div class="lgtop rotop">
+        <input id="lnSearch" type="search" placeholder="ค้นหา: ชื่อ รหัส เหตุผล เลขที่บันทึก" autocomplete="off" aria-label="ค้นหาเงินกู้">
+        <button id="lnAdd" class="btn primary" type="button">+ บันทึกเงินกู้ใหม่</button>
+      </div>
+      <div class="lggrid">
+        <div><label for="lnStatus">สถานะ</label>
+          <select id="lnStatus"><option value="active">กำลังผ่อน</option><option value="closed">จ่ายครบแล้ว</option><option value="cancelled">ยกเลิก</option><option value="all">ทั้งหมด</option></select></div>
+        <div><label for="lnKind">ประเภท</label><select id="lnKind"><option value="">ทุกประเภท</option></select></div>
+        <div><label for="lnBranch">สาขา</label><select id="lnBranch"><option value="">ทุกสาขา</option></select></div>
+      </div>
+      <div class="lgactions"><span class="grow"></span><button id="lnClear" class="btn small" type="button" hidden>ล้างตัวกรอง</button><button id="lnExport" class="btn small" type="button">ดาวน์โหลด Excel (CSV)</button></div>
+    </div>
+    <div class="rostercountbar"><p class="muted small" id="lnCount"></p></div>
+    <div id="lnList"></div>
+  </section>
+
+  <section id="loanView" hidden>
+    <div class="evbar">
+      <button id="lnBack" class="btn small" type="button">← เงินกู้</button>
+      <span class="grow"></span>
+      <div id="loanActions" class="tk-actions"></div>
+    </div>
+    <p class="error" id="loanDetailError" hidden></p>
+    <div class="card tkhead" id="loanHead"></div>
+    <div class="tkgrid" id="loanBody"></div>
   </section>
 
   <section id="employeeView" hidden>
@@ -547,7 +591,7 @@
       <div class="lgactions rosterdrvbar">
         <label class="check"><input id="drvShowOff" type="checkbox"> แสดงคนที่เลิกขับแล้ว</label>
         <span class="grow"></span>
-        <button id="drvAdd" class="btn primary" type="button">+ เพิ่มคนขับ</button>
+        <span class="muted small">คนขับเพิ่ม / แก้ไข / ลาออก ที่หน้า <a href="#employees">พนักงาน</a> (ระบบสร้างข้อมูลคนขับให้เอง)</span>
       </div>
       <div id="driverList" class="rostergrid"></div>
     </div>
@@ -891,26 +935,6 @@
 </dialog>
 
 <!-- Add or edit a driver -->
-<dialog id="drvDialog">
-  <h3 id="ddTitle">เพิ่มคนขับ</h3>
-  <label for="ddName">ชื่อจริง</label>
-  <input id="ddName" type="text" maxlength="80" autocomplete="off" placeholder="ชื่อ-นามสกุล">
-  <div id="ddNickRow">
-    <label for="ddNick">ชื่อเล่น <span class="muted small">(ไม่บังคับ)</span></label>
-    <input id="ddNick" type="text" maxlength="40" autocomplete="off">
-  </div>
-  <label for="ddPhone">เบอร์โทร <span class="muted small">(ไม่บังคับ)</span></label>
-  <input id="ddPhone" type="text" maxlength="30" autocomplete="off" inputmode="tel">
-  <label for="ddBranch">สาขา <span class="muted small">(ไม่บังคับ)</span></label>
-  <select id="ddBranch"></select>
-  <label for="ddNotes">หมายเหตุ <span class="muted small">(ไม่บังคับ)</span></label>
-  <input id="ddNotes" type="text" maxlength="300" autocomplete="off">
-  <p class="error" id="ddError" hidden></p>
-  <div class="dialog-actions">
-    <button type="button" class="btn" id="ddCancel">ยกเลิก</button>
-    <button type="button" class="btn primary" id="ddSave">บันทึก</button>
-  </div>
-</dialog>
 
 <dialog id="empDialog">
   <h3 id="empDlgTitle">เพิ่มพนักงาน</h3>
@@ -937,14 +961,50 @@
   <div id="emdStartCap" class="datecap"></div>
   <label for="emdPhone">เบอร์โทร <span class="muted small">(ไม่บังคับ)</span></label>
   <input id="emdPhone" type="text" maxlength="30" autocomplete="off" inputmode="tel">
-  <label for="emdDriver">ผูกกับคนขับในระบบรถ <span class="muted small">(เฉพาะ พขร.)</span></label>
-  <select id="emdDriver"><option value="">— ไม่ผูก —</option></select>
+  <p class="muted small">ตำแหน่ง “พนักงานขับรถสาย / หน้าโรง” = คนขับ: ระบบสร้างข้อมูลคนขับในระบบรถให้เองและอัปเดตตามที่แก้ที่นี่</p>
   <label for="emdNotes">หมายเหตุ <span class="muted small">(ไม่บังคับ)</span></label>
   <input id="emdNotes" type="text" maxlength="500" autocomplete="off">
   <p class="error" id="emdError" hidden></p>
   <div class="dialog-actions">
     <button type="button" class="btn" id="emdCancel">ยกเลิก</button>
     <button type="button" class="btn primary" id="emdSave">บันทึก</button>
+  </div>
+</dialog>
+
+<dialog id="loanDialog" class="lndialog">
+  <h3 id="lndTitle">บันทึกเงินกู้ใหม่</h3>
+  <label for="lndEmployee">พนักงาน <span class="muted small">(พิมพ์รหัสหรือชื่อแล้วเลือก)</span></label>
+  <input id="lndEmployee" type="text" list="lndEmpList" autocomplete="off" placeholder="เช่น SB-PD033 หรือ ประเสริฐ">
+  <datalist id="lndEmpList"></datalist>
+  <div class="lnfields">
+    <div><label for="lndKind">ประเภท</label><select id="lndKind"></select></div>
+    <div><label for="lndAmount">ยอดเงิน (บาท)</label><input id="lndAmount" type="text" inputmode="decimal" autocomplete="off"></div>
+    <div><label for="lndDate">วันที่</label><input id="lndDate" type="date"><div id="lndDateCap" class="datecap"></div></div>
+  </div>
+  <label for="lndReason">เหตุผล <span class="muted small">(ไม่บังคับ)</span></label>
+  <input id="lndReason" type="text" maxlength="300" autocomplete="off" placeholder="เช่น ค่ายกรถจากอุบัติเหตุ / ซื้อมอเตอร์ไซค์">
+  <div class="lnfields">
+    <div><label for="lndMemo">อ้างอิงบันทึกข้อความ</label><input id="lndMemo" type="text" maxlength="100" autocomplete="off" placeholder="เลขที่ / วันที่"></div>
+    <div><label for="lndApprover">ผู้อนุมัติ</label><input id="lndApprover" type="text" maxlength="100" autocomplete="off"></div>
+  </div>
+  <h4 class="lnh">วิธีคืนเงิน</h4>
+  <div class="lnfields">
+    <div><label for="lndMode">วิธีคืน</label><select id="lndMode"></select></div>
+    <div id="lndAmountEach"><label for="lndAmountEachN">ยอดหักต่อเดือน (บาท)</label><input id="lndAmountEachN" type="text" inputmode="decimal" autocomplete="off"></div>
+    <div id="lndMonths" hidden><label for="lndMonthsN">แบ่งเป็นกี่เดือน</label><input id="lndMonthsN" type="number" min="1" max="120" inputmode="numeric"></div>
+    <div id="lndPercent" hidden><label for="lndPercentN">หักกี่ % ของยอดกู้ ต่อเดือน</label><input id="lndPercentN" type="text" inputmode="decimal" autocomplete="off"></div>
+    <div id="lndCustom" hidden><label for="lndCustomN">ยอดหักแต่ละเดือน (คั่นด้วย ,)</label><input id="lndCustomN" type="text" autocomplete="off" placeholder="2000, 2000, 1500"></div>
+    <div><label for="lndStart">เริ่มหักตั้งแต่</label>
+      <select id="lndStart"><option value="1">เดือนหน้า</option><option value="0">เดือนนี้</option><option value="2">เว้น 1 เดือน (เริ่มอีก 2 เดือน)</option><option value="3">เว้น 2 เดือน</option><option value="4">เว้น 3 เดือน</option><option value="pick">เลือกเดือนเอง…</option></select></div>
+    <div id="lndStartMonthRow" hidden><label for="lndStartMonth">เดือนที่เริ่มหัก</label><input id="lndStartMonth" type="month"></div>
+  </div>
+  <div id="lndPreview" class="lnpreview"></div>
+  <label for="lndNotes">หมายเหตุ <span class="muted small">(ไม่บังคับ)</span></label>
+  <input id="lndNotes" type="text" maxlength="500" autocomplete="off">
+  <p class="error" id="lndError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="lndCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="lndSave">บันทึก</button>
   </div>
 </dialog>
 
@@ -1161,6 +1221,7 @@
 <script src="/static/where.js"></script>
 <script src="/static/roster.js"></script>
 <script src="/static/employees.js"></script>
+<script src="/static/loans.js"></script>
 <script src="/static/machinery.js"></script>
 <script src="/static/plan.js"></script>
 <script src="/static/mgr.js"></script>

@@ -1065,3 +1065,16 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 .emd-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tkcard.hsoon { position: relative; }
 .sideitem .soon { white-space: nowrap; flex-shrink: 0; }
+
+/* ---- เงินกู้ */
+.lnmonthbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.lnmonthbar input[type=month] { width: auto; padding: 6px 10px; }
+.lntable .r, .emptable .r { text-align: right; font-variant-numeric: tabular-nums; }
+.lnfields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 14px; align-items: start; }
+.lnfields > div { min-width: 0; }
+.lnfields input, .lnfields select { width: 100%; }
+.lnh { margin: 14px 0 4px; font-size: 14px; color: var(--muted); }
+.lnpreview { margin: 10px 0 6px; max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 10px; background: var(--bg); }
+dialog.lndialog { max-width: 720px; width: calc(100vw - 32px); }
+.lnentry { display: grid; gap: 10px; }
+.lntable td, .lntable th { white-space: nowrap; }

@@ -180,9 +180,10 @@ function renderEmployee() {
     card("การทำงาน", kvAll("สถานะ", off ? "ลาออกแล้ว" : "ทำงานอยู่"), kvAll("วันเริ่มงาน", e.start_date ? beDate(e.start_date) : ""),
       kvAll("อายุงาน", tenure(e.start_date, e.end_date) + (off ? "" : e.start_date ? " (ถึงวันนี้)" : "")),
       off ? kvAll("วันที่ลาออก", e.end_date ? beDate(e.end_date) : "") : null, off ? kvAll("เหตุผล", e.end_reason) : null, kvAll("หมายเหตุ", e.notes)),
-    soon("เงินกู้ / หักเงินเดือน", "ยอดกู้ ยอดคืน และยอดคงเหลือของคนนี้ (รวมกรณีอุบัติเหตุ)"),
+    el("section", { class: "card tkcard" }, el("h3", { text: "เงินกู้ / หักเงินเดือน" }), el("div", { id: "empLoansBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     soon("ใบเตือน และบันทึกข้อความ", "เอกสารที่ออกให้คนนี้ พร้อมสถานะการเซ็นรับ และระดับการเตือน"),
     soon("ตรวจสลิปเงินเดือน", "อ่านสลิปแล้วตรวจกับค่าแรง เงินกู้ และเงินสะสมของคนนี้"));
+  renderEmployeeLoans(e);
 }
 
 // ------------------------------------------------------------------ add / edit
@@ -206,21 +207,14 @@ async function openEmpDialog(e) {
   $("emdNotes").value = e ? e.notes : "";
   showErr("emdError", "");
   $("emdSave").dataset.id = e ? e.id : "";
-  $("emdDriver").replaceChildren(el("option", { value: "", text: "— ไม่ผูก —" }));
   $("empDialog").showModal();
-  try {
-    const drivers = await api("/api/drivers");
-    emp.drivers = drivers;
-    $("emdDriver").replaceChildren(el("option", { value: "", text: "— ไม่ผูก —" }), ...drivers.map((d) => el("option", { value: d.driver_id, text: d.nickname ? `${d.name} (${d.nickname})` : d.name })));
-    $("emdDriver").value = e && e.driver_id ? e.driver_id : "";
-  } catch (err) { /* the link is optional: the rest of the form still works */ }
 }
 
 async function saveEmployee() {
   const id = $("emdSave").dataset.id;
   const body = {
     code: $("emdCode").value, full_name: $("emdName").value, prefix: $("emdPrefix").value, gender: $("emdGender").value, nickname: $("emdNick").value, branch: $("emdBranch").value, position: $("emdPosition").value,
-    start_date: $("emdStart").value || null, phone: $("emdPhone").value, notes: $("emdNotes").value, driver_id: $("emdDriver").value || null,
+    start_date: $("emdStart").value || null, phone: $("emdPhone").value, notes: $("emdNotes").value,
   };
   $("emdSave").disabled = true;
   try {
