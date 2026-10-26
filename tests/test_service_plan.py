@@ -481,3 +481,31 @@ def test_bill_lines_for_the_new_items(line, key):
 def test_the_parts_are_not_the_services():
     assert sp.classify_line("ประเก็นท่อร่วมไอดี") is None                         # a gasket, not the manifold
     assert sp.classify_line("ท่อไอดี") is None and sp.classify_line("เปลี่ยนท่อไอดี") is None   # the intake hose is another part
+
+
+# ------------------------------------------------- "mileage of the next time" on a bill: mileage + the truck's oil-change distance
+def _fake_plan_tables(monkeypatch, plans, overrides=()):
+    monkeypatch.setattr(sp, "has_v10", lambda: True)
+    monkeypatch.setattr(sp, "_oil_cache", {"at": 0.0, "value": {}})
+    monkeypatch.setattr(sp, "_vehicle_groups", lambda: plans)
+    monkeypatch.setattr(sp, "_groups", lambda: GROUPS)
+    monkeypatch.setattr(sp.supabase, "select_all", lambda table, params: list(overrides))
+
+
+def test_the_next_mileage_distance_follows_the_trucks_group_then_its_class(monkeypatch):
+    _fake_plan_tables(monkeypatch, {"a": "S2", "b": "B4", "c": "B5"})
+    trucks = [{"id": "a", "vehicle_class": "รถเล็ก"}, {"id": "b", "vehicle_class": "รถเล็ก"},    # an NLR: class small, plan group B4 (big rules)
+              {"id": "c", "vehicle_class": "รถใหญ่"}, {"id": "d", "vehicle_class": "รถเล็ก"},    # d: no group yet -> its class
+              {"id": "e", "vehicle_class": "รถใหญ่"}, {"id": "f", "vehicle_class": ""}, {"vehicle_class": "รถเล็ก"}]
+    assert sp.oil_km_by_vehicle(trucks) == {"a": 10_000, "b": 20_000, "c": 20_000, "d": 10_000, "e": 20_000}
+
+
+def test_the_next_mileage_distance_follows_a_change_saved_on_the_settings_page(monkeypatch):
+    _fake_plan_tables(monkeypatch, {"a": "S2"}, [{"vehicle_class": sp.SMALL, "item_key": "engine_oil", "interval_km": 15_000, "interval_months": None}])
+    assert sp.oil_km_by_vehicle([{"id": "a", "vehicle_class": "รถเล็ก"}]) == {"a": 15_000}
+
+
+def test_no_suggestion_when_the_plan_tables_cannot_be_read(monkeypatch):
+    monkeypatch.setattr(sp, "_oil_cache", {"at": 0.0, "value": {}})
+    monkeypatch.setattr(sp, "has_v10", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
+    assert sp.oil_km_by_vehicle([{"id": "a", "vehicle_class": "รถเล็ก"}]) == {}

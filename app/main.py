@@ -126,6 +126,9 @@ def meta(x_app_token: str = Header(default=""), token: str = Query(default="")) 
         except supabase.SupabaseError:
             logger.exception("could not load fixer suggestions")
     roster = load_roster()
+    if supabase.configured():          # km to the next oil change per truck: the bill page suggests "mileage + this" for the next time
+        oil = service_plan.oil_km_by_vehicle(roster)
+        roster = [{**r, "oil_km": oil.get(r.get("id"))} for r in roster]
     return {"categories": CATEGORIES, "vehicles": roster, "fixers": fixers, "shops": shops.choices(), "shop_contacts": shops.directory(),
             "usages": fleet.usage_choices(roster), "branches": fleet.BRANCHES,
             "fleet_ready": fleet.has_v6() if supabase.configured() else False,

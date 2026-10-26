@@ -227,6 +227,30 @@ function flagInput(node, flagged) {
   return node;
 }
 
+// Picking a truck fills in its branch; and once there is a mileage, "the mileage of the next time" is that + the truck's oil-change distance
+// (10,000 small / 20,000 big, from the plan: roster.oil_km). A next-mileage the bill itself gave, or one you typed, is never overwritten;
+// one this filled in follows the mileage as you change it.
+function bindVehicleAutofill({ vehicleSel, branchEl, mileageEl, nextEl, hintEl, fillBranchNow = false }) {
+  const veh = () => selectedVehicle(vehicleSel);
+  const hint = (text) => { if (hintEl) hintEl.textContent = text; };
+  nextEl.dataset.auto = nextEl.value === "" ? "1" : "";
+  const suggest = () => {
+    if (nextEl.dataset.auto !== "1") return;
+    const v = veh(), km = v && v.oil_km, mileage = num(mileageEl.value);
+    if (km && mileage > 0) { nextEl.value = String(Math.round(mileage + km)); hint(`= เลขไมล์ + ${baht(km)} (รอบน้ำมันเครื่องของรถคันนี้) — แก้ได้`); }
+    else { nextEl.value = ""; hint(""); }
+  };
+  nextEl.addEventListener("input", () => { nextEl.dataset.auto = nextEl.value === "" ? "1" : ""; hint(""); });
+  mileageEl.addEventListener("input", suggest);
+  vehicleSel.addEventListener("change", () => {
+    const v = veh();
+    if (v && v.branch) branchEl.value = v.branch;
+    suggest();
+  });
+  if (fillBranchNow && veh() && veh().branch && !branchEl.value) branchEl.value = veh().branch;
+  suggest();
+}
+
 function eventField(label, node, { wide = false } = {}) {
   return el("label", { class: "field" + (wide ? " wide" : "") }, el("span", { text: label }), node);
 }
@@ -258,7 +282,7 @@ function render(draft, pickedVehicle) {
       el("datalist", { id: "evVendorList" }, ...[...new Set([...(board.shops || []), ...(board.fixers || [])])].map((n) => el("option", { value: n }))))),
     eventField("สาขา", flagInput(inp("evBranch", "text", ev.branch), flags.has("branch"))),
     eventField("เลขไมล์", flagInput(inp("evMileage", "number", ev.mileage, { inputmode: "numeric" }), flags.has("mileage"))),
-    eventField("ไมล์ครั้งต่อไป", flagInput(inp("evNext", "number", ev.next_service_mileage, { inputmode: "numeric" }), flags.has("next_service_mileage"))),
+    eventField("ไมล์ครั้งต่อไป", el("div", {}, flagInput(inp("evNext", "number", ev.next_service_mileage, { inputmode: "numeric" }), flags.has("next_service_mileage")), el("div", { id: "evNextHint", class: "datecap" }))),
     eventField("ยอดรวมในบิล (บาท)", flagInput(inp("evTotal", "number", ev.total_cost, { step: "0.01", inputmode: "decimal" }), flags.has("total_cost"))),
     eventField("หมายเหตุ", el("textarea", { id: "evNotes", text: ev.notes || "" }), { wide: true }),
   );
@@ -268,6 +292,7 @@ function render(draft, pickedVehicle) {
   $("evTotal").addEventListener("input", () => { state.totalManual = true; });
   bindDateField($("evDate"), $("evDateCap"));
   vSel.addEventListener("change", renderFixes);   // the "which repairs does this close" list follows the truck
+  bindVehicleAutofill({ vehicleSel: vSel, branchEl: $("evBranch"), mileageEl: $("evMileage"), nextEl: $("evNext"), hintEl: $("evNextHint"), fillBranchNow: true });
   renderFixes();
 
   // one block per bill file, photo beside its own rows
@@ -280,8 +305,8 @@ function billBlock(bill, items) {
   const file = state.billFiles[bill.file_index];
   const preview = el("div", { class: "preview" });
   if (!file) preview.append(el("p", { class: "muted small", text: "(ไม่มีตัวอย่างไฟล์)" }));
-  else if (file.type === "application/pdf") preview.append(el("iframe", { src: file.url, title: bill.filename }), el("a", { href: file.url, target: "_blank", rel: "noopener", text: "เปิดในแท็บใหม่" }));
-  else preview.append(el("a", { href: file.url, target: "_blank", rel: "noopener" }, el("img", { src: file.url, alt: bill.filename })));
+  else if (file.type === "application/pdf") preview.append(el("iframe", { src: file.url, title: bill.filename }), el("button", { class: "btn small", type: "button", text: "ดูแบบเต็มจอ", onclick: () => buView(file.url, file.type, bill.filename) }));
+  else preview.append(buThumb({ url: file.url, type: file.type, name: bill.filename, turns: file.turns || 0 }));      // turn it (↻) or click for the big pop-up with zoom
 
   const right = el("div", {}, el("h3", {}, `บิลที่ ${bill.file_index + 1}`, el("span", { class: "muted small", text: bill.filename })));
   if (!bill.ok) {

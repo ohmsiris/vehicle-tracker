@@ -18,6 +18,7 @@ line such as "กรองเครื่อง" on a bill dated 2026-10-22 coun
 Until schema_v10.sql / schema_v11.sql have been run, reads come back empty and writes say what is missing.
 """
 import calendar
+import logging
 import math
 import re
 import time
@@ -26,6 +27,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from app import events, logsource, mgr, supabase
+
+logger = logging.getLogger("service_plan")
 
 SMALL, BIG = "รถเล็ก", "รถใหญ่"
 RULE_SETS = [SMALL, BIG]
@@ -882,6 +885,41 @@ def delete_reading(reading_id: str) -> None:
     supabase.delete("km_readings", {"id": f"eq.{reading_id}"})
 
 
+def oil_km_for(rule_set: Optional[str], overrides: Optional[list[dict]] = None) -> Optional[int]:
+    """Km between two engine-oil changes for a rule set: what the settings page saved, else the default (10,000 small / 20,000 big)."""
+    saved = next((o["interval_km"] for o in overrides or [] if o.get("vehicle_class") == rule_set and o.get("item_key") == "engine_oil" and o.get("interval_km")), None)
+    return saved or DEFAULT_KM.get(rule_set, {}).get("engine_oil")
+
+
+_oil_cache: dict = {"at": 0.0, "value": {}}
+
+
+def oil_km_by_vehicle(vehicles: list[dict]) -> dict:
+    """vehicle id -> km to the next oil change, for "the mileage of the next time" on a bill (mileage + this). It is the truck's
+    plan group's rule set (so an NLR in a big-truck group gets 20,000 whatever its class says); a truck with no group goes by
+    its รถเล็ก / รถใหญ่. Cached 30 s; {} when the plan tables are not there (the page then simply does not suggest)."""
+    now = time.time()
+    if now - _oil_cache["at"] > 30 or not _oil_cache["value"]:
+        try:
+            ready = has_v10()
+            overrides = supabase.select_all("service_intervals", {"select": "*", "order": "item_key.asc"}) if ready else []
+            groups = _groups() if ready else merge_groups(None)
+            plans = _vehicle_groups() if ready else {}
+        except Exception:
+            logger.exception("could not work out the oil intervals")
+            return {}
+        _oil_cache.update(at=now, value={"overrides": overrides, "groups": groups, "plans": plans})
+    cached = _oil_cache["value"]
+    out = {}
+    for v in vehicles:
+        group = cached["groups"].get(cached["plans"].get(v.get("id")))
+        rule_set = group["rule_set"] if group else v.get("vehicle_class")
+        km = oil_km_for(rule_set, cached["overrides"]) if rule_set in RULE_SETS else None
+        if km and v.get("id"):
+            out[v["id"]] = km
+    return out
+
+
 def settings() -> dict:
     """The settings page: the groups (months per step, how many trucks) and the km per item for each rule set."""
     ready = has_v10()
@@ -890,8 +928,7 @@ def settings() -> dict:
     for code in _vehicle_groups().values():
         counts[code] = counts.get(code, 0) + 1
     def oil_of(g):                                       # the group's engine-oil round: the km (as set for its rule set) and what that is in months
-        saved = next((o["interval_km"] for o in overrides if o.get("vehicle_class") == g["rule_set"] and o.get("item_key") == "engine_oil" and o.get("interval_km")), None)
-        km = saved or DEFAULT_KM.get(g["rule_set"], {}).get("engine_oil")
+        km = oil_km_for(g["rule_set"], overrides)
         return {"oil_km": km, "oil_months": item_months(km, g) if km else None}
 
     groups = [{**g, **oil_of(g), "months": group_months(g), "implied_km_per_day": group_km_per_day(g), "trucks": counts.get(g["code"], 0),

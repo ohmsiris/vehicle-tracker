@@ -280,21 +280,25 @@ function buRenderOrigin() {
   const job = bu.cur;
   const files = job ? job.files : [];
   $("bnOrigin").hidden = files.length === 0;
-  fill($("bnThumbs"), ...files.map((f) => {
-    if (f.type === "application/pdf") return el("div", { class: "bu-thumb" }, el("button", { class: "btn small", type: "button", text: `📄 ${f.name}`, onclick: () => buView(f.url, f.type, f.name) }));
-    let turns = f.turns || 0;
-    const img = el("img", { src: f.url, alt: f.name, title: "กดเพื่อดูภาพใหญ่" });
-    const apply = () => {
-      img.style.transform = `rotate(${turns * 90}deg)`;
-      const odd = turns % 2 === 1;
-      img.style.maxWidth = odd ? "260px" : "100%";
-      img.style.maxHeight = odd ? "220px" : "100%";
-    };
-    apply();
-    img.addEventListener("click", () => buView(f.url, f.type, f.name, () => f.turns || 0, (t) => { f.turns = t; turns = t; apply(); }));
-    return el("div", { class: "bu-thumb" }, img,
-      el("button", { class: "btn small rot", type: "button", title: "หมุนรูป (เฉพาะที่ดูตรงนี้)", text: "↻", onclick: () => { turns = (turns + 1) % 4; f.turns = turns; apply(); } }));
-  }));
+  fill($("bnThumbs"), ...files.map((f) => buThumb(f)));
+}
+
+// One bill file as a small preview that can be turned (↻) and opened large in the pop-up below. Used by the purchase bills, the repair-bill
+// review and the repair record: `f` is {url, type, name} (a turn made here is kept in f.turns).
+function buThumb(f) {
+  if (f.type === "application/pdf") return el("div", { class: "bu-thumb" }, el("button", { class: "btn small", type: "button", text: `📄 ${f.name || "ไฟล์"}`, onclick: () => buView(f.url, f.type, f.name) }));
+  let turns = f.turns || 0;
+  const img = el("img", { src: f.url, alt: f.name || "บิล", title: "กดเพื่อดูภาพใหญ่", loading: "lazy" });
+  const apply = () => {
+    img.style.transform = `rotate(${turns * 90}deg)`;
+    const odd = turns % 2 === 1;
+    img.style.maxWidth = odd ? "var(--thumb-h)" : "100%";
+    img.style.maxHeight = odd ? "var(--thumb-w)" : "100%";
+  };
+  apply();
+  img.addEventListener("click", () => buView(f.url, f.type, f.name, () => f.turns || 0, (t) => { f.turns = t; turns = t; apply(); }));
+  return el("div", { class: "bu-thumb" }, img,
+    el("button", { class: "btn small rot", type: "button", title: "หมุนรูป (เฉพาะที่ดูตรงนี้)", text: "↻", onclick: () => { turns = (turns + 1) % 4; f.turns = turns; apply(); } }));
 }
 
 // ---- the original bill in a pop-up: click the picture / press Esc to close, so checking is one click in and one out

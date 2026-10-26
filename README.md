@@ -191,6 +191,13 @@ dialog. A shop with no number yet (ฮีโน่ เอเซีย หนอ�
 
 ## One repair event, read like a bill
 
+**Bill review and editing** (the page after a bill is read, and "แก้ไข" on a saved bill): picking a truck fills in its **สาขา** at once; once
+there is a **เลขไมล์**, **ไมล์ครั้งต่อไป** is filled in as mileage + the truck's oil-change distance (10,000 small / 20,000 big -- the truck's
+plan group's rule set, with any change saved on the plan settings page; `oil_km` per truck comes from `/api/meta`, `service_plan.oil_km_by_vehicle`).
+A next mileage the bill itself gave, or one you typed, is never overwritten; one the page filled in follows the mileage as you change it. The bill photos
+are the same turnable preview as the purchase bills (↻ to turn, click for the big pop-up with zoom; Esc closes) -- on the review page, and on a
+saved job (click a photo or PDF).
+
 The log (`#log`) is where history is found: choose one truck in its picker to see
 that truck's whole history, with a header card (usage, main driver, last repair,
 lifetime totals). Open a job to read it as a bill (read-only), with its

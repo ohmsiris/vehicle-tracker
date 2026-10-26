@@ -988,7 +988,7 @@ table.bu-lines-view { min-width: 640px; }
 .spin { display: inline-block; width: 12px; height: 12px; margin-right: 6px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: buspin .8s linear infinite; vertical-align: -1px; }
 @keyframes buspin { to { transform: rotate(360deg); } }
 .bu-thumbs { display: flex; gap: 12px; overflow-x: auto; padding-top: 6px; }
-.bu-thumb { flex: 0 0 auto; position: relative; width: 220px; height: 260px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); overflow: hidden; display: grid; place-items: center; }
+.bu-thumb { --thumb-w: 220px; --thumb-h: 260px; flex: 0 0 auto; position: relative; width: 220px; height: 260px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); overflow: hidden; display: grid; place-items: center; }
 .bu-thumb img { max-width: 100%; max-height: 100%; transition: transform .2s; }
 .bu-thumb .rot { position: absolute; top: 6px; right: 6px; }
 .bu-thumb img { cursor: zoom-in; }
@@ -1043,3 +1043,6 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 .hsoon-tag { position: absolute; top: 12px; right: 14px; font-size: 11px; font-weight: 600; color: var(--warn); background: var(--warn-soft); padding: 1px 9px; border-radius: 999px; }
 .hsoon-needs { color: var(--muted); font-style: italic; margin: 8px 0 0; }
 .hdigest { white-space: pre-line; font-size: 14px; margin: 4px 0 6px; line-height: 1.55; }
+/* the repair-bill review: the same turnable preview, but as big as its column */
+.bill .preview .bu-thumb { --thumb-w: 340px; --thumb-h: 460px; width: 100%; height: 460px; }
+.bill .preview .bu-thumb img { width: auto; border: 0; box-shadow: none; background: transparent; }

@@ -133,9 +133,11 @@ function renderPaper(d) {
       el("td", { class: "r", text: moneyText(l.line_total) }),
       el("td", {}, l.category ? el("span", { class: "catchip", text: l.category }) : null)))));
 
-  const files = d.attachments.map((a) => a.mime_type === "application/pdf"
-    ? el("a", { class: "filecard", href: a.url, target: "_blank", rel: "noopener" }, el("span", { class: "pdfico", text: "PDF" }), el("span", { class: "small", text: a.type === "bill" ? "บิล (เปิด)" : "ไฟล์ (เปิด)" }))
-    : el("a", { class: "filethumb", href: a.url, target: "_blank", rel: "noopener", title: "เปิดรูปเต็ม" },
+  // a click opens the same pop-up as the purchase bills (turn, zoom, Esc to close); the link underneath still works in a new tab
+  const popup = (a, i) => (ev) => { ev.preventDefault(); buView(a.url, a.mime_type, `${e.vendor || "บิล"} · ${a.type === "bill" ? "บิล" : "ไฟล์"} ${i + 1}`); };
+  const files = d.attachments.map((a, i) => a.mime_type === "application/pdf"
+    ? el("a", { class: "filecard", href: a.url, target: "_blank", rel: "noopener", onclick: popup(a, i) }, el("span", { class: "pdfico", text: "PDF" }), el("span", { class: "small", text: a.type === "bill" ? "บิล (เปิด)" : "ไฟล์ (เปิด)" }))
+    : el("a", { class: "filethumb", href: a.url, target: "_blank", rel: "noopener", title: "ดูรูปใหญ่ หมุน ขยาย", onclick: popup(a, i) },
         el("img", { src: a.url, alt: a.type === "bill" ? "รูปบิล" : "รูปอื่นๆ", loading: "lazy" }),
         el("span", { class: "filetag", text: a.type === "bill" ? "บิล" : "รูปอื่นๆ" })));
 
@@ -246,7 +248,7 @@ function startEdit() {
       field("ผู้ซ่อม", input("edPerformedBy", "text", e.performed_by, { maxlength: "200" })),
       field("สาขา", input("edBranch", "text", e.branch, { maxlength: "100" })),
       field("เลขไมล์", input("edMileage", "number", e.mileage, { inputmode: "numeric" })),
-      field("ไมล์ครั้งต่อไป", input("edNext", "number", e.next_service_mileage, { inputmode: "numeric" })),
+      field("ไมล์ครั้งต่อไป", el("div", {}, input("edNext", "number", e.next_service_mileage, { inputmode: "numeric" }), el("div", { id: "edNextHint", class: "datecap" }))),
       field("ยอดรวม (บาท)", input("edTotal", "number", e.total_cost, { step: "0.01", inputmode: "decimal" })),
       field("สรุปสั้นๆ ว่าซ่อมอะไร (ไม่บังคับ — แสดงในรายการประวัติ)", el("div", { class: "row" },
         input("edSummary", "text", e.summary, { maxlength: "500", placeholder: "เช่น ถ่ายน้ำมันเครื่อง + เปลี่ยนผ้าเบรกหลัง" }),
@@ -263,6 +265,7 @@ function startEdit() {
   fleet.paperCard.replaceWith(form);
   fleet.paperCard = form;
   bindDateField($("edDate"), $("edDateCap"));
+  bindVehicleAutofill({ vehicleSel: $("edVehicle"), branchEl: $("edBranch"), mileageEl: $("edMileage"), nextEl: $("edNext"), hintEl: $("edNextHint") });
   $("edTotal").addEventListener("input", () => { fleet.totalManual = true; editTotalsChanged(); });
   editHooks.renumber();
   editTotalsBar();
