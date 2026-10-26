@@ -29,7 +29,7 @@ def test_the_dealership_km_for_small_and_big():
     assert (small["wheel_grease"], big["wheel_grease"]) == (30_000, 60_000)
     for key in ("gearbox_oil", "diff_oil", "brake_clutch_fluid", "power_steering", "coolant"):
         assert small[key] == 40_000 and big[key] == 40_000
-    assert "valve_adjust" not in small and big["valve_adjust"] == 80_000          # D-Max has hydraulic lifters
+    assert small["valve_adjust"] == 100_000 and big["valve_adjust"] == 80_000      # small: only the Isuzu 2.5 gets it (ONLY_FOR)
     assert small["injector_washers"] == 100_000 and "injector_washers" not in big
     assert big["valve_cover_seal"] == 80_000 and "valve_cover_seal" not in small
 
@@ -37,7 +37,7 @@ def test_the_dealership_km_for_small_and_big():
 def test_every_default_item_exists():
     for table in sp.DEFAULT_KM.values():
         for key, km in table.items():
-            assert key in sp.ITEMS and (km is None and key in sp.FIXED_MONTHS or km > 0)
+            assert key in sp.ITEMS and km > 0
 
 
 def test_group_months_and_implied_km_per_day():
@@ -62,7 +62,7 @@ def test_the_owners_conversion_table():
 def test_effective_plan_uses_the_rule_set_of_the_group():
     assert "injector_washers" in {i["key"] for i in sp.effective_plan(S2)}
     assert "injector_washers" not in {i["key"] for i in sp.effective_plan(B5)}
-    assert "valve_adjust" not in {i["key"] for i in sp.effective_plan(S2)} and "valve_adjust" in {i["key"] for i in sp.effective_plan(B5)}
+    assert "valve_adjust" not in {i["key"] for i in sp.effective_plan(S2)} and "valve_adjust" in {i["key"] for i in sp.effective_plan(B5)}      # (S2: not without a truck)
 
 
 def test_saved_km_changes_apply_to_that_rule_set_only():
@@ -413,29 +413,58 @@ def test_the_groups_say_what_their_oil_round_is(monkeypatch):
 
 
 # ------------------------------------------------- the calendar items and the other new default items
-def test_a_flush_and_a_chassis_check_are_counted_in_months_for_every_truck():
-    assert sp.FIXED_MONTHS == {"engine_flush": 12, "chassis_check": 3}
-    for group in (S2, S3, B5, B6, KK1):                  # whatever the group's driving rate, the same months
+def test_the_flush_comes_round_about_once_a_year_and_the_chassis_check_with_every_oil_change():
+    for rule_set, oil in ((sp.SMALL, 10_000), (sp.BIG, 20_000)):
+        assert sp.DEFAULT_KM[rule_set]["engine_flush"] == 60_000 and sp.DEFAULT_KM[rule_set]["chassis_check"] == oil == sp.DEFAULT_KM[rule_set]["engine_oil"]
+    B4 = GROUPS["B4"]
+    for group, flush_months in ((S2, 12), (B4, 12)):              # 60,000 km = 6 steps of 2 months / 3 steps of 4 months
         plan = {i["key"]: i for i in sp.effective_plan(group)}
-        assert plan["engine_flush"]["interval_months"] == 12 and plan["engine_flush"]["interval_km"] is None
-        assert plan["chassis_check"]["interval_months"] == 3 and plan["chassis_check"]["interval_km"] is None
+        assert plan["engine_flush"]["interval_months"] == pytest.approx(flush_months)
+        assert plan["chassis_check"]["interval_months"] == plan["engine_oil"]["interval_months"]
 
 
-def test_a_calendar_item_falls_due_by_the_calendar():
-    plan = sp.vehicle_plan(TRUCK, group=B5, records=[rec("engine_flush", "2026-01-10"), rec("chassis_check", "2026-09-10")], readings=[], overrides=[], today=TODAY)
-    items = {i["key"]: i for i in plan["items"]}
-    assert items["engine_flush"]["due_date"] == "2027-01-10" and items["engine_flush"]["due_by"] == "months" and items["engine_flush"]["km_left"] is None
-    assert items["chassis_check"]["due_date"] == "2026-12-10"
+def test_a_flush_falls_due_by_km_and_months_like_any_other_item():
+    plan = sp.vehicle_plan(TRUCK, group=S2, records=[rec("engine_flush", "2025-10-24", odo=100_000)], readings=[], overrides=[], today=TODAY)
+    item = {i["key"]: i for i in plan["items"]}["engine_flush"]
+    assert item["interval_km"] == 60_000 and item["due_date"] == "2026-10-24" and item["due_by"] == "months"
+
+
+ISUZU_25 = {"id": VID, "make": "ISUZU", "model": "D-Max 2.5"}
+
+
+@pytest.mark.parametrize("make,model,gets_it", [
+    ("ISUZU", "D-Max 2.5", True), ("Isuzu", "D-MAX 2.5 Hi-Lander", True),
+    ("ISUZU", "D-Max 1.9", False), ("TOYOTA", "Hilux Revo 2.4", False), ("TOYOTA", "Revo", False),
+    ("ISUZU", None, False), (None, None, False), ("TOYOTA", "2.5", False),
+])
+def test_the_valve_adjustment_is_only_for_the_isuzu_2_5(make, model, gets_it):
+    keys = {i["key"] for i in sp.effective_plan(S2, None, {"id": VID, "make": make, "model": model})}
+    assert ("valve_adjust" in keys) is gets_it
+    assert "injector_washers" in keys                                       # that one is for every small truck
+
+
+def test_the_isuzu_2_5_valve_adjustment_is_with_the_injector_washers_at_100000_km():
+    plan = {i["key"]: i for i in sp.effective_plan(S2, None, ISUZU_25)}
+    assert plan["valve_adjust"]["interval_km"] == plan["injector_washers"]["interval_km"] == 100_000
+    assert plan["valve_adjust"]["interval_months"] == plan["injector_washers"]["interval_months"]
+    vp = sp.vehicle_plan({**ISUZU_25}, group=S2, records=[], readings=[], overrides=[], today=TODAY)
+    assert "valve_adjust" in {i["key"] for i in vp["items"]}
+    other = sp.vehicle_plan({"id": VID, "make": "ISUZU", "model": "D-Max 1.9"}, group=S2, records=[], readings=[], overrides=[], today=TODAY)
+    assert "valve_adjust" not in {i["key"] for i in other["items"]}
+
+
+def test_the_big_trucks_valve_adjustment_is_for_every_big_truck():
+    assert "valve_adjust" in {i["key"] for i in sp.effective_plan(B5, None, {"id": VID, "make": "HINO", "model": "Mega 500"})}
+
+
+def test_the_settings_say_which_trucks_an_item_is_only_for():
+    items = {i["key"]: i for i in sp.rule_set_items(sp.SMALL)}
+    assert items["valve_adjust"]["only_for"] == "Isuzu 2.5 เท่านั้น" and items["injector_washers"]["only_for"] is None
 
 
 def test_the_intake_manifold_is_for_the_small_trucks_at_100000_km():
     assert sp.DEFAULT_KM[sp.SMALL]["intake_manifold"] == 100_000 and "intake_manifold" not in sp.DEFAULT_KM[sp.BIG]
     assert sp.effective_plan(S2)[[i["key"] for i in sp.effective_plan(S2)].index("intake_manifold")]["interval_months"] == pytest.approx(20)
-
-
-def test_the_km_of_a_calendar_item_cannot_be_set_in_the_settings():
-    with pytest.raises(sp.InvalidPlan):
-        sp.clean_interval({"vehicle_class": sp.SMALL, "item_key": "engine_flush", "interval_km": "1000"})
 
 
 @pytest.mark.parametrize("line,key", [

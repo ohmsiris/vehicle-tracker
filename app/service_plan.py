@@ -83,11 +83,6 @@ ITEM_CATEGORY = {key: "ไส้กรองและของเหลว" for 
 ITEM_CATEGORY.update(valve_adjust="เครื่องยนต์", valve_cover_seal="เครื่องยนต์", injector_washers="เครื่องยนต์", intake_manifold="เครื่องยนต์",
                      chassis_check="ช่วงล่าง")
 
-# Items counted by the CALENDAR, the same for every truck: months, not km. (Every other item is km, and its months follow from the truck's
-# group -- how fast that kind of truck drives -- so they differ from truck to truck. A check or a flush should come round about the same
-# time for every truck whatever it drives, so these skip that conversion: exactly this many months after it was last done.)
-FIXED_MONTHS = {"engine_flush": 12, "chassis_check": 3}
-
 # rule set -> key -> km. The dealership's rules as the owner settled them (see Maintenance_Plan.xlsx):
 # small = D-Max / Revo, big = NLR / NMR / NPR, 6- and 10-wheelers. A missing key means no such service for that rule set.
 DEFAULT_KM = {
@@ -102,10 +97,11 @@ DEFAULT_KM = {
         "brake_clutch_fluid": 40_000,
         "power_steering": 40_000,
         "wheel_grease": 30_000,
+        "valve_adjust": 100_000,           # only the mechanical-valve engines (Isuzu 2.5, see ONLY_FOR), done with the injector washers
         "injector_washers": 100_000,
         "intake_manifold": 100_000,        # cleaned with the injector washers
-        "engine_flush": None,              # by the calendar (FIXED_MONTHS)
-        "chassis_check": None,
+        "engine_flush": 60_000,            # about once a year in S2
+        "chassis_check": 10_000,           # at every oil change
     },
     BIG: {
         "engine_oil": 20_000,
@@ -120,10 +116,22 @@ DEFAULT_KM = {
         "brake_clutch_fluid": 40_000,
         "power_steering": 40_000,
         "wheel_grease": 60_000,
-        "engine_flush": None,              # by the calendar (FIXED_MONTHS)
-        "chassis_check": None,
+        "engine_flush": 60_000,            # about once a year in B4
+        "chassis_check": 20_000,           # at every oil change
     },
 }
+
+
+def _isuzu_25(vehicle: Optional[dict]) -> bool:
+    """The 2.5 litre Isuzu D-Max: its valves are adjusted by hand. The 1.9 and the Revo have hydraulic ones (nothing to adjust)."""
+    text = f"{(vehicle or {}).get('make') or ''} {(vehicle or {}).get('model') or ''}".lower()
+    return "isuzu" in text and "2.5" in text
+
+
+# Items that only SOME trucks of a rule set need: (rule set, item key) -> (what it is for, test on the truck's make/model). A truck
+# that fails the test does not get the item at all (no row in its plan, no reminder). The test reads the truck's make and model in the
+# roster, so a new 2.5 needs its model written like "D-Max 2.5".
+ONLY_FOR = {(SMALL, "valve_adjust"): ("Isuzu 2.5 เท่านั้น", _isuzu_25)}
 
 # The groups: how many months one base step of km is worth. months_per_step None -> worked out from km_per_day.
 DEFAULT_GROUPS = [
@@ -176,8 +184,9 @@ def item_months(km: Optional[int], group: dict) -> Optional[float]:
     return (km / group["step_km"]) * months
 
 
-def effective_plan(group: Optional[dict], overrides: Optional[list[dict]] = None) -> list[dict]:
-    """The items one truck needs: its rule set's km (with any saved change) and the months its group makes of them."""
+def effective_plan(group: Optional[dict], overrides: Optional[list[dict]] = None, vehicle: Optional[dict] = None) -> list[dict]:
+    """The items one truck needs: its rule set's km (with any saved change) and the months its group makes of them.
+    `vehicle` (its make / model) decides the items that are only for some trucks (ONLY_FOR); without it they are left out."""
     if not group:
         return []
     base = DEFAULT_KM.get(group["rule_set"])
@@ -188,8 +197,11 @@ def effective_plan(group: Optional[dict], overrides: Optional[list[dict]] = None
     for key, (label, grp) in ITEMS.items():
         if key not in base:
             continue
+        only = ONLY_FOR.get((group["rule_set"], key))
+        if only and not only[1](vehicle):
+            continue
         km = saved[key]["interval_km"] if key in saved else base[key]
-        months = FIXED_MONTHS.get(key) or item_months(km, group)        # a calendar item: its own months; else from the km and the group
+        months = item_months(km, group)
         out.append({"key": key, "label": label, "group": grp, "default_km": base[key], "interval_km": km,
                     "interval_months": months, "customised": key in saved})
     return out
@@ -200,7 +212,7 @@ def rule_set_items(rule_set: str, overrides: Optional[list[dict]] = None) -> lis
     base = DEFAULT_KM.get(rule_set, {})
     saved = {o["item_key"]: o for o in (overrides or []) if o.get("vehicle_class") == rule_set and o.get("interval_km")}
     return [{"key": key, "label": label, "default_km": base[key], "interval_km": saved[key]["interval_km"] if key in saved else base[key],
-             "customised": key in saved, "months": FIXED_MONTHS.get(key)} for key, (label, _g) in ITEMS.items() if key in base]
+             "customised": key in saved, "only_for": (ONLY_FOR.get((rule_set, key)) or (None,))[0]} for key, (label, _g) in ITEMS.items() if key in base]
 
 
 # ------------------------------------------------- reading bills for history
@@ -447,7 +459,7 @@ def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], r
                  today: date, with_chart: bool = False, soon_days: int = SOON_DAYS, snoozes: Optional[dict] = None) -> dict:
     """The whole programme for one truck. `records` = saved records + bill hits for THIS truck; `group` = its group;
     `snoozes` = this truck's snoozed reminders {item_key: {until, for_due}}."""
-    plan = effective_plan(group, overrides)
+    plan = effective_plan(group, overrides, vehicle)
     default_kmpd = group_km_per_day(group) if group else None
     est = estimate_km_per_day(readings, today, default_kmpd)
     odo = latest_odometer(readings, records)
@@ -607,7 +619,7 @@ def clean_interval(data: dict) -> dict:
     if rule_set not in RULE_SETS:
         raise InvalidPlan("ชุดกฎต้องเป็นรถเล็กหรือรถใหญ่")
     if DEFAULT_KM[rule_set].get(key) is None:
-        raise InvalidPlan("รายการนี้ไม่ได้อยู่ในแผนของรถกลุ่มนี้ (หรือนับเป็นเดือนอย่างเดียว)")
+        raise InvalidPlan("รายการนี้ไม่ได้อยู่ในแผนของรถกลุ่มนี้")
     km = _int(data.get("interval_km"), "ระยะทาง", maximum=1_000_000, allow_blank=False)
     if not km:
         raise InvalidPlan("ระยะทางต้องมากกว่า 0")

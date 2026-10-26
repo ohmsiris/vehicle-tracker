@@ -323,11 +323,8 @@ function kmRow(rule, it) {
     } catch (err) { plSettingMsg(msg, err.message); return; }
     renderSettings();
   };
-  if (it.default_km === null) {                           // counted by the calendar, the same for every truck (FIXED_MONTHS in service_plan.py): nothing to change here
-    return el("div", { class: "pl-km-row" }, el("div", {}, el("strong", { text: it.label }), el("div", { class: "muted small", text: `ทุก ${plMonths(it.months)} (นับเป็นเดือน ทุกคัน)` })));
-  }
   return el("div", { class: `pl-km-row${it.customised ? " custom" : ""}` },
-    el("div", {}, el("strong", { text: it.label }), el("div", { class: "muted small", text: `ค่าเริ่มต้น ${baht(it.default_km)} กม.${""}` })),
+    el("div", {}, el("strong", { text: it.label }), el("div", { class: "muted small", text: `ค่าเริ่มต้น ${baht(it.default_km)} กม.${it.only_for ? ` · ${it.only_for}` : ""}` })),
     km, el("div", { class: "pl-set-actions" }, el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: save }),
       it.customised ? el("button", { class: "btn small", type: "button", text: "คืนค่าเริ่มต้น", onclick: reset }) : null, msg));
 }

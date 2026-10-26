@@ -491,19 +491,21 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   existed for a day and was taken out; `schema_v20.sql` drops its table). To add an item: a line in `ITEMS` (name, table group),
   its km per rule set in `DEFAULT_KM` (a missing key = not for that kind of truck), a category in `ITEM_CATEGORY` if it is not
   "ไส้กรองและของเหลว", and how a bill line is recognised (`_LINE_RULES`: at the start of the line; `_ANYWHERE`: anywhere in it).
-  An item counted by the CALENDAR instead of km (the same for every truck whatever it drives) puts `None` in `DEFAULT_KM` and its
-  months in `FIXED_MONTHS`: that is how the flush (12 months) and the chassis check (3 months) work -- a km item's months follow
-  from the truck's group (its driving rate), so they differ from truck to truck; a calendar item does not.
+  Every item is counted in km; its months follow from the truck's group (its driving rate). An item only SOME trucks of a rule set
+  need goes in `ONLY_FOR` (rule set, key) with a test on the truck's make / model text: today the small trucks' ปรับตั้งวาล์ว is for
+  the **Isuzu 2.5** only (make contains "isuzu" and model contains "2.5" -- so write a new one's model like "D-Max 2.5"; the D-Max 1.9
+  and the Revo have hydraulic valves and never get it). A truck that fails the test has no row for it in its plan and gets no reminder.
 - Built in since: ล้างท่อร่วมไอดี (small trucks, 100,000 km, with the injector washers; a line that is the manifold itself --
   "ท่อร่วมไอดี", "เปลี่ยน / ล้าง / ทำความสะอาด ท่อร่วมไอดี" -- counts, since a new one is as clean as it gets; "ท่อไอดี" alone is the intake
-  hose and needs ล้าง / ทำความสะอาด; a gasket line does not count), ฟลัชชิ่งน้ำมันเครื่อง (12 months, every truck), เช็คช่วงล่าง (3 months, every truck; any bill line with แหนบ /
-  สลักคอม้า / ปีกนก / โช้ค or "เช็ค/ตรวจช่วงล่าง" counts as done). The big trucks' valve adjustment is every 80,000 km.
+  hose and needs ล้าง / ทำความสะอาด; a gasket line does not count), ฟลัชชิ่งน้ำมันเครื่อง (60,000 km both kinds -- about once a year in S2 and B4), เช็คช่วงล่าง (every oil change: 10,000 km small, 20,000 km big;
+  any bill line with แหนบ / สลักคอม้า / ปีกนก / โช้ค or "เช็ค/ตรวจช่วงล่าง" counts as done), ปรับตั้งวาล์ว for the Isuzu 2.5 (100,000 km, with the
+  injector washers). The big trucks' valve adjustment is every 80,000 km.
 - Bill matching notes: a line that starts with "อัดจารบี" (or "ค่าอัดจารบี") counts as the wheel-bearing grease service -- the
   mechanic greases everything in one go; a bare "จารบี 1 กระป๋อง" or "หัวอัดจาระบี" is a part and does not. The group rows on the
   settings page show what the group's engine-oil round is (km as set for its rule set, and what that is in months), so changing
   the oil km below is visible above (the group's own "months per 10,000 km" is the driving rate and does not change).
 - The settings page layout: reminders (full width), the groups (full width), then รถเล็ก (left) and รถใหญ่ (right) with the km
-  of each item (calendar items show "ทุก N เดือน"), and which truck follows which group.
+  of each item, and which truck follows which group.
 - **Scheduled items travel with the oil change**: the aim is that the other items get done at an oil change, not on a day of their
   own. When a truck's oil change is in the reminders (inside the "coming close" window), every other item of that truck that would
   fall due before the NEXT oil change (its due date within the oil interval after this one) is added to its reminders, marked

@@ -722,6 +722,14 @@ async function submitNoBill() {
 // --------------------------------------------------------------- adding
 // A clean slate after every add: a second report for the same truck straight away is rare, so the truck is
 // cleared too and the cursor goes back to the truck picker.
+// The add-request date: "today" is the latest you can pick, and the default until you choose another day.
+function syncAddDate() {
+  const input = $("addDate"), today = todayISO();
+  input.max = today;
+  if (!input.value || input.value === input.dataset.auto) { input.value = today; $("addDateCap").textContent = dateCaption(today); }
+  input.dataset.auto = today;
+}
+
 function resetAddForm() {
   $("addVehicle").value = "";
   delete $("addReporter").dataset.typed;
@@ -729,8 +737,8 @@ function resetAddForm() {
   $("addReporter").value = "";
   $("addUrgent").checked = false;
   $("addShop").value = "";
-  $("addDate").value = todayISO();
-  $("addDateCap").textContent = dateCaption($("addDate").value);
+  $("addDate").value = "";
+  syncAddDate();
   $("addVehicle").focus();
 }
 
@@ -821,10 +829,11 @@ function initBoard() {
     const v = selectedVehicle($("addVehicle"));
     if (!$("addReporter").dataset.typed) $("addReporter").value = v && v.driver ? v.driver : "";
   });
-  $("addDate").max = todayISO();
   bindDateField($("addDate"), $("addDateCap"));
-  $("addDate").value = todayISO();
-  $("addDateCap").textContent = dateCaption($("addDate").value);
+  syncAddDate();
+  // A phone keeps the page open for days: without this the latest date you could pick stayed the day the page was opened.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) syncAddDate(); });
+  $("addDate").addEventListener("focus", () => syncAddDate());
   bindDateField($("fixDate"), $("fixDateCap"));
   $("fixCancel").addEventListener("click", () => $("fixDialog").close());
   $("fixHasBill").addEventListener("click", () => submitFix("fixed_awaiting_bill"));
