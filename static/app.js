@@ -253,7 +253,9 @@ function render(draft, pickedVehicle) {
   form.replaceChildren(
     eventField("รถ", vSel),
     eventField("วันที่ (ในบิลเป็น พ.ศ.)", el("div", {}, flagInput(inp("evDate", "date", ev.event_date), flags.has("event_date")), el("div", { id: "evDateCap", class: "datecap" }))),
-    eventField("ร้าน / อู่", flagInput(inp("evVendor", "text", ev.vendor), flags.has("vendor"))),
+    // a free text box that also offers the shops (and the other names used before) -- for when the bill's name was not read, or is written another way
+    eventField("ร้าน / อู่", el("div", {}, flagInput(inp("evVendor", "text", ev.vendor, { list: "evVendorList", autocomplete: "off", placeholder: "พิมพ์ หรือเลือกจากรายการ" }), flags.has("vendor")),
+      el("datalist", { id: "evVendorList" }, ...[...new Set([...(board.shops || []), ...(board.fixers || [])])].map((n) => el("option", { value: n }))))),
     eventField("สาขา", flagInput(inp("evBranch", "text", ev.branch), flags.has("branch"))),
     eventField("เลขไมล์", flagInput(inp("evMileage", "number", ev.mileage, { inputmode: "numeric" }), flags.has("mileage"))),
     eventField("ไมล์ครั้งต่อไป", flagInput(inp("evNext", "number", ev.next_service_mileage, { inputmode: "numeric" }), flags.has("next_service_mileage"))),
