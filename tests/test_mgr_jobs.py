@@ -80,3 +80,11 @@ def test_the_car_side_is_counted_by_stage():
 def test_there_is_no_line_any_more():
     import importlib.util
     assert importlib.util.find_spec("app.line_push") is None
+
+
+def test_the_plan_badge_counts_trucks_not_items():
+    found = [{"vehicle_id": "a", "truck": "6", "label": f"x{i}", "stage": st, "days_left": 1, "km_left": None, "km_real": False, "key": f"k{i}"}
+             for i, st in enumerate(["overdue", "overdue", "soon", "soon", "due"])]
+    found += [{"vehicle_id": "b", "truck": "18", "label": "y", "stage": "soon", "days_left": 3, "km_left": None, "km_real": False, "key": "ky"}]
+    out = j.summarize_plan(found, True, 10)
+    assert out["total"] == 6 and out["trucks"] == 2 and out["urgent_trucks"] == 1

@@ -132,7 +132,9 @@ def summarize_plan(found: list[dict], enabled: bool, soon_days: int) -> dict:
     counts = {"overdue": 0, "due": 0, "soon": 0}
     for x in found:
         counts[x["stage"]] += 1
-    return {"enabled": enabled, "soon_days": soon_days, "counts": counts, "total": len(found),
+    trucks = {x["vehicle_id"] for x in found}                       # the badge counts TRUCKS to look at (a truck with 9 items due is one)
+    urgent_trucks = {x["vehicle_id"] for x in found if x["stage"] in ("overdue", "due")}
+    return {"enabled": enabled, "soon_days": soon_days, "counts": counts, "total": len(found), "trucks": len(trucks), "urgent_trucks": len(urgent_trucks),
             "items": [{"vehicle_id": x["vehicle_id"], "truck": x["truck"], "label": x["label"], "stage": x["stage"], "days_left": x["days_left"], "km_left": x["km_left"],
                        "km_real": x["km_real"], "key": x["key"], "together": bool(x.get("together"))} for x in found[:PLAN_ITEMS_SHOWN]]}
 

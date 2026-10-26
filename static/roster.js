@@ -61,8 +61,11 @@ async function syncPickers(structural) {
 
 // ------------------------------------------------------------------ filters
 function fillRosterFilters() {
-  const branch = $("roBranch"), usage = $("roUsage");
-  const keepB = branch.value, keepU = usage.value;
+  const branch = $("roBranch"), usage = $("roUsage"), cls = $("roClass");
+  const keepB = branch.value, keepU = usage.value, keepC = cls.value;
+  const classes = [...new Set(fleet.vehicles.map((v) => v.vehicle_class).filter(Boolean))];
+  cls.replaceChildren(el("option", { value: "", text: "รถทุกขนาด" }), ...classes.map((c) => el("option", { value: c, text: c })));
+  cls.value = keepC;
   const branches = [...new Set([...(state.branches || []), ...fleet.vehicles.map((v) => v.branch).filter(Boolean)])];
   branch.replaceChildren(el("option", { value: "", text: "ทุกสาขา" }), ...branches.map((b) => el("option", { value: b, text: b })));
   usage.replaceChildren(el("option", { value: "", text: "ทุกประเภท" }), ...usageList().map((u) => el("option", { value: u, text: u })),
@@ -80,15 +83,28 @@ function usageList() {
 
 function visibleTrucks() {
   const tokens = $("roSearch").value.trim().split(/\s+/).map(vehNorm).filter(Boolean);
-  const branch = $("roBranch").value, usage = $("roUsage").value, status = $("roStatus").value;
+  const branch = $("roBranch").value, usage = $("roUsage").value, status = $("roStatus").value, cls = $("roClass").value;
+  const busy = $("roBusy").checked, sort = SORTS[$("roSort").value] || SORTS.number;
+  $("roClear").hidden = !(tokens.length || branch || usage || cls || busy || status !== "active" || $("roSort").value !== "number");
   return fleet.vehicles
     .filter((v) => (status === "all" ? true : status === "off" ? v.active === false : v.active !== false))
     .filter((v) => !branch || v.branch === branch)
     .filter((v) => !usage || (usage === UNSET ? !v.usage : v.usage === usage))
+    .filter((v) => !cls || v.vehicle_class === cls)
+    .filter((v) => !busy || v.open_requests || v.at_shop_requests || v.awaiting_bill_requests)
     .map((v) => [v, rosterScore(v, tokens)])
     .filter(([, s]) => s > 0)
-    .sort((a, b) => b[1] - a[1] || SORTS.number(a[0], b[0]))
+    .sort((a, b) => (tokens.length ? b[1] - a[1] : 0) || sort(a[0], b[0]) || SORTS.number(a[0], b[0]))     // words typed: best match first; otherwise the chosen order
     .map(([v]) => v);
+}
+
+function clearRosterFilters() {
+  $("roSearch").value = "";
+  for (const id of ["roBranch", "roUsage", "roClass"]) $(id).value = "";
+  $("roStatus").value = "active";
+  $("roSort").value = "number";
+  $("roBusy").checked = false;
+  renderRoster();
 }
 
 // a truck matches when every word is somewhere in its number / plate / model / branch / driver / usage
@@ -448,7 +464,8 @@ function showRosterTab(tab) {
 
 function initRoster() {
   $("roSearch").addEventListener("input", renderRoster);
-  for (const id of ["roBranch", "roUsage", "roStatus"]) $(id).addEventListener("change", renderRoster);
+  for (const id of ["roBranch", "roUsage", "roClass", "roStatus", "roSort", "roBusy"]) $(id).addEventListener("change", renderRoster);
+  $("roClear").addEventListener("click", clearRosterFilters);
   $("roAdd").addEventListener("click", () => goTruck("new"));
   $("roTabTrucks").addEventListener("click", () => showRosterTab("trucks"));
   $("roTabDrivers").addEventListener("click", () => showRosterTab("drivers"));

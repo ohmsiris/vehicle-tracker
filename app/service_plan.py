@@ -40,6 +40,8 @@ OVERDUE_REPEAT_DAYS = 3              # an overdue item is reminded about again e
 MAX_SNOOZE_DAYS = 90
 MAX_AS_OF_DAYS = 400                 # how far ahead the "look ahead" slider may go
 GPS_WINDOW_DAYS = 120                # GPS periods older than this no longer describe how the truck is used now
+ODOMETER_WINDOW_DAYS = 400          # the km per day is measured over about the last year of odometer figures (bills and readings)
+MAX_KM_PER_DAY = 1000
 MIN_ODOMETER_SPAN = 30               # days between two odometer readings before they beat the GPS figure
 MAX_KM = 3_000_000
 DAYS_PER_MONTH = 30.4375
@@ -289,6 +291,13 @@ def bill_hits(events: list[dict]) -> list[dict]:
     return out
 
 
+def bill_odometers(events: list[dict]) -> list[dict]:
+    """The mileage written on every confirmed bill / record, as odometer readings -- whether or not any of its lines is a plan item
+    (a "check at 160,000 km" bill that matched nothing still says how far the truck had been)."""
+    return [{"vehicle_id": ev["vehicle_id"], "kind": "odometer", "end_date": ev["event_date"], "km": ev["mileage"]}
+            for ev in events if ev.get("vehicle_id") and ev.get("event_date") and ev.get("mileage")]
+
+
 # --------------------------------------------------------------- the maths
 def parse_date(value) -> Optional[date]:
     if isinstance(value, date):
@@ -311,11 +320,33 @@ def add_months_f(d: date, months: float) -> date:
     return add_months(d, whole) + timedelta(days=round((months - whole) * DAYS_PER_MONTH))
 
 
-def estimate_km_per_day(readings: list[dict], today: date, default: Optional[float] = None) -> dict:
-    """{value, source, note}: source is 'odometer', 'gps' (measured) or 'default' (what the truck's group assumes)."""
-    odo = sorted((r for r in readings if r.get("kind") == "odometer" and parse_date(r.get("end_date"))), key=lambda r: r["end_date"])
+def odometer_points(readings: list[dict], hits: Optional[list[dict]] = None) -> list[dict]:
+    """Every odometer figure we have for a truck, oldest first, as {end_date, km}: the readings typed on the plan page AND the
+    mileage written on its bills / records (the same bill can come up once per item it covered: counted once)."""
+    seen: dict = {}
+    for r in readings:
+        if r.get("kind") == "odometer" and parse_date(r.get("end_date")) and r.get("km") is not None:
+            seen[(parse_date(r["end_date"]), r["km"])] = None
+    for h in hits or []:
+        if h.get("odometer_km") and parse_date(h.get("done_date")):
+            seen[(parse_date(h["done_date"]), h["odometer_km"])] = None
+    return [{"end_date": d.isoformat(), "km": km} for d, km in sorted(seen)]
+
+
+def estimate_km_per_day(readings: list[dict], today: date, default: Optional[float] = None, hits: Optional[list[dict]] = None) -> dict:
+    """{value, source, note}: source is 'odometer', 'gps' (measured) or 'default' (what the truck's group assumes).
+    `hits` = the truck's records / bill hits: their mileage counts as odometer readings too. Of the figures, the newest one and the
+    oldest one within ODOMETER_WINDOW_DAYS before it (a truck's use changes over the years) give the rate."""
+    odo = odometer_points(readings, hits)
+    if len(odo) >= 2:
+        newest = parse_date(odo[-1]["end_date"])
+        recent = [p for p in odo if (newest - parse_date(p["end_date"])).days <= ODOMETER_WINDOW_DAYS]
+        if len(recent) >= 2:
+            odo = recent
     span = (parse_date(odo[-1]["end_date"]) - parse_date(odo[0]["end_date"])).days if len(odo) >= 2 else 0
     odo_value = (odo[-1]["km"] - odo[0]["km"]) / span if span > 0 and odo[-1]["km"] >= odo[0]["km"] else None
+    if odo_value is not None and not 0 < odo_value <= MAX_KM_PER_DAY:          # equal or mistyped mileages: not a rate to trust
+        odo_value = None
     since = today - timedelta(days=GPS_WINDOW_DAYS)
     km = days = 0
     for r in readings:
@@ -464,7 +495,7 @@ def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], r
     `snoozes` = this truck's snoozed reminders {item_key: {until, for_due}}."""
     plan = effective_plan(group, overrides, vehicle)
     default_kmpd = group_km_per_day(group) if group else None
-    est = estimate_km_per_day(readings, today, default_kmpd)
+    est = estimate_km_per_day(readings, today, default_kmpd, records)
     odo = latest_odometer(readings, records)
     measured = est["value"] if est["source"] in ("gps", "odometer") else None
     statuses = [item_status(it, last_done(it["key"], records), measured, odo, today, soon_days, default_kmpd) for it in plan]
@@ -753,11 +784,12 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
     readings = _group(supabase.select_all("km_readings", {"select": "*", "order": "id.asc"})) if ready else {}
     overrides = supabase.select_all("service_intervals", {"select": "*", "order": "item_key.asc"}) if ready else []
     groups, assigned = _groups(), _vehicle_groups()
-    hits = _group(bill_hits(_bill_events()))
+    events = _bill_events()
+    hits, odos = _group(bill_hits(events)), _group(bill_odometers(events))
     rows = []
     for v in vehicles:
         group = groups.get(assigned.get(v["id"]))
-        plan = vehicle_plan(v, group=group, records=records.get(v["id"], []) + hits.get(v["id"], []), readings=readings.get(v["id"], []),
+        plan = vehicle_plan(v, group=group, records=records.get(v["id"], []) + hits.get(v["id"], []), readings=readings.get(v["id"], []) + odos.get(v["id"], []),
                             overrides=overrides, today=today, soon_days=soon_days, snoozes=snoozes.get(v["id"]))
         rows.append({**{k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "usage")}, **plan})
 
@@ -796,7 +828,7 @@ def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
     hits = bill_hits(events)
     groups = _groups()
     code = _vehicle_groups().get(vehicle_id)
-    plan = vehicle_plan(v, group=groups.get(code), records=records + hits, readings=readings, overrides=overrides, today=today, with_chart=True,
+    plan = vehicle_plan(v, group=groups.get(code), records=records + hits, readings=readings + bill_odometers(events), overrides=overrides, today=today, with_chart=True,
                         soon_days=_plan_settings()["soon_days"], snoozes=_snoozes().get(vehicle_id))
     history = sorted([{**r, "label": item_label(r["item_key"])} for r in records + hits], key=lambda r: (r["done_date"], r["item_key"]), reverse=True)
     choices = [{**g, "months": group_months(g)} for g in sorted(groups.values(), key=lambda g: g.get("sort_order", 99))]

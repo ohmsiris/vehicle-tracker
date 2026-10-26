@@ -440,20 +440,38 @@
     </div>
 
     <div id="rosterTrucks">
-      <div class="card rosterbar">
-        <input id="roSearch" type="search" placeholder="ค้นหา: เบอร์รถ ทะเบียน รุ่น ชื่อคนขับ เช่น 84-4786, 36, D-Max, สมชาย" autocomplete="off" aria-label="ค้นหารถ">
-        <select id="roBranch" aria-label="สาขา"><option value="">ทุกสาขา</option></select>
-        <select id="roUsage" aria-label="ประเภท"><option value="">ทุกประเภท</option></select>
-        <select id="roStatus" aria-label="สถานะ">
-          <option value="active">ใช้งานอยู่</option>
-          <option value="off">เลิกใช้แล้ว</option>
-          <option value="all">ทั้งหมด</option>
-        </select>
-        <button id="roAdd" class="btn primary" type="button">+ เพิ่มรถ</button>
+      <div class="card logfilters">
+        <div class="lgtop rotop">
+          <input id="roSearch" type="search" placeholder="ค้นหา: เบอร์รถ ทะเบียน รุ่น ชื่อคนขับ เช่น 84-4786, 36, D-Max, สมชาย" autocomplete="off" aria-label="ค้นหารถ">
+          <button id="roAdd" class="btn primary" type="button">+ เพิ่มรถ</button>
+        </div>
+        <div class="lggrid">
+          <div><label for="roBranch">สาขา</label><select id="roBranch"><option value="">ทุกสาขา</option></select></div>
+          <div><label for="roUsage">ประเภทการใช้งาน</label><select id="roUsage"><option value="">ทุกประเภท</option></select></div>
+          <div><label for="roClass">ขนาดรถ</label><select id="roClass"><option value="">รถทุกขนาด</option></select></div>
+          <div><label for="roStatus">สถานะ</label>
+            <select id="roStatus">
+              <option value="active">ใช้งานอยู่</option>
+              <option value="off">เลิกใช้แล้ว</option>
+              <option value="all">ทั้งหมด</option>
+            </select></div>
+          <div><label for="roSort">เรียงตาม</label>
+            <select id="roSort">
+              <option value="number">เบอร์รถ (แยกสาขา)</option>
+              <option value="recent">ซ่อมล่าสุด</option>
+              <option value="spend">ค่าซ่อมรวมสูงสุด</option>
+              <option value="count">ซ่อมบ่อยที่สุด</option>
+            </select></div>
+        </div>
+        <div class="lgactions">
+          <label class="check"><input id="roBusy" type="checkbox"> เฉพาะที่มีงานค้าง (รอซ่อม / อยู่ที่อู่ / รอบิล)</label>
+          <span class="grow"></span>
+          <button id="roClear" class="btn small" type="button" hidden>ล้างตัวกรอง</button>
+          <button id="roExport" class="btn small" type="button">ดาวน์โหลด Excel (CSV)</button>
+        </div>
       </div>
       <div class="rostercountbar">
         <p class="muted small" id="rosterCount"></p>
-        <button id="roExport" class="btn small" type="button">ดาวน์โหลด Excel (CSV)</button>
       </div>
       <div id="rosterList" class="rostergrid"></div>
     </div>

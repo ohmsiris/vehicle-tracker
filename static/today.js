@@ -87,7 +87,7 @@ function renderToday() {
   const mgrN = m.ready ? m.overdue + m.today + m.follow_ups : 0;
   const planOn = p.enabled && p.total > 0;
   navBadge("navMgr", mgrN, m.ready && m.overdue > 0);
-  navBadge("navPlan", planOn ? p.counts.overdue + p.counts.due + p.counts.soon : 0, planOn && p.counts.overdue + p.counts.due > 0);
+  navBadge("navPlan", planOn ? p.trucks : 0, planOn && p.urgent_trucks > 0);          // trucks to look at, not items
 }
 
 // one browser notification per day for the summary (and again if the numbers change), never for the same thing twice

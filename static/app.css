@@ -1046,3 +1046,5 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 /* the repair-bill review: the same turnable preview, but as big as its column */
 .bill .preview .bu-thumb { --thumb-w: 340px; --thumb-h: 460px; width: 100%; height: 460px; }
 .bill .preview .bu-thumb img { width: auto; border: 0; box-shadow: none; background: transparent; }
+.rotop { grid-template-columns: minmax(0, 1fr) auto; }
+@media (max-width: 700px) { .rotop { grid-template-columns: 1fr; } }

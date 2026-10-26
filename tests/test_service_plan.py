@@ -509,3 +509,40 @@ def test_no_suggestion_when_the_plan_tables_cannot_be_read(monkeypatch):
     monkeypatch.setattr(sp, "_oil_cache", {"at": 0.0, "value": {}})
     monkeypatch.setattr(sp, "has_v10", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
     assert sp.oil_km_by_vehicle([{"id": "a", "vehicle_class": "รถเล็ก"}]) == {}
+
+
+# ------------------------------------------------- km per day from the mileage written on bills
+def bill(date_, km):
+    return {"item_key": "engine_oil", "done_date": date_, "odometer_km": km, "source": "bill"}
+
+
+def test_the_mileage_on_bills_gives_the_km_per_day():
+    hits = [bill("2025-06-29", 156_774), bill("2025-12-14", 178_284), bill("2026-05-28", 199_694), bill("2026-05-28", 199_694)]     # (one bill, two items)
+    e = sp.estimate_km_per_day([], TODAY, 132, hits)
+    assert e["source"] == "odometer" and e["value"] == pytest.approx((199_694 - 156_774) / 333, abs=0.1) and "3 ครั้ง" in e["note"]
+
+
+def test_old_mileages_beyond_the_window_do_not_set_todays_rate():
+    hits = [bill("2024-02-07", 92_272), bill("2025-06-29", 156_774), bill("2026-05-28", 199_694)]
+    e = sp.estimate_km_per_day([], TODAY, 132, hits)
+    assert e["value"] == pytest.approx((199_694 - 156_774) / 333, abs=0.1)              # not the 2-year average: the 2024 bill is outside 400 days
+
+
+def test_a_single_mileage_or_a_mistyped_one_gives_no_rate():
+    assert sp.estimate_km_per_day([], TODAY, 132, [bill("2026-05-28", 199_694)])["source"] == "default"
+    assert sp.estimate_km_per_day([], TODAY, 132, [bill("2026-01-01", 199_694), bill("2026-05-28", 19_969)])["source"] == "default"       # went backwards
+    assert sp.estimate_km_per_day([], TODAY, 132, [bill("2026-01-01", 100_000), bill("2026-05-28", 900_000)])["source"] == "default"      # 5,000 km a day
+    assert sp.estimate_km_per_day([], TODAY, 132, [bill("2026-01-01", 100_000), bill("2026-05-28", 100_000)])["source"] == "default"      # standing still
+
+
+def test_readings_and_bills_are_both_used():
+    readings = [{"kind": "odometer", "end_date": "2026-06-28", "km": 202_000}]
+    e = sp.estimate_km_per_day(readings, TODAY, 132, [bill("2026-05-28", 199_694)])
+    assert e["source"] == "odometer" and e["value"] == pytest.approx((202_000 - 199_694) / 31, abs=0.1)
+
+
+def test_every_bill_mileage_counts_as_an_odometer_reading_even_if_no_line_is_a_plan_item():
+    events = [{"id": "e1", "vehicle_id": VID, "event_date": "2026-05-28", "mileage": 199_694, "source": "bill", "bill_line_items": [{"description": "ค่าแรง"}]},
+              {"id": "e2", "vehicle_id": VID, "event_date": "2026-06-01", "mileage": None, "source": "bill", "bill_line_items": []}]
+    assert sp.bill_hits(events) == []
+    assert sp.bill_odometers(events) == [{"vehicle_id": VID, "kind": "odometer", "end_date": "2026-05-28", "km": 199_694}]

@@ -47,7 +47,8 @@ function drawToday(d) {
   if (!p.enabled) out.push(hEmpty("การแจ้งเตือนแผนซ่อมปิดอยู่ (ตั้งค่าที่แผนซ่อมบำรุง)"));
   else if (!p.total) out.push(hEmpty("ยังไม่มีรถที่ใกล้ถึงรอบ"));
   else {
-    out.push(hStats(hStat(p.counts.overdue, "เลยกำหนด", p.counts.overdue ? "bad" : ""), hStat(p.counts.due, "ครบแล้ว", p.counts.due ? "warn" : ""), hStat(p.counts.soon, `ใกล้ถึง (${p.soon_days} วัน)`)),
+    out.push(el("p", { class: "muted small", text: `${p.trucks} คัน ที่ต้องดู (รวม ${p.total} รายการ)` }),
+      hStats(hStat(p.counts.overdue, "เลยกำหนด", p.counts.overdue ? "bad" : ""), hStat(p.counts.due, "ครบแล้ว", p.counts.due ? "warn" : ""), hStat(p.counts.soon, `ใกล้ถึง (${p.soon_days} วัน)`)),
       hList(p.items.slice(0, 6).map((x) => hRow(`${x.truck} · ${x.label}`, planLeft(x), x.stage === "overdue" ? "bad" : x.stage === "due" ? "warn" : ""))));
     if (p.total > 6) out.push(el("p", { class: "muted small hempty", text: `และอีก ${p.total - 6} รายการ` }));
   }

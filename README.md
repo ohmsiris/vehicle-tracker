@@ -384,6 +384,8 @@ buttons as the board. It reads the board's own list, so the two never disagree.
 
 ## Fleet roster ("ทะเบียนรถ", `#roster`)
 
+The truck list has the same big filter card as the maintenance log: search, สาขา, ประเภทการใช้งาน, ขนาดรถ (รถเล็ก / รถใหญ่), สถานะ, a sort (number, last repair, total repair cost, most repairs), "only trucks with open work", and a clear button.
+
 Trucks and drivers under one roof (`app/fleet.py`, `static/roster.js`).
 
 - **Trucks:** one row each with its **usage** (รถสาย, รถหน้าโรง, or any label you
@@ -513,6 +515,11 @@ what comes next. The numbers are the ones in `Maintenance_Plan.xlsx` (kept outsi
   the oil km below is visible above (the group's own "months per 10,000 km" is the driving rate and does not change).
 - The settings page layout: reminders (full width), the groups (full width), then รถเล็ก (left) and รถใหญ่ (right) with the km
   of each item, and which truck follows which group.
+- **km per day is measured from bills too**: the mileage written on every confirmed bill / record counts as an odometer reading (even a bill
+  none of whose lines is a plan item), together with the readings typed on the plan page. The rate is the newest figure against the oldest
+  one within 400 days of it (`ODOMETER_WINDOW_DAYS`); equal, backwards or absurd (over 1,000 km/day) pairs are ignored. Until a truck has two
+  figures it uses what its group assumes ("ตามกลุ่ม").
+- **The menu badge on แผนซ่อมบำรุง counts trucks**, not items (a truck with nine items due is one): `plan.trucks` / `plan.urgent_trucks` of `/api/today`.
 - **Scheduled items travel with the oil change**: the aim is that the other items get done at an oil change, not on a day of their
   own. When a truck's oil change is in the reminders (inside the "coming close" window), every other item of that truck that would
   fall due before the NEXT oil change (its due date within the oil interval after this one) is added to its reminders, marked
