@@ -226,13 +226,13 @@
   <section id="attendanceView" hidden>
     <div class="page-head">
       <h2 class="page-title">เวลาทำงาน</h2>
-      <p class="muted small">อัปโหลดไฟล์ .xls จากเครื่องสแกนนิ้ว (งวด 26 – 25) แล้วตรวจวันที่สแกนเดียวหรือทำงานไม่ครบเวลา — ระบบจับคู่เข้า-ออกกะจากเวลาสแกนเอง และไม่ตัดเงินให้อัตโนมัติ คุณเป็นคนตัดสินทุกวันที่ติดธง</p>
+      <p class="muted small">อัปโหลดไฟล์ .xls จากเครื่องสแกนนิ้ว (งวด 26 – 25) แล้วตรวจวันที่สแกนขาเดียวหรือทำงานไม่ครบเวลา — ระบบจับคู่เข้า-ออกกะจากเวลาสแกนเอง และไม่ตัดเงินให้อัตโนมัติ คุณเป็นคนตัดสินทุกวันที่ติดธง</p>
     </div>
     <p class="error" id="atError" hidden></p>
     <div class="edit-banner" id="atNeedsV26" hidden>ยังใช้เวลาทำงานไม่ได้ — ต้องรันไฟล์ <strong>schema_v26.sql</strong> ใน Supabase ก่อน</div>
     <div class="card" id="atBar">
       <div class="lgtop rotop">
-        <div class="atmonth"><button id="atPrev" class="btn small" type="button" aria-label="เดือนก่อน">‹</button><input id="atMonth" type="month" aria-label="งวดเงินเดือน (เดือนของวันที่ 25)"><button id="atNext" class="btn small" type="button" aria-label="เดือนถัดไป">›</button>
+        <div class="atmonth"><button id="atPrev" class="btn small" type="button" aria-label="เดือนก่อน">‹</button><select id="atMonth" aria-label="งวดเงินเดือน (ตั้งชื่อตามเดือนของวันที่ 25)"></select><button id="atNext" class="btn small" type="button" aria-label="เดือนถัดไป">›</button>
           <span class="muted small" id="atRange"></span></div>
         <div><button id="atUpload" class="btn primary" type="button">+ อัปโหลดไฟล์จากเครื่องสแกน</button><input id="atFile" type="file" accept=".xls,application/vnd.ms-excel" multiple hidden></div>
       </div>
@@ -246,12 +246,18 @@
         <div><label for="atShow">แสดง</label><select id="atShow"><option value="open">เฉพาะที่ยังต้องตัดสิน</option><option value="flagged">ติดธงทั้งหมด (รวมที่ตัดสินแล้ว)</option><option value="all">ทุกคนที่มีเวลาทำงาน</option></select></div>
         <div><label for="atBranch">สาขา</label><select id="atBranch"><option value="">ทุกสาขา</option></select></div>
         <div><label for="atPosition">ตำแหน่ง</label><select id="atPosition"><option value="">ทุกตำแหน่ง</option></select></div>
-        <div><label for="atKind">ประเภทธง</label><select id="atKind"><option value="">ทุกประเภท</option><option value="single">สแกนเดียว</option><option value="short">ทำงานไม่ครบเวลา</option></select></div>
+        <div><label for="atKind">ประเภทธง</label><select id="atKind"><option value="">ทุกประเภท</option><option value="single">สแกนขาเดียว</option><option value="short">ทำงานไม่ครบเวลา</option></select></div>
       </div>
     </div>
     <div class="rostercountbar"><p class="muted small" id="atCount"></p></div>
     <div id="atList"></div>
     <div class="card" id="atHistory" hidden></div>
+    <details class="card atsched" id="atSched">
+      <summary>ตั้งเวลาทำงานรายคน <span class="muted small">— ค่าเริ่มต้น: ผลิต สระบุรี 12 ชม. · แก่งคอย 9 ชม. (ส่วนที่เกินเป็น OT); ใส่เวลาเริ่ม–เลิกเพื่อกำหนดเฉพาะคน เช่น 08:00–17:00</span></summary>
+      <div class="lgtop rotop atschedbar"><input id="atSchedSearch" type="search" placeholder="ค้นหา: ชื่อ รหัส ตำแหน่ง" autocomplete="off" aria-label="ค้นหาพนักงาน"><select id="atSchedShow" aria-label="แสดง"><option value="fixed">ฝ่ายผลิต และที่ตั้งเวลาเองแล้ว</option><option value="own">เฉพาะที่ตั้งเวลาเองแล้ว</option><option value="all">ทุกคน</option></select></div>
+      <p class="muted small" id="atSchedCount"></p>
+      <div id="atSchedBody"></div>
+    </details>
   </section>
 
   <section id="loanView" hidden>

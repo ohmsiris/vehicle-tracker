@@ -266,3 +266,68 @@ def test_the_schema_is_missing_message_and_the_employee_lock(db, monkeypatch):
     with pytest.raises(at.InvalidAttendance, match="schema_v26"):
         at.set_review({"employee_id": E1, "work_date": "2026-09-02", "decision": "half"})
     assert ("attendance_punches", "employee_id") in em.REFERENCED_BY and ("attendance_reviews", "employee_id") in em.REFERENCED_BY
+
+
+# ------------------------------------------------------------------ the worker's own shift time, and overtime
+def kk(eid=E1, code="SB-KK001", position="ผลิต", **extra):
+    return {**emp(eid, code, position=position), "branch": "แก่งคอย", **extra}
+
+
+def test_a_clock_time_and_a_shift_length_are_read_past_midnight_too():
+    assert at.parse_clock("08:00") == 480 and at.parse_clock("08:00:00") == 480 and at.parse_clock("") is None and at.parse_clock(None) is None
+    assert at.clock_text(at.parse_clock("8:05")) == "08:05"
+    assert at.schedule_minutes("08:00", "17:00") == 540 and at.schedule_minutes("20:00", "08:00") == 720
+    assert at.schedule_minutes("08:00", "") is None and at.schedule_minutes("08:00", "08:00") is None
+    for bad in ("25:00", "8", "ab", "12:61"):
+        with pytest.raises(at.InvalidAttendance, match="เวลาไม่ถูกต้อง"):
+            at.parse_clock(bad)
+
+
+def test_a_workers_own_shift_time_replaces_the_default_for_him_only():
+    nine = [dt("2026-09-02", "08:00"), dt("2026-09-02", "17:00")]
+    sar = {E1: emp(E1, "SB-FR001")}                                                    # Saraburi ผลิต: 12 h by default, so 9 h is short
+    assert month({E1: nine}, emps=sar)["people"][0]["days"][0]["flag"] == "short"
+    own = {E1: {**emp(E1, "SB-FR001"), "shift_start": "08:00:00", "shift_end": "17:00:00"}}
+    p = month({E1: nine}, emps=own)["people"][0]
+    assert p["days"][0]["flag"] == "ok" and p["expected"] == 540 and p["schedule"] == {"start": "08:00", "end": "17:00"}
+    free = {E1: {**emp(E1, "SB-FR001", position="ช่าง"), "shift_start": "08:00", "shift_end": "17:00"}}      # a free-hours role with a set time is checked against it
+    assert month({E1: [dt("2026-09-02", "08:00"), dt("2026-09-02", "14:00")]}, emps=free)["people"][0]["days"][0]["flag"] == "short"
+
+
+def test_kaeng_khoi_ผลิต_work_past_the_nine_hour_shift_is_overtime():
+    punches = [dt("2026-09-02", "08:00"), dt("2026-09-02", "17:05"),            # 9:05: within the 10 minute grace, no OT
+               dt("2026-09-03", "08:00"), dt("2026-09-03", "20:10"),            # 12:10: 3:10 of OT
+               dt("2026-09-04", "08:00"), dt("2026-09-04", "16:55")]            # 8:55: not short, no OT
+    p = month({E1: punches}, emps={E1: kk()})["people"][0]
+    assert [d["flag"] for d in p["days"]] == ["ok", "ok", "ok"] and [d["ot_minutes"] for d in p["days"]] == [0, 190, 0]
+    assert p["counts"]["ot_minutes"] == 190 and p["ot_applies"] is True
+    out = month({E1: punches}, emps={E1: kk()})
+    assert out["totals"]["ot_minutes"] == 190
+    other = month({E1: punches}, emps={E1: emp(E1, "SB-FR001")})["people"][0]      # Saraburi has no OT
+    assert other["ot_applies"] is False and other["counts"]["ot_minutes"] == 0
+    wash = month({E1: punches}, emps={E1: kk(position="ล้างกระสอบ")})["people"][0]  # only ผลิต at Kaeng Khoi
+    assert wash["counts"]["ot_minutes"] == 0
+
+
+def test_the_settings_list_and_save_a_workers_shift_time(db, monkeypatch):
+    def update(table, match, values):
+        rows = db._eq(db.t[table], match)
+        for r in rows:
+            r.update(values)
+        return rows
+    monkeypatch.setattr(at.supabase, "update", update)
+    monkeypatch.setattr(at, "has_v27", lambda: True)
+    db.t["employees"].append({**kk(E2, "SB-KK002"), "pay_group": "hq"})
+    first = at.list_schedules()
+    assert [p["code"] for p in first["people"]] == ["SB-FR001"] and first["people"][0]["default_minutes"] == 720 and first["people"][0]["start"] is None     # HQ-paid are left out
+    out = at.set_schedule({"employee_id": E1, "start": "08:00", "end": "17:00"})
+    assert out == {"employee_id": E1, "start": "08:00", "end": "17:00", "minutes": 540}
+    assert at.list_schedules()["people"][0]["minutes"] == 540
+    assert at.set_schedule({"employee_id": E1, "start": "", "end": ""})["minutes"] is None and db.t["employees"][0]["shift_start"] is None
+    for data, frag in (({"employee_id": E1, "start": "08:00", "end": ""}, "ให้ครบทั้งสองช่อง"), ({"employee_id": E1, "start": "08:00", "end": "08:00"}, "ไม่เป็นเวลาเดียวกัน"),
+                       ({"employee_id": "x", "start": "", "end": ""}, "ไม่พบพนักงาน"), ({"employee_id": E1, "start": "99:00", "end": "17:00"}, "เวลาไม่ถูกต้อง")):
+        with pytest.raises(at.InvalidAttendance, match=frag):
+            at.set_schedule(data)
+    monkeypatch.setattr(at, "has_v27", lambda: False)
+    with pytest.raises(at.InvalidAttendance, match="schema_v27"):
+        at.set_schedule({"employee_id": E1, "start": "08:00", "end": "17:00"})

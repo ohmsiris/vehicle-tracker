@@ -5,7 +5,7 @@
 The machine exports an .xls whose sheet "รายงานบันทึกเวลา" holds, per person, the scans of each day of a pay period (the 26th to the 25th). Only the
 scans are read from it. Which scans belong together is worked out here, from the scans alone, because people move between day and night shifts:
 a night shift is a scan one evening and one next morning, so the scans of a person are laid in a row and paired up (pair_shifts) whatever the date.
-A shift belongs to the day it STARTED. A scan that finds no partner is a single scan (สแกนเดียว); the owner decides what each one is worth.
+A shift belongs to the day it STARTED. A scan that finds no partner is a single scan (สแกนขาเดียว); the owner decides what each one is worth.
 
 What is flagged for the owner (review_flag):
   single  a scan with no partner                         -- every role
@@ -28,6 +28,7 @@ from app import employees, supabase
 DECISIONS = {"approve": "อนุมัติ", "half": "ค่าแรงครึ่งวัน", "full_penalty": "ค่าแรงเต็ม + ใบเตือน + หักเงิน", "unpaid": "ไม่จ่าย"}
 FRACTION = {"approve": 1.0, "half": 0.5, "full_penalty": 1.0, "unpaid": 0.0}      # how much of a day's wage each decision pays
 FIXED_POSITIONS = {"ผลิต"}                         # the roles with a fixed shift: their short days are flagged
+OT_BRANCH = "แก่งคอย"                                  # the branch whose ผลิต are paid overtime for what they work past the shift
 SHIFT_MINUTES = {"สระบุรี": 12 * 60, "แก่งคอย": 9 * 60}   # a ผลิต shift by branch: Kaeng Khoi's 9 hours are followed by 3 hours of OT (paid apart), Saraburi works 12 with none
 DEFAULT_SHIFT = 12 * 60
 LATE_GRACE = 10                                    # minutes of the shift that may be missing before a day is "short"
@@ -36,6 +37,8 @@ DUP_GAP = timedelta(minutes=30)                    # a second scan this soon aft
 MAX_SHIFT = timedelta(hours=17)                    # two scans further apart than this are not one shift
 MAX_UPLOAD = 8 * 1024 * 1024
 SHEET = "รายงานบันทึกเวลา"
+NEEDS_V27 = "ยังตั้งเวลาทำงานรายคนไม่ได้ — ต้องรันไฟล์ schema_v27.sql ใน Supabase ก่อน"
+CLOCK_RE = re.compile(r"^(\d{1,2}):(\d{2})(?::\d{2})?$")
 NEEDS_V26 = "ยังใช้เวลาทำงานไม่ได้ — ต้องรันไฟล์ schema_v26.sql ใน Supabase ก่อน"
 MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
 PERIOD_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\s*~\s*(\d{4}-\d{2}-\d{2})")
@@ -159,6 +162,29 @@ def expected_minutes(branch: Optional[str]) -> int:
     return SHIFT_MINUTES.get(branch or "", DEFAULT_SHIFT)
 
 
+def parse_clock(value) -> Optional[int]:
+    """'08:00' (or '08:00:00') -> minutes after midnight; None for blank. Raises InvalidAttendance in Thai."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    m = CLOCK_RE.match(text)
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        raise InvalidAttendance("เวลาไม่ถูกต้อง (เช่น 08:00)")
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
+def clock_text(minutes: Optional[int]) -> Optional[str]:
+    return None if minutes is None else f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def schedule_minutes(start, end) -> Optional[int]:
+    """The length of a worker's own shift (the end may be past midnight); None when either time is not set."""
+    a, b = parse_clock(start), parse_clock(end)
+    if a is None or b is None or a == b:
+        return None
+    return (b - a) % 1440
+
+
 def review_flag(shifts: list[dict], fixed: bool, expected: int = DEFAULT_SHIFT) -> str:
     """'single' / 'short' / 'ok' for the shifts that started on one day."""
     if any(s["out"] is None for s in shifts):
@@ -193,8 +219,10 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         if (e.get("pay_group") or "company") == "hq":
             skipped_hq += 1
             continue
-        fixed = (e.get("position") or "") in FIXED_POSITIONS
-        expected = expected_minutes(e.get("branch"))
+        custom = schedule_minutes(e.get("shift_start"), e.get("shift_end"))              # the worker's own shift time, an exception to the default
+        fixed = (e.get("position") or "") in FIXED_POSITIONS or custom is not None
+        expected = custom or expected_minutes(e.get("branch"))
+        ot_applies = e.get("branch") == OT_BRANCH and (e.get("position") or "") in FIXED_POSITIONS      # Kaeng Khoi ผลิต: what is worked past the shift is OT
         by_day: dict[date, list[dict]] = {}
         for s in pair_shifts(punches.get(eid, []), target_minutes=expected if fixed else 9 * 60):
             if start <= s["in"].date() <= end:
@@ -209,22 +237,24 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
             if flag == "single":
                 singles += 1
             r = by_key.get((eid, day.isoformat()))
-            days.append({"date": day.isoformat(), "shifts": [_shift_card(s) for s in shifts], "flag": flag, "minutes": sum(minutes_of(s) for s in shifts),
+            ot = sum(minutes_of(s) - expected for s in shifts if s["out"] and minutes_of(s) - expected > LATE_GRACE) if ot_applies else 0
+            days.append({"date": day.isoformat(), "shifts": [_shift_card(s) for s in shifts], "flag": flag, "minutes": sum(minutes_of(s) for s in shifts), "ot_minutes": ot,
                          "single_no": singles if flag == "single" else None, "suggest": "half" if flag == "single" and singles <= FREE_SINGLES else None,
                          "review": review_card(r) if r else None})
         if not days:
             continue
         flagged = [d for d in days if d["flag"] in ("single", "short")]
         people.append({"employee_id": eid, "code": e["code"], "name": employees.display_name(e.get("prefix"), e["full_name"]), "position": e.get("position") or "",
-                       "branch": e.get("branch") or "", "status": e.get("status") or "active", "fixed": fixed, "expected": expected,
+                       "branch": e.get("branch") or "", "status": e.get("status") or "active", "fixed": fixed, "expected": expected, "ot_applies": ot_applies,
+                       "schedule": {"start": clock_text(parse_clock(e.get("shift_start"))), "end": clock_text(parse_clock(e.get("shift_end")))} if custom is not None else None,
                        "counts": {"days": len(days), "single": sum(d["flag"] == "single" for d in days), "short": sum(d["flag"] == "short" for d in days),
                                   "open": sum(d["review"] is None for d in flagged), "decided": sum(d["review"] is not None for d in flagged),
-                                  "minutes": sum(d["minutes"] for d in days)},
+                                  "minutes": sum(d["minutes"] for d in days), "ot_minutes": sum(d["ot_minutes"] for d in days)},
                        "deduct": round(sum(d["review"]["deduct_amount"] for d in days if d["review"]), 2), "days": days})
     people.sort(key=lambda p: (p["branch"], p["position"], p["code"]))
     totals = {"people": len(people), "days": sum(p["counts"]["days"] for p in people), "single": sum(p["counts"]["single"] for p in people),
               "short": sum(p["counts"]["short"] for p in people), "open": sum(p["counts"]["open"] for p in people),
-              "decided": sum(p["counts"]["decided"] for p in people), "suggested": sum(1 for p in people for d in p["days"] if d["suggest"] and not d["review"])}
+              "decided": sum(p["counts"]["decided"] for p in people), "ot_minutes": sum(p["counts"]["ot_minutes"] for p in people), "suggested": sum(1 for p in people for d in p["days"] if d["suggest"] and not d["review"])}
     return {"month": month, "start": start.isoformat(), "end": end.isoformat(), "people": people, "totals": totals, "hq_skipped": skipped_hq}
 
 
@@ -274,6 +304,23 @@ def has_v26() -> bool:
     return ok
 
 
+_EMP_COLS = "id,code,prefix,full_name,position,branch,status,pay_group"
+_probe27 = {"at": 0.0, "ok": False}
+
+
+def has_v27() -> bool:
+    now = time.time()
+    if now - _probe27["at"] < 30:
+        return _probe27["ok"]
+    try:
+        supabase.select("employees", {"select": "shift_start,shift_end", "limit": "1"})
+        ok = True
+    except supabase.SupabaseError:
+        ok = False
+    _probe27.update(at=now, ok=ok)
+    return ok
+
+
 def _require() -> None:
     if not (employees.has_v21() and has_v26()):
         raise InvalidAttendance(NEEDS_V26)
@@ -316,7 +363,7 @@ def _load_month(month: str) -> dict:
     for r in supabase.select_all("attendance_punches", {"select": "employee_id,punched_at", **window, "order": "employee_id.asc,punched_at.asc"}):
         punches.setdefault(r["employee_id"], []).append(datetime.fromisoformat(str(r["punched_at"])[:19]))
     reviews = supabase.select_all("attendance_reviews", {"select": "*", "work_date": f"gte.{start}", "and": f"(work_date.lte.{end})", "order": "id.asc"})
-    emps = {e["id"]: e for e in supabase.select_all("employees", {"select": "id,code,prefix,full_name,position,branch,status,pay_group", "order": "code.asc"})}
+    emps = {e["id"]: e for e in supabase.select_all("employees", {"select": _EMP_COLS + (",shift_start,shift_end" if has_v27() else ""), "order": "code.asc"})}
     return build_month(month, emps, punches, reviews)
 
 
@@ -363,8 +410,46 @@ def apply_suggestions(month: str) -> dict:
     month = parse_month(month)
     data = _load_month(month)
     now = datetime.now(employees.BANGKOK).isoformat()
-    rows = [{"employee_id": p["employee_id"], "work_date": d["date"], "decision": d["suggest"], "deduct_amount": 0, "note": f"สแกนเดียวครั้งที่ {d['single_no']} ของเดือน",
+    rows = [{"employee_id": p["employee_id"], "work_date": d["date"], "decision": d["suggest"], "deduct_amount": 0, "note": f"สแกนขาเดียวครั้งที่ {d['single_no']} ของเดือน",
              "manual": False, "decided_at": now} for p in data["people"] for d in p["days"] if d["suggest"] and not d["review"]]
     for i in range(0, len(rows), 200):
         supabase.insert("attendance_reviews", rows[i:i + 200], on_conflict="employee_id,work_date")
     return {"applied": len(rows)}
+
+
+# ------------------------------------------------------------------ each worker's own shift time (settings)
+def list_schedules() -> dict:
+    """Everyone paid by us (not resigned, not paid by HQ) with the default shift of his branch and position and his own times, if set."""
+    _require()
+    ready = has_v27()
+    rows = supabase.select_all("employees", {"select": _EMP_COLS + (",shift_start,shift_end" if ready else ""), "status": "eq.active", "order": "code.asc"})
+    people = []
+    for e in rows:
+        if (e.get("pay_group") or "company") == "hq":
+            continue
+        fixed = (e.get("position") or "") in FIXED_POSITIONS
+        own = schedule_minutes(e.get("shift_start"), e.get("shift_end"))
+        people.append({"employee_id": e["id"], "code": e["code"], "name": employees.display_name(e.get("prefix"), e["full_name"]), "position": e.get("position") or "",
+                       "branch": e.get("branch") or "", "default_minutes": expected_minutes(e.get("branch")) if fixed else None,
+                       "start": clock_text(parse_clock(e.get("shift_start"))) if own is not None else None, "end": clock_text(parse_clock(e.get("shift_end"))) if own is not None else None,
+                       "minutes": own})
+    return {"ready": ready, "people": people}
+
+
+def set_schedule(data: dict) -> dict:
+    """Set one worker's own shift time (both times), or clear it (both empty) to go back to the default."""
+    _require()
+    if not has_v27():
+        raise InvalidAttendance(NEEDS_V27)
+    try:
+        eid = str(uuid.UUID(str(data.get("employee_id") or "")))
+    except ValueError:
+        raise InvalidAttendance("ไม่พบพนักงาน")
+    start, end = parse_clock(data.get("start")), parse_clock(data.get("end"))
+    if (start is None) != (end is None):
+        raise InvalidAttendance("ใส่เวลาเริ่มและเวลาเลิกให้ครบทั้งสองช่อง หรือเว้นว่างทั้งคู่")
+    if start is not None and start == end:
+        raise InvalidAttendance("เวลาเริ่มและเวลาเลิกต้องไม่เป็นเวลาเดียวกัน")
+    emp = employees._get(eid)
+    supabase.update("employees", {"id": f"eq.{emp['id']}"}, {"shift_start": clock_text(start), "shift_end": clock_text(end)})
+    return {"employee_id": emp["id"], "start": clock_text(start), "end": clock_text(end), "minutes": schedule_minutes(clock_text(start), clock_text(end))}

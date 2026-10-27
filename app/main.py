@@ -675,6 +675,18 @@ def api_attendance_review(body: dict = Body(...), x_app_token: str = Header(defa
     return _hr_call(x_hr_pin, attendance.set_review, body)
 
 
+@app.get("/api/attendance/schedules")
+def api_attendance_schedules(x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, attendance.list_schedules)
+
+
+@app.put("/api/attendance/schedule")
+def api_attendance_schedule(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, attendance.set_schedule, body)
+
+
 @app.post("/api/attendance/apply-suggestions")
 def api_attendance_apply(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
     _check_token(x_app_token, token)

@@ -99,7 +99,7 @@ label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
 pre { overflow: auto; max-height: 360px; font-size: 12px; }
 
 /* -------------------------------------------------------------- inputs */
-select, input[type=text], input[type=number], input[type=date], input[type=password], textarea {
+select, input[type=text], input[type=number], input[type=date], input[type=month], input[type=password], textarea {
   width: 100%; padding: 9px 12px; font: inherit; color: var(--text); background: var(--surface);
   border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
   transition: border-color .15s, box-shadow .15s;
@@ -1145,3 +1145,17 @@ dialog.lndialog { max-width: 720px; width: calc(100vw - 32px); }
   .atbody { padding: 0 10px 12px; }
   .atmanual { margin-left: 0; }
 }
+input[type=date], input[type=month], input[type=time] { min-height: 40px; }
+input[type=date]::-webkit-calendar-picker-indicator, input[type=month]::-webkit-calendar-picker-indicator, input[type=time]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; border-radius: 6px; padding: 2px; }
+input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-webkit-calendar-picker-indicator:hover, input[type=time]::-webkit-calendar-picker-indicator:hover { opacity: 1; background: var(--surface-2); }
+[data-theme="dark"] input[type=date]::-webkit-calendar-picker-indicator, [data-theme="dark"] input[type=month]::-webkit-calendar-picker-indicator, [data-theme="dark"] input[type=time]::-webkit-calendar-picker-indicator { filter: invert(1); }
+.atmonth select { width: auto; min-width: 170px; }
+.atshift { margin: 0 0 8px; }
+.atsched { padding: 0; }
+.atsched > summary { cursor: pointer; padding: 14px 16px; font-weight: 600; list-style-position: inside; }
+.atsched > summary:hover { background: var(--surface-2); }
+.atsched[open] > summary { border-bottom: 1px solid var(--line); }
+.atsched > :not(summary) { margin-left: 16px; margin-right: 16px; }
+.atschedbar { margin-top: 12px; }
+.atsched .tablewrap { margin-bottom: 14px; }
+.attime { width: 120px; }

@@ -457,7 +457,10 @@ Run `schema_v26.sql` once in Supabase. The page works on one pay month (26th to 
   stored (`attendance_punches`); people with no scans, and codes that are not in พนักงาน, are skipped (the page lists the latter).
 - **Shifts** are worked out from the scans alone, because people move between day and night shifts: a person's scans are laid in a row and paired in/out
   (two scans more than 17 h apart never pair; a second scan within 30 min is the same scan; one stray scan does not shift the pairs after it). A shift belongs to the day it started.
-- **Flags:** a scan with no partner = สแกนเดียว (every role); a ผลิต shift shorter than its length minus 10 min = ทำงานไม่ครบเวลา (12 h at Saraburi; 9 h at Kaeng Khoi, where 3 h of OT follow). Free-hours roles only get the single-scan flag; their hours are shown.
+- **Flags:** a scan with no partner = สแกนขาเดียว (every role); a ผลิต shift shorter than its length minus 10 min = ทำงานไม่ครบเวลา (12 h at Saraburi; 9 h at Kaeng Khoi, where 3 h of OT follow). Free-hours roles only get the single-scan flag; their hours are shown.
+- **Shift times** (`schema_v27.sql`; "ตั้งเวลาทำงานรายคน" at the bottom of the page): the default is ผลิต 12 h at Saraburi and 9 h at Kaeng Khoi; set a start and an end
+  for one worker (e.g. 08:00–17:00) to make an exception -- his days are then checked against that length, whatever his position. At Kaeng Khoi ผลิต, what is worked past
+  the shift (more than 10 min) is shown as **OT** per day and per person (the pay step will price it).
 - **Decisions** (the owner's, one per person and work day): อนุมัติ / ค่าแรงครึ่งวัน / ค่าแรงเต็ม + ใบเตือน + หัก (with the amount) / ไม่จ่าย. Nothing is decided automatically.
   The first 3 single scans of a month carry the suggestion ค่าแรงครึ่งวัน, applied only by "ใช้ตามข้อเสนอทั้งหมด"; from the 4th on there is none.
   "ทำงานแต่ไม่มีสแกน" adds a day by hand. People paid by HQ (`pay_group = hq`) are left out.
