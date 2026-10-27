@@ -1159,3 +1159,10 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .atschedbar { margin-top: 12px; }
 .atsched .tablewrap { margin-bottom: 14px; }
 .attime { width: 120px; }
+
+/* ---- สต็อก: the weekly out-list ---- */
+.skw { display: grid; gap: 8px; margin: 12px 0; }
+.skw-row { display: grid; grid-template-columns: minmax(0, 2fr) 90px minmax(0, 1fr) 96px; gap: 8px; align-items: center; }
+.skw-row input, .skw-row select { width: 100%; }
+.skw-have { white-space: nowrap; }
+@media (max-width: 640px) { .skw-row { grid-template-columns: 1fr 90px; } .skw-row select, .skw-have { grid-column: 1 / -1; } }

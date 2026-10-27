@@ -1040,6 +1040,12 @@ def api_stock_moves(item_id: str, x_app_token: str = Header(default=""), token: 
     return _buy_call(stock.item_moves, item_id)
 
 
+@app.post("/api/stock/moves/batch")
+def api_stock_moves_batch(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(stock.add_moves_batch, body)
+
+
 @app.post("/api/stock/moves")
 def api_stock_move(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

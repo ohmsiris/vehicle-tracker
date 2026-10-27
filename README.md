@@ -675,9 +675,16 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
 - **เทียบราคา** (`#prices`): per item the last price, the cheapest (where, when) and the latest price at each supplier,
   cheapest first, with the purchase history; switch between paid (with VAT) and before VAT. Below: the lines not linked
   to an item yet, each with a picker (that is how old bills get cleaned up).
-- **สต็อก (ร่าง)** (`#stock`): a draft while the supply room is renovated. On hand = the sum of `stock_moves`: + รับเข้า,
-  − เบิก (optionally for which machine), นับ (a stock-take writes the difference). A minimum shows "ควรสั่งเพิ่ม". Saving a
-  bill can receive its linked lines into stock ("รับของเข้าสต็อกด้วย", off by default); deleting the bill takes them out again.
+- **สต็อก** (`#stock`; `schema_v28.sql`, `scripts/import_stock_opening.py`): the mechanics' room. On hand = the sum of `stock_moves`: + รับเข้า, − เบิก
+  (optionally for which machine), นับ (a stock-take writes the difference). A minimum shows "ควรสั่งเพิ่ม".
+  **IN** is recorded by the owner and always goes into the stock first: saving a bill receives its linked lines ("รับของเข้าสต็อกด้วย", now ticked by default),
+  or "+ รับเข้า" by hand; deleting the bill takes them out again. **OUT** is what the mechanic writes on paper: the owner types it once a week with
+  **เบิกประจำสัปดาห์** -- one list (item, quantity, optional machine), one save; a bad row is named by its number and nothing is written; items that go below zero
+  are listed afterwards (a wrong quantity or a missing opening count).
+  **One standard name per item**: ชนิด + ยี่ห้อ + รุ่น + สเปค (`stock.compose_name`), built from the four fields, e.g. "แมกเนติก Fuji SC-N8 220V",
+  "โอเวอร์โหลด Mitsubishi TH-T25 18-26A". The model code is the word a bill is matched by (spaces, dashes and capitals do not matter: SC-N2 = SCN2 = sc n2);
+  a model that comes in several ratings uses a pair, "TR-N2/3+12-18A" (both must be on the bill line). The 27 Oct 2026 count of the electrical store and
+  the consumables (52 items) was loaded by the import script; three welding-rod lines wait for a confirmed count.
 - Not built yet, on purpose: the slip reader / spending report (to be discussed -- likely from the confirmed bills, dated
   when the work or purchase happened, not the bank), purchase orders. The parts index (`#machinery`) stays as it is for now.
 

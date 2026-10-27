@@ -788,8 +788,8 @@
   <!-- ============ Buying for the factory: the stock room (draft) ============ -->
   <section id="stockView" hidden>
     <div class="page-head">
-      <h2 class="page-title">สต็อก <span class="muted small">(ร่าง)</span></h2>
-      <p class="muted small">ห้องอะไหล่ช่างกำลังปรับปรุง — หน้านี้เป็นร่างไว้ก่อน: รายการของ คงเหลือ = รับเข้า − เบิก (± นับสต็อก) · ของที่ต่ำกว่าขั้นต่ำขึ้นว่าควรสั่งเพิ่ม</p>
+      <h2 class="page-title">สต็อก</h2>
+      <p class="muted small">รับเข้า = คุณเป็นคนบันทึก (ของที่ซื้อเข้าสต็อกก่อนเสมอ) · เบิกออก = ช่างเขียนใส่กระดาษ แล้วคุณพิมพ์ลงทีเดียวทุกสัปดาห์ด้วยปุ่ม “เบิกประจำสัปดาห์” · ทุกรายการมีชื่อมาตรฐานเดียว: ชนิด + ยี่ห้อ + รุ่น + สเปค</p>
     </div>
     <p class="error" id="skError" hidden></p>
     <div class="edit-banner" id="skNeedsV16" hidden>ยังใช้สต็อกไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
@@ -798,7 +798,7 @@
       <select id="skCat" aria-label="หมวด"><option value="">ทุกหมวด</option></select>
       <select id="skLoc" aria-label="ที่เก็บ"><option value="">ทุกที่เก็บ</option></select>
       <label class="mgcheck"><input id="skLow" type="checkbox"> เฉพาะที่ควรสั่งเพิ่ม</label>
-      <button id="skAdd" class="btn push" type="button">+ เพิ่มรายการ</button>
+      <button id="skWeekly" class="btn primary push" type="button">เบิกประจำสัปดาห์</button><button id="skAdd" class="btn" type="button">+ เพิ่มรายการ</button>
     </div>
     <p class="muted small" id="skCount"></p>
     <div id="skList"></div>

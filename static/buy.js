@@ -5,7 +5,7 @@
 //   #purchase-new  pick bill files (one bill per file, or pages of one bill) -> they are READ IN THE BACKGROUND (a queue:
 //                  go to another page and come back) -> check each one against the original -> save
 //   #prices        what every thing cost where: the last price, the cheapest supplier, and the lines not identified yet
-//   #stock         the mechanics' stock room, a draft: what is on the shelf, in / out / counted
+//   #stock         the mechanics' stock room: what is on the shelf; IN is recorded by the owner (bills go in first), OUT is typed once a week from the mechanic's paper
 // The suppliers are kept on the settings page (ตั้งค่า), with the words that find them on a bill.
 // Data: /api/purchases*, /api/prices, /api/stock* (app/purchasing.py, app/stock.py). Loaded BEFORE app.js.
 // The queue lives in this page's memory only: refreshing the browser loses bills that were read but not saved.
@@ -263,7 +263,7 @@ function buMakeReview(draft) {
     source: draft ? "bill" : "manual",
     vendor_id: d.vendor_id || "", vendor_name: d.vendor_name || "", new_vendor: d.vendor_id ? "" : (d.vendor_name || ""),
     bill_date: d.date || todayISO(), bill_no: d.bill_no || "", branch: "สระบุรี", vat_mode: d.vat_mode || "none",
-    subtotal: d.subtotal ?? "", vat_amount: d.vat_amount ?? "", discount: d.discount ?? "", total: d.total ?? "", notes: "", receive_stock: false,
+    subtotal: d.subtotal ?? "", vat_amount: d.vat_amount ?? "", discount: d.discount ?? "", total: d.total ?? "", notes: "", receive_stock: true,
     low: d.low_confidence_fields || [],
     lines: (d.line_items || []).map((ln) => {
       const found = ln.item_id ? { id: ln.item_id } : buMatch(ln.description);          // the item list may have changed while the bill waited
@@ -377,7 +377,7 @@ function buRenderReview() {
   fill($("bnFoot"),
     el("div", { class: "mfields" }, mfield(d, "notes", "หมายเหตุ", { wide: true, maxlength: 500 })),
     el("label", { class: "mgcheck" }, (() => { const c = el("input", { type: "checkbox" }); c.checked = d.receive_stock; c.addEventListener("change", () => { d.receive_stock = c.checked; }); return c; })(),
-      "รับของเข้าสต็อกด้วย", el("span", { class: "muted small", text: " (ห้องอะไหล่ยังปรับปรุงอยู่ — ปกติไม่ต้องติ๊ก)" })));
+      "รับของเข้าสต็อกด้วย", el("span", { class: "muted small", text: " (ของที่ซื้อเข้าสต็อกก่อนเสมอ — เอาติ๊กออกเฉพาะบิลที่ไม่ใช่ของเข้าห้องอะไหล่)" })));
 }
 
 function buItemSelect(ln, onChange) {
@@ -551,7 +551,7 @@ function renderUnlinked() {
   }));
 }
 
-// ================================================================== stock (#stock), a draft
+// ================================================================== stock (#stock)
 async function openStock() {
   showView("stock");
   showErr("skError", "");
@@ -590,11 +590,16 @@ function renderStock() {
     : [el("p", { class: "muted empty", text: s.items.length ? "ไม่พบรายการที่ตรงกับตัวกรอง" : "ยังไม่มีรายการ — กด “+ เพิ่มรายการ” หรือบันทึกบิลซื้อของแล้วสร้างรายการจากบรรทัดในบิล" })]));
 }
 
-const SK_FIELDS = [["name", "ชื่อรายการ", { wide: true, maxlength: 120 }], ["category", "หมวด (เช่น ลูกปืน สายพาน ไฟฟ้า)", { maxlength: 40 }], ["unit", "หน่วย", { maxlength: 20 }],
-  ["spec", "สเปค", { wide: true, maxlength: 200 }], ["min_qty", "ขั้นต่ำ (ต่ำกว่านี้ขึ้นว่าควรสั่งเพิ่ม)", { type: "number" }], ["location", "ที่เก็บ / ชั้น", { maxlength: 60 }]];
+// one standard name per item: ชนิด + ยี่ห้อ + รุ่น + สเปค (the server builds it too; an item without a ชนิด keeps the name it was typed with)
+const SK_FIELDS = [["kind", "ชนิด (เช่น แมกเนติก โอเวอร์โหลด เบรกเกอร์)", { maxlength: 60 }], ["brand", "ยี่ห้อ", { maxlength: 40 }], ["model", "รุ่น / เบอร์", { maxlength: 60 }],
+  ["spec", "สเปค (เช่น 220V 40A)", { maxlength: 200 }], ["name", "ชื่อรายการ (ตั้งให้เองจาก ชนิด + ยี่ห้อ + รุ่น + สเปค)", { wide: true, maxlength: 120 }],
+  ["category", "หมวด (เช่น ไฟฟ้า โซ่ เชื่อม-ตัด)", { maxlength: 40 }], ["unit", "หน่วย", { maxlength: 20 }],
+  ["min_qty", "ขั้นต่ำ (ต่ำกว่านี้ขึ้นว่าควรสั่งเพิ่ม)", { type: "number" }], ["location", "ที่เก็บ / ชั้น", { maxlength: 60 }]];
+const skStandardName = (d) => [d.kind, d.brand, d.model, d.spec].map((x) => String(x || "").trim()).filter(Boolean).join(" ");
 
 async function openStockItem(item) {
-  const d = item ? { ...item, min_qty: item.min_qty ?? "", aliases: (item.aliases || []).join(", ") } : { name: "", category: "", unit: "", spec: "", min_qty: "", location: "", aliases: "" };
+  const d = item ? { ...item, kind: item.kind || "", brand: item.brand || "", model: item.model || "", min_qty: item.min_qty ?? "", aliases: (item.aliases || []).join(", ") }
+    : { kind: "", brand: "", model: "", name: "", category: "", unit: "", spec: "", min_qty: "", location: "", aliases: "" };
   let history = null;
   if (item) {
     try { history = await api(`/api/stock/items/${item.id}/moves`); } catch (_) { history = []; }
@@ -602,7 +607,7 @@ async function openStockItem(item) {
   const KIND = { in: "รับเข้า", out: "เบิก", count: "นับสต็อก" };
   buOpenDialog(item ? item.name : "เพิ่มรายการ", [
     el("div", { class: "mfields" }, ...SK_FIELDS.map(([k, l, o]) => mfield(d, k, l, o)),
-      mfield(d, "aliases", "คำที่เจอในบิลแล้วนับเป็นรายการนี้ (คั่นด้วย ,)", { wide: true, maxlength: 2000 })),
+      mfield(d, "aliases", "คำที่เจอในบิลแล้วนับเป็นรายการนี้ (คั่นด้วย , — ใส่รุ่นไว้ได้เลย เช่น SC-N8; รุ่นเดียวกันหลายสเปคใช้คู่ เช่น TR-N2/3+12-18A)", { wide: true, maxlength: 2000 })),
     history && history.length ? el("details", { open: true }, el("summary", { text: `ความเคลื่อนไหว (${history.length})` }),
       ...history.map((m) => el("div", { class: "prhist small" }, el("span", { text: beDate(m.move_date) }), el("span", { text: KIND[m.kind] || m.kind }),
         el("strong", { text: `${m.qty > 0 ? "+" : ""}${buQty(m.qty)}` }), el("span", { class: "muted", text: [m.machine_name, m.notes].filter(Boolean).join(" · ") }),
@@ -612,10 +617,59 @@ async function openStockItem(item) {
           $("buDialog").close(); await loadStock();
         } })))) : null,
   ], async () => {
-    const body = { ...Object.fromEntries(SK_FIELDS.map(([k]) => [k, d[k]])), aliases: String(d.aliases || "").split(",").map((w) => w.trim()).filter(Boolean) };
+    const body = { ...Object.fromEntries(SK_FIELDS.map(([k]) => [k, d[k]])) };
+    if (d.kind) delete body.name;                                  // the server builds the standard name from the parts
+    if (item || d.aliases) body.aliases = String(d.aliases || "").split(",").map((w) => w.trim()).filter(Boolean);
     bu.stock = await api(item ? `/api/stock/items/${item.id}` : "/api/stock/items", jsonOpts(item ? "PATCH" : "POST", body));
     bu.opts = null;                                    // the bill page's item list is stale now
     await loadStock();
+  });
+  for (const k of ["kind", "brand", "model", "spec"]) $(`mf_${k}`).addEventListener("input", () => skSyncName(d));
+  skSyncName(d);
+}
+
+function skSyncName(d) {                       // while typing the parts, the name field shows the standard name (and cannot be typed over)
+  const name = $("mf_name");
+  if (!name) return;
+  name.readOnly = !!String(d.kind || "").trim();
+  if (name.readOnly) { d.name = skStandardName(d); name.value = d.name; }
+}
+
+// the mechanic's paper, typed once a week: one list, one save
+function openWeeklyOut() {
+  const items = bu.stock.items.filter((i) => i.active !== false), byName = new Map(items.map((i) => [i.name, i]));
+  const machines = bu.stock.machines.filter((m) => m.active !== false);
+  const d = { move_date: todayISO(), notes: "" }, rows = [], list = el("div", { class: "skw" });
+  const addRow = () => {
+    const name = el("input", { type: "text", list: "skwItems", placeholder: "พิมพ์ชื่อ/รุ่น แล้วเลือกจากรายการที่ขึ้น", autocomplete: "off", "aria-label": "รายการที่เบิก" });
+    const qty = el("input", { type: "number", min: "0", step: "any", inputmode: "decimal", placeholder: "จำนวน", "aria-label": "จำนวน" });
+    const machine = el("select", { "aria-label": "ใช้กับเครื่อง" }, el("option", { value: "", text: "— ไม่ระบุเครื่อง —" }), ...machines.map((m) => el("option", { value: m.id, text: m.name })));
+    const have = el("span", { class: "muted small skw-have" });
+    name.addEventListener("input", () => { const it = byName.get(name.value.trim()); fill(have, it ? `มี ${buQty(it.on_hand)} ${it.unit || ""}` : ""); });
+    rows.push({ name, qty, machine });
+    list.append(el("div", { class: "skw-row" }, name, qty, machine, have));
+  };
+  for (let i = 0; i < 8; i++) addRow();
+  buOpenDialog("เบิกของประจำสัปดาห์ (จากกระดาษของช่าง)", [
+    el("datalist", { id: "skwItems" }, ...items.map((i) => el("option", { value: i.name }))),
+    el("p", { class: "muted small", text: "พิมพ์ของที่ช่างเขียนเบิกไว้ในสัปดาห์นี้ทีเดียว — ช่องไหนเว้นว่างไว้ข้ามให้ ถ้ามีแถวไหนผิด ระบบจะบอกเลขแถวและยังไม่บันทึกอะไรเลย" }),
+    el("div", { class: "mfields" }, mfield(d, "move_date", "วันที่เบิก (ใส่วันสิ้นสัปดาห์ก็ได้)", { type: "date", caption: true }), mfield(d, "notes", "หมายเหตุ (เช่น สัปดาห์ 20–26 ต.ค.)", { wide: true, maxlength: 300 })),
+    list,
+    el("button", { class: "btn small", type: "button", text: "+ เพิ่มแถว", onclick: () => { addRow(); rows[rows.length - 1].name.focus(); } }),
+  ], async () => {
+    const out = [];
+    rows.forEach((r, i) => {
+      const n = r.name.value.trim();
+      if (!n && !r.qty.value.trim()) return;
+      const it = byName.get(n);
+      if (!it) throw new Error(`แถวที่ ${i + 1}: เลือกรายการจากรายการที่ขึ้นให้ (พิมพ์ชื่อหรือรุ่นแล้วกดเลือก)`);
+      out.push({ item_id: it.id, qty: r.qty.value, machine_id: r.machine.value || "" });
+    });
+    if (!out.length) throw new Error("ยังไม่ได้ใส่รายการ");
+    const r = await api("/api/stock/moves/batch", jsonOpts("POST", { kind: "out", move_date: d.move_date, notes: d.notes, rows: out }));
+    bu.stock = r;
+    renderStock();
+    if (r.negative && r.negative.length) alert(`บันทึก ${r.written} รายการแล้ว\nแต่ของเหล่านี้ในระบบติดลบ (เช็คว่านับยอดเริ่มต้นหรือจำนวนที่ช่างเขียนถูกไหม):\n• ${r.negative.join("\n• ")}`);
   });
 }
 
@@ -693,6 +747,7 @@ function initBuy() {
   $("prUv").addEventListener("change", renderUnlinked);
   for (const id of ["skQ", "skCat", "skLoc", "skLow"]) $(id).addEventListener(id === "skQ" ? "input" : "change", renderStock);
   $("skAdd").addEventListener("click", () => openStockItem(null));
+  $("skWeekly").addEventListener("click", () => bu.stock && bu.stock.ready && openWeeklyOut());
   $("buDlgCancel").addEventListener("click", () => $("buDialog").close());
   $("buViewerClose").addEventListener("click", () => $("buViewer").close());
   $("buViewer").addEventListener("click", (e) => { if (e.target === $("buViewer")) $("buViewer").close(); });          // a click on the dim area closes it

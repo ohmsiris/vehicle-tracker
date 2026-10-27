@@ -7,6 +7,12 @@ moves; nothing is stored twice.
   out    - taken for a job (optionally which machine)
   count  a stock-take: the move that brings the shelf to what was counted (so the history explains every change)
 
+How the room is run: IN is recorded by the owner (a bill line, or by hand) -- everything goes into the stock first; OUT is what the mechanic writes on
+paper, and the owner types it once a week as one list (add_moves_batch). Every item has ONE standard name, built from its parts:
+    ชนิด + ยี่ห้อ + รุ่น + สเปค     e.g. "แมกเนติก Fuji SC-N8 220V", "โอเวอร์โหลด Mitsubishi TH-T25 18-26A"
+(compose_name). The model code is the word a bill is matched by (spaces, dashes and capitals do not matter: SC-N2 = SCN2 = sc n2); where one model comes
+in several ratings the word is a pair "TR-N2/3+12-18A" (both must be on the bill line).
+
 Pure rules (clean_item, clean_move, on_hand) are unit-tested; the database calls are thin. Needs schema_v16.sql.
 """
 import re
@@ -45,26 +51,39 @@ def _qty(value, what: str, *, allow_zero: bool) -> Optional[float]:
     return n
 
 
+def compose_name(kind, brand, model, spec) -> str:
+    """The standard name: ชนิด + ยี่ห้อ + รุ่น + สเปค, whichever are given, single-spaced."""
+    return _text(" ".join(p for p in (_text(kind, 60), _text(brand, 40), _text(model, 60), _text(spec, 200)) if p), 120)
+
+
 def clean_item(data: dict, *, existing: Optional[dict] = None, others: list[dict]) -> dict:
-    """A new item (existing=None) or the fields present in `data`. Names and words are unique across items."""
+    """A new item (existing=None) or the fields present in `data`. Names and words are unique across items.
+    An item with a ชนิด gets its standard name from the parts (unless a name is typed); changing a part renames it."""
     creating = existing is None
     out: dict = {}
-    if creating or "name" in data:
-        name = _text(data.get("name"), 120)
+    for key, limit in (("kind", 60), ("brand", 40), ("model", 60), ("category", 40), ("unit", 20), ("spec", 200), ("location", 60), ("notes", 500)):
+        if creating or key in data:
+            out[key] = _text(data.get(key), limit) or None
+    final = {**(existing or {}), **out}
+    composed = compose_name(final.get("kind"), final.get("brand"), final.get("model"), final.get("spec")) if final.get("kind") else ""
+    typed = _text(data.get("name"), 120) if "name" in data else ""
+    parts_changed = any(k in data for k in ("kind", "brand", "model", "spec"))
+    if creating or "name" in data or (composed and parts_changed):
+        name = typed or composed
         if not name:
             raise InvalidStock("ใส่ชื่อรายการด้วย")
         if any(o["name"].lower() == name.lower() for o in others):
             raise InvalidStock(f"มีรายการชื่อ “{name}” อยู่แล้ว")
         out["name"] = name
-    for key, limit in (("category", 40), ("unit", 20), ("spec", 200), ("location", 60), ("notes", 500)):
-        if creating or key in data:
-            out[key] = _text(data.get(key), limit) or None
     if creating or "min_qty" in data:
         out["min_qty"] = _qty(data.get("min_qty"), "จำนวนขั้นต่ำ", allow_zero=True)
     if "active" in data:
         out["active"] = bool(data["active"])
-    if "aliases" in data:
-        raw = data["aliases"]
+    if creating and "aliases" not in data and out.get("model"):                 # the model code is what a bill names it by
+        if out["model"].lower() not in {a.lower() for o in others for a in o.get("aliases", [])}:
+            out["aliases"] = [out["model"]]
+    if "aliases" in data or "aliases" in out:
+        raw = data.get("aliases", out.get("aliases"))
         if not isinstance(raw, list):
             raise InvalidStock("คำที่ใช้เรียกไม่ถูกต้อง")
         taken = {a.lower(): o["name"] for o in others for a in o.get("aliases", [])}
@@ -112,6 +131,30 @@ def clean_move(data: dict, *, today: date, items: set, machines: set, on_hand_no
         raise InvalidStock("ไม่พบเครื่องนี้")
     return {"item_id": item_id, "move_date": d.isoformat(), "kind": kind, "qty": qty, "machine_id": machine_id,
             "notes": _text(data.get("notes"), 300) or None}
+
+
+def clean_batch(data: dict, *, today: date, items: set, machines: set) -> list[dict]:
+    """The weekly list: {kind: out|in, move_date, notes, rows: [{item_id, qty, machine_id, notes}]} -> the moves to write (blank rows skipped).
+    All or nothing: the first bad row is named by its number and nothing is written."""
+    kind = data.get("kind") or "out"
+    if kind not in ("in", "out"):
+        raise InvalidStock("เลือกว่ารับเข้าหรือเบิกออก")
+    raw = data.get("rows")
+    if not isinstance(raw, list):
+        raise InvalidStock("ไม่มีรายการให้บันทึก")
+    moves = []
+    for n, r in enumerate(raw, 1):
+        r = r if isinstance(r, dict) else {}
+        if not r.get("item_id") and str(r.get("qty") if r.get("qty") is not None else "").strip() == "":
+            continue
+        try:
+            moves.append(clean_move({"kind": kind, "move_date": data.get("move_date"), "item_id": r.get("item_id"), "qty": r.get("qty"), "machine_id": r.get("machine_id"),
+                                     "notes": r.get("notes") or data.get("notes")}, today=today, items=items, machines=machines))
+        except InvalidStock as exc:
+            raise InvalidStock(f"แถวที่ {n}: {exc}")
+    if not moves:
+        raise InvalidStock("ไม่มีรายการให้บันทึก")
+    return moves
 
 
 def on_hand(moves: list[dict]) -> dict:
@@ -192,6 +235,20 @@ def add_move(data: dict) -> dict:
         return overview()                                     # counted what the system already had: nothing to write
     supabase.insert("stock_moves", [row])
     return overview()
+
+
+def add_moves_batch(data: dict) -> dict:
+    """Write the weekly out-list (or an in-list) in one go. `negative` names the items that now show less than nothing on the shelf, so a missing
+    opening count or a wrong quantity is noticed -- the moves are still written (the paper is the truth, the records catch up)."""
+    _require()
+    items = {i["id"]: i for i in items_with_aliases()}
+    moves = clean_batch(data, today=today_th(), items=set(items), machines={m["id"] for m in _machines()})
+    supabase.insert("stock_moves", moves)
+    have = on_hand(_moves())
+    out = overview()
+    out["negative"] = sorted(items[i]["name"] for i in {m["item_id"] for m in moves} if have.get(i, 0) < 0)
+    out["written"] = len(moves)
+    return out
 
 
 def item_moves(item_id: str) -> list[dict]:
