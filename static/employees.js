@@ -79,7 +79,8 @@ function visibleEmployees() {
   const gender = $("emGender").value;
   $("emClear").hidden = !(tokens.length || branch || pos || gender || status !== "active" || $("emSort").value !== "code");
   return emp.all
-    .filter((e) => (status === "all" ? true : status === "resigned" ? e.status === "resigned" : e.status !== "resigned"))
+    .filter((e) => (status === "all" ? true : status === "resigned" ? e.status === "resigned" : e.status === "resigned" ? false
+      : status === "probation" ? !!(e.probation && e.probation.on) : status === "review" ? !!e.rate_review : true))
     .filter((e) => !branch || e.branch === branch)
     .filter((e) => !pos || (pos === "__none" ? !e.position : e.position === pos))
     .filter((e) => !gender || (gender === "__none" ? !e.gender : e.gender === gender))
@@ -91,17 +92,38 @@ function visibleEmployees() {
     .sort(sort);
 }
 
+function empBadges(e) {
+  const out = [];
+  if (e.probation && e.probation.on) out.push(el("span", { class: `badge ${e.probation.soon ? "warn" : ""}`.trim(), title: `ครบทดลองงาน ${beDate(e.probation_end)}`, text: `ทดลองงาน · เหลือ ${e.probation.days_left} วัน` }));
+  if (e.pay_group === "hq") out.push(el("span", { class: "badge", text: "HQ จ่าย" }));
+  return out;
+}
+
+function renderEmpAlerts() {
+  const live = emp.all.filter((e) => e.status !== "resigned");
+  const soon = live.filter((e) => e.probation && e.probation.soon).sort((a, b) => a.probation.days_left - b.probation.days_left);
+  const review = live.filter((e) => e.rate_review);
+  const box = [];
+  if (soon.length) box.push(el("div", { class: "edit-banner" }, el("strong", { text: "ใกล้ครบทดลองงาน (ภายใน 30 วัน): " }),
+    soon.map((e) => `${e.display_name} (${beDate(e.probation_end)} · อีก ${e.probation.days_left} วัน)`).join(" · ")));
+  if (review.length) box.push(el("div", { class: "edit-banner" }, el("strong", { text: `ค่าแรงที่ให้ตรวจสอบ ${review.length} คน: ` }), review.map((e) => e.display_name).join(" · "), " ",
+    el("button", { class: "btn small", type: "button", text: "ดูเฉพาะรายการนี้", onclick: () => { $("emStatus").value = "review"; renderEmployees(); } })));
+  $("empAlerts").replaceChildren(...box);
+}
+
 function renderEmployees() {
+  renderEmpAlerts();
   const rows = visibleEmployees();
   const s = emp.summary || { active: 0, resigned: 0, by_position: [] };
   fill($("emCount"), `พบ ${rows.length} คน จากที่ทำงานอยู่ ${s.active} คน${s.resigned ? ` (ลาออกแล้ว ${s.resigned})` : ""}`,
     s.by_position.length ? ` · ${s.by_position.map(([p, n]) => `${p} ${n}`).join(" · ")}` : null,
     s.by_gender ? ` · ชาย ${s.by_gender["ชาย"]} · หญิง ${s.by_gender["หญิง"]}${s.by_gender["ยังไม่ระบุ"] ? ` · ยังไม่ระบุเพศ ${s.by_gender["ยังไม่ระบุ"]}` : ""}` : null);
-  const head = el("tr", {}, ...["รหัส", "ชื่อ-สกุล", "เพศ", "สาขา", "ตำแหน่ง", "เริ่มงาน", ""].map((t) => el("th", { text: t })));
+  const head = el("tr", {}, ...["รหัส", "ชื่อ-สกุล", "เพศ", "สาขา", "ตำแหน่ง", "ค่าแรง/วัน", "เริ่มงาน", ""].map((t) => el("th", { text: t })));
   const body = rows.map((e) => {
     const tr = el("tr", { class: `emprow${e.status === "resigned" ? " off" : ""}`, tabindex: "0", onclick: () => goHash(`#employee=${e.id}`) },
-      el("td", { class: "emcode", text: e.code }), el("td", { class: "emname", text: empLabel(e) }), el("td", { text: e.gender }), el("td", { text: e.branch }),
-      el("td", { text: e.position }), el("td", { text: e.start_date ? beDate(e.start_date) : "" }),
+      el("td", { class: "emcode", text: e.code }), el("td", {}, el("span", { class: "emname", text: empLabel(e) }), ...empBadges(e)), el("td", { text: e.gender }), el("td", { text: e.branch }),
+      el("td", { text: e.position }), el("td", { class: "r", text: e.daily_rate ? `${lnMoney(e.daily_rate)}${e.rate_review ? " ⚑" : ""}` : (e.pay_group === "hq" ? "HQ" : "") }),
+      el("td", { text: e.start_date ? beDate(e.start_date) : "" }),
       el("td", {}, e.status === "resigned" ? el("span", { class: "badge", text: "ลาออกแล้ว" }) : null));
     tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter") goHash(`#employee=${e.id}`); });
     return tr;
@@ -121,7 +143,7 @@ function clearEmpFilters() {
 
 function exportEmployees() {
   const cols = [["รหัส", (e) => e.code], ["คำนำหน้า", (e) => e.prefix], ["ชื่อ-สกุล", (e) => e.full_name], ["เพศ", (e) => e.gender], ["ชื่อเล่น", (e) => e.nickname], ["สาขา", (e) => e.branch], ["ตำแหน่ง/แผนก", (e) => e.position],
-    ["สถานะ", (e) => (e.status === "resigned" ? "ลาออกแล้ว" : "ทำงานอยู่")], ["วันเริ่มงาน (ค.ศ.)", (e) => e.start_date], ["วันที่ลาออก (ค.ศ.)", (e) => e.end_date],
+    ["สถานะ", (e) => (e.status === "resigned" ? "ลาออกแล้ว" : "ทำงานอยู่")], ["ค่าแรงต่อวัน", (e) => e.daily_rate], ["ครบทดลองงาน (ค.ศ.)", (e) => e.probation_end], ["จ่ายโดย", (e) => (e.pay_group === "hq" ? "HQ" : "บริษัท")], ["วันเริ่มงาน (ค.ศ.)", (e) => e.start_date], ["วันที่ลาออก (ค.ศ.)", (e) => e.end_date],
     ["เบอร์โทร", (e) => e.phone], ["หมายเหตุ", (e) => e.notes]];
   const q = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
   const lines = [cols.map(([h]) => q(h)).join(","), ...visibleEmployees().map((e) => cols.map(([, f]) => q(f(e))).join(","))];
@@ -180,11 +202,96 @@ function renderEmployee() {
     card("การทำงาน", kvAll("สถานะ", off ? "ลาออกแล้ว" : "ทำงานอยู่"), kvAll("วันเริ่มงาน", e.start_date ? beDate(e.start_date) : ""),
       kvAll("อายุงาน", tenure(e.start_date, e.end_date) + (off ? "" : e.start_date ? " (ถึงวันนี้)" : "")),
       off ? kvAll("วันที่ลาออก", e.end_date ? beDate(e.end_date) : "") : null, off ? kvAll("เหตุผล", e.end_reason) : null, kvAll("หมายเหตุ", e.notes)),
+    el("section", { class: "card tkcard" }, el("h3", { text: "ค่าจ้าง / ทดลองงาน" }), el("div", { id: "empRatesBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     el("section", { class: "card tkcard" }, el("h3", { text: "เงินกู้ / หักเงินเดือน" }), el("div", { id: "empLoansBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     el("section", { class: "card tkcard" }, el("h3", { text: "ใบเตือน / บันทึกข้อความ" }), el("div", { id: "empDocsBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     soon("ตรวจสลิปเงินเดือน", "อ่านสลิปแล้วตรวจกับค่าแรง เงินกู้ และเงินสะสมของคนนี้"));
   renderEmployeeLoans(e);
   renderEmployeeDocs(e);
+  renderEmployeeRates(e);
+}
+
+// ------------------------------------------------------------------ the daily wage, its history and the probation period
+async function renderEmployeeRates(person) {
+  const box = document.getElementById("empRatesBox");
+  if (!box) return;
+  try {
+    const d = await api(`/api/employees/${person.id}/rates`);
+    const cur = d.current, pr = d.probation;
+    const probLine = !d.probation_end ? "ไม่ได้อยู่ระหว่างทดลองงาน" : pr.on ? `ทดลองงานถึง ${beDate(d.probation_end)} (เหลือ ${pr.days_left} วัน)` : `ผ่านทดลองงานแล้ว (ครบ ${beDate(d.probation_end)})`;
+    fill(box,                                                  // (fill drops the empty slots: replaceChildren would print "null")
+      el("div", { class: "hstats" }, hStat(cur ? lnMoney(cur.daily_rate) : "—", "ค่าแรงต่อวัน (บาท)", cur && cur.review ? "warn" : ""), hStat(lnMoney(d.ot_hourly), "OT ต่อชั่วโมง (แก่งคอย ผลิต)")),
+      cur ? el("p", { class: "muted small", text: `ใช้ตั้งแต่ ${beDate(cur.effective_from)} · ${cur.kind_label}${cur.reason ? ` · ${cur.reason}` : ""}` }) : el("p", { class: "muted small", text: d.pay_group === "hq" ? "จ่ายโดย HQ — ไม่ต้องคำนวณในระบบนี้" : "ยังไม่มีค่าแรง — กด “+ ปรับค่าจ้าง” เพื่อใส่" }),
+      cur && cur.review ? el("p", { class: "small", style: "color:var(--warn)", text: `⚑ ให้ตรวจสอบ: ${cur.review_note || "ตรวจค่าแรง"}` }) : null,
+      kvAll("ทดลองงาน", probLine), person.pay_group === "hq" ? kvAll("จ่ายเงินเดือนโดย", "HQ") : null,
+      d.rates.length ? el("ul", { class: "hlist" }, ...d.rates.map((r) => el("li", { class: "hrow" },
+        el("span", { class: "hrow-main", text: `${beDate(r.effective_from)} · ${lnMoney(r.daily_rate)} บาท/วัน · ${r.kind_label}${r.reason ? ` · ${r.reason}` : ""}${r.memo_ref ? ` (${r.memo_ref})` : ""}` }),
+        el("button", { class: "hlink", type: "button", text: "ลบ", onclick: () => deleteRate(r, person) })))) : null,
+      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:6px" }, el("button", { class: "btn small", type: "button", text: "+ ปรับค่าจ้าง", onclick: () => openRateDialog(person, d) }),
+        el("button", { class: "btn small", type: "button", text: "แก้วันครบทดลองงาน", onclick: () => editProbation(person, d) })));
+  } catch (err) {
+    box.replaceChildren(el("p", { class: "muted small", text: err.status === 423 ? "ล็อกอยู่ (ใส่ PIN)" : err.message }));
+  }
+}
+
+function openRateDialog(person, d) {
+  emp.rateFor = person;
+  $("rtTitle").textContent = `ปรับค่าจ้าง — ${person.display_name}`;
+  $("rtRate").value = d.current ? d.current.daily_rate : "";
+  $("rtFrom").value = todayISO();
+  $("rtFrom").max = "";
+  $("rtFromCap").textContent = dateCaption($("rtFrom").value);
+  $("rtKind").value = d.probation && d.probation.on ? "probation" : "normal";
+  $("rtReason").value = "";
+  $("rtMemo").value = "";
+  $("rtReview").checked = false;
+  $("rtReviewNote").value = "";
+  showErr("rtError", "");
+  $("rateDialog").showModal();
+}
+
+async function saveRate() {
+  const p = emp.rateFor;
+  $("rtSave").disabled = true;
+  try {
+    await api(`/api/employees/${p.id}/rates`, jsonOpts("POST", { daily_rate: $("rtRate").value, effective_from: $("rtFrom").value, kind: $("rtKind").value, reason: $("rtReason").value,
+      memo_ref: $("rtMemo").value, review: $("rtReview").checked, review_note: $("rtReviewNote").value }));
+    $("rateDialog").close();
+    emp.loaded = false;
+    await empLoad();
+    renderEmployeeRates(p);
+  } catch (err) { showErr("rtError", err.message); } finally { $("rtSave").disabled = false; }
+}
+
+async function deleteRate(r, person) {
+  if (!confirm(`ลบค่าแรง ${lnMoney(r.daily_rate)} บาท (เริ่ม ${beDate(r.effective_from)}) ออกจากประวัติ? ใช้เฉพาะกรณีใส่ผิด`)) return;
+  try {
+    await api(`/api/rates/${r.id}`, { method: "DELETE" });
+    emp.loaded = false;
+    await empLoad();
+    renderEmployeeRates(person);
+  } catch (err) { showErr("empDetailError", err.message); }
+}
+
+async function editProbation(person, d) {
+  const hint = d.default_probation_end ? `\n(3 เดือนจากวันเริ่มงาน = ${d.default_probation_end})` : "";
+  const v = prompt(`วันครบทดลองงาน (ค.ศ. เช่น 2027-01-19) — เว้นว่าง = ไม่อยู่ระหว่างทดลองงาน${hint}`, d.probation_end || d.default_probation_end || "");
+  if (v === null) return;
+  try {
+    emp.current = await api(`/api/employees/${person.id}`, jsonOpts("PATCH", { probation_end: v.trim() }));
+    emp.loaded = false;
+    await empLoad();
+    renderEmployee();
+  } catch (err) { showErr("empDetailError", err.message); }
+}
+
+function addThreeMonths(iso) {                              // the last day of a 3-month trial: 15 Oct -> 14 Jan
+  const [y, m, d] = iso.split("-").map(Number);
+  const idx = y * 12 + (m - 1) + 3, ny = Math.floor(idx / 12), nm = (idx % 12) + 1;
+  const last = new Date(ny, nm, 0).getDate();
+  const end = new Date(ny, nm - 1, Math.min(d, last));
+  end.setDate(end.getDate() - 1);
+  return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
 }
 
 // ------------------------------------------------------------------ add / edit
@@ -206,6 +313,11 @@ async function openEmpDialog(e) {
   $("emdStartCap").textContent = dateCaption($("emdStart").value);
   $("emdPhone").value = e ? e.phone : "";
   $("emdNotes").value = e ? e.notes : "";
+  $("emdProb").value = e && e.probation_end ? e.probation_end : "";
+  $("emdProbCap").textContent = dateCaption($("emdProb").value);
+  $("emdPay").value = e ? e.pay_group : "company";
+  $("emdRate").value = "";
+  $("emdRateRow").hidden = !!e;                              // a rate of someone already here is changed on their page ("+ ปรับค่าจ้าง")
   showErr("emdError", "");
   $("emdSave").dataset.id = e ? e.id : "";
   $("empDialog").showModal();
@@ -215,11 +327,15 @@ async function saveEmployee() {
   const id = $("emdSave").dataset.id;
   const body = {
     code: $("emdCode").value, full_name: $("emdName").value, prefix: $("emdPrefix").value, gender: $("emdGender").value, nickname: $("emdNick").value, branch: $("emdBranch").value, position: $("emdPosition").value,
-    start_date: $("emdStart").value || null, phone: $("emdPhone").value, notes: $("emdNotes").value,
+    start_date: $("emdStart").value || null, phone: $("emdPhone").value, notes: $("emdNotes").value, probation_end: $("emdProb").value || "", pay_group: $("emdPay").value,
   };
   $("emdSave").disabled = true;
   try {
     const saved = await api(id ? `/api/employees/${id}` : "/api/employees", jsonOpts(id ? "PATCH" : "POST", body));
+    if (!id && $("emdRate").value.trim()) {                  // a new person's first wage, from the day they started (a trial wage while on probation)
+      await api(`/api/employees/${saved.id}/rates`, jsonOpts("POST", { daily_rate: $("emdRate").value, effective_from: $("emdStart").value || todayISO(), kind: $("emdProb").value ? "probation" : "normal",
+        reason: "เริ่มงาน" }));
+    }
     $("empDialog").close();
     emp.loaded = false;
     await empLoad();
@@ -301,6 +417,16 @@ function initEmployees() {
     $("emdNameHint").textContent = "";
   });
   bindDateField($("emdStart"), $("emdStartCap"));
+  bindDateField($("emdProb"), $("emdProbCap"));
+  $("emdProb3").addEventListener("click", () => {
+    if (!$("emdStart").value) { showErr("emdError", "ใส่วันเริ่มงานก่อน"); return; }
+    showErr("emdError", "");
+    $("emdProb").value = addThreeMonths($("emdStart").value);
+    $("emdProbCap").textContent = dateCaption($("emdProb").value);
+  });
+  $("rtCancel").addEventListener("click", () => $("rateDialog").close());
+  $("rtSave").addEventListener("click", saveRate);
+  bindDateField($("rtFrom"), $("rtFromCap"));
   $("emrCancel").addEventListener("click", () => $("empResignDialog").close());
   $("emrSave").addEventListener("click", submitResign);
   bindDateField($("emrDate"), $("emrDateCap"));

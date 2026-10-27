@@ -1061,7 +1061,7 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 .emcode { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); }
 .emname { font-weight: 600; }
 .emprow.off .emname { font-weight: 400; }
-@media (max-width: 700px) { .emptable th:nth-child(4), .emptable td:nth-child(4), .emptable th:nth-child(6), .emptable td:nth-child(6) { display: none; } }
+@media (max-width: 700px) { .emptable th:nth-child(4), .emptable td:nth-child(4), .emptable th:nth-child(7), .emptable td:nth-child(7) { display: none; } }
 .emd-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tkcard.hsoon { position: relative; }
 .sideitem .soon { white-space: nowrap; flex-shrink: 0; }

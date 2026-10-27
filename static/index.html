@@ -134,7 +134,7 @@
         <div><label for="emGender">เพศ</label>
           <select id="emGender"><option value="">ทุกเพศ</option><option value="ชาย">ชาย</option><option value="หญิง">หญิง</option><option value="__none">ยังไม่ระบุ</option></select></div>
         <div><label for="emStatus">สถานะ</label>
-          <select id="emStatus"><option value="active">ทำงานอยู่</option><option value="resigned">ลาออกแล้ว</option><option value="all">ทั้งหมด</option></select></div>
+          <select id="emStatus"><option value="active">ทำงานอยู่</option><option value="probation">ทดลองงาน</option><option value="review">ค่าแรงให้ตรวจสอบ</option><option value="resigned">ลาออกแล้ว</option><option value="all">ทั้งหมด</option></select></div>
         <div><label for="emSort">เรียงตาม</label>
           <select id="emSort"><option value="code">รหัสพนักงาน</option><option value="name">ชื่อ (ก-ฮ)</option><option value="start">เริ่มงานเก่าสุดก่อน</option></select></div>
       </div>
@@ -144,6 +144,7 @@
         <button id="emExport" class="btn small" type="button">ดาวน์โหลด Excel (CSV)</button>
       </div>
     </div>
+    <div id="empAlerts"></div>
     <div class="rostercountbar"><p class="muted small" id="emCount"></p></div>
     <div id="empList"></div>
   </section>
@@ -998,6 +999,13 @@
   <label for="emdStart">วันเริ่มงาน <span class="muted small">(ไม่บังคับ)</span></label>
   <input id="emdStart" type="date">
   <div id="emdStartCap" class="datecap"></div>
+  <label for="emdProb">ครบทดลองงาน <span class="muted small">(ปกติ 3 เดือนนับจากวันเริ่มงาน — เว้นว่าง = ไม่ได้ทดลองงาน)</span></label>
+  <div class="row"><input id="emdProb" type="date"><button id="emdProb3" class="btn small" type="button">+3 เดือนจากวันเริ่มงาน</button></div>
+  <div id="emdProbCap" class="datecap"></div>
+  <div id="emdRateRow"><label for="emdRate">ค่าแรงต่อวัน (บาท) <span class="muted small">(พนักงานใหม่ — เริ่มใช้ตั้งแต่วันเริ่มงาน)</span></label>
+    <input id="emdRate" type="text" inputmode="decimal" autocomplete="off"></div>
+  <label for="emdPay">จ่ายเงินเดือนโดย</label>
+  <select id="emdPay"><option value="company">บริษัท (คำนวณในระบบนี้)</option><option value="hq">HQ (ไม่ต้องคำนวณที่นี่)</option></select>
   <label for="emdPhone">เบอร์โทร <span class="muted small">(ไม่บังคับ)</span></label>
   <input id="emdPhone" type="text" maxlength="30" autocomplete="off" inputmode="tel">
   <p class="muted small">ตำแหน่ง “พนักงานขับรถสาย / หน้าโรง” = คนขับ: ระบบสร้างข้อมูลคนขับในระบบรถให้เองและอัปเดตตามที่แก้ที่นี่</p>
@@ -1044,6 +1052,28 @@
   <div class="dialog-actions">
     <button type="button" class="btn" id="lndCancel">ยกเลิก</button>
     <button type="button" class="btn primary" id="lndSave">บันทึก</button>
+  </div>
+</dialog>
+
+<dialog id="rateDialog">
+  <h3 id="rtTitle">ปรับค่าจ้าง</h3>
+  <label for="rtRate">ค่าแรงต่อวัน (บาท)</label>
+  <input id="rtRate" type="text" inputmode="decimal" autocomplete="off">
+  <label for="rtFrom">เริ่มใช้ตั้งแต่</label>
+  <input id="rtFrom" type="date">
+  <div id="rtFromCap" class="datecap"></div>
+  <label for="rtKind">ประเภท</label>
+  <select id="rtKind"><option value="normal">ปกติ</option><option value="probation">ทดลองงาน</option></select>
+  <label for="rtReason">เหตุผล <span class="muted small">(ไม่บังคับ)</span></label>
+  <input id="rtReason" type="text" maxlength="300" autocomplete="off" placeholder="เช่น ผ่านทดลองงาน / ปรับขึ้น / ตามบันทึกข้อความ">
+  <label for="rtMemo">อ้างอิงบันทึกข้อความ <span class="muted small">(ไม่บังคับ)</span></label>
+  <input id="rtMemo" type="text" maxlength="100" autocomplete="off">
+  <label class="check"><input id="rtReview" type="checkbox"> ทำเครื่องหมายให้ตรวจสอบ</label>
+  <input id="rtReviewNote" type="text" maxlength="300" autocomplete="off" placeholder="ตรวจอะไร (ไม่บังคับ)">
+  <p class="error" id="rtError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="rtCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="rtSave">บันทึก</button>
   </div>
 </dialog>
 

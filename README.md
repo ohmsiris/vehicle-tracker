@@ -405,6 +405,17 @@ same name when exactly one matches. The files themselves are not in git (they ho
 Planned next (shown as "เร็วๆ นี้" in the menu): เงินกู้ (borrow / repay ledger per person, repaid by salary deduction), ใบเตือน and บันทึกข้อความ (templates with
 the signature blocks, tracked per person), and payslip reading + checking.
 
+## Daily rates and probation (on each person's page; `schema_v25.sql`, `app/rates.py`)
+
+Everyone is paid **per day** (every role, every day the same). Each person has a **rate history** (`employee_rates`): a raise or the end of probation is a NEW row with the date it starts
+("+ ปรับค่าจ้าง": rate, from-date, ปกติ / ทดลองงาน, reason, memo reference, an optional ⚑ "ให้ตรวจสอบ" flag), the old row stays, and the rate on any day is the latest one starting on or before it
+(`rate_on` -- the pay calculation will use it). The list shows the current rate and badges; filters "ทดลองงาน" and "ค่าแรงให้ตรวจสอบ"; a banner lists who finishes probation within 30 days.
+
+**Probation** = the last day of the trial (`employees.probation_end`), usually 3 months from the start date ("+3 เดือนจากวันเริ่มงาน" fills it: started 15 Oct -> 14 Jan), editable when it ends earlier or later.
+**Who pays**: `pay_group` company / hq -- people paid by HQ (SB-FR005, SB-FR007) are not part of the salary calculation here. Overtime: Kaeng Khoi ผลิต get 3 hours every shift at 40 ฿/hour (`OT_HOURLY`);
+Saraburi ผลิต work 12 hours with no OT. The starting rates came from the September 2569 pay sheets (`scripts/import_rates.py`, with the owner's corrections: FR034 / FR076 = 390, FR071 = เด็กรถ 344,
+KK030 = 390 head of shift; 357 = the trial wage, flagged). The drivers' pay also has a commission % of sales (calculated elsewhere), not stored here.
+
 ## Loans ("เงินกู้", `#loans`, `#loan=<id>`)
 
 What an employee owes the company -- a loan, an advance (เบิกล่วงหน้า), or an accident cost turned into a loan (like the "ขับรถตกข้างทาง" memo: 5,500 ฿ = 2,000 + 2,000 + 1,500) --

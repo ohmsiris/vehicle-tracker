@@ -153,7 +153,7 @@ def test_the_plan_is_described_in_a_sentence():
 class Fake:
     def __init__(self):
         self.t = {"employees": [{"id": EMP, "code": "SB-PD033", "prefix": "นาย", "full_name": "ประเสริฐศักดิ์ แสงเพ็ง", "branch": "สระบุรี", "status": "active"}],
-                  "employee_loans": [], "employee_loan_entries": [], "employee_documents": []}
+                  "employee_loans": [], "employee_loan_entries": [], "employee_documents": [], "employee_rates": []}
 
     def _eq(self, rows, params):
         eq = {k: v[3:] for k, v in (params or {}).items() if isinstance(v, str) and v.startswith("eq.")}

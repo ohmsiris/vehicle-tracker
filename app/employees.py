@@ -170,9 +170,18 @@ def clean_employee(data: dict, *, existing: Optional[dict] = None, others: list[
         values["notes"] = _clean(data.get("notes"), 500) or None
     if creating or "start_date" in data:
         values["start_date"] = _date(data.get("start_date"), "วันเริ่มงาน", today=today)
+    if "probation_end" in data:                         # the last day of the trial period (usually 3 months after the start); empty = not on probation
+        values["probation_end"] = _date(data.get("probation_end"), "วันครบทดลองงาน", today=today, allow_future_days=800)
+    if "pay_group" in data:
+        group = _clean(data.get("pay_group"), 10) or "company"
+        if group not in ("company", "hq"):
+            raise InvalidEmployee("เลือกผู้จ่ายเงินเดือนให้ถูกต้อง")
+        values["pay_group"] = group
     final = {**(existing or {}), **values}
     if final.get("end_date") and final.get("start_date") and final["end_date"] < final["start_date"]:
         raise InvalidEmployee("วันเริ่มงานต้องไม่หลังวันที่ลาออก")
+    if final.get("probation_end") and final.get("start_date") and final["probation_end"] < final["start_date"]:
+        raise InvalidEmployee("วันครบทดลองงานต้องไม่ก่อนวันเริ่มงาน")
     return values
 
 
@@ -204,7 +213,8 @@ def present(row: dict, drivers: dict[str, dict]) -> dict:
             "display_name": display_name(row.get("prefix"), row["full_name"]), "nickname": row.get("nickname") or "", "branch": row["branch"],
             "position": row.get("position") or "", "status": row.get("status") or "active", "start_date": row.get("start_date"),
             "end_date": row.get("end_date"), "end_reason": row.get("end_reason") or "", "phone": row.get("phone") or "",
-            "driver_id": row.get("driver_id"), "driver_name": driver["name"] if driver else "", "notes": row.get("notes") or ""}
+            "driver_id": row.get("driver_id"), "driver_name": driver["name"] if driver else "", "notes": row.get("notes") or "",
+            "pay_group": row.get("pay_group") or "company", "probation_end": row.get("probation_end")}
 
 
 # ------------------------------------------------------------------ the database
@@ -255,7 +265,16 @@ def list_employees() -> dict:
     for r in rows:
         if r.get("position") and r["position"] not in seen:
             seen.append(r["position"])
-    return {"ready": True, "employees": [present(r, drivers) for r in rows], "summary": summarize(rows), "positions": seen, "branches": BRANCHES}
+    cards = [present(r, drivers) for r in rows]
+    from app import rates                                # (rates imports this module: imported here to avoid a loop)
+    today = today_th()
+    current: dict = {}
+    if rates.has_v25():
+        current = rates.current_summary(rates.all_rates(), today)
+    for c in cards:
+        c.update(current.get(c["id"], {}))
+        c["probation"] = rates.probation_state(c.get("probation_end"), today) if c["status"] != "resigned" else {"on": False, "days_left": None, "soon": False}
+    return {"ready": True, "employees": cards, "summary": summarize(rows), "positions": seen, "branches": BRANCHES}
 
 
 def _get(employee_id: str) -> dict:

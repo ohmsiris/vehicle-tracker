@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, documents, employees, events, fleet, history, home, loans, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
+from app import dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -520,6 +520,24 @@ def api_employee_options(x_app_token: str = Header(default=""), token: str = Que
 def api_employees(x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
     _check_token(x_app_token, token)
     return _hr_call(x_hr_pin, employees.list_employees)
+
+
+@app.get("/api/employees/{employee_id}/rates")
+def api_employee_rates(employee_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, rates.list_rates, employee_id)
+
+
+@app.post("/api/employees/{employee_id}/rates")
+def api_add_employee_rate(employee_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, rates.add_rate, employee_id, body)
+
+
+@app.delete("/api/rates/{rate_id}")
+def api_delete_rate(rate_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, rates.delete_rate, rate_id)
 
 
 @app.get("/api/employees/{employee_id}")
