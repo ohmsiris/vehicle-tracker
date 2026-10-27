@@ -58,3 +58,49 @@ def test_the_weekly_list_is_all_or_nothing_and_blank_rows_are_skipped():
             stock.clean_batch({"kind": "out", "rows": rows}, today=TODAY, items={I1, I2}, machines=set())
     with pytest.raises(stock.InvalidStock, match="รับเข้าหรือเบิก"):
         stock.clean_batch({"kind": "count", "rows": [{"item_id": I1, "qty": 1}]}, today=TODAY, items={I1}, machines=set())
+
+
+class FakeDb:
+    def __init__(self):
+        self.t = {"stock_items": [], "stock_item_aliases": [], "stock_moves": []}
+
+    def insert(self, table, rows, **kw):
+        out = []
+        for r in rows:
+            row = {"id": f"id{len(self.t[table])}-{table}", **r}
+            self.t[table].append(row)
+            out.append(dict(row))
+        return out
+
+
+@pytest.fixture
+def sdb(monkeypatch):
+    d = FakeDb()
+    monkeypatch.setattr(stock, "_require", lambda: None)
+    monkeypatch.setattr(stock, "today_th", lambda: TODAY)
+    monkeypatch.setattr(stock, "items_with_aliases", lambda: [{**r, "aliases": [a["alias"] for a in d.t["stock_item_aliases"] if a["item_id"] == r["id"]]} for r in d.t["stock_items"]])
+    monkeypatch.setattr(stock, "overview", lambda: {"ready": True, "items": []})
+    monkeypatch.setattr(stock.supabase, "insert", d.insert)
+    return d
+
+
+def test_several_new_items_are_made_at_once_with_their_opening_count(sdb):
+    out = stock.create_items_batch({"category": "ไฟฟ้า", "rows": [
+        {"kind": "แมกเนติก", "brand": "Fuji", "model": "SC-N3", "spec": "220V", "unit": "ตัว", "qty": "2"},
+        {"kind": "", "brand": "", "model": "", "spec": ""},                                                    # blank: skipped
+        {"kind": "ลูกลอย", "brand": "Qubix", "model": "UKY-2", "unit": "ตัว", "qty": ""}]})
+    assert out["created"] == 2
+    assert [i["name"] for i in sdb.t["stock_items"]] == ["แมกเนติก Fuji SC-N3 220V", "ลูกลอย Qubix UKY-2"] and {i["category"] for i in sdb.t["stock_items"]} == {"ไฟฟ้า"}
+    assert [a["alias"] for a in sdb.t["stock_item_aliases"]] == ["SC-N3", "UKY-2"]
+    assert [(m["kind"], m["qty"]) for m in sdb.t["stock_moves"]] == [("count", 2.0)]                           # no quantity, no count
+
+
+def test_a_bad_row_stops_the_whole_batch_and_is_named(sdb):
+    rows = [{"kind": "แมกเนติก", "model": "SC-N3", "spec": "220V"}, {"kind": "แมกเนติก", "model": "SC-N3", "spec": "220V"}]       # the same name twice
+    with pytest.raises(stock.InvalidStock, match="แถวที่ 2.*อยู่แล้ว"):
+        stock.create_items_batch({"rows": rows})
+    with pytest.raises(stock.InvalidStock, match="แถวที่ 1: จำนวน"):
+        stock.create_items_batch({"rows": [{"kind": "ลูกลอย", "qty": "abc"}]})
+    with pytest.raises(stock.InvalidStock, match="ไม่มีรายการ"):
+        stock.create_items_batch({"rows": [{"kind": ""}]})
+    assert sdb.t["stock_items"] == []                                                                          # nothing was written by any of them

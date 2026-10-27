@@ -635,8 +635,9 @@ function skSyncName(d) {                       // while typing the parts, the na
   if (name.readOnly) { d.name = skStandardName(d); name.value = d.name; }
 }
 
-// the mechanic's paper, typed once a week: one list, one save
-function openWeeklyOut() {
+// several things at once: the mechanic's paper typed once a week (kind "out"), or several things received (kind "in"): one list, one save
+function openStockBatch(kind) {
+  const isOut = kind === "out";
   const items = bu.stock.items.filter((i) => i.active !== false), byName = new Map(items.map((i) => [i.name, i]));
   const machines = bu.stock.machines.filter((m) => m.active !== false);
   const d = { move_date: todayISO(), notes: "" }, rows = [], list = el("div", { class: "skw" });
@@ -647,13 +648,13 @@ function openWeeklyOut() {
     const have = el("span", { class: "muted small skw-have" });
     name.addEventListener("input", () => { const it = byName.get(name.value.trim()); fill(have, it ? `มี ${buQty(it.on_hand)} ${it.unit || ""}` : ""); });
     rows.push({ name, qty, machine });
-    list.append(el("div", { class: "skw-row" }, name, qty, machine, have));
+    list.append(el("div", { class: `skw-row${isOut ? "" : " in"}` }, name, qty, isOut ? machine : null, have));
   };
   for (let i = 0; i < 8; i++) addRow();
-  buOpenDialog("เบิกของประจำสัปดาห์ (จากกระดาษของช่าง)", [
+  buOpenDialog(isOut ? "เบิกของประจำสัปดาห์ (จากกระดาษของช่าง)" : "รับของเข้าสต็อกหลายรายการ", [
     el("datalist", { id: "skwItems" }, ...items.map((i) => el("option", { value: i.name }))),
-    el("p", { class: "muted small", text: "พิมพ์ของที่ช่างเขียนเบิกไว้ในสัปดาห์นี้ทีเดียว — ช่องไหนเว้นว่างไว้ข้ามให้ ถ้ามีแถวไหนผิด ระบบจะบอกเลขแถวและยังไม่บันทึกอะไรเลย" }),
-    el("div", { class: "mfields" }, mfield(d, "move_date", "วันที่เบิก (ใส่วันสิ้นสัปดาห์ก็ได้)", { type: "date", caption: true }), mfield(d, "notes", "หมายเหตุ (เช่น สัปดาห์ 20–26 ต.ค.)", { wide: true, maxlength: 300 })),
+    el("p", { class: "muted small", text: (isOut ? "พิมพ์ของที่ช่างเขียนเบิกไว้ในสัปดาห์นี้ทีเดียว" : "พิมพ์ของที่รับเข้ามาทีเดียว (ไม่มีบิลก็ได้)") + " — ช่องไหนเว้นว่างไว้ข้ามให้ ถ้ามีแถวไหนผิด ระบบจะบอกเลขแถวและยังไม่บันทึกอะไรเลย กด “+ เพิ่มแถว” ได้เรื่อยๆ" }),
+    el("div", { class: "mfields" }, mfield(d, "move_date", isOut ? "วันที่เบิก (ใส่วันสิ้นสัปดาห์ก็ได้)" : "วันที่รับเข้า", { type: "date", caption: true }), mfield(d, "notes", "หมายเหตุ (เช่น สัปดาห์ 20–26 ต.ค.)", { wide: true, maxlength: 300 })),
     list,
     el("button", { class: "btn small", type: "button", text: "+ เพิ่มแถว", onclick: () => { addRow(); rows[rows.length - 1].name.focus(); } }),
   ], async () => {
@@ -666,10 +667,36 @@ function openWeeklyOut() {
       out.push({ item_id: it.id, qty: r.qty.value, machine_id: r.machine.value || "" });
     });
     if (!out.length) throw new Error("ยังไม่ได้ใส่รายการ");
-    const r = await api("/api/stock/moves/batch", jsonOpts("POST", { kind: "out", move_date: d.move_date, notes: d.notes, rows: out }));
+    const r = await api("/api/stock/moves/batch", jsonOpts("POST", { kind, move_date: d.move_date, notes: d.notes, rows: out }));
     bu.stock = r;
     renderStock();
-    if (r.negative && r.negative.length) alert(`บันทึก ${r.written} รายการแล้ว\nแต่ของเหล่านี้ในระบบติดลบ (เช็คว่านับยอดเริ่มต้นหรือจำนวนที่ช่างเขียนถูกไหม):\n• ${r.negative.join("\n• ")}`);
+    if (isOut && r.negative && r.negative.length) alert(`บันทึก ${r.written} รายการแล้ว\nแต่ของเหล่านี้ในระบบติดลบ (เช็คว่านับยอดเริ่มต้นหรือจำนวนที่ช่างเขียนถูกไหม):\n• ${r.negative.join("\n• ")}`);
+  });
+}
+
+// several NEW items at once (the standard name is built per row from ชนิด + ยี่ห้อ + รุ่น + สเปค)
+function openStockMulti() {
+  const d = { category: "" }, rows = [], list = el("div", { class: "skm" });
+  const addRow = () => {
+    const f = (ph, cls, type = "text") => el("input", { type, placeholder: ph, autocomplete: "off", class: cls, "aria-label": ph, ...(type === "number" ? { min: "0", step: "any", inputmode: "decimal" } : {}) });
+    const r = { kind: f("ชนิด เช่น แมกเนติก", "skm-kind"), brand: f("ยี่ห้อ", "skm-brand"), model: f("รุ่น / เบอร์", "skm-model"), spec: f("สเปค เช่น 220V", "skm-spec"),
+      unit: f("หน่วย", "skm-unit"), qty: f("จำนวน", "skm-qty", "number") }, name = el("div", { class: "skm-name muted small" });
+    const sync = () => fill(name, skStandardName({ kind: r.kind.value, brand: r.brand.value, model: r.model.value, spec: r.spec.value }));
+    for (const k of ["kind", "brand", "model", "spec"]) r[k].addEventListener("input", sync);
+    rows.push(r);
+    list.append(el("div", { class: "skm-row" }, r.kind, r.brand, r.model, r.spec, r.unit, r.qty, name));
+  };
+  for (let i = 0; i < 6; i++) addRow();
+  buOpenDialog("เพิ่มหลายรายการ", [
+    el("p", { class: "muted small", text: "ใส่ชนิดอย่างน้อยในแต่ละแถว — ชื่อมาตรฐานสร้างให้เอง (โชว์ใต้แต่ละแถว) รุ่นจะถูกใช้เป็นคำที่เจอในบิลให้ด้วย จำนวนที่ใส่คือยอดตั้งต้นในสต็อก (เว้นว่างได้) ถ้ามีแถวไหนผิด ระบบจะบอกเลขแถวและยังไม่บันทึกอะไรเลย" }),
+    el("div", { class: "mfields" }, mfield(d, "category", "หมวดของชุดนี้ (เช่น ไฟฟ้า โซ่ เชื่อม-ตัด)", { maxlength: 40 })),
+    list,
+    el("button", { class: "btn small", type: "button", text: "+ เพิ่มแถว", onclick: () => { addRow(); rows[rows.length - 1].kind.focus(); } }),
+  ], async () => {
+    const body = rows.map((r) => ({ kind: r.kind.value, brand: r.brand.value, model: r.model.value, spec: r.spec.value, unit: r.unit.value, qty: r.qty.value }));
+    bu.stock = await api("/api/stock/items/batch", jsonOpts("POST", { category: d.category, rows: body }));
+    bu.opts = null;                                    // the bill page's item list is stale now
+    renderStock();
   });
 }
 
@@ -747,7 +774,9 @@ function initBuy() {
   $("prUv").addEventListener("change", renderUnlinked);
   for (const id of ["skQ", "skCat", "skLoc", "skLow"]) $(id).addEventListener(id === "skQ" ? "input" : "change", renderStock);
   $("skAdd").addEventListener("click", () => openStockItem(null));
-  $("skWeekly").addEventListener("click", () => bu.stock && bu.stock.ready && openWeeklyOut());
+  $("skWeekly").addEventListener("click", () => bu.stock && bu.stock.ready && openStockBatch("out"));
+  $("skIn").addEventListener("click", () => bu.stock && bu.stock.ready && openStockBatch("in"));
+  $("skMulti").addEventListener("click", () => bu.stock && bu.stock.ready && openStockMulti());
   $("buDlgCancel").addEventListener("click", () => $("buDialog").close());
   $("buViewerClose").addEventListener("click", () => $("buViewer").close());
   $("buViewer").addEventListener("click", (e) => { if (e.target === $("buViewer")) $("buViewer").close(); });          // a click on the dim area closes it

@@ -1028,6 +1028,12 @@ def api_stock_new_item(body: dict = Body(...), x_app_token: str = Header(default
     return _buy_call(stock.create_item, body)
 
 
+@app.post("/api/stock/items/batch")
+def api_stock_items_batch(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _buy_call(stock.create_items_batch, body)
+
+
 @app.patch("/api/stock/items/{item_id}")
 def api_stock_edit_item(item_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

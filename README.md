@@ -681,6 +681,8 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
   or "+ รับเข้า" by hand; deleting the bill takes them out again. **OUT** is what the mechanic writes on paper: the owner types it once a week with
   **เบิกประจำสัปดาห์** -- one list (item, quantity, optional machine), one save; a bad row is named by its number and nothing is written; items that go below zero
   are listed afterwards (a wrong quantity or a missing opening count).
+  Also several at once: **รับเข้าหลายรายการ** (a list of things received, no bill needed) and **+ เพิ่มหลายรายการ** (a list of new items with their
+  opening count; each row shows its standard name, a bad row is named and nothing is written).
   **One standard name per item**: ชนิด + ยี่ห้อ + รุ่น + สเปค (`stock.compose_name`), built from the four fields, e.g. "แมกเนติก Fuji SC-N8 220V",
   "โอเวอร์โหลด Mitsubishi TH-T25 18-26A". The model code is the word a bill is matched by (spaces, dashes and capitals do not matter: SC-N2 = SCN2 = sc n2);
   a model that comes in several ratings uses a pair, "TR-N2/3+12-18A" (both must be on the bill line). The 27 Oct 2026 count of the electrical store and

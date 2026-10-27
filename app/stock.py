@@ -208,6 +208,42 @@ def create_item(data: dict) -> dict:
     return overview()
 
 
+def create_items_batch(data: dict) -> dict:
+    """Several new items at once: {category, rows: [{kind, brand, model, spec, unit, qty}]}. Blank rows are skipped; every row is checked first (names and
+    bill words must be unique across the list too) and the first bad one is named by its number, with nothing written. `qty` is the count to start from."""
+    _require()
+    raw = data.get("rows")
+    if not isinstance(raw, list):
+        raise InvalidStock("ไม่มีรายการให้บันทึก")
+    category = _text(data.get("category"), 40)
+    others = items_with_aliases()
+    cleaned = []
+    for n, r in enumerate(raw, 1):
+        r = r if isinstance(r, dict) else {}
+        if not any(_text(r.get(k), 200) for k in ("kind", "brand", "model", "spec", "name")):
+            continue
+        try:
+            v = clean_item({**r, **({"category": category} if category and not _text(r.get("category"), 40) else {})}, others=others)
+            qty = _qty(r.get("qty"), "จำนวน", allow_zero=True)
+        except InvalidStock as exc:
+            raise InvalidStock(f"แถวที่ {n}: {exc}")
+        aliases = v.pop("aliases", [])
+        others = others + [{**v, "aliases": aliases}]
+        cleaned.append((v, aliases, qty))
+    if not cleaned:
+        raise InvalidStock("ไม่มีรายการให้บันทึก")
+    today = today_th().isoformat()
+    for v, aliases, qty in cleaned:
+        row = supabase.insert("stock_items", [v])[0]
+        if aliases:
+            supabase.insert("stock_item_aliases", [{"item_id": row["id"], "alias": a} for a in aliases])
+        if qty:
+            supabase.insert("stock_moves", [{"item_id": row["id"], "move_date": today, "kind": "count", "qty": qty, "notes": "ยอดเริ่มต้น"}])
+    out = overview()
+    out["created"] = len(cleaned)
+    return out
+
+
 def update_item(item_id: str, data: dict) -> dict:
     _require()
     items = items_with_aliases()
