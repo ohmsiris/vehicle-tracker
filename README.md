@@ -451,6 +451,18 @@ repaid by salary deduction, no interest, no cap yet (`schema_v23.sql`; `app/loan
 - **Status**: ร่าง → ออกแล้ว · รอเซ็น → เซ็นรับทราบแล้ว (date) / ปฏิเสธลงนาม (witnesses) / ยกเลิก. Print, have it signed on paper, then mark it. Each person's page lists their papers and warnings; an employee with papers can only be ลาออก.
 - Not built yet: scanned signed copies attached to a paper, signing on the screen, the other letters in the personnel folder (หนังสือเลิกจ้าง, หนังสือรับรองเงินเดือน, คืนเงินสะสม ...) -- the same engine can take them.
 
+## Attendance ("เวลาทำงาน", `#attendance`; `schema_v26.sql`, `app/attendance.py`)
+Run `schema_v26.sql` once in Supabase. The page works on one pay month (26th to 25th, named by the month of the 25th: 26 Aug – 25 Sep is "2026-09").
+- **Upload** the fingerprint machine's `.xls` (sheet "รายงานบันทึกเวลา"; several files at once is fine, uploading the same file twice adds nothing). Only the scans are
+  stored (`attendance_punches`); people with no scans, and codes that are not in พนักงาน, are skipped (the page lists the latter).
+- **Shifts** are worked out from the scans alone, because people move between day and night shifts: a person's scans are laid in a row and paired in/out
+  (two scans more than 17 h apart never pair; a second scan within 30 min is the same scan; one stray scan does not shift the pairs after it). A shift belongs to the day it started.
+- **Flags:** a scan with no partner = สแกนเดียว (every role); a ผลิต shift shorter than 12 h minus 10 min = ทำงานไม่ครบเวลา. Free-hours roles only get the single-scan flag; their hours are shown.
+- **Decisions** (the owner's, one per person and work day): อนุมัติ / ค่าแรงครึ่งวัน / ค่าแรงเต็ม + ใบเตือน + หัก (with the amount) / ไม่จ่าย. Nothing is decided automatically.
+  The first 3 single scans of a month carry the suggestion ค่าแรงครึ่งวัน, applied only by "ใช้ตามข้อเสนอทั้งหมด"; from the 4th on there is none.
+  "ทำงานแต่ไม่มีสแกน" adds a day by hand. People paid by HQ (`pay_group = hq`) are left out.
+- The pay calculation (day split 390 / 344, OT, deductions, Excel export) builds on these decisions and comes next. Same PIN lock as พนักงาน.
+
 ## Fleet roster ("ทะเบียนรถ", `#roster`)
 
 The truck list has the same big filter card as the maintenance log: search, สาขา, ประเภทการใช้งาน, ขนาดรถ (รถเล็ก / รถใหญ่), สถานะ, a sort (number, last repair, total repair cost, most repairs), "only trucks with open work", and a clear button.

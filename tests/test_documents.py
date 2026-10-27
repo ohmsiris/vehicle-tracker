@@ -73,7 +73,7 @@ class Fake:
     def __init__(self):
         self.t = {"employees": [{"id": E1, "code": "SB-FR001", "prefix": "นาย", "gender": "ชาย", "full_name": "จรูญ มินฉิมพลี", "position": "ช่าง", "branch": "สระบุรี", "status": "active"},
                                 {"id": E2, "code": "SB-KK003", "prefix": "นาย", "gender": "ชาย", "full_name": "สมชาย เพชรจันทร์", "position": "พนักงานขับรถหน้าโรง", "branch": "แก่งคอย", "status": "active"}],
-                  "employee_documents": [], "employee_loans": [], "hr_settings": [], "employee_rates": []}
+                  "employee_documents": [], "employee_loans": [], "hr_settings": [], "employee_rates": [], "attendance_punches": [], "attendance_reviews": []}
 
     def _eq(self, rows, params):
         eq = {k: v[3:] for k, v in (params or {}).items() if isinstance(v, str) and v.startswith("eq.")}

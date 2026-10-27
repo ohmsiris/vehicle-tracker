@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
+from app import attendance, dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -653,6 +653,32 @@ def api_loan_delete(loan_id: str, x_app_token: str = Header(default=""), token: 
     _check_token(x_app_token, token)
     _hr_call(x_hr_pin, loans.delete_loan, loan_id)
     return {"ok": True}
+
+
+# ------------------------------------------------------------- เวลาทำงาน (the fingerprint machine's report and the owner's decisions): same lock as พนักงาน
+@app.get("/api/attendance")
+def api_attendance(month: str = "", x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, attendance.get_month, month)
+
+
+@app.post("/api/attendance/upload")
+def api_attendance_upload(file: UploadFile = File(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    data = file.file.read(attendance.MAX_UPLOAD + 1)
+    return _hr_call(x_hr_pin, attendance.import_report, data, file.filename or "")
+
+
+@app.put("/api/attendance/review")
+def api_attendance_review(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, attendance.set_review, body)
+
+
+@app.post("/api/attendance/apply-suggestions")
+def api_attendance_apply(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, attendance.apply_suggestions, body.get("month") or "")
 
 
 # ------------------------------------------------------------- เอกสารพนักงาน (หนังสือเตือน / บันทึกข้อความ): same lock as the rest of พนักงาน

@@ -62,7 +62,7 @@ def test_an_employee_can_get_a_probation_end_and_a_payer():
 class Fake:
     def __init__(self):
         self.t = {"employees": [{"id": E1, "code": "SB-KK062", "full_name": "ธนวัฒน์ บุตรดี", "branch": "แก่งคอย", "status": "active", "start_date": "2026-03-26", "probation_end": "2026-06-25", "pay_group": "company"}],
-                  "employee_rates": []}
+                  "employee_rates": [], "attendance_punches": [], "attendance_reviews": []}
 
     def _eq(self, rows, params):
         eq = {k: v[3:] for k, v in (params or {}).items() if isinstance(v, str) and v.startswith("eq.")}

@@ -1115,3 +1115,33 @@ dialog.lndialog { max-width: 720px; width: calc(100vw - 32px); }
   body.printing-doc { background: #fff; }
   @page { size: A4; margin: 18mm 20mm; }
 }
+
+/* ---- เวลาทำงาน (attendance) ---- */
+.atmonth { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.atmonth input[type="month"] { min-width: 150px; }
+.atnote { margin: 10px 0 0; font-size: 14px; }
+.atnote details { margin: 2px 0 6px; }
+.atsuggest { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: var(--warn-soft); border-color: var(--warn-line); }
+.atsuggest p { margin: 0; flex: 1 1 320px; }
+.atcard { padding: 0; margin-bottom: 10px; }
+.atcard.hasopen { border-left: 4px solid var(--warn); }
+.athead { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; width: 100%; padding: 12px 16px; background: none; border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.athead:hover { background: var(--surface-2); }
+.athead:focus-visible { outline: none; box-shadow: var(--ring); }
+.atwho { min-width: 0; }
+.atchips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.atcaret { width: 14px; color: var(--muted); }
+.atbody { padding: 0 16px 14px; }
+.atfoot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.atmanual { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.atbtns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.atamount { width: 110px; }
+.btn.suggested { border-style: dashed; border-color: var(--warn); }
+.attable td { vertical-align: middle; }
+.attable tr.atneed td { background: var(--warn-soft); }
+.attable tr.atdone td { background: var(--ok-soft); }
+@media (max-width: 640px) {
+  .athead { padding: 10px 12px; }
+  .atbody { padding: 0 10px 12px; }
+  .atmanual { margin-left: 0; }
+}

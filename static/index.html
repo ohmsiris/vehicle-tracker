@@ -55,6 +55,7 @@
     <nav class="side-items" id="sideEmployees">
       <button id="navEmployees" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>รายชื่อพนักงาน</span></button>
       <button id="navLoans" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10.2c0-1 1.1-1.7 2.5-1.7s2.5.7 2.5 1.7-1.1 1.5-2.5 1.8-2.5.8-2.5 1.8 1.1 1.7 2.5 1.7 2.5-.7 2.5-1.7"/></svg><span>เงินกู้</span></button>
+      <button id="navAttendance" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg><span>เวลาทำงาน</span></button>
       <button id="navDocs" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4M10 12h6M10 16h6"/></svg><span>ใบเตือน / บันทึกข้อความ</span></button>
       <button class="sideitem" type="button" disabled title="ยังไม่ได้สร้าง"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 9h8M8 13h5M9 17l2 2 4-4"/></svg><span>ตรวจสลิปเงินเดือน</span><i class="soon">เร็วๆ นี้</i></button>
     </nav>
@@ -219,6 +220,38 @@
     </div>
     <div class="rostercountbar"><p class="muted small" id="lnCount"></p></div>
     <div id="lnList"></div>
+  </section>
+
+  <!-- ============ Attendance ============ -->
+  <section id="attendanceView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">เวลาทำงาน</h2>
+      <p class="muted small">อัปโหลดไฟล์ .xls จากเครื่องสแกนนิ้ว (งวด 26 – 25) แล้วตรวจวันที่สแกนเดียวหรือทำงานไม่ครบเวลา — ระบบจับคู่เข้า-ออกกะจากเวลาสแกนเอง และไม่ตัดเงินให้อัตโนมัติ คุณเป็นคนตัดสินทุกวันที่ติดธง</p>
+    </div>
+    <p class="error" id="atError" hidden></p>
+    <div class="edit-banner" id="atNeedsV26" hidden>ยังใช้เวลาทำงานไม่ได้ — ต้องรันไฟล์ <strong>schema_v26.sql</strong> ใน Supabase ก่อน</div>
+    <div class="card" id="atBar">
+      <div class="lgtop rotop">
+        <div class="atmonth"><button id="atPrev" class="btn small" type="button" aria-label="เดือนก่อน">‹</button><input id="atMonth" type="month" aria-label="งวดเงินเดือน (เดือนของวันที่ 25)"><button id="atNext" class="btn small" type="button" aria-label="เดือนถัดไป">›</button>
+          <span class="muted small" id="atRange"></span></div>
+        <div><button id="atUpload" class="btn primary" type="button">+ อัปโหลดไฟล์จากเครื่องสแกน</button><input id="atFile" type="file" accept=".xls,application/vnd.ms-excel" multiple hidden></div>
+      </div>
+      <p class="atnote" id="atUploadNote" hidden></p>
+    </div>
+    <div class="kpis" id="atKpis"></div>
+    <div class="card atsuggest" id="atSuggest" hidden></div>
+    <div class="card logfilters">
+      <div class="lgtop rotop"><input id="atSearch" type="search" placeholder="ค้นหา: ชื่อ รหัส ตำแหน่ง" autocomplete="off" aria-label="ค้นหาพนักงาน"><span></span></div>
+      <div class="lggrid">
+        <div><label for="atShow">แสดง</label><select id="atShow"><option value="open">เฉพาะที่ยังต้องตัดสิน</option><option value="flagged">ติดธงทั้งหมด (รวมที่ตัดสินแล้ว)</option><option value="all">ทุกคนที่มีเวลาทำงาน</option></select></div>
+        <div><label for="atBranch">สาขา</label><select id="atBranch"><option value="">ทุกสาขา</option></select></div>
+        <div><label for="atPosition">ตำแหน่ง</label><select id="atPosition"><option value="">ทุกตำแหน่ง</option></select></div>
+        <div><label for="atKind">ประเภทธง</label><select id="atKind"><option value="">ทุกประเภท</option><option value="single">สแกนเดียว</option><option value="short">ทำงานไม่ครบเวลา</option></select></div>
+      </div>
+    </div>
+    <div class="rostercountbar"><p class="muted small" id="atCount"></p></div>
+    <div id="atList"></div>
+    <div class="card" id="atHistory" hidden></div>
   </section>
 
   <section id="loanView" hidden>
@@ -1291,6 +1324,7 @@
 <script src="/static/roster.js"></script>
 <script src="/static/employees.js"></script>
 <script src="/static/loans.js"></script>
+<script src="/static/attendance.js"></script>
 <script src="/static/documents.js"></script>
 <script src="/static/machinery.js"></script>
 <script src="/static/plan.js"></script>

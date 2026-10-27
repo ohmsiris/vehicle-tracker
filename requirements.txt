@@ -6,3 +6,4 @@ python-dotenv>=1.0
 pillow>=10.0
 httpx>=0.26
 tzdata>=2024.1
+xlrd>=2.0.1
