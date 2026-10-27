@@ -27,6 +27,7 @@ from app import employees, supabase
 
 DECISIONS = {"approve": "อนุมัติ", "half": "ค่าแรงครึ่งวัน", "full_penalty": "ค่าแรงเต็ม + ใบเตือน + หักเงิน", "unpaid": "ไม่จ่าย"}
 FRACTION = {"approve": 1.0, "half": 0.5, "full_penalty": 1.0, "unpaid": 0.0}      # how much of a day's wage each decision pays
+FREE_HOURS = ("เด็กรถ", "พนักงานขับรถ")       # irregular hours: no shift time can be set, nothing is checked for length, no overtime
 FIXED_POSITIONS = {"ผลิต"}                         # the roles with a fixed shift: their short days are flagged
 OT_BRANCH = "แก่งคอย"                                  # the branch whose ผลิต are paid overtime for what they work past the shift
 SHIFT_MINUTES = {"สระบุรี": 12 * 60, "แก่งคอย": 9 * 60}   # a ผลิต shift by branch: Kaeng Khoi's 9 hours are followed by 3 hours of OT (paid apart), Saraburi works 12 with none
@@ -34,7 +35,7 @@ DEFAULT_SHIFT = 12 * 60
 LATE_GRACE = 10                                    # minutes of the shift that may be missing before a day is "short"
 FREE_SINGLES = 3                                   # single scans a month that come with the "half a day" suggestion
 DUP_GAP = timedelta(minutes=30)                    # a second scan this soon after the first is the same scan pressed twice
-MAX_SHIFT = timedelta(hours=17)                    # two scans further apart than this are not one shift
+MAX_SHIFT = timedelta(hours=19)                    # two scans further apart than this are not one shift (a long day, e.g. 03:45 to 20:45, is possible)
 MAX_UPLOAD = 8 * 1024 * 1024
 SHEET = "รายงานบันทึกเวลา"
 NEEDS_V27 = "ยังตั้งเวลาทำงานรายคนไม่ได้ — ต้องรันไฟล์ schema_v27.sql ใน Supabase ก่อน"
@@ -154,6 +155,10 @@ def pair_shifts(punches: list[datetime], target_minutes: int = DEFAULT_SHIFT) ->
     return out
 
 
+def is_free_hours(position) -> bool:
+    return any(str(position or "").startswith(p) for p in FREE_HOURS)
+
+
 def minutes_of(shift: dict) -> int:
     return int((shift["out"] - shift["in"]).total_seconds() // 60) if shift["out"] else 0
 
@@ -219,7 +224,8 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         if (e.get("pay_group") or "company") == "hq":
             skipped_hq += 1
             continue
-        custom = schedule_minutes(e.get("shift_start"), e.get("shift_end"))              # the worker's own shift time, an exception to the default
+        free = is_free_hours(e.get("position"))
+        custom = None if free else schedule_minutes(e.get("shift_start"), e.get("shift_end"))      # the worker's own shift time, an exception to the default
         fixed = (e.get("position") or "") in FIXED_POSITIONS or custom is not None
         expected = custom or expected_minutes(e.get("branch"))
         ot_applies = e.get("branch") == OT_BRANCH and (e.get("position") or "") in FIXED_POSITIONS      # Kaeng Khoi ผลิต: what is worked past the shift is OT
@@ -245,7 +251,7 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
             continue
         flagged = [d for d in days if d["flag"] in ("single", "short")]
         people.append({"employee_id": eid, "code": e["code"], "name": employees.display_name(e.get("prefix"), e["full_name"]), "position": e.get("position") or "",
-                       "branch": e.get("branch") or "", "status": e.get("status") or "active", "fixed": fixed, "expected": expected, "ot_applies": ot_applies,
+                       "branch": e.get("branch") or "", "status": e.get("status") or "active", "fixed": fixed, "free": free, "expected": expected, "ot_applies": ot_applies,
                        "schedule": {"start": clock_text(parse_clock(e.get("shift_start"))), "end": clock_text(parse_clock(e.get("shift_end")))} if custom is not None else None,
                        "counts": {"days": len(days), "single": sum(d["flag"] == "single" for d in days), "short": sum(d["flag"] == "short" for d in days),
                                   "open": sum(d["review"] is None for d in flagged), "decided": sum(d["review"] is not None for d in flagged),
@@ -425,7 +431,7 @@ def list_schedules() -> dict:
     rows = supabase.select_all("employees", {"select": _EMP_COLS + (",shift_start,shift_end" if ready else ""), "status": "eq.active", "order": "code.asc"})
     people = []
     for e in rows:
-        if (e.get("pay_group") or "company") == "hq":
+        if (e.get("pay_group") or "company") == "hq" or is_free_hours(e.get("position")):
             continue
         fixed = (e.get("position") or "") in FIXED_POSITIONS
         own = schedule_minutes(e.get("shift_start"), e.get("shift_end"))
@@ -451,5 +457,7 @@ def set_schedule(data: dict) -> dict:
     if start is not None and start == end:
         raise InvalidAttendance("เวลาเริ่มและเวลาเลิกต้องไม่เป็นเวลาเดียวกัน")
     emp = employees._get(eid)
+    if start is not None and is_free_hours(emp.get("position")):
+        raise InvalidAttendance("เด็กรถและพนักงานขับรถทำงานเวลาไม่แน่นอน — ตั้งเวลากะไม่ได้ (ไม่เช็คทำงานไม่ครบเวลา และไม่มี OT)")
     supabase.update("employees", {"id": f"eq.{emp['id']}"}, {"shift_start": clock_text(start), "shift_end": clock_text(end)})
     return {"employee_id": emp["id"], "start": clock_text(start), "end": clock_text(end), "minutes": schedule_minutes(clock_text(start), clock_text(end))}

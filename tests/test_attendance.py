@@ -44,6 +44,12 @@ def test_a_night_shift_pairs_across_midnight_and_belongs_to_the_day_it_started()
     assert [(x["in"].day, x["out"].day) for x in s] == [(1, 2), (2, 3)]
 
 
+def test_a_seventeen_hour_day_is_one_shift_not_a_short_night_between_two_days():
+    punches = [dt("2026-09-29", "03:49"), dt("2026-09-29", "21:29"), dt("2026-09-30", "03:43"), dt("2026-09-30", "21:07"), dt("2026-10-01", "03:42"), dt("2026-10-01", "20:44")]
+    s = at.pair_shifts(punches, 9 * 60)
+    assert [(x["in"].strftime("%d %H:%M"), x["out"].strftime("%d %H:%M")) for x in s] == [("29 03:49", "29 21:29"), ("30 03:43", "30 21:07"), ("01 03:42", "01 20:44")]
+
+
 def test_the_same_scan_pressed_twice_counts_once():
     s = at.pair_shifts([dt("2026-09-01", "07:00"), dt("2026-09-01", "07:03"), dt("2026-09-01", "19:00")])
     assert len(s) == 1 and s[0]["in"].minute == 0
@@ -330,4 +336,17 @@ def test_the_settings_list_and_save_a_workers_shift_time(db, monkeypatch):
             at.set_schedule(data)
     monkeypatch.setattr(at, "has_v27", lambda: False)
     with pytest.raises(at.InvalidAttendance, match="schema_v27"):
+        at.set_schedule({"employee_id": E1, "start": "08:00", "end": "17:00"})
+
+
+def test_เด็กรถ_and_drivers_have_free_hours_no_shift_time_no_ot(db, monkeypatch):
+    assert at.is_free_hours("เด็กรถ") and at.is_free_hours("พนักงานขับรถสาย") and at.is_free_hours("พนักงานขับรถหน้าโรง") and not at.is_free_hours("ผลิต")
+    punches = [dt("2026-09-02", "03:00"), dt("2026-09-02", "20:00")]
+    boy = {E1: {**kk(position="เด็กรถ"), "shift_start": "08:00", "shift_end": "17:00"}}      # a stored time is ignored for them
+    p = month({E1: punches}, emps=boy)["people"][0]
+    assert p["free"] is True and p["schedule"] is None and p["days"][0]["flag"] == "ok" and p["days"][0]["ot_minutes"] == 0
+    monkeypatch.setattr(at, "has_v27", lambda: True)
+    db.t["employees"][0]["position"] = "เด็กรถ"
+    assert at.list_schedules()["people"] == []                                                # not offered in the settings list
+    with pytest.raises(at.InvalidAttendance, match="ตั้งเวลากะไม่ได้"):
         at.set_schedule({"employee_id": E1, "start": "08:00", "end": "17:00"})

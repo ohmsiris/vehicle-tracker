@@ -315,6 +315,7 @@ function atFillMonths(selected) {
 // ------------------------------------------------------------------ shift times (settings): the default for the branch and position, and each worker's own exception
 function atShiftText(p) {
   if (p.schedule) return `เวลากะ ${p.schedule.start}–${p.schedule.end} (ตั้งเวลาเอง) = ${atHM(p.expected)} ชม.${p.ot_applies ? " · ที่เกินกะนับเป็น OT" : ""}`;
+  if (p.free) return "เด็กรถ / คนขับ: เวลาไม่แน่นอน — ไม่เช็คทำงานไม่ครบเวลา และไม่มี OT";
   if (p.fixed) return `เวลากะตามค่าเริ่มต้น ${atHM(p.expected)} ชม.${p.ot_applies ? " · ที่เกินกะนับเป็น OT" : ""} — เปลี่ยนได้ที่ “ตั้งเวลาทำงานรายคน” ด้านล่าง`;
   return "ไม่กำหนดเวลากะ (ตั้งเวลาได้ที่ “ตั้งเวลาทำงานรายคน” ด้านล่าง)";
 }
