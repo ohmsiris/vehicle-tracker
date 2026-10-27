@@ -9,8 +9,8 @@ A shift belongs to the day it STARTED. A scan that finds no partner is a single 
 
 What is flagged for the owner (review_flag):
   single  a scan with no partner                         -- every role
-  short   worked less than the shift minus 10 minutes    -- ผลิต only (the one role with a fixed 12-hour shift); never an automatic pay cut
-Everyone else (ช่าง, drivers, clerks ...) has free hours: their hours are shown, and only single scans are flagged.
+  short   worked less than the shift minus 10 minutes    -- ผลิต only (the one role with a fixed shift); never an automatic pay cut
+The shift is 12 hours at Saraburi and 9 at Kaeng Khoi (where 3 hours of OT follow). Everyone else (ช่าง, drivers, clerks ...) has free hours: their hours are shown, and only single scans are flagged.
 The owner's choices (DECISIONS): อนุมัติ / ค่าแรงครึ่งวัน / ค่าแรงเต็ม + ใบเตือน + หักเงิน / ไม่จ่าย. The first FREE_SINGLES single scans of a month come with a
 suggestion of ค่าแรงครึ่งวัน; from the next one on there is no suggestion -- the owner decides. Nothing is ever decided automatically: a suggestion
 becomes a decision only when it is accepted (one at a time, or with "ใช้ตามข้อเสนอทั้งหมด").
@@ -28,7 +28,8 @@ from app import employees, supabase
 DECISIONS = {"approve": "อนุมัติ", "half": "ค่าแรงครึ่งวัน", "full_penalty": "ค่าแรงเต็ม + ใบเตือน + หักเงิน", "unpaid": "ไม่จ่าย"}
 FRACTION = {"approve": 1.0, "half": 0.5, "full_penalty": 1.0, "unpaid": 0.0}      # how much of a day's wage each decision pays
 FIXED_POSITIONS = {"ผลิต"}                         # the roles with a fixed shift: their short days are flagged
-SHIFT_MINUTES = 12 * 60
+SHIFT_MINUTES = {"สระบุรี": 12 * 60, "แก่งคอย": 9 * 60}   # a ผลิต shift by branch: Kaeng Khoi's 9 hours are followed by 3 hours of OT (paid apart), Saraburi works 12 with none
+DEFAULT_SHIFT = 12 * 60
 LATE_GRACE = 10                                    # minutes of the shift that may be missing before a day is "short"
 FREE_SINGLES = 3                                   # single scans a month that come with the "half a day" suggestion
 DUP_GAP = timedelta(minutes=30)                    # a second scan this soon after the first is the same scan pressed twice
@@ -117,7 +118,7 @@ def parse_report(data: bytes) -> dict:
 
 
 # ------------------------------------------------------------------ shifts
-def pair_shifts(punches: list[datetime], target_minutes: int = SHIFT_MINUTES) -> list[dict]:
+def pair_shifts(punches: list[datetime], target_minutes: int = DEFAULT_SHIFT) -> list[dict]:
     """Lay a person's scans in a row and pair them into shifts: [{in, out}] with out None for a single scan.
 
     A second scan within DUP_GAP of the one before is the same scan twice and is dropped. Then the pairing leaves the FEWEST scans alone
@@ -154,11 +155,15 @@ def minutes_of(shift: dict) -> int:
     return int((shift["out"] - shift["in"]).total_seconds() // 60) if shift["out"] else 0
 
 
-def review_flag(shifts: list[dict], fixed: bool) -> str:
+def expected_minutes(branch: Optional[str]) -> int:
+    return SHIFT_MINUTES.get(branch or "", DEFAULT_SHIFT)
+
+
+def review_flag(shifts: list[dict], fixed: bool, expected: int = DEFAULT_SHIFT) -> str:
     """'single' / 'short' / 'ok' for the shifts that started on one day."""
     if any(s["out"] is None for s in shifts):
         return "single"
-    if fixed and sum(minutes_of(s) for s in shifts) < SHIFT_MINUTES - LATE_GRACE:
+    if fixed and sum(minutes_of(s) for s in shifts) < expected - LATE_GRACE:
         return "short"
     return "ok"
 
@@ -189,8 +194,9 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
             skipped_hq += 1
             continue
         fixed = (e.get("position") or "") in FIXED_POSITIONS
+        expected = expected_minutes(e.get("branch"))
         by_day: dict[date, list[dict]] = {}
-        for s in pair_shifts(punches.get(eid, []), target_minutes=SHIFT_MINUTES if fixed else 9 * 60):
+        for s in pair_shifts(punches.get(eid, []), target_minutes=expected if fixed else 9 * 60):
             if start <= s["in"].date() <= end:
                 by_day.setdefault(s["in"].date(), []).append(s)
         for key, r in by_key.items():
@@ -199,7 +205,7 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         days, singles = [], 0
         for day in sorted(by_day):
             shifts = by_day[day]
-            flag = review_flag(shifts, fixed) if shifts else "manual"
+            flag = review_flag(shifts, fixed, expected) if shifts else "manual"
             if flag == "single":
                 singles += 1
             r = by_key.get((eid, day.isoformat()))
@@ -210,7 +216,7 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
             continue
         flagged = [d for d in days if d["flag"] in ("single", "short")]
         people.append({"employee_id": eid, "code": e["code"], "name": employees.display_name(e.get("prefix"), e["full_name"]), "position": e.get("position") or "",
-                       "branch": e.get("branch") or "", "status": e.get("status") or "active", "fixed": fixed,
+                       "branch": e.get("branch") or "", "status": e.get("status") or "active", "fixed": fixed, "expected": expected,
                        "counts": {"days": len(days), "single": sum(d["flag"] == "single" for d in days), "short": sum(d["flag"] == "short" for d in days),
                                   "open": sum(d["review"] is None for d in flagged), "decided": sum(d["review"] is not None for d in flagged),
                                   "minutes": sum(d["minutes"] for d in days)},
@@ -333,7 +339,6 @@ def get_month(month: str = "") -> dict:
                        "punches_added": u["punches_added"], "unknown": u.get("unknown_codes") or "", "at": u["created_at"]} for u in uploads]
     out["decisions"] = DECISIONS
     out["free_singles"] = FREE_SINGLES
-    out["shift_minutes"] = SHIFT_MINUTES
     out["ready"] = True
     return out
 

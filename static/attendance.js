@@ -2,7 +2,7 @@
 
 // เวลาทำงาน: the fingerprint machine's report, checked day by day before any pay is worked out.
 //   #attendance   one pay month (the 26th to the 25th, named by the month of the 25th): upload the machine's .xls, then go through the days that
-//                 need the owner -- a single scan, or (ผลิต only) a shift shorter than 12 hours minus 10 minutes -- and decide each one.
+//                 need the owner -- a single scan, or (ผลิต only) a shift shorter than its length (12 h Saraburi, 9 h Kaeng Khoi) minus 10 minutes -- and decide each one.
 // The server pairs the scans into shifts and says what is flagged (app/attendance.py); nothing here decides anything by itself. The one shortcut is
 // "ใช้ตามข้อเสนอทั้งหมด": the first 3 single scans of a month come with a suggestion (ค่าแรงครึ่งวัน) that is applied only when this button is pressed.
 // Data: /api/attendance (same PIN lock as พนักงาน). Loaded BEFORE app.js: nothing runs at load time; helpers from app.js / board.js / dashboard.js /
@@ -87,7 +87,7 @@ function renderAttendance() {
   $("atKpis").replaceChildren(
     kpi("คนที่มีเวลาทำงาน", String(t.people), [`${t.days} วันทำงาน`]),
     kpi("สแกนเดียว", String(t.single), "วันที่มีสแกนครั้งเดียว", t.single ? "warn" : ""),
-    kpi("ทำงานไม่ครบเวลา", String(t.short), `ฝ่ายผลิต น้อยกว่า ${atHM(d.shift_minutes - 10)} ชม.`, t.short ? "warn" : ""),
+    kpi("ทำงานไม่ครบเวลา", String(t.short), "ฝ่ายผลิต: สระบุรี < 11:50 ชม. · แก่งคอย < 8:50 ชม.", t.short ? "warn" : ""),
     kpi("ค้างตัดสิน", String(t.open), t.open ? "ต้องให้คุณตัดสิน" : "ครบแล้ว", t.open ? "bad" : "ok"),
     kpi("ตัดสินแล้ว", String(t.decided), "วันที่ติดธง"));
   const box = $("atSuggest");
@@ -143,7 +143,7 @@ function atDayRow(p, d) {
     ? d.shifts.map((s) => (s.out ? `${s.in} → ${s.out}${s.next_day ? " (+1 วัน)" : ""}` : `${s.in} (สแกนเดียว)`)).join("  ·  ")
     : "ไม่มีสแกน (เพิ่มโดยเจ้าของ)";
   const status = d.flag === "single" ? el("span", { class: "badge warn", text: d.single_no ? `สแกนเดียว ครั้งที่ ${d.single_no}` : "สแกนเดียว" })
-    : d.flag === "short" ? el("span", { class: "badge warn", text: `ขาด ${atHM(at.data.shift_minutes - d.minutes)} ชม.` })
+    : d.flag === "short" ? el("span", { class: "badge warn", text: `ขาด ${atHM(p.expected - d.minutes)} ชม.` })
     : d.flag === "manual" ? el("span", { class: "badge", text: "เพิ่มเอง" }) : el("span", { class: "badge ok", text: "ปกติ" });
   return el("tr", { class: d.review ? "atdone" : d.flag === "ok" ? "" : "atneed" },
     el("td", { class: "nowrap", text: `${AT_DOW[dt.getDay()]} ${beDate(d.date).replace(/ \d{4}$/, "")}` }),

@@ -70,6 +70,7 @@ def test_a_fixed_shift_is_short_when_more_than_ten_minutes_are_missing():
     short = [{"in": dt("2026-09-01", "07:00"), "out": dt("2026-09-01", "18:49")}]
     assert at.review_flag(ok, True) == "ok" and at.review_flag(short, True) == "short"
     assert at.review_flag(short, False) == "ok"                                           # free hours: never "short"
+    assert at.review_flag(short, True, 9 * 60) == "ok"                          # Kaeng Khoi's shift is 9 hours
     assert at.review_flag([{"in": dt("2026-09-01", "07:00"), "out": None}], False) == "single"
 
 
@@ -113,6 +114,8 @@ def test_a_short_fixed_shift_is_flagged_with_no_suggestion_and_free_roles_are_no
     punches = [dt("2026-09-02", "07:00"), dt("2026-09-02", "16:00")]                  # 9 hours
     assert month({E1: punches})["people"][0]["days"][0]["flag"] == "short"
     assert month({E1: punches})["people"][0]["days"][0]["suggest"] is None
+    kk = month({E1: punches}, emps={E1: {**emp(E1, "SB-KK001"), "branch": "แก่งคอย"}})                  # 9 hours is a full shift at Kaeng Khoi
+    assert kk["people"][0]["days"][0]["flag"] == "ok" and kk["people"][0]["expected"] == 540
     free = month({E1: punches}, emps={E1: emp(E1, "SB-FR001", position="ช่าง")})
     assert free["people"][0]["days"][0]["flag"] == "ok" and free["totals"]["open"] == 0
 
