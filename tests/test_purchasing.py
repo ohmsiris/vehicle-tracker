@@ -137,3 +137,17 @@ def test_item_names_and_words_belong_to_one_item():
         sk.clean_item({"name": "ลูกปืน 6206", "aliases": ["6205"]}, others=others)
     out = sk.clean_item({"name": " สายพาน  B-82 ", "unit": "เส้น", "min_qty": "2", "aliases": ["B-82", "b-82", ""]}, others=others)
     assert out["name"] == "สายพาน B-82" and out["min_qty"] == 2 and out["aliases"] == ["B-82"]
+
+
+def test_a_bill_photographed_again_is_caught_by_supplier_and_bill_number_or_date_and_total():
+    saved = [{"id": "b1", "vendor_id": "v1", "vendor_name": "บริษัท ก", "bill_date": "2026-10-21", "bill_no": "IV-0042", "total": 1134.2},
+             {"id": "b2", "vendor_id": "v2", "vendor_name": "บริษัท ข", "bill_date": "2026-10-21", "bill_no": "IV-0042", "total": 500}]
+    same = pu.same_bill_matches({"vendor_id": "v1", "vendor_name": "บริษัท ก", "bill_date": "2026-10-21", "bill_no": "iv 0042", "total": 99}, saved)
+    assert [(m["bill_id"], m["reason"]) for m in same] == [("b1", "เลขที่บิลเดียวกัน")]                      # spacing and capitals in the number do not matter
+    by_total = pu.same_bill_matches({"vendor_id": "v1", "vendor_name": "บริษัท ก", "bill_date": "2026-10-21", "bill_no": None, "total": 1134.2}, saved)
+    assert [(m["bill_id"], m["reason"]) for m in by_total] == [("b1", "วันที่และยอดรวมเท่ากัน")]
+    assert pu.same_bill_matches({"vendor_id": "v3", "vendor_name": "บริษัท ค", "bill_date": "2026-10-21", "bill_no": "IV-0042", "total": 1134.2}, saved) == []     # another supplier
+    assert pu.same_bill_matches({"vendor_id": "v1", "bill_date": "2026-10-22", "bill_no": None, "total": 1134.2}, saved) == []                                          # another day
+    by_name = pu.same_bill_matches({"vendor_id": None, "vendor_name": "บริษัท  ก", "bill_date": "2026-10-21", "bill_no": "IV-0042", "total": None},
+                                           [{**saved[0], "vendor_id": None}])
+    assert len(by_name) == 1                                                                                   # a supplier not in the list yet is found by its name

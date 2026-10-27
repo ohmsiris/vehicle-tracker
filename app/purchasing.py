@@ -44,9 +44,12 @@ class InvalidPurchase(ValueError):
 
 
 class DuplicateBill(Exception):
-    def __init__(self, found: list[dict]):
-        super().__init__("duplicate bill file")
+    """The bill looks already saved: the same file, or the same supplier with the same bill number / the same date and total.
+    `message` is Thai and shown to the user before they choose to save it anyway."""
+    def __init__(self, found: list[dict], message: str = "ไฟล์บิลนี้เคยบันทึกไว้แล้ว"):
+        super().__init__("duplicate bill")
         self.found = found
+        self.message = message
 
 
 class NotFound(Exception):
@@ -309,6 +312,42 @@ def _learn(item_id: str, description: str, taken: set) -> None:
     taken.add(word.lower())
 
 
+def _bill_key(text) -> str:
+    return re.sub(r"[\s\-_./]", "", str(text or "")).lower()
+
+
+def same_bill_matches(bill: dict, existing: list[dict]) -> list[dict]:
+    """The saved bills this one probably is: the same supplier (id, or the name when there is no id) AND either the same bill number
+    or the same date with the same total. Pure."""
+    def same_vendor(b):
+        if bill.get("vendor_id") and b.get("vendor_id"):
+            return bill["vendor_id"] == b["vendor_id"]
+        return bool(bill.get("vendor_name")) and _bill_key(bill["vendor_name"]) == _bill_key(b.get("vendor_name"))
+    out = []
+    for b in existing:
+        if not same_vendor(b):
+            continue
+        if _bill_key(bill.get("bill_no")) and _bill_key(bill.get("bill_no")) == _bill_key(b.get("bill_no")):
+            reason = "เลขที่บิลเดียวกัน"
+        elif bill.get("total") is not None and b.get("total") is not None and str(b.get("bill_date"))[:10] == str(bill.get("bill_date"))[:10] and abs(float(b["total"]) - float(bill["total"])) < 0.005:
+            reason = "วันที่และยอดรวมเท่ากัน"
+        else:
+            continue
+        out.append({"bill_id": b["id"], "bill_date": b.get("bill_date"), "bill_no": b.get("bill_no"), "total": b.get("total"), "reason": reason})
+    return out
+
+
+def _find_same_bill(bill: dict) -> list[dict]:
+    rows: dict = {}
+    queries = [{"bill_date": f"eq.{bill['bill_date']}"}]
+    if _bill_key(bill.get("bill_no")):
+        queries.append({"bill_no": f"eq.{bill['bill_no']}"})
+    for q in queries:
+        for r in supabase.select("purchase_bills", {"select": "id,vendor_id,vendor_name,bill_date,bill_no,total", **q}):
+            rows[r["id"]] = r
+    return same_bill_matches(bill, list(rows.values()))
+
+
 def save_bill(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicates: bool = False, extraction_model: Optional[str] = None) -> dict:
     _require()
     items = items_with_aliases()
@@ -327,6 +366,12 @@ def save_bill(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicates
         found = supabase.select("purchase_attachments", {"select": "bill_id,sha256,created_at", "sha256": f"in.({hashes})"})
         if found:
             raise DuplicateBill(found)
+    if not allow_duplicates:
+        same = _find_same_bill(clean["bill"])
+        if same:
+            first = same[0]
+            raise DuplicateBill(same, f"บิลนี้น่าจะเคยบันทึกไว้แล้ว ({first['reason']}"
+                                      f"{' · ' + str(first['bill_no']) if first.get('bill_no') else ''} · {first['bill_date']})")
 
     bill = dict(clean["bill"])
     if clean["new_vendor"]:

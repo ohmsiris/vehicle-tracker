@@ -1172,3 +1172,13 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .skm-row input { width: 100%; }
 .skm-name { grid-column: 1 / -1; min-height: 1.2em; padding-left: 4px; }
 @media (max-width: 640px) { .skm-row { grid-template-columns: 1fr 1fr; } .skw-row.in { grid-template-columns: 1fr 90px; } }
+.skcascade { padding-top: 0; }
+.skcascade select { flex: 1 1 150px; }
+.skarrow { color: var(--muted); font-size: 20px; line-height: 1; }
+@media (max-width: 640px) { .skarrow { display: none; } }
+.skth { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; white-space: nowrap; }
+.skth:hover { color: var(--accent); }
+.sktable th.r, .sktable td.r { text-align: right; }
+.sktable td { vertical-align: middle; padding: 6px 8px; }
+.sktable thead th { position: sticky; top: 0; background: var(--surface); }
+.sktable tbody tr:nth-child(even):not(.low) td { background: var(--surface-2); }

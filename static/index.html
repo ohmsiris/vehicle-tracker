@@ -794,11 +794,17 @@
     <p class="error" id="skError" hidden></p>
     <div class="edit-banner" id="skNeedsV16" hidden>ยังใช้สต็อกไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
     <div class="card bufilters">
-      <input id="skQ" type="search" placeholder="ค้นหา: ชื่อ หมวด สเปค ที่เก็บ" autocomplete="off" aria-label="ค้นหาของในสต็อก">
-      <select id="skCat" aria-label="หมวด"><option value="">ทุกหมวด</option></select>
+      <input id="skQ" type="search" placeholder="ค้นหา: ชื่อ ชนิด ยี่ห้อ รุ่น สเปค ที่เก็บ" autocomplete="off" aria-label="ค้นหาของในสต็อก">
+      <button id="skWeekly" class="btn primary push" type="button">เบิกประจำสัปดาห์</button><button id="skIn" class="btn" type="button">รับเข้าหลายรายการ</button><button id="skMulti" class="btn" type="button">+ เพิ่มหลายรายการ</button><button id="skAdd" class="btn" type="button">+ เพิ่มรายการ</button>
+    </div>
+    <div class="card bufilters skcascade" aria-label="กรองทีละชั้น">
+      <select id="skCat" aria-label="หมวด"><option value="">ทุกหมวด</option></select><span class="skarrow" aria-hidden="true">›</span>
+      <select id="skKind" aria-label="ชนิด"><option value="">ทุกชนิด</option></select><span class="skarrow" aria-hidden="true">›</span>
+      <select id="skVolt" aria-label="แรงดัน (V)"><option value="">ทุกแรงดัน</option></select><span class="skarrow" aria-hidden="true">›</span>
+      <select id="skBrand" aria-label="ยี่ห้อ"><option value="">ทุกยี่ห้อ</option></select>
       <select id="skLoc" aria-label="ที่เก็บ"><option value="">ทุกที่เก็บ</option></select>
       <label class="mgcheck"><input id="skLow" type="checkbox"> เฉพาะที่ควรสั่งเพิ่ม</label>
-      <button id="skWeekly" class="btn primary push" type="button">เบิกประจำสัปดาห์</button><button id="skIn" class="btn" type="button">รับเข้าหลายรายการ</button><button id="skMulti" class="btn" type="button">+ เพิ่มหลายรายการ</button><button id="skAdd" class="btn" type="button">+ เพิ่มรายการ</button>
+      <button id="skClear" class="btn small" type="button" hidden>ล้างตัวกรอง</button>
     </div>
     <p class="muted small" id="skCount"></p>
     <div id="skList"></div>

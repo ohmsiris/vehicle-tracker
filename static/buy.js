@@ -17,7 +17,7 @@ const bu = {
   jobs: [],                // the queue: { id, files, status: queued|reading|ready|error, error, t0, extraction, server, review, manual }
   cur: null,               // the job being checked
   nextId: 1, running: 0, timer: null, notice: "",
-  bills: [], prices: null, stock: null, vat: "inc",
+  bills: [], prices: null, stock: null, vat: "inc", skSort: { key: "category", dir: 1 },
   dlgSave: null,
 };
 
@@ -476,7 +476,7 @@ async function buSave(allowDuplicates = false) {
     await api("/api/purchases", { method: "POST", body: fd });
   } catch (err) {
     btn.disabled = false;
-    if (err.status === 409 && confirm("ไฟล์บิลนี้เคยบันทึกไว้แล้ว — บันทึกซ้ำอีกครั้งใช่ไหม?")) return buSave(true);
+    if (err.status === 409 && confirm(`${err.message} — บันทึกซ้ำอีกครั้งใช่ไหม?`)) return buSave(true);
     showErr("bnSaveError", err.message);
     return;
   }
@@ -561,33 +561,78 @@ async function openStock() {
 async function loadStock() {
   try { bu.stock = await api("/api/stock"); } catch (err) { showErr("skError", `โหลดสต็อกไม่สำเร็จ: ${err.message}`); return; }
   buNeedsV16("skNeedsV16", bu.stock.ready);
-  const active = bu.stock.items.filter((i) => i.active !== false);
-  buFillSelect($("skCat"), "ทุกหมวด", [...new Set(active.map((i) => i.category).filter(Boolean))].sort());
-  buFillSelect($("skLoc"), "ทุกที่เก็บ", [...new Set(active.map((i) => i.location).filter(Boolean))].sort());
   renderStock();
+}
+
+// The filters work one level at a time, each narrowing the next: หมวด › ชนิด › แรงดัน (V, read from the spec) › ยี่ห้อ. Every list shows only what is left
+// after the choices before it, with how many items each has -- e.g. ไฟฟ้า › แมกเนติก › 220V › Fuji.
+const SK_NONE = "__none__";
+const SK_VOLT_RE = /(\d+(?:\.\d+)?)\s*V\s*(DC|AC)?/i;
+const skVolt = (i) => { const m = SK_VOLT_RE.exec(i.spec || ""); return m ? `${m[1]}V${m[2] ? m[2].toUpperCase() : ""}` : ""; };
+const SK_LEVELS = [["skCat", (i) => i.category || "", "ทุกหมวด"], ["skKind", (i) => i.kind || "", "ทุกชนิด"], ["skVolt", skVolt, "ทุกแรงดัน"], ["skBrand", (i) => i.brand || "", "ทุกยี่ห้อ"]];
+const SK_COLS = [["category", "หมวด"], ["kind", "ชนิด"], ["brand", "ยี่ห้อ"], ["model", "รุ่น"], ["spec", "สเปค"], ["on_hand", "คงเหลือ"], ["min_qty", "ขั้นต่ำ"], ["location", "ที่เก็บ"], ["last", "ราคาล่าสุด"]];
+const skSortValue = (i, key) => (key === "last" ? (i.last ? Number(i.last.unit_cost) : null) : key === "on_hand" || key === "min_qty" ? (i[key] === null || i[key] === undefined ? null : Number(i[key])) : (i[key] || "").toString());
+const skOptionText = (v, n) => `${v === SK_NONE ? "(ไม่ระบุ)" : v} (${n})`;
+
+function skSorted(items) {
+  const { key, dir } = bu.skSort;
+  return [...items].sort((a, b) => {
+    const x = skSortValue(a, key), y = skSortValue(b, key);
+    if ((x === null || x === "") !== (y === null || y === "")) return x === null || x === "" ? 1 : -1;          // blanks last, whichever way it is sorted
+    const c = typeof x === "number" ? x - y : String(x).localeCompare(String(y), "th", { numeric: true });
+    return (c || String(a.name).localeCompare(String(b.name), "th", { numeric: true })) * dir;
+  });
 }
 
 function renderStock() {
   const s = bu.stock;
-  const q = $("skQ").value.trim().toLowerCase(), cat = $("skCat").value, loc = $("skLoc").value, onlyLow = $("skLow").checked;
-  const items = s.items.filter((i) => (i.active !== false) && (!q || [i.name, i.category, i.spec, i.location, ...(i.aliases || [])].filter(Boolean).join(" ").toLowerCase().includes(q))
-    && (!cat || i.category === cat) && (!loc || i.location === loc) && (!onlyLow || i.low));
+  const all = s.items.filter((i) => i.active !== false);
+  let pool = all;
+  const picked = [];
+  for (const [id, get, blank] of SK_LEVELS) {
+    const sel = $(id), cur = sel.value, counts = new Map();
+    for (const i of pool) { const v = get(i) || SK_NONE; counts.set(v, (counts.get(v) || 0) + 1); }
+    const values = [...counts.keys()].sort((a, b) => (a === SK_NONE ? 1 : b === SK_NONE ? -1 : a.localeCompare(b, "th", { numeric: true })));
+    sel.replaceChildren(el("option", { value: "", text: blank }), ...values.map((v) => el("option", { value: v, text: skOptionText(v, counts.get(v)) })));
+    sel.value = counts.has(cur) ? cur : "";
+    if (sel.value) { pool = pool.filter((i) => (get(i) || SK_NONE) === sel.value); picked.push(sel.value === SK_NONE ? "(ไม่ระบุ)" : sel.value); }
+  }
+  const locSel = $("skLoc"), curLoc = locSel.value, locs = [...new Set(pool.map((i) => i.location).filter(Boolean))].sort();
+  locSel.replaceChildren(el("option", { value: "", text: "ทุกที่เก็บ" }), ...locs.map((l) => el("option", { value: l, text: l })));
+  locSel.value = locs.includes(curLoc) ? curLoc : "";
+  const q = $("skQ").value.trim().toLowerCase(), loc = locSel.value, onlyLow = $("skLow").checked;
+  const items = skSorted(pool.filter((i) => (!q || [i.name, i.category, i.kind, i.brand, i.model, i.spec, i.location, ...(i.aliases || [])].filter(Boolean).join(" ").toLowerCase().includes(q))
+    && (!loc || i.location === loc) && (!onlyLow || i.low)));
   const low = items.filter((i) => i.low).length;
-  fill($("skCount"), `${items.length} รายการ${low ? ` · ควรสั่งเพิ่ม ${low}` : ""}`);
-  fill($("skList"), ...(items.length ? [el("div", { class: "bu-scroll" }, el("table", { class: "lines sktable" },
-    el("thead", {}, el("tr", {}, ...["รายการ", "หมวด", "คงเหลือ", "ขั้นต่ำ", "ที่เก็บ", "ราคาล่าสุด", ""].map((t) => el("th", { text: t })))),
-    el("tbody", {}, ...items.map((i) => el("tr", { class: i.low ? "low" : "" },
-      el("td", {}, el("button", { class: "linkbtn", type: "button", text: i.name, onclick: () => openStockItem(i) }), i.spec ? el("div", { class: "muted small", text: i.spec }) : null),
+  $("skClear").hidden = !(picked.length || q || loc || onlyLow);
+  fill($("skCount"), `${picked.length ? `${picked.join(" › ")} — ` : ""}${items.length} รายการ${low ? ` · ควรสั่งเพิ่ม ${low}` : ""}`);
+  const arrow = (k) => (bu.skSort.key === k ? (bu.skSort.dir > 0 ? " ▲" : " ▼") : "");
+  const head = el("tr", {}, ...SK_COLS.map(([k, label]) => el("th", { class: ["on_hand", "min_qty", "last"].includes(k) ? "r" : "", "aria-sort": bu.skSort.key === k ? (bu.skSort.dir > 0 ? "ascending" : "descending") : "none" },
+    el("button", { class: "skth", type: "button", title: "เรียงตามคอลัมน์นี้", text: label + arrow(k), onclick: () => { bu.skSort = { key: k, dir: bu.skSort.key === k ? -bu.skSort.dir : 1 }; renderStock(); } })))
+    , el("th", {}));
+  fill($("skList"), ...(items.length ? [el("div", { class: "bu-scroll" }, el("table", { class: "lines sktable" }, el("thead", {}, head),
+    el("tbody", {}, ...items.map((i) => el("tr", { class: i.low ? "low" : "", title: i.name },
       el("td", { text: i.category || "" }),
-      el("td", {}, el("strong", { text: `${buQty(i.on_hand)} ${i.unit || ""}`.trim() }), i.low ? el("span", { class: "badge urgent", text: "ควรสั่งเพิ่ม" }) : null),
-      el("td", { text: i.min_qty === null || i.min_qty === undefined ? "" : buQty(i.min_qty) }),
+      el("td", {}, el("button", { class: "linkbtn", type: "button", text: i.kind || i.name, onclick: () => openStockItem(i) }), i.kind ? null : el("div", { class: "muted small", text: "ยังไม่ได้จัดชนิด" })),
+      el("td", { text: i.brand || "" }),
+      el("td", {}, el("button", { class: "linkbtn", type: "button", text: i.model || "", onclick: () => openStockItem(i) })),
+      el("td", { text: i.spec || "" }),
+      el("td", { class: "r nowrap" }, el("strong", { text: `${buQty(i.on_hand)} ${i.unit || ""}`.trim() }), i.low ? el("div", { class: "badge urgent", text: "ควรสั่งเพิ่ม" }) : null),
+      el("td", { class: "r", text: i.min_qty === null || i.min_qty === undefined ? "" : buQty(i.min_qty) }),
       el("td", { text: i.location || "" }),
-      el("td", { class: "small", text: i.last ? `${buMoney(i.last.unit_cost)} ฿ · ${i.last.vendor || ""}` : "–" }),
+      el("td", { class: "small r nowrap", text: i.last ? `${buMoney(i.last.unit_cost)} ฿` : "–", title: i.last ? i.last.vendor || "" : "" }),
       el("td", { class: "sk-actions" },
         el("button", { class: "btn small", type: "button", text: "+ รับเข้า", onclick: () => openStockMove(i, "in") }),
         el("button", { class: "btn small", type: "button", text: "− เบิก", onclick: () => openStockMove(i, "out") }),
         el("button", { class: "btn small", type: "button", text: "นับ", onclick: () => openStockMove(i, "count") })))))))]
     : [el("p", { class: "muted empty", text: s.items.length ? "ไม่พบรายการที่ตรงกับตัวกรอง" : "ยังไม่มีรายการ — กด “+ เพิ่มรายการ” หรือบันทึกบิลซื้อของแล้วสร้างรายการจากบรรทัดในบิล" })]));
+}
+
+function skClearFilters() {
+  for (const id of ["skCat", "skKind", "skBrand", "skVolt", "skLoc"]) $(id).value = "";
+  $("skQ").value = "";
+  $("skLow").checked = false;
+  renderStock();
 }
 
 // one standard name per item: ชนิด + ยี่ห้อ + รุ่น + สเปค (the server builds it too; an item without a ชนิด keeps the name it was typed with)
@@ -772,7 +817,8 @@ function initBuy() {
   $("prVat").addEventListener("change", () => { bu.vat = $("prVat").value; renderPrices(); });
   $("prUq").addEventListener("input", renderUnlinked);
   $("prUv").addEventListener("change", renderUnlinked);
-  for (const id of ["skQ", "skCat", "skLoc", "skLow"]) $(id).addEventListener(id === "skQ" ? "input" : "change", renderStock);
+  for (const id of ["skQ", "skCat", "skKind", "skBrand", "skVolt", "skLoc", "skLow"]) $(id).addEventListener(id === "skQ" ? "input" : "change", renderStock);
+  $("skClear").addEventListener("click", skClearFilters);
   $("skAdd").addEventListener("click", () => openStockItem(null));
   $("skWeekly").addEventListener("click", () => bu.stock && bu.stock.ready && openStockBatch("out"));
   $("skIn").addEventListener("click", () => bu.stock && bu.stock.ready && openStockBatch("in"));

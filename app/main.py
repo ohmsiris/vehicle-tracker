@@ -982,7 +982,7 @@ def api_purchase_save(payload: str = Form(...), files: list[UploadFile] = File(d
     try:
         return _buy_call(purchasing.save_bill, data, raws, allow_duplicates=allow_duplicates, extraction_model=EXTRACTION_MODEL)
     except purchasing.DuplicateBill as exc:
-        return JSONResponse(status_code=409, content={"detail": "duplicate bill", "duplicates": exc.found})
+        return JSONResponse(status_code=409, content={"detail": exc.message, "duplicates": exc.found})
 
 
 @app.get("/api/purchases")
