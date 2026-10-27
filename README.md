@@ -420,7 +420,7 @@ repaid by salary deduction, no interest, no cap yet (`schema_v23.sql`; `app/loan
   A repayment above the balance is refused. "ยกเลิก" keeps a wrongly-entered or written-off loan in the history; "ลบ" only while nothing is recorded against it.
 - **ยอดที่ต้องหักเงินเดือน** (top of the page, by month, CSV): what payroll should deduct this month (and what was left unpaid from earlier months); "บันทึกว่าหักแล้วทั้งหมด" records each as a salary repayment.
 - An employee with a loan can only be ลาออก, never deleted; a resigned employee cannot get a new loan. Each person's page has a loans card. Both tables are in the weekly backup.
-- Still to do: import the history from the "กู้เงินโรงงาน" sheet (needs the sheet exported as .xlsx), and check the deductions against the payslips.
+- **Opening balances** came from the monthly pay workbooks: `scripts/import_loans_from_payroll.py <workbook.xlsx> ... [--as-of 2026-09-30] [--apply]` reads the ค้างเงิน / จ่ายค้าง / ค้างย/ป columns (found by their headings) and makes ONE loan per person for what is still owed after the month, dated the month end, repaid by the amount deducted that month from the next month on (the accident memo: 2,000 then 1,500; nothing deducted = no schedule, to be set by hand). The start-of-month figure and the month's deduction are in the loan's note. Re-running skips people already imported. Done for September 2569 (Saraburi drivers + staff: 18 loans, 123,500 ฿). Still to do: Kaeng Khoi's workbook (2 people), comparing with the "กู้เงินโรงงาน" Google sheet, and checking each month's deductions against the payslips.
 
 ## Warning letters and memos ("ใบเตือน / บันทึกข้อความ", `#documents`, `#document=<id>`)
 
