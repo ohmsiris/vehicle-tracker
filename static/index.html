@@ -427,6 +427,10 @@
           <input id="billInput" type="file" accept="image/*,application/pdf" multiple hidden>
         </div>
         <ul class="filelist" id="billList"></ul>
+        <div class="bu-modes" id="rqModes" hidden>
+          <label><input type="radio" name="rqMode" value="each" checked> แต่ละไฟล์เป็นบิลคนละใบ</label>
+          <label><input type="radio" name="rqMode" value="one"> ทุกไฟล์เป็นบิลใบเดียวกัน (หลายหน้า)</label>
+        </div>
       </div>
     </div>
 
@@ -491,10 +495,17 @@
       <div class="thumbs" id="refThumbs"></div>
     </div>
 
+    <p class="muted small" id="rqRefNote" hidden>เลือกไว้หลายบิล — “รูปอื่นๆ” จะรออยู่ที่นี่ (แนบไปกับบิลได้เมื่ออ่านทีละใบ)</p>
     <button id="extractBtn" class="btn primary big" disabled>อ่านบิล</button>
     <button id="manualSaveBtn" class="btn primary big" type="button" hidden>บันทึก</button>
     <p class="error" id="captureError" hidden></p>
     <p class="error" id="manualError" hidden></p>
+
+    <div class="card rqbox" id="rqQueueBox" hidden>
+      <h2 id="rqQueueHead">บิลที่รอตรวจ</h2>
+      <p class="muted small">ระบบอ่านอยู่เบื้องหลัง เปิดหน้าอื่นได้ — กลับมากด “ตรวจและบันทึก” ทีละใบ · บิลที่ยังไม่ตรวจยังไม่เข้าประวัติรถและแผนซ่อม · รีเฟรชหน้าแล้วบิลที่ยังไม่บันทึกจะหาย</p>
+      <div id="rqQueue"></div>
+    </div>
   </section>
 
   <!-- ============ Reading ============ -->
@@ -538,7 +549,7 @@
     <div class="card totals" id="totalsBox"></div>
 
     <div class="actions">
-      <button id="backBtn" class="btn">← กลับไปแก้ไฟล์</button>
+      <button id="backBtn" class="btn">← กลับไปหน้าบิลที่รอตรวจ</button>
       <button id="confirmBtn" class="btn primary big">ยืนยันและบันทึก</button>
     </div>
     <p class="error" id="reviewError" hidden></p>
@@ -1357,6 +1368,7 @@
 <script src="/static/settings.js"></script>
 <script src="/static/buy.js"></script>
 <script src="/static/manual.js"></script>
+<script src="/static/billqueue.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

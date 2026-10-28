@@ -1219,3 +1219,12 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 }
 .mileage-hint { margin-top: 4px; line-height: 1.5; }
 .mileage-warn { color: var(--bad); font-weight: 600; }
+
+/* ---- บันทึกบิล: the queue of bills waiting to be checked ---- */
+.rqbox { margin-top: 18px; }
+.rqgroup { margin-top: 12px; }
+.rqgroup-head { padding: 6px 0; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+.rqjob { display: flex; justify-content: space-between; align-items: center; gap: 10px 16px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+.rqjob-main { min-width: 0; flex: 1 1 280px; display: grid; gap: 2px; }
+.rqjob-title { font-weight: 600; }
+.rqjob-actions { display: flex; gap: 6px; flex-wrap: wrap; }

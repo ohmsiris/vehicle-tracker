@@ -5,8 +5,10 @@ const state = {
   token: "",
   categories: [],
   vehicles: [],          // roster rows, index = option value in every vehicle <select>
-  billFiles: [],         // [{blob, name, type, url}]  -- sent for extraction
+  billFiles: [],         // [{blob, name, type, url}]  -- the bill being checked (its files), sent with it when saved
   refFiles: [],          // [{blob, name, type, url}]  -- stored as-is, never extracted
+  pickBills: [],         // the bill files picked on the page, not read yet (they become bills in the queue: billqueue.js)
+  pickRefs: [],          // the other photos picked on the page (they go with the bill, or with the mechanic's own entry)
   draft: null,
   totalManual: false,     // true once the user types their own header total -- stop auto-following the line sum
 };
@@ -170,16 +172,17 @@ async function addFiles(list, target, allowPdf) {
 
 function renderPicked() {
   const list = $("billList");
-  list.replaceChildren(...state.billFiles.map((f, i) =>
+  list.replaceChildren(...state.pickBills.map((f, i) =>
     el("li", {},
       el("span", { class: "name", text: (f.type === "application/pdf" ? "📄 " : "🧾 ") + f.name }),
       el("span", { class: "muted small", text: `${Math.max(1, Math.round(f.blob.size / 1024))} KB` }),
-      el("button", { class: "btn small", text: "ลบ", onclick: () => { state.billFiles.splice(i, 1); renderPicked(); } }))));
-  $("refThumbs").replaceChildren(...state.refFiles.map((f, i) =>
+      el("button", { class: "btn small", text: "ลบ", onclick: () => { state.pickBills.splice(i, 1); renderPicked(); } }))));
+  $("refThumbs").replaceChildren(...state.pickRefs.map((f, i) =>
     el("div", { class: "thumb" },
       el("img", { src: f.url, alt: f.name }),
-      el("button", { text: "×", title: "ลบ", onclick: () => { state.refFiles.splice(i, 1); renderPicked(); } }))));
-  $("extractBtn").disabled = state.billFiles.length === 0;
+      el("button", { text: "×", title: "ลบ", onclick: () => { state.pickRefs.splice(i, 1); renderPicked(); } }))));
+  $("extractBtn").disabled = state.pickBills.length === 0;
+  rqRenderModes();
 }
 
 function wireDrop(dropId, inputId, target, allowPdf) {
@@ -192,32 +195,7 @@ function wireDrop(dropId, inputId, target, allowPdf) {
   drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); addFiles([...e.dataTransfer.files], target, allowPdf); });
 }
 
-// --------------------------------------------------------------- extraction
-async function runExtract() {
-  $("captureError").hidden = true;
-  const veh = selectedVehicle($("vehicleSelect"));
-  const fd = new FormData();
-  state.billFiles.forEach((f) => fd.append("files", f.blob, f.name));
-  fd.append("plate", veh ? veh.plate : "");
-
-  showView("busy");
-  const t0 = Date.now();
-  const timer = setInterval(() => {
-    const s = Math.floor((Date.now() - t0) / 1000);
-    $("busyText").textContent = `กำลังอ่านบิล ${state.billFiles.length} ไฟล์… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  }, 500);
-  try {
-    state.draft = await api("/api/extract", { method: "POST", body: fd });
-    render(state.draft, veh);
-    showView("review");
-  } catch (err) {
-    showView("capture");
-    $("captureError").textContent = err.status === 403 ? "รหัสเข้าใช้งานไม่ถูกต้อง" : `อ่านบิลไม่สำเร็จ: ${err.message}`;
-    $("captureError").hidden = false;
-  } finally {
-    clearInterval(timer);
-  }
-}
+// --------------------------------------------------------------- extraction: see billqueue.js (the bills are read in the background, then checked one by one)
 
 // --------------------------------------------------------------- review rendering
 function flagInput(node, flagged) {
@@ -632,6 +610,7 @@ async function confirmSave() {
     $("doneClosed").hidden = closed === 0;
     $("doneClosed").textContent = closed ? `ปิดงานซ่อมให้แล้ว ${closed} งาน` : "";
     resetAfterSave();
+    rqSaved(veh ? veh.id : null);                          // off the queue of bills waiting to be checked
     showView("done");
   } catch (err) {
     showReviewError("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ข้อมูลที่กรอกยังอยู่ ลองอีกครั้ง");
@@ -682,12 +661,13 @@ async function init() {
   state.token = params.get("token") || storedToken();
   if (params.get("token")) { saveToken(state.token); history.replaceState(null, "", location.pathname + (params.get("sample") ? "?sample=1" : "") + location.hash); }
 
-  wireDrop("billDrop", "billInput", state.billFiles, true);
-  wireDrop("refDrop", "refInput", state.refFiles, false);
-  $("extractBtn").addEventListener("click", runExtract);
-  $("backBtn").addEventListener("click", () => showView("capture"));
+  wireDrop("billDrop", "billInput", state.pickBills, true);
+  wireDrop("refDrop", "refInput", state.pickRefs, false);
+  $("extractBtn").addEventListener("click", rqEnqueue);
+  $("backBtn").addEventListener("click", () => { rq.cur = null; showView("capture"); });
   $("confirmBtn").addEventListener("click", confirmSave);
-  $("newBtn").addEventListener("click", () => showView("capture"));
+  $("newBtn").addEventListener("click", rqNext);
+  initBillQueue();
   $("toBoardBtn").addEventListener("click", () => showView("board"));
   $("navBoard").addEventListener("click", () => { showView("board"); loadDueStrip(); });
   $("navBills").addEventListener("click", () => showView(lastBillView));

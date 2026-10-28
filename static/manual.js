@@ -161,7 +161,7 @@ function readManual() {
         unit: g("unit") || null, unit_cost: num(g("unit_cost")) || null, line_total: num(g("line_total")) || null,
       };
     }),
-    attachments: state.refFiles.map((f) => ({ type: "reference_photo", filename: f.name })),
+    attachments: state.pickRefs.map((f) => ({ type: "reference_photo", filename: f.name })),
     bill_extractions: {},
     fixes_request_ids: [...document.querySelectorAll("#manualFixesList input:checked")].map((b) => b.dataset.id),
   };
@@ -183,7 +183,7 @@ async function saveManual() {
   btn.disabled = true;
   btn.textContent = "กำลังบันทึก…";
   try {
-    const res = await postEvent(p, false, state.refFiles);
+    const res = await postEvent(p, false, state.pickRefs);
     if (!res.ok) {
       let detail = "";
       try { detail = (await res.json()).detail || ""; } catch (_) { /* not json */ }
@@ -196,8 +196,11 @@ async function saveManual() {
     const closed = p.fixes_request_ids.length;
     $("doneClosed").hidden = closed === 0;
     $("doneClosed").textContent = closed ? `ปิดงานซ่อมให้แล้ว ${closed} งาน` : "";
+    state.pickRefs.forEach((f) => URL.revokeObjectURL(f.url));
+    state.pickRefs.length = 0;                              // the photos went with this entry
     resetAfterSave();
     resetManualForm();
+    rqSaved(null);
     showView("done");
   } catch (err) {
     showErrorIn("manualError", "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ข้อมูลที่กรอกยังอยู่ ลองอีกครั้ง");

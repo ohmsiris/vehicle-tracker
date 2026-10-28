@@ -750,3 +750,11 @@ A bill's shop is stored under the shop's own name from the shops list: "บร�
 department in brackets are ignored; a typo or a missing mark is enough, a bare common word like "ไดนาโม" never is). The new-bill form then says "บิลเขียนว่า “…” — รวมเป็นร้านนี้ (แก้ได้)".
 `scripts/fold_vendor_names.py [--apply] [--only "<text>"]` did the same for the bills already saved (17 bills on 28 Oct 2026).
 Fleet numbers are per size class: a small and a big truck can both be #2 at one branch (both are in use at Kaeng Khoi).
+
+## บันทึกบิล (repair bills) as a queue (`static/billqueue.js`)
+Works like บิลซื้อของ: pick many photos / PDFs -- "แต่ละไฟล์เป็นบิลคนละใบ" or "ทุกไฟล์เป็นบิลใบเดียวกัน (หลายหน้า)" -- and press อ่านบิล: they are read in the background, 3 at a time with a
+clock, and wait under **บิลที่รอตรวจ**, one block per truck (the truck picked before reading, else the one the plate matched; unknown ones last). A number beside "บันทึกบิล" in the menu
+counts them. "ตรวจและบันทึก" opens a bill on the usual check page; saving takes it off the list and "ตรวจบิลถัดไป" opens the next one (the same truck first). Nothing is saved
+before it is checked, so an unchecked bill is in no truck history and no maintenance plan. The list lives in the open page (a refresh loses unsaved bills; the browser warns).
+"รูปอื่นๆ" go with the bill when one bill is read at a time. Picked files (`state.pickBills` / `pickRefs`) are kept apart from the bill being checked (`state.billFiles` / `refFiles`).
+
