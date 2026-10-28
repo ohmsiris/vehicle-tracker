@@ -1,12 +1,12 @@
 """
 Load a truck's repair history from the dealership's "ประวัติการซ่อม" PDF report (app/dealer_history.py) as maintenance events (no prices).
 
-    .venv/Scripts/python.exe scripts/import_dealer_history.py "<report1.pdf>" ["<report2.pdf>" ...] [--apply]
+    .venv/Scripts/python.exe scripts/import_dealer_history.py "<report1.pdf>" ["<report2.pdf>" ...] [--apply] [--vendor "<shop>"]
 
 Needs PyMuPDF in the venv (a local tool, not a server dependency):  .venv/Scripts/python.exe -m pip install pymupdf
 Each report is one truck (matched by its plate). A visit already on the site (same truck, same day AND same odometer) is skipped, so a report can be loaded again; a
 visit whose day is on the site with a DIFFERENT odometer is reported, not added. New visits are saved like a record made by hand (source "manual": it can be deleted one by one),
-with the dealer's wording as lines (the explanation in brackets), ค่าแรง for labour and the AI categoriser for parts. Dry run unless --apply.
+with the shop อิซูซุจึงกงเฮงแก่งคอย (--vendor), the dealer's wording as lines (the explanation in brackets), ค่าแรง for labour and the AI categoriser for parts. Dry run unless --apply.
 """
 import re
 import sys
@@ -19,6 +19,7 @@ from app import categorize, dealer_history as dh, events, history, supabase    #
 from app.config import settings                                                   # noqa: E402
 
 SOURCE_NOTE = f"{history.IMPORT_MARK} (รายงานประวัติการซ่อม)"
+DEFAULT_VENDOR = "อิซูซุจึงกงเฮงแก่งคอย"            # the shop shown on every visit loaded (the report itself does not say which branch); change with --vendor "<name>" or "" for none
 
 
 def read_pdf(path: str) -> str:
@@ -30,6 +31,9 @@ def read_pdf(path: str) -> str:
 
 def plate_key(text) -> str:
     return re.sub(r"\s+", "", str(text or ""))
+
+
+VENDOR = DEFAULT_VENDOR
 
 
 def main(paths: list[str], apply: bool) -> None:
@@ -86,7 +90,7 @@ def main(paths: list[str], apply: bool) -> None:
             lines = [{"description": dh.line_text(ln), "category": "ค่าแรง" if ln["kind"] == "ค่าแรง" else cache.get(ln["description"]),
                       "quantity": ln["quantity"], "unit": ln["unit"]} for ln in visit["lines"]]
             payload = {"vehicle_id": v["id"], "source": "manual", "attachments": [], "line_items": lines,
-                       "event": {"event_date": visit["date"].isoformat(), "mileage": visit["mileage"], "branch": v["branch"], "vendor": None,
+                       "event": {"event_date": visit["date"].isoformat(), "mileage": visit["mileage"], "branch": v["branch"], "vendor": VENDOR or None,
                                  "notes": f"{SOURCE_NOTE} · ออกใบแจ้งหนี้ {visit['invoice_date'].strftime('%d/%m/')}{visit['invoice_date'].year + 543}"}}
             res = events.save_event(payload, [])
             print(f"  saved #{v['vehicle_number']} {visit['date']} {visit['mileage']:,} km -> {res['event_id']}")
@@ -94,6 +98,10 @@ def main(paths: list[str], apply: bool) -> None:
 
 
 if __name__ == "__main__":
+    if "--vendor" in sys.argv:
+        k = sys.argv.index("--vendor")
+        VENDOR = sys.argv[k + 1]
+        del sys.argv[k:k + 2]
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
         sys.exit(__doc__)
