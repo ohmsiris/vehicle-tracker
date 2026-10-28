@@ -714,3 +714,10 @@ dashboard, with ศูนย์บริการ and ศูนย์ซ่อ�
 Renaming a shop renames it in the repair requests and the manager's tickets, and keeps the old name as a word. A shop can be
 switched off (old bills keep grouping under it; it is no longer offered). The same shops appear as the "shop" places on the
 manager's board, so there is one list to look after. More settings (the other things that are still in the code) will be added to this page.
+
+## Bill form: shop list and mileage history
+- **ร้าน / อู่** (both on a new bill's review page and when editing a saved bill) is a text box with a dropdown of the repair shops and the names used before. The many ways
+  one outside shop was written on past bills ("บริษัท จึงกงเฮงอีซูซุ จำกัด (สาขา…)", "อิซูซุจึงกงเฮง" ...) are folded into that shop's own name (`repair_requests.known_fixers`
+  via `shops.canonical`), so each shop is one option; in-house names and people stay as they are.
+- **เลขไมล์** shows under the box what this truck's other bills say just before and just after the bill's date (`GET /api/vehicles/{id}/mileage`), and flags a mileage lower
+  than an earlier bill's or higher than a later one's, so a misread odometer is seen at once. When editing, the bill itself is left out of the list.

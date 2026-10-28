@@ -255,10 +255,11 @@ function startEdit() {
     el("div", { class: "grid" },
       field("รถ", vSel),
       field("วันที่ (ในบิลเป็น พ.ศ.)", el("div", {}, dateInput, el("div", { id: "edDateCap", class: "datecap" }))),
-      field("ร้าน / อู่", input("edVendor", "text", e.vendor, { maxlength: "200" })),
+      field("ร้าน / อู่", el("div", {}, input("edVendor", "text", e.vendor, { maxlength: "200", list: "edVendorList", autocomplete: "off", placeholder: "พิมพ์ หรือเลือกจากรายการ" }),
+        el("datalist", { id: "edVendorList" }, ...vendorNames().map((n) => el("option", { value: n }))))),
       field("ผู้ซ่อม", input("edPerformedBy", "text", e.performed_by, { maxlength: "200" })),
       field("สาขา", input("edBranch", "text", e.branch, { maxlength: "100" })),
-      field("เลขไมล์", input("edMileage", "number", e.mileage, { inputmode: "numeric" })),
+      field("เลขไมล์", el("div", {}, input("edMileage", "number", e.mileage, { inputmode: "numeric" }), el("div", { id: "edMileHint", class: "datecap mileage-hint" }))),
       field("ไมล์ครั้งต่อไป", el("div", {}, input("edNext", "number", e.next_service_mileage, { inputmode: "numeric" }), el("div", { id: "edNextHint", class: "datecap" }))),
       field("ยอดรวม (บาท)", input("edTotal", "number", e.total_cost, { step: "0.01", inputmode: "decimal" })),
       field("สรุปสั้นๆ ว่าซ่อมอะไร (ไม่บังคับ — แสดงในรายการประวัติ)", el("div", { class: "row" },
@@ -277,6 +278,7 @@ function startEdit() {
   fleet.paperCard = form;
   bindDateField($("edDate"), $("edDateCap"));
   bindVehicleAutofill({ vehicleSel: $("edVehicle"), branchEl: $("edBranch"), mileageEl: $("edMileage"), nextEl: $("edNext"), hintEl: $("edNextHint") });
+  bindMileageHistory({ vehicleSel: $("edVehicle"), dateEl: $("edDate"), mileageEl: $("edMileage"), hintEl: $("edMileHint"), excludeId: (d.event && (d.event.id || d.event.event_id)) || "" });
   $("edTotal").addEventListener("input", () => { fleet.totalManual = true; editTotalsChanged(); });
   editHooks.renumber();
   editTotalsBar();

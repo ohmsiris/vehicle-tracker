@@ -254,6 +254,39 @@ function bindVehicleAutofill({ vehicleSel, branchEl, mileageEl, nextEl, hintEl, 
   suggest();
 }
 
+// the shops to pick from: the shops you send trucks to, then the other names used before (the many spellings of one shop are already folded into it by the server)
+const vendorNames = () => [...new Set([...(board.shops || []), ...(board.fixers || [])])];
+
+const AT_MILEAGE_ROWS = 2;                         // readings shown on each side of this bill's date
+// Under the mileage box: what this truck's other bills say, just before and just after this bill's date -- so a mistyped or misread odometer is seen at once.
+// A mileage lower than an earlier bill's, or higher than a later one's, is flagged. `excludeId` = the bill being edited (it is not its own neighbour).
+function bindMileageHistory({ vehicleSel, dateEl, mileageEl, hintEl, excludeId = "" }) {
+  const cache = new Map();
+  const load = (v) => { if (!cache.has(v.id)) cache.set(v.id, api(`/api/vehicles/${v.id}/mileage`).catch(() => [])); return cache.get(v.id); };
+  let seq = 0;
+  const paint = async () => {
+    const my = ++seq, v = selectedVehicle(vehicleSel);
+    if (!v) { fill(hintEl, ""); return; }
+    const rows = (await load(v)).filter((r) => r.event_id !== excludeId);
+    if (my !== seq) return;                         // the truck or date changed while this was loading
+    const date = dateEl.value, mileage = num(mileageEl.value);
+    if (!rows.length) { fill(hintEl, "ยังไม่มีเลขไมล์จากบิลอื่นของรถคันนี้"); return; }
+    const before = rows.filter((r) => !date || r.event_date <= date).slice(0, AT_MILEAGE_ROWS);
+    const after = rows.filter((r) => date && r.event_date > date).slice(-AT_MILEAGE_ROWS).reverse();      // the nearest later ones, newest first
+    const fmt = (r) => `${beDate(r.event_date)} · ${Number(r.mileage).toLocaleString("th-TH")}`;
+    const parts = [...after.map(fmt), "▶ บิลนี้", ...before.map(fmt)];
+    const problems = [];
+    if (mileage && before.length && mileage < before[0].mileage) problems.push(`น้อยกว่าบิล ${beDate(before[0].event_date)} (${Number(before[0].mileage).toLocaleString("th-TH")}) ที่เก่ากว่า`);
+    if (mileage && after.length && mileage > after[after.length - 1].mileage) problems.push(`มากกว่าบิล ${beDate(after[after.length - 1].event_date)} (${Number(after[after.length - 1].mileage).toLocaleString("th-TH")}) ที่ใหม่กว่า`);
+    fill(hintEl, el("div", { text: `ไมล์ที่เคยบันทึก: ${parts.join("  |  ")}` }),
+      problems.length ? el("div", { class: "mileage-warn", text: `⚠ ${problems.join(" · ")} — ตรวจเลขไมล์อีกที` }) : null);
+  };
+  vehicleSel.addEventListener("change", paint);
+  dateEl.addEventListener("input", paint);
+  mileageEl.addEventListener("input", paint);
+  paint();
+}
+
 function eventField(label, node, { wide = false } = {}) {
   return el("label", { class: "field" + (wide ? " wide" : "") }, el("span", { text: label }), node);
 }
@@ -282,9 +315,9 @@ function render(draft, pickedVehicle) {
     eventField("วันที่ (ในบิลเป็น พ.ศ.)", el("div", {}, flagInput(inp("evDate", "date", ev.event_date), flags.has("event_date")), el("div", { id: "evDateCap", class: "datecap" }))),
     // a free text box that also offers the shops (and the other names used before) -- for when the bill's name was not read, or is written another way
     eventField("ร้าน / อู่", el("div", {}, flagInput(inp("evVendor", "text", ev.vendor, { list: "evVendorList", autocomplete: "off", placeholder: "พิมพ์ หรือเลือกจากรายการ" }), flags.has("vendor")),
-      el("datalist", { id: "evVendorList" }, ...[...new Set([...(board.shops || []), ...(board.fixers || [])])].map((n) => el("option", { value: n }))))),
+      el("datalist", { id: "evVendorList" }, ...vendorNames().map((n) => el("option", { value: n }))))),
     eventField("สาขา", flagInput(inp("evBranch", "text", ev.branch), flags.has("branch"))),
-    eventField("เลขไมล์", flagInput(inp("evMileage", "number", ev.mileage, { inputmode: "numeric" }), flags.has("mileage"))),
+    eventField("เลขไมล์", el("div", {}, flagInput(inp("evMileage", "number", ev.mileage, { inputmode: "numeric" }), flags.has("mileage")), el("div", { id: "evMileHint", class: "datecap mileage-hint" }))),
     eventField("ไมล์ครั้งต่อไป", el("div", {}, flagInput(inp("evNext", "number", ev.next_service_mileage, { inputmode: "numeric" }), flags.has("next_service_mileage")), el("div", { id: "evNextHint", class: "datecap" }))),
     eventField("ยอดรวมในบิล (บาท)", flagInput(inp("evTotal", "number", ev.total_cost, { step: "0.01", inputmode: "decimal" }), flags.has("total_cost"))),
     eventField("หมายเหตุ", el("textarea", { id: "evNotes", text: ev.notes || "" }), { wide: true }),
@@ -296,6 +329,7 @@ function render(draft, pickedVehicle) {
   bindDateField($("evDate"), $("evDateCap"));
   vSel.addEventListener("change", renderFixes);   // the "which repairs does this close" list follows the truck
   bindVehicleAutofill({ vehicleSel: vSel, branchEl: $("evBranch"), mileageEl: $("evMileage"), nextEl: $("evNext"), hintEl: $("evNextHint"), fillBranchNow: true });
+  bindMileageHistory({ vehicleSel: vSel, dateEl: $("evDate"), mileageEl: $("evMileage"), hintEl: $("evMileHint") });
   renderFixes();
 
   // one block per bill file, photo beside its own rows

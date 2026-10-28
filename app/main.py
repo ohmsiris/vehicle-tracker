@@ -1376,6 +1376,13 @@ def api_vehicle_events(vehicle_id: str, x_app_token: str = Header(default=""), t
     return _history_call(history.vehicle_events, vehicle_id)
 
 
+@app.get("/api/vehicles/{vehicle_id}/mileage")
+def api_vehicle_mileage(vehicle_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> list:
+    """Every odometer reading on this truck's confirmed bills (for the mileage box: what came before and after this bill)."""
+    _check_token(x_app_token, token)
+    return _history_call(history.vehicle_mileage, vehicle_id)
+
+
 @app.get("/api/events/{event_id}")
 def api_event(event_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """One confirmed event in full: header, every line, files, and the board requests it closed."""

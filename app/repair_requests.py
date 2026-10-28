@@ -321,11 +321,14 @@ def act(request_id: str, action: str, **fields) -> dict:
 def known_fixers() -> list[str]:
     """Names/shops seen before, most recent first -- suggestions for the
     'who fixed it' box. Includes bill vendors so a shop you've already
-    saved a bill from is one tap away."""
+    saved a bill from is one tap away. The many ways one outside shop was written on bills ("บริษัท จึงกงเฮงอีซูซุ จำกัด (สาขา…)", "อิซูซุจึงกงเฮง" ...)
+    are folded into that shop's own name, so each shop is ONE option; in-house names and people are left as they are."""
+    from app import shops
     seen: dict[str, None] = {}
     for table, column in (("repair_requests", "fixed_by"), ("maintenance_events", "vendor"), ("maintenance_events", "performed_by")):
         for r in supabase.select(table, {"select": column, column: "not.is.null", "order": "created_at.desc" if table == "maintenance_events" else "updated_at.desc", "limit": "200"}):
             name = (r.get(column) or "").strip()
             if name:
-                seen.setdefault(name, None)
+                shop = shops.canonical(name)
+                seen.setdefault(shop if shop and shop != shops.IN_HOUSE else name, None)
     return list(seen)

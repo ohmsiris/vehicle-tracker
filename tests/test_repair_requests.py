@@ -529,3 +529,16 @@ def test_the_edit_endpoint_carries_the_truck_and_the_date(monkeypatch):
     monkeypatch.setattr(main.repair_requests, "edit", lambda rid, data: seen.update(data) or {"ok": True})
     client.patch("/api/requests/abc?token=secret", json={"vehicle_id": "v2", "request_date": "2026-10-05"})
     assert seen == {"vehicle_id": "v2", "request_date": "2026-10-05"}
+
+
+def test_the_many_spellings_of_one_shop_are_one_suggestion(monkeypatch):
+    from app import repair_requests as rr
+    names = {"repair_requests": ["ช่างเอ๋"],
+             "maintenance_events": ["บริษัท จึงกงเฮงอีซูซุ จำกัด (สาขาแก่งคอย)", "อิซูซุจึงกงเฮง", "บริษัท จึงกงเฮงอีซูซุ จำกัด", "ร้านใหม่ที่ไม่รู้จัก", "อิซูซุจึงกงเฮงแก่งคอย"]}
+    def fake_select(table, params):
+        col = params["select"]
+        return [{col: n} for n in names[table]]
+    monkeypatch.setattr(rr.supabase, "select", fake_select)
+    out = rr.known_fixers()
+    assert out.count("อิซูซุจึงกงเฮงแก่งคอย") == 1 and not [n for n in out if "บริษัท จึงกงเฮง" in n]          # folded into the shop's own name
+    assert "ช่างเอ๋" in out and "ร้านใหม่ที่ไม่รู้จัก" in out                                                     # a person and an unknown shop stay as they are

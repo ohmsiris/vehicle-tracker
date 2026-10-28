@@ -1217,3 +1217,5 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
   body.printing-sheet { background: #fff; }
   body.printing-sheet .stocksheet { width: auto; box-shadow: none; padding: 0; margin: 0; }
 }
+.mileage-hint { margin-top: 4px; line-height: 1.5; }
+.mileage-warn { color: var(--bad); font-weight: 600; }

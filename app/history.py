@@ -185,6 +185,14 @@ def vehicle_events(vehicle_id: str) -> list[dict]:
     return event_rows(events, lines, attachments)
 
 
+def vehicle_mileage(vehicle_id: str) -> list[dict]:
+    """The odometer readings of one truck's confirmed bills, newest bill first: [{event_id, event_date, mileage}]."""
+    vid = _uuid_or_404(vehicle_id)
+    rows = supabase.select_all("maintenance_events", {"select": "id,event_date,mileage", "vehicle_id": f"eq.{vid}", "status": "eq.confirmed", "mileage": "not.is.null",
+                                                      "order": "event_date.desc,created_at.desc,id.asc"})
+    return [{"event_id": r["id"], "event_date": r["event_date"], "mileage": r["mileage"]} for r in rows]
+
+
 def event_detail(event_id: str) -> dict:
     eid = _uuid_or_404(event_id)
     rows = supabase.select("maintenance_events", {
