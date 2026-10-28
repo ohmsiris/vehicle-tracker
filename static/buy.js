@@ -96,7 +96,8 @@ async function openPurchaseBill(id) {
         el("td", { text: ln.unit_cost === null ? "–" : `${buMoney(ln.unit_cost)} ฿` })))))),
     el("p", { class: "bu-sum", text: `ยอดบิล ${buMoney(b.total)} บาท` }),
     b.notes ? el("p", { class: "muted small", text: b.notes }) : null,
-    el("div", { class: "pl-set-actions" }, el("button", { class: "btn small danger", type: "button", text: "ลบบิลนี้", onclick: async () => {
+    el("div", { class: "pl-set-actions" }, el("button", { class: "btn small primary", type: "button", text: "แก้ไขบิลนี้", onclick: () => { $("buDialog").close(); buEditBill(b); } }),
+      el("button", { class: "btn small danger", type: "button", text: "ลบบิลนี้", onclick: async () => {
       if (!confirm("ลบบิลนี้ทั้งใบใช่ไหม? (รายการและราคาในบิลนี้จะหายไปด้วย)")) return;
       try { await api(`/api/purchases/${b.id}`, { method: "DELETE" }); } catch (err) { showErr("buDlgError", err.message); return; }
       $("buDialog").close();
@@ -250,6 +251,22 @@ function buRemoveJob(job, ask) {
   if (bu.cur === job) bu.cur = null;
   buRenderQueue();
   buBadge();
+}
+
+// "แก้ไขบิลนี้": the saved bill opens on the check page (its photos beside it); saving writes the changes back to the same bill
+async function buEditBill(b) {
+  if (!bu.opts) { try { await buLoadOptions(); } catch (err) { showErr("buError", err.message); return; } }
+  const lines = b.lines.map((ln) => ({ ...buBlankLine(), description: ln.description, quantity: ln.quantity ?? "", unit: ln.unit || "", unit_price: ln.unit_price ?? "", line_total: ln.line_total ?? "",
+    item_id: ln.item_id || "", auto_item: ln.item_id || "", used_for: ln.used_for || "", unlinked_by_hand: !ln.item_id, low_confidence_fields: ln.low_confidence_fields || [] }));
+  const review = { source: b.source, purpose: b.purpose || "stock", machine_id: b.machine_id || "", machine_model: b.machine_model || "",
+    vendor_id: b.vendor_id || "", vendor_name: b.vendor_name || "", new_vendor: b.vendor_id ? "" : (b.vendor_name || ""), bill_date: String(b.bill_date).slice(0, 10), bill_no: b.bill_no || "",
+    branch: b.branch || "", vat_mode: b.vat_mode || "none", subtotal: b.subtotal ?? "", vat_amount: b.vat_amount ?? "", discount: b.discount ?? "", total: b.total ?? "", notes: b.notes || "",
+    receive_stock: !!b.received_stock, low: [], lines: lines.length ? lines : [buBlankLine()] };
+  const files = b.attachments.map((a, i) => ({ url: a.url, type: a.mime_type, name: `${a.mime_type === "application/pdf" ? "ไฟล์" : "รูป"} ${i + 1}`, remote: true }));
+  const job = { id: -1, files, status: "ready", error: "", t0: null, extraction: null, server: null, review, manual: false, purpose: review.purpose, editId: b.id };
+  bu.cur = job;
+  bu.notice = "";
+  goHash("#purchase-new");                                // that page shows the bill being checked when there is one
 }
 
 function buOpenJob(job) {
@@ -466,6 +483,7 @@ async function buSave(allowDuplicates = false) {
   if (d.purpose === "repair" && !d.machine_id) return showErr("bnSaveError", "บิลซ่อมเครื่อง: เลือกเครื่องที่ซ่อมก่อน");
   if (d.purpose === "reference" && !String(d.machine_model || "").trim()) return showErr("bnSaveError", "บิลอ้างอิง: เลือกรุ่นเครื่องก่อน");
   const lines = d.lines.filter((ln) => String(ln.description || "").trim() || ln.line_total !== "" || ln.quantity !== "");
+  const editing = !!job.editId;
   const payload = {
     source: d.source, vendor_id: d.vendor_id || null, new_vendor: d.vendor_id ? null : (d.new_vendor || null), vendor_name: d.vendor_name || d.new_vendor || null,
     bill_date: d.bill_date, bill_no: d.bill_no, branch: d.branch, vat_mode: d.vat_mode || "none",
@@ -479,10 +497,11 @@ async function buSave(allowDuplicates = false) {
   const fd = new FormData();
   fd.append("payload", JSON.stringify(payload));
   if (allowDuplicates) fd.append("allow_duplicates", "true");
-  if (d.source === "bill") for (const f of job.files) fd.append("files", f.blob, f.name);
+  if (d.source === "bill" && !editing) for (const f of job.files) fd.append("files", f.blob, f.name);
   btn.disabled = true;
   try {
-    await api("/api/purchases", { method: "POST", body: fd });
+    if (editing) await api(`/api/purchases/${job.editId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    else await api("/api/purchases", { method: "POST", body: fd });
   } catch (err) {
     btn.disabled = false;
     if (err.status === 409 && confirm(`${err.message} — บันทึกซ้ำอีกครั้งใช่ไหม?`)) return buSave(true);
@@ -491,6 +510,7 @@ async function buSave(allowDuplicates = false) {
   }
   btn.disabled = false;
   bu.opts = null;                                        // a new supplier / item may have been made
+  if (editing) { bu.cur = null; goHash("#purchases"); return; }
   buRemoveJob(job, false);
   bu.notice = `บันทึกบิลแล้ว: ${d.new_vendor || d.vendor_name || "ไม่ระบุร้าน"} · ${beDate(d.bill_date)}`;
   if (bu.jobs.length) goHash("#purchase-new"); else goHash("#purchases");
@@ -913,8 +933,13 @@ function initBuy() {
     buOpenJob(job);
   });
   $("bnAddLine").addEventListener("click", () => { bu.cur.review.lines.push(buBlankLine()); buRenderLines(); });
-  $("bnBack").addEventListener("click", () => { bu.cur = null; buShowHome(); });
-  $("bnDiscard").addEventListener("click", () => { if (bu.cur) { const j = bu.cur; if (confirm("ทิ้งบิลนี้ทั้งใบ (ยังไม่ได้บันทึก) ใช่ไหม?")) { buRemoveJob(j, false); buShowHome(); } } });
+  $("bnBack").addEventListener("click", () => { const editing = bu.cur && bu.cur.editId; bu.cur = null; if (editing) goHash("#purchases"); else buShowHome(); });
+  $("bnDiscard").addEventListener("click", () => {
+    if (!bu.cur) return;
+    const j = bu.cur;
+    if (j.editId) { if (confirm("ยกเลิกการแก้ไข (ไม่เปลี่ยนอะไรในบิลนี้) ใช่ไหม?")) { bu.cur = null; goHash("#purchases"); } return; }
+    if (confirm("ทิ้งบิลนี้ทั้งใบ (ยังไม่ได้บันทึก) ใช่ไหม?")) { buRemoveJob(j, false); buShowHome(); }
+  });
   $("bnSave").addEventListener("click", () => buSave(false));
   let prTimer = null;
   $("prQ").addEventListener("input", () => { clearTimeout(prTimer); prTimer = setTimeout(loadPrices, 300); });

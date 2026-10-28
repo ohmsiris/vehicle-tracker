@@ -1006,6 +1006,13 @@ def api_purchase(bill_id: str, x_app_token: str = Header(default=""), token: str
     return _buy_call(purchasing.bill_detail, bill_id)
 
 
+@app.put("/api/purchases/{bill_id}")
+def api_purchase_update(bill_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Edit a saved purchase bill (header, lines, what it is); the photos are not touched."""
+    _check_token(x_app_token, token)
+    return _buy_call(purchasing.update_bill, bill_id, body)
+
+
 @app.delete("/api/purchases/{bill_id}")
 def api_purchase_delete(bill_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

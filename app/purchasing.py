@@ -444,38 +444,75 @@ def save_bill(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicates
             uploaded.append(path)
             supabase.insert("purchase_attachments", [{"bill_id": bill_id, "storage_path": path, "mime_type": p["mime"], "byte_size": len(p["data"]),
                                                       "sha256": p["sha256"] if not allow_duplicates else f"{p['sha256']}:{bill_id}", "sort_order": p["sort_order"]}])
-        by_name = {i["name"].lower(): i["id"] for i in items}
-        taken = {a.lower() for i in items for a in i["aliases"]}
-        rows = []
-        for n, ln in enumerate(clean["lines"]):
-            item_id = _create_item(ln["new_item"], by_name) if ln["new_item"] else ln["item_id"]
-            if not item_id and not ln["new_item"] and not ln["unlinked_by_hand"]:
-                hit = match_item(ln["description"], items)          # a line typed in by hand finds its item like a read one
-                item_id = hit["id"] if hit else None
-            if item_id and (ln["learn"] or ln["new_item"]):
-                _learn(item_id, ln["description"], taken)
-            rows.append({"bill_id": bill_id, "line_number": n + 1, "description": ln["description"], "item_id": item_id, "quantity": ln["quantity"],
-                         "unit": ln["unit"], "unit_price": ln["unit_price"], "line_total": ln["line_total"], "unit_cost": ln["unit_cost"],
-                         "unit_cost_ex_vat": ln["unit_cost_ex_vat"], "machine_id": ln["machine_id"], "used_for": ln["used_for"],
-                         "low_confidence_fields": ln["low_confidence_fields"]})
-        saved = supabase.insert("purchase_lines", rows)
-        if clean["receive_stock"]:
-            moves = [{"item_id": s["item_id"], "move_date": bill["bill_date"], "kind": "in", "qty": s["quantity"], "purchase_line_id": s["id"],
-                      "notes": f"จากบิล {bill.get('bill_no') or ''}".strip()} for s in saved if s.get("item_id") and s.get("quantity")]
-            if moves:
-                supabase.insert("stock_moves", moves)
-        if clean["purpose"] == "repair":                          # the machine's history gets the repair (deleted with the bill)
-            machine = next((m for m in _machines() if m["id"] == clean["machine_id"]), {})
-            vendor = bill.get("vendor_name") or next((s["name"] for s in suppliers if s["id"] == bill.get("vendor_id")), "") or "ไม่ระบุร้าน"
-            supabase.insert("machine_events", [{
-                "branch": bill.get("branch") or machine.get("branch") or BRANCHES[0], "machine_id": clean["machine_id"], "event_date": bill["bill_date"], "kind": "ซ่อม",
-                "summary": f"ซ่อม / อะไหล่จาก {vendor} ({len(saved)} รายการ)"[:300], "vendor": vendor[:200], "cost": bill.get("total"),
-                "notes": f"จากบิลซื้อของ{' เลขที่ ' + bill['bill_no'] if bill.get('bill_no') else ''}", "purchase_bill_id": bill_id}])
+        _write_lines(bill_id, bill, clean, items, suppliers)
     except Exception:
         supabase.delete("purchase_bills", {"id": f"eq.{bill_id}"})          # the lines and attachments go with it
         supabase.storage_delete(uploaded)
         raise
     return {"bill_id": bill_id}
+
+
+def _write_lines(bill_id: str, bill: dict, clean: dict, items: list[dict], suppliers: list[dict]) -> list[dict]:
+    """The lines of a bill (new items made, words learned), what they put on the shelf and, for a repair bill, the machine's repair entry. Used by a new bill and an edit."""
+    by_name = {i["name"].lower(): i["id"] for i in items}
+    taken = {a.lower() for i in items for a in i["aliases"]}
+    rows = []
+    for n, ln in enumerate(clean["lines"]):
+        item_id = _create_item(ln["new_item"], by_name) if ln["new_item"] else ln["item_id"]
+        if not item_id and not ln["new_item"] and not ln["unlinked_by_hand"]:
+            hit = match_item(ln["description"], items)          # a line typed in by hand finds its item like a read one
+            item_id = hit["id"] if hit else None
+        if item_id and (ln["learn"] or ln["new_item"]):
+            _learn(item_id, ln["description"], taken)
+        rows.append({"bill_id": bill_id, "line_number": n + 1, "description": ln["description"], "item_id": item_id, "quantity": ln["quantity"],
+                     "unit": ln["unit"], "unit_price": ln["unit_price"], "line_total": ln["line_total"], "unit_cost": ln["unit_cost"],
+                     "unit_cost_ex_vat": ln["unit_cost_ex_vat"], "machine_id": ln["machine_id"], "used_for": ln["used_for"],
+                     "low_confidence_fields": ln["low_confidence_fields"]})
+    saved = supabase.insert("purchase_lines", rows)
+    if clean["receive_stock"]:
+        moves = [{"item_id": s["item_id"], "move_date": bill["bill_date"], "kind": "in", "qty": s["quantity"], "purchase_line_id": s["id"],
+                  "notes": f"จากบิล {bill.get('bill_no') or ''}".strip()} for s in saved if s.get("item_id") and s.get("quantity")]
+        if moves:
+            supabase.insert("stock_moves", moves)
+    if clean["purpose"] == "repair":                          # the machine's history gets the repair (deleted with the bill)
+        machine = next((m for m in _machines() if m["id"] == clean["machine_id"]), {})
+        vendor = bill.get("vendor_name") or next((s["name"] for s in suppliers if s["id"] == bill.get("vendor_id")), "") or "ไม่ระบุร้าน"
+        supabase.insert("machine_events", [{
+            "branch": bill.get("branch") or machine.get("branch") or BRANCHES[0], "machine_id": clean["machine_id"], "event_date": bill["bill_date"], "kind": "ซ่อม",
+            "summary": f"ซ่อม / อะไหล่จาก {vendor} ({len(saved)} รายการ)"[:300], "vendor": vendor[:200], "cost": bill.get("total"),
+            "notes": f"จากบิลซื้อของ{' เลขที่ ' + bill['bill_no'] if bill.get('bill_no') else ''}", "purchase_bill_id": bill_id}])
+    return saved
+
+
+def update_bill(bill_id: str, payload: dict) -> dict:
+    """Edit a saved bill: the same fields and lines as the check page. The photos stay. The new lines are written first and the old ones removed after, so a
+    failure half way never leaves the bill empty; what the bill put on the shelf (and a repair bill's machine entry) is taken off and made again from the new lines."""
+    _require()
+    _uuid_or_none(bill_id, "บิล")
+    rows = supabase.select("purchase_bills", {"select": "id,source", "id": f"eq.{bill_id}"})
+    if not rows:
+        raise NotFound()
+    items = items_with_aliases()
+    suppliers = shops.of_kind("supplier", shops._load())
+    clean = clean_bill(payload, today=today_th(), vendors={s["id"] for s in suppliers}, items={i["id"] for i in items}, machines={m["id"] for m in _machines()})
+    if clean["purpose"] != "stock" and not has_v30():
+        raise InvalidPurchase(NEEDS_V30)
+    bill = dict(clean["bill"])
+    bill.pop("source", None)                                          # a bill stays what it was (read from a photo, or typed)
+    if has_v30():
+        bill.update(purpose=clean["purpose"], machine_id=clean["machine_id"], machine_model=clean["machine_model"])
+    if clean["new_vendor"]:
+        bill["vendor_id"] = _create_supplier(clean["new_vendor"])
+    old = [l["id"] for l in supabase.select_all("purchase_lines", {"select": "id", "bill_id": f"eq.{bill_id}", "order": "id.asc"})]
+    old_events = [e["id"] for e in supabase.select_all("machine_events", {"select": "id", "purchase_bill_id": f"eq.{bill_id}", "order": "id.asc"})] if has_v30() else []
+    supabase.update("purchase_bills", {"id": f"eq.{bill_id}"}, bill)
+    saved = _write_lines(bill_id, bill, clean, items, suppliers)
+    if old:
+        supabase.delete("stock_moves", {"purchase_line_id": f"in.({','.join(old)})"})
+        supabase.delete("purchase_lines", {"id": f"in.({','.join(old)})"})
+    if old_events:
+        supabase.delete("machine_events", {"id": f"in.({','.join(old_events)})"})            # the entry made by the old version of the bill
+    return {"bill_id": bill_id, "lines": len(saved)}
 
 
 def _vendor_names() -> dict:
@@ -507,7 +544,9 @@ def bill_detail(bill_id: str) -> dict:
     items = {i["id"]: i["name"] for i in supabase.select_all("stock_items", {"select": "id,name", "order": "name.asc"})}
     machines = {m["id"]: m["name"] for m in _machines()}
     b.pop("extraction", None)
+    got = supabase.select("stock_moves", {"select": "id", "purchase_line_id": f"in.({','.join(l['id'] for l in lines)})", "limit": "1"}) if lines else []
     return {**b, "vendor": _vendor_names().get(b.get("vendor_id")) or b.get("vendor_name"), "purpose": b.get("purpose") or "stock", "machine_name": machines.get(b.get("machine_id")),
+            "received_stock": bool(got),
             "lines": [{**ln, "item_name": items.get(ln.get("item_id")), "machine_name": machines.get(ln.get("machine_id"))} for ln in lines],
             "attachments": [{"id": a["id"], "mime_type": a["mime_type"], "url": supabase.public_url(a["storage_path"])} for a in atts]}
 

@@ -781,3 +781,9 @@ Most of a page's wait is round trips to the database (the app makes many small r
 - Measured from a laptop against the live database (each read ~120 ms there, much less on the server): stock 1.6 s -> 0.22 s, บิลซื้อของ list 1.1 -> 0.24, prices 1.1 -> 0.21,
   people 0.6 -> 0.02, vehicles 0.72 -> 0.40, attendance 1.27 -> 0.72. The very first load after a deploy is still the slowest (cold: ~20 reads for the page's data).
 
+## Editing a saved purchase bill (`purchasing.update_bill`, `PUT /api/purchases/{id}`)
+A saved bill's dialog has **แก้ไขบิลนี้**: it opens the check page with the bill (its photos beside it) -- shop, date, number, VAT, total, notes, every line, and what the bill IS (stock / a
+machine's repair / a reference list). Saving writes the changes back to the same bill; the photos are untouched. The new lines are written first and the old ones removed after, so a failure
+never leaves a bill empty; what the bill had put on the shelf is taken off and put on again from the new lines ("รับเข้าสต็อก" is ticked when it had), and a repair bill's machine entry is made again.
+A misread shop that made a new supplier is fixed by choosing the right shop here (and the misspellings of a supplier are added as its words in ตั้งค่า, so the next bill finds it by itself).
+
