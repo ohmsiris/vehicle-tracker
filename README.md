@@ -738,10 +738,10 @@ edited (`events.py`), and the maintenance plan ignores it when it matches a line
 saved (77 on 27 Oct 2026).
 
 ## Small trucks: the wheel-bearing job, and what Isuzu's free check covers (`service_plan.LABEL_FOR`, `_SMALL_ONLY`, `_ANYWHERE`)
-A D-Max / Revo has nowhere to grease "every point": the only grease job is the wheel bearings (the mechanic cleans and re-greases them whenever he checks them or changes the wheel
+A D-Max / Revo has nowhere to grease "every point": the only grease job is the wheel bearings (the mechanic cleans and re-greases them when he changes the wheel
 seals / bearings). So for the small rule set only (รถเล็ก) the plan item is called **ตรวจเช็คลูกปืนล้อ** (big trucks keep "อัดจารบีทุกจุด"), and a bill line counts as that job done that day when it
-checks the wheel bearings or changes the wheel seals / bearings ("ตรวจเช็คลูกปืนล้อ", "เปลี่ยนซีลล้อ", "เปลี่ยนลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า", a part line
-"ซีลล้อ"). Isuzu's free **"ตรวจเช็ก 8 ระบบสำคัญ"** (it includes the suspension: wheel-bearing play, ball joints, bushes, shocks, leaf springs, wheel nuts) counts as **เช็คช่วงล่าง** for every truck.
+changes the wheel seals / bearings or greases them ("เปลี่ยนซีลล้อ", "เปลี่ยนลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า", a part line "ซีลล้อ"); a line that only
+checks the bearings ("ตรวจเช็คลูกปืนล้อ" with no seal, grease or replacement) does not count. Isuzu's free **"ตรวจเช็ก 8 ระบบสำคัญ"** (it includes the suspension: wheel-bearing play, ball joints, bushes, shocks, leaf springs, wheel nuts) counts as **เช็คช่วงล่าง** for every truck.
 The plan reads the bills every time it is shown, so a new rule or a new bill takes effect at once: there is nothing to refresh.
 
 ## One name per shop on a bill (`shops.fold_vendor`)

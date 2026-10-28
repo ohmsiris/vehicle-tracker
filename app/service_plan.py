@@ -264,9 +264,12 @@ _ANYWHERE = [
     ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจสอบ|ตรวจเช็ค|ตรวจเช็ก|ตรวจ)\s*(?:สภาพ\s*)?ช่วงล่าง|ตรวจเช็[คก]\s*(?:รถ)?\s*(?:ฟรี)?\s*[8๘]\s*ระบบ")),
 ]
 _TOP_UP = re.compile(r"เติม")
-# Only for the small trucks (D-Max / Revo): checking the wheel bearings, or changing the wheel seals / bearings, IS the wheel-bearing job (the bearings are cleaned and
-# re-greased with it): "ตรวจเช็คลูกปืนล้อ", "ซีลล้อ", "ลูกปืนล้อ", "ซีลลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า".
+# Only for the small trucks (D-Max / Revo): changing the wheel seals / bearings or greasing them IS the wheel-bearing job (the bearings are cleaned and re-greased with it):
+# "เปลี่ยนซีลล้อ", "ลูกปืนล้อ" (a part), "ซีลลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า". A line that only CHECKS the bearings ("ตรวจเช็คลูกปืนล้อ" with no
+# seal, grease or replacement in it) does not count.
 _SMALL_ONLY = [("wheel_grease", re.compile(r"(?:ซีล|ลูกปืน)\s*(?:ลูกปืน\s*)?ล้อ"))]
+_CHECK_ONLY = re.compile(r"^\s*(?:ตรวจ|เช็ค|เช็ก)")
+_REAL_WORK = re.compile(r"เปลี่ยน|ซีล|จา(?:ร|ระ)บี")
 
 
 def classify_line(description: Optional[str], rule_set: Optional[str] = None) -> Optional[str]:
@@ -281,7 +284,7 @@ def classify_line(description: Optional[str], rule_set: Optional[str] = None) ->
     for key, pattern in _ANYWHERE:
         if pattern.search(text):
             return key
-    if rule_set == SMALL:
+    if rule_set == SMALL and not (_CHECK_ONLY.match(text) and not _REAL_WORK.search(text)):
         for key, pattern in _SMALL_ONLY:
             if pattern.search(text):
                 return key

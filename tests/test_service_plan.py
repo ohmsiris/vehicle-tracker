@@ -554,7 +554,7 @@ def test_every_bill_mileage_counts_as_an_odometer_reading_even_if_no_line_is_a_p
 @pytest.mark.parametrize("line,hit", [
     ("เปลี่ยนซีลล้อหน้า", True), ("เปลี่ยนลูกปืนล้อหลัง", True), ("ซีลล้อ", True), ("ลูกปืนล้อ SKF", True),
     ("เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า", True), ("ซีลลูกปืนล้อหน้า", True),
-    ("ตรวจเช็คลูกปืนล้อ", True), ("ตรวจสอบลูกปืนล้อหน้า", True), ("ตรวจ/เติมลมยางล้อหน้า", False), ("ลูกปืนคลัตช์", False), ("ซีลเพลาข้อเหวี่ยงหน้า", False), ("ตรวจเช็คลูกปืนล้อ และเปลี่ยนซีลล้อ", True),
+    ("ตรวจเช็คลูกปืนล้อ", False), ("ตรวจสอบลูกปืนล้อหน้า", False), ("ตรวจเช็คลูกปืนล้อ อัดจาระบี", True), ("ตรวจ/เติมลมยางล้อหน้า", False), ("ลูกปืนคลัตช์", False), ("ซีลเพลาข้อเหวี่ยงหน้า", False), ("ตรวจเช็คลูกปืนล้อ และเปลี่ยนซีลล้อ", True),
 ])
 def test_for_a_small_truck_checking_the_wheel_bearings_or_changing_the_seals_is_the_wheel_job(line, hit):
     assert (sp.classify_line(line, sp.SMALL) == "wheel_grease") is hit
