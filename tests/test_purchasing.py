@@ -151,3 +151,24 @@ def test_a_bill_photographed_again_is_caught_by_supplier_and_bill_number_or_date
     by_name = pu.same_bill_matches({"vendor_id": None, "vendor_name": "บริษัท  ก", "bill_date": "2026-10-21", "bill_no": "IV-0042", "total": None},
                                            [{**saved[0], "vendor_id": None}])
     assert len(by_name) == 1                                                                                   # a supplier not in the list yet is found by its name
+
+
+# ------------------------------------------------------------- what a bill is: stock / a machine's repair / a reference parts list
+def test_a_bill_is_for_stock_by_default_and_a_repair_or_reference_bill_needs_its_machine_or_model():
+    out = clean(bill(receive_stock=True))
+    assert out["purpose"] == "stock" and out["machine_id"] is None and out["machine_model"] is None and out["receive_stock"] is True
+    rep = clean(bill(purpose="repair", machine_id=MACHINE, receive_stock=True, machine_model="ignored"))
+    assert rep["purpose"] == "repair" and rep["machine_id"] == MACHINE and rep["machine_model"] is None
+    assert rep["receive_stock"] is False and rep["lines"][0]["machine_id"] == MACHINE          # a repair's parts go into the machine, not the store
+    ref = clean(bill(purpose="reference", machine_model=" MYCOM 8WB-HE ", machine_id=MACHINE, receive_stock=True))
+    assert ref["purpose"] == "reference" and ref["machine_model"] == "MYCOM 8WB-HE" and ref["machine_id"] is None and ref["receive_stock"] is False
+    for data, frag in ((bill(purpose="repair"), "เลือกเครื่อง"), (bill(purpose="reference"), "เลือกรุ่น"), (bill(purpose="gift"), "คืออะไร")):
+        with pytest.raises(pu.InvalidPurchase, match=frag):
+            clean(data)
+
+
+def test_a_reference_parts_list_belongs_to_every_machine_of_that_model():
+    m = {"id": "m1", "model": "8WB-HE", "make": "MYCOM"}
+    assert pu.model_matches(m, "MYCOM 8WB-HE") and pu.model_matches(m, "mycom 8wbhe") and not pu.model_matches(m, "SMC108L")
+    assert not pu.model_matches({"id": "m2", "model": None}, "MYCOM 8WB-HE")
+    assert pu.machine_models([m, {"model": "8WB-HE", "make": "MYCOM"}, {"model": "SMC108L", "make": None}, {"model": None}]) == ["MYCOM 8WB-HE", "SMC108L"]

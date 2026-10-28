@@ -730,6 +730,12 @@
     <div class="edit-banner" id="bnNeedsV16" hidden>ยังใช้ระบบซื้อของไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
     <div id="bnUpload">
       <p class="muted small" id="bnNotice" hidden></p>
+      <div class="modeswitch" role="tablist" aria-label="บิลนี้คืออะไร" id="bnPurposes">
+        <button class="modebtn active" type="button" role="tab" data-purpose="stock">🧾 ซื้อเข้าสต็อก</button>
+        <button class="modebtn" type="button" role="tab" data-purpose="repair">🔧 ซ่อมเครื่องจักร</button>
+        <button class="modebtn" type="button" role="tab" data-purpose="reference">📚 รายการอะไหล่อ้างอิง (ไม่นับเงิน)</button>
+      </div>
+      <p class="muted small" id="bnPurposeNote"></p>
       <div class="card">
         <div class="drop" id="bnDrop" tabindex="0" role="button">
           <span>แตะเพื่อเลือกไฟล์บิล หรือลากมาวางที่นี่ — เลือกหลายไฟล์พร้อมกันได้</span>

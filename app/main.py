@@ -991,6 +991,13 @@ def api_purchases(limit: int = Query(default=100), x_app_token: str = Header(def
     return _buy_call(purchasing.list_bills, limit)
 
 
+@app.get("/api/machines/{machine_id}/prices")
+def api_machine_prices(machine_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Every price and part known for one machine (its repair bills, lines marked for it, its model's reference parts lists)."""
+    _check_token(x_app_token, token)
+    return _buy_call(purchasing.machine_prices, machine_id)
+
+
 @app.get("/api/purchases/{bill_id}")
 def api_purchase(bill_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

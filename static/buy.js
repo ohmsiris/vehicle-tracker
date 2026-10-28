@@ -14,6 +14,7 @@ const bu = {
   opts: null,              // { ready, suppliers, items, machines, branches }
   pick: [],                // files chosen but not started: { blob, name, type }
   mode: "each",            // "each": one bill per file · "one": all the files are pages of one bill
+  purpose: "stock",        // what the bills picked next are: stock / repair (one machine's repair) / reference (a model's parts list: no money)
   jobs: [],                // the queue: { id, files, status: queued|reading|ready|error, error, t0, extraction, server, review, manual }
   cur: null,               // the job being checked
   nextId: 1, running: 0, timer: null, notice: "",
@@ -66,13 +67,14 @@ function renderPurchases() {
   const q = $("buQ").value.trim().toLowerCase(), vendor = $("buVendor").value, branch = $("buBranch").value, from = buPeriodStart($("buPeriod").value);
   const rows = bu.bills.filter((b) => (!q || [b.vendor, b.vendor_name, b.bill_no].filter(Boolean).join(" ").toLowerCase().includes(q))
     && (!vendor || b.vendor === vendor) && (!branch || b.branch === branch) && (!from || b.bill_date >= from));
-  const total = rows.reduce((s, b) => s + Number(b.total || 0), 0);
-  fill($("buCount"), `${rows.length} บิล · รวม ${buMoney(total)} บาท`);
+  const refs = rows.filter((b) => b.purpose === "reference").length;
+  const total = rows.reduce((s, b) => s + (b.purpose === "reference" ? 0 : Number(b.total || 0)), 0);       // a reference parts list is not money spent
+  fill($("buCount"), `${rows.length} บิล · รวม ${buMoney(total)} บาท${refs ? ` (ไม่นับบิลอ้างอิง ${refs} ใบ)` : ""}`);
   fill($("buList"), ...(rows.length ? rows.map((b) => el("button", { class: "card bubill", type: "button", onclick: () => openPurchaseBill(b.id) },
     el("span", { class: "bubill-date", text: beDate(b.bill_date) }),
     el("strong", { text: b.vendor || "ไม่ระบุร้าน" }),
-    el("span", { class: "muted small", text: [b.bill_no ? `เลขที่ ${b.bill_no}` : null, `${b.lines} รายการ`, b.branch, b.source === "manual" ? "กรอกเอง" : null].filter(Boolean).join(" · ") }),
-    el("span", { class: "bubill-total", text: `${buMoney(b.total)} ฿` })))
+    el("span", { class: "muted small", text: [buPurposeText(b), b.bill_no ? `เลขที่ ${b.bill_no}` : null, `${b.lines} รายการ`, b.branch, b.source === "manual" ? "กรอกเอง" : null].filter(Boolean).join(" · ") }),
+    el("span", { class: `bubill-total${b.purpose === "reference" ? " muted" : ""}`, text: b.purpose === "reference" ? `(${buMoney(b.total)} ฿ ไม่นับ)` : `${buMoney(b.total)} ฿` })))
     : [el("p", { class: "muted empty", text: bu.bills.length ? "ไม่พบบิลที่ตรงกับตัวกรอง" : "ยังไม่มีบิลซื้อของ — กด “+ บิลซื้อของใหม่”" })]));
 }
 
@@ -82,7 +84,7 @@ async function openPurchaseBill(id) {
   const files = b.attachments.map((a, i) => el("button", { class: "btn small", type: "button", onclick: () => buView(a.url, a.mime_type, `${b.vendor || "บิล"} · ${a.mime_type === "application/pdf" ? "ไฟล์" : "รูป"} ${i + 1}`), text: a.mime_type === "application/pdf" ? `📄 ไฟล์ ${i + 1}` : `🧾 รูป ${i + 1}` }));
   const vat = (BU_VAT.find(([k]) => k === b.vat_mode) || [, ""])[1];
   buOpenDialog(`${b.vendor || "ไม่ระบุร้าน"} · ${beDate(b.bill_date)}`, [
-    el("p", { class: "muted small", text: [b.bill_no ? `เลขที่ ${b.bill_no}` : null, b.branch, vat, b.source === "manual" ? "กรอกเอง ไม่มีบิล" : null].filter(Boolean).join(" · ") }),
+    el("p", { class: "muted small", text: [buPurposeText(b), b.bill_no ? `เลขที่ ${b.bill_no}` : null, b.branch, vat, b.source === "manual" ? "กรอกเอง ไม่มีบิล" : null].filter(Boolean).join(" · ") }),
     files.length ? el("div", { class: "chips" }, ...files) : null,
     el("div", { class: "bu-scroll" }, el("table", { class: "lines bu-lines-view" },
       el("thead", {}, el("tr", {}, ...["รายการในบิล", "เป็นของ", "จำนวน", "รวม", "ต่อหน่วยจริง"].map((t) => el("th", { text: t })))),
@@ -159,7 +161,7 @@ function buStartJobs() {
   const groups = bu.mode === "one" ? [bu.pick] : bu.pick.map((f) => [f]);
   for (const files of groups) {
     for (const f of files) f.url = f.url || URL.createObjectURL(f.blob);
-    bu.jobs.push({ id: bu.nextId++, files, status: "queued", error: "", t0: null, extraction: null, server: null, review: null, manual: false });
+    bu.jobs.push({ id: bu.nextId++, files, status: "queued", error: "", t0: null, extraction: null, server: null, review: null, manual: false, purpose: bu.purpose });
   }
   bu.pick = [];
   buRenderPick();
@@ -220,7 +222,8 @@ function buBadge() {
 }
 
 function buJobTitle(job) {
-  return job.manual ? "กรอกเอง (ไม่มีบิล)" : job.files.map((f) => f.name).join(", ");
+  const tag = job.purpose === "repair" ? "[ซ่อมเครื่อง] " : job.purpose === "reference" ? "[อ้างอิง ไม่นับเงิน] " : "";
+  return tag + (job.manual ? "กรอกเอง (ไม่มีบิล)" : job.files.map((f) => f.name).join(", "));
 }
 
 function buRenderQueue() {
@@ -252,15 +255,17 @@ function buRemoveJob(job, ask) {
 function buOpenJob(job) {
   bu.cur = job;
   bu.notice = "";
-  if (!job.review) job.review = buMakeReview(job.server);
+  if (!job.review) job.review = buMakeReview(job.server, job.purpose);
   buShowReview();
 }
 
 // draft = what the server read (null to type a bill in by hand)
-function buMakeReview(draft) {
+function buMakeReview(draft, purpose = "stock") {
   const d = draft || {};
+  const models = (bu.opts && bu.opts.machine_models) || [];
   const review = {
     source: draft ? "bill" : "manual",
+    purpose, machine_id: "", machine_model: models.length === 1 ? models[0] : "",
     vendor_id: d.vendor_id || "", vendor_name: d.vendor_name || "", new_vendor: d.vendor_id ? "" : (d.vendor_name || ""),
     bill_date: d.date || todayISO(), bill_no: d.bill_no || "", branch: "สระบุรี", vat_mode: d.vat_mode || "none",
     subtotal: d.subtotal ?? "", vat_amount: d.vat_amount ?? "", discount: d.discount ?? "", total: d.total ?? "", notes: "", receive_stock: true,
@@ -363,7 +368,7 @@ function buRenderReview() {
   });
   newVendor.addEventListener("input", () => { d.new_vendor = newVendor.value; });
 
-  fill($("bnHead"),
+  fill($("bnHead"), buPurposeBlock(d),
     el("div", { class: "mfields" },
       flag("vendor_name", el("div", { class: "mfield" }, el("label", { for: "bnVendor", text: "ร้าน" }), vendorSel, newVendor,
         d.vendor_name ? el("div", { class: "muted small", text: `ในบิลเขียนว่า: ${d.vendor_name}` }) : null)),
@@ -376,7 +381,8 @@ function buRenderReview() {
   buRenderLines();
   fill($("bnFoot"),
     el("div", { class: "mfields" }, mfield(d, "notes", "หมายเหตุ", { wide: true, maxlength: 500 })),
-    el("label", { class: "mgcheck" }, (() => { const c = el("input", { type: "checkbox" }); c.checked = d.receive_stock; c.addEventListener("change", () => { d.receive_stock = c.checked; }); return c; })(),
+    d.purpose && d.purpose !== "stock" ? el("p", { class: "muted small", text: d.purpose === "repair" ? "บิลซ่อมเครื่อง: อะไหล่ใช้กับเครื่องนี้เลย ไม่รับเข้าสต็อก" : "บิลอ้างอิง: ไม่รับเข้าสต็อก และไม่นับเงินที่ไหนเลย" })
+      : el("label", { class: "mgcheck" }, (() => { const c = el("input", { type: "checkbox" }); c.checked = d.receive_stock; c.addEventListener("change", () => { d.receive_stock = c.checked; }); return c; })(),
       "รับของเข้าสต็อกด้วย", el("span", { class: "muted small", text: " (ของที่ซื้อเข้าสต็อกก่อนเสมอ — เอาติ๊กออกเฉพาะบิลที่ไม่ใช่ของเข้าห้องอะไหล่)" })));
 }
 
@@ -457,11 +463,14 @@ async function buSave(allowDuplicates = false) {
   const btn = $("bnSave");
   if (btn.disabled) return;
   showErr("bnSaveError", "");
+  if (d.purpose === "repair" && !d.machine_id) return showErr("bnSaveError", "บิลซ่อมเครื่อง: เลือกเครื่องที่ซ่อมก่อน");
+  if (d.purpose === "reference" && !String(d.machine_model || "").trim()) return showErr("bnSaveError", "บิลอ้างอิง: เลือกรุ่นเครื่องก่อน");
   const lines = d.lines.filter((ln) => String(ln.description || "").trim() || ln.line_total !== "" || ln.quantity !== "");
   const payload = {
     source: d.source, vendor_id: d.vendor_id || null, new_vendor: d.vendor_id ? null : (d.new_vendor || null), vendor_name: d.vendor_name || d.new_vendor || null,
     bill_date: d.bill_date, bill_no: d.bill_no, branch: d.branch, vat_mode: d.vat_mode || "none",
     subtotal: d.subtotal, vat_amount: d.vat_amount, discount: d.discount, total: d.total, notes: d.notes, receive_stock: d.receive_stock,
+    purpose: d.purpose || "stock", machine_id: d.machine_id || null, machine_model: d.machine_model || null,
     extraction: job.extraction,
     lines: lines.map((ln) => ({ description: ln.description, quantity: ln.quantity, unit: ln.unit, unit_price: ln.unit_price, line_total: ln.line_total,
       item_id: ln.item_id || null, new_item: ln.new_item, learn: ln.learn, unlinked_by_hand: !!ln.unlinked_by_hand, used_for: ln.used_for || null,
@@ -803,9 +812,11 @@ function initBuy() {
   drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); buAddFiles([...e.dataTransfer.files]); });
   for (const r of document.querySelectorAll("input[name=bnMode]")) r.addEventListener("change", () => { bu.mode = document.querySelector("input[name=bnMode]:checked").value; buRenderPick(); });
   $("bnRead").addEventListener("click", buStartJobs);
+  for (const b of document.querySelectorAll("#bnPurposes [data-purpose]")) b.addEventListener("click", () => buSetPurpose(b.dataset.purpose));
+  buSetPurpose("stock");
   $("bnManual").addEventListener("click", async () => {
     if (!bu.opts) { try { await buLoadOptions(); } catch (err) { showErr("bnError", err.message); return; } }     // pressed before the page finished loading
-    const job = { id: bu.nextId++, files: [], status: "ready", error: "", t0: null, extraction: null, server: null, review: buMakeReview(null), manual: true };
+    const job = { id: bu.nextId++, files: [], status: "ready", error: "", t0: null, extraction: null, server: null, review: buMakeReview(null, bu.purpose), manual: true, purpose: bu.purpose };
     bu.jobs.push(job);
     buBadge();
     buOpenJob(job);
@@ -899,4 +910,72 @@ function skPrintSheet() {
   const done = () => { document.body.classList.remove("printing-sheet"); window.removeEventListener("afterprint", done); };
   window.addEventListener("afterprint", done);
   window.print();
+}
+
+
+// ================================================================== what a bill is: stock / a machine's repair / a reference parts list
+const BU_PURPOSE_NOTE = {
+  stock: "ของที่ซื้อเข้าห้องอะไหล่ — นับเงิน และรับเข้าสต็อก",
+  repair: "อะไหล่ / งานซ่อมของเครื่องจักร 1 เครื่อง — นับเป็นค่าซ่อมของเครื่องนั้น และขึ้นในประวัติงานซ่อมของเครื่อง (บิลหนึ่งใบ = เครื่องเดียว)",
+  reference: "รายการอะไหล่ของรุ่นเครื่อง (เช่น ใบรายการ MYCOM 8WB-HE) — เก็บไว้รู้ว่ารุ่นนี้มีอะไหล่อะไร ราคาเท่าไหร่ ไม่นับเงินที่ไหนเลย",
+};
+
+function buSetPurpose(purpose) {
+  bu.purpose = purpose;
+  for (const b of document.querySelectorAll("#bnPurposes [data-purpose]")) {
+    b.classList.toggle("active", b.dataset.purpose === purpose);
+    b.setAttribute("aria-selected", String(b.dataset.purpose === purpose));
+  }
+  fill($("bnPurposeNote"), BU_PURPOSE_NOTE[purpose] || "");
+}
+
+function buPurposeText(b) {
+  if (b.purpose === "repair") return `ซ่อม ${b.machine_name || "เครื่องจักร"}`;
+  if (b.purpose === "reference") return `อ้างอิง ${b.machine_model || ""} (ไม่นับเงิน)`.replace("  ", " ");
+  return null;
+}
+
+// on the check page: what this bill is, and its machine (repair) or model (reference)
+function buPurposeBlock(d) {
+  d.purpose = d.purpose || "stock";
+  const purposes = (bu.opts && bu.opts.purposes) || { stock: "ซื้อเข้าสต็อก", repair: "ซ่อมเครื่องจักร", reference: "รายการอะไหล่อ้างอิง (ไม่นับเงิน)" };
+  const sel = el("select", { id: "bnPurpose", "aria-label": "บิลนี้คือ" }, ...Object.entries(purposes).map(([k, v]) => el("option", { value: k, text: v })));
+  sel.value = d.purpose;
+  sel.addEventListener("change", () => { d.purpose = sel.value; buRenderReview(); });
+  const parts = [el("div", { class: "mfield" }, el("label", { for: "bnPurpose", text: "บิลนี้คือ" }), sel)];
+  if (d.purpose === "repair") {
+    parts.push(mselect(d, "machine_id", "เครื่องที่ซ่อม", (bu.opts.machines || []).filter((m) => m.active !== false || m.id === d.machine_id).map((m) => [m.id, m.name]), { blank: "— เลือกเครื่อง —" }));
+  } else if (d.purpose === "reference") {
+    parts.push(mfield(d, "machine_model", "รุ่นเครื่อง (ใช้กับทุกเครื่องรุ่นนี้)", { list: "bnModelList", placeholder: "MYCOM 8WB-HE", maxlength: 80 }),
+      el("datalist", { id: "bnModelList" }, ...(bu.opts.machine_models || []).map((m) => el("option", { value: m }))));
+  }
+  return el("div", { class: `bn-purpose ${d.purpose}` }, el("div", { class: "mfields" }, ...parts), el("p", { class: "muted small", text: BU_PURPOSE_NOTE[d.purpose] }));
+}
+
+// the machine page's button: every price and part known for this machine
+async function openMachinePrices(machine) {
+  let r;
+  try { r = await api(`/api/machines/${machine.id}/prices`); } catch (err) { alert(err.message); return; }
+  const q = el("input", { type: "search", placeholder: "ค้นหาอะไหล่ ร้าน", "aria-label": "ค้นหา", class: "mp-q" });
+  const body = el("tbody");
+  const paint = () => {
+    const t = q.value.trim().toLowerCase();
+    const rows = r.rows.filter((x) => !t || [x.description, x.vendor].filter(Boolean).join(" ").toLowerCase().includes(t));
+    fill(body, ...(rows.length ? rows.map((x) => el("tr", { class: x.counts ? "" : "mp-ref" },
+      el("td", { class: "nowrap", text: beDate(x.bill_date) }), el("td", { text: x.vendor || "" }),
+      el("td", {}, el("span", { class: `badge${x.counts ? "" : " shop"}`, text: x.purpose === "reference" ? "อ้างอิง" : x.purpose === "repair" ? "ซ่อม" : "ซื้อ" })),
+      el("td", { text: x.description }), el("td", { class: "r nowrap", text: `${buQty(x.quantity)} ${x.unit || ""}`.trim() }),
+      el("td", { class: "r nowrap", text: x.unit_cost === null || x.unit_cost === undefined ? "–" : `${buMoney(x.unit_cost)} ฿` }),
+      el("td", { class: "r nowrap", text: x.line_total === null || x.line_total === undefined ? "–" : buMoney(x.line_total) })))
+      : [el("tr", {}, el("td", { colspan: "7", class: "muted", text: r.rows.length ? "ไม่พบรายการที่ตรงกับคำค้น" : "ยังไม่มีบิลของเครื่องนี้ — บันทึกบิลซื้อของแบบ “ซ่อมเครื่องจักร” หรือ “รายการอะไหล่อ้างอิง”" }))]));
+  };
+  q.addEventListener("input", paint);
+  paint();
+  const model = [r.machine.make, r.machine.model].filter(Boolean).join(" ");
+  buOpenDialog(`ราคาและอะไหล่ · ${r.machine.name}`, [
+    el("p", { class: "muted small", text: `${model ? `รุ่น ${model} · ` : ""}ค่าใช้จ่ายของเครื่องนี้ ${buMoney(r.spent)} บาท (ไม่นับบิลอ้างอิง) · ${r.bills} บิล${r.reference_lines ? ` · รายการอ้างอิงของรุ่นนี้ ${r.reference_lines} รายการ` : ""}` }),
+    q,
+    el("div", { class: "bu-scroll" }, el("table", { class: "lines mp-table" },
+      el("thead", {}, el("tr", {}, ...["วันที่", "ร้าน", "ประเภท", "รายการ", "จำนวน", "ต่อหน่วยจริง", "รวม"].map((t) => el("th", { text: t })))), body)),
+  ], null);
 }

@@ -238,7 +238,7 @@ async function renderMachinePage() {
   const btn = (text, onclick, cls = "") => el("button", { class: `btn${cls ? ` ${cls}` : ""}`, type: "button", text, onclick });
   fill($("mdActions"), ...(mc.editing
     ? [btn("ยกเลิก", cancelMachineEdit), btn("บันทึก", saveMachine, "primary")]
-    : [btn("บันทึกงานซ่อมเครื่องนี้", () => openEventDialog(null, { machine_id: m.id })), btn("แก้ไข", startMachineEdit, "primary")]));
+    : [btn("ราคาและอะไหล่ทั้งหมด", () => openMachinePrices(m)), btn("บันทึกงานซ่อมเครื่องนี้", () => openEventDialog(null, { machine_id: m.id })), btn("แก้ไข", startMachineEdit, "primary")]));
   const cards = [];
   if (mc.editing) {
     const d = mc.draft;

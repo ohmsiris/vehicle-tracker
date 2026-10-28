@@ -758,3 +758,13 @@ counts them. "ตรวจและบันทึก" opens a bill on the usual
 before it is checked, so an unchecked bill is in no truck history and no maintenance plan. The list lives in the open page (a refresh loses unsaved bills; the browser warns).
 "รูปอื่นๆ" go with the bill when one bill is read at a time. Picked files (`state.pickBills` / `pickRefs`) are kept apart from the bill being checked (`state.billFiles` / `refFiles`).
 
+## What a purchase bill is: stock / a machine's repair / a reference parts list (`schema_v30.sql`, `purchasing.PURPOSES`)
+บิลซื้อของ has the same kind of tabs as บันทึกงานซ่อม, chosen before the photos are read and changeable on the check page:
+- **🧾 ซื้อเข้าสต็อก**: the normal bill -- money counts, the lines can go into the store room.
+- **🔧 ซ่อมเครื่องจักร**: parts / work for ONE machine (one bill = one machine). Money counts; nothing goes into the store; every line is marked for that machine and saving makes a
+  repair entry in the machine's history (`machine_events.purchase_bill_id`, deleted with the bill).
+- **📚 รายการอะไหล่อ้างอิง (ไม่นับเงิน)**: a parts list kept to know a machine MODEL's parts and prices (e.g. a MYCOM 8WB-HE overhaul list). It belongs to every machine of that model
+  (`purchasing.model_matches`), counts no money anywhere (not in the bills total, not in the home page's spending, not in the store), but its prices are kept to compare.
+The machine page has **ราคาและอะไหล่ทั้งหมด** (`GET /api/machines/{id}/prices`): every line of its repair bills, of other bills marked for it, and of its model's reference lists, with the
+machine's money spent (reference lists not counted).
+

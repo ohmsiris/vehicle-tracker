@@ -37,6 +37,10 @@ MAX_QTY = 1_000_000
 BUDDHIST_YEAR_FLOOR = 2400
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf"}
 NEEDS_V16 = "ต้องรัน schema_v16.sql ใน Supabase ก่อน จึงจะใช้ระบบซื้อของได้"
+NEEDS_V30 = "ต้องรัน schema_v30.sql ใน Supabase ก่อน จึงจะบันทึกบิลซ่อมเครื่อง / บิลอ้างอิงได้"
+# What a bill is (schema_v30): bought for the store room; a machine's repair (money counts, a repair entry of that machine is made); a parts list kept only to
+# know the parts of a machine model -- no money counts anywhere (not in spending, not in the store, not on a machine).
+PURPOSES = {"stock": "ซื้อเข้าสต็อก", "repair": "ซ่อมเครื่องจักร", "reference": "รายการอะไหล่อ้างอิง (ไม่นับเงิน)"}
 
 
 class InvalidPurchase(ValueError):
@@ -178,7 +182,20 @@ def clean_bill(data: dict, *, today: date, vendors: set, items: set, machines: s
     for ln, cost in zip(lines, line_costs(lines, vat_mode, total)):
         ln.update(cost)
     source = "manual" if data.get("source") == "manual" else "bill"
+    purpose = data.get("purpose") or "stock"
+    if purpose not in PURPOSES:
+        raise InvalidPurchase("เลือกว่าบิลนี้คืออะไร (ซื้อเข้าสต็อก / ซ่อมเครื่อง / อ้างอิง)")
+    machine_id = _uuid_or_none(data.get("machine_id"), "เครื่อง", machines) if purpose == "repair" else None
+    if purpose == "repair" and not machine_id:
+        raise InvalidPurchase("บิลซ่อมเครื่อง: เลือกเครื่องที่ซ่อม")
+    machine_model = (_text(data.get("machine_model"), 80) or None) if purpose == "reference" else None
+    if purpose == "reference" and not machine_model:
+        raise InvalidPurchase("บิลอ้างอิง: เลือกรุ่นเครื่องที่รายการนี้เป็นของ")
+    if machine_id:
+        for ln in lines:                                       # every line of a repair bill is for that machine
+            ln["machine_id"] = ln["machine_id"] or machine_id
     return {
+        "purpose": purpose, "machine_id": machine_id, "machine_model": machine_model,
         "bill": {
             "vendor_id": vendor_id, "vendor_name": _text(data.get("vendor_name"), 200) or new_vendor, "bill_date": _date(data.get("bill_date"), today=today).isoformat(),
             "bill_no": _text(data.get("bill_no"), 60) or None, "branch": branch, "vat_mode": vat_mode,
@@ -186,7 +203,7 @@ def clean_bill(data: dict, *, today: date, vendors: set, items: set, machines: s
             "discount": _num(data.get("discount"), "ส่วนลด", maximum=MAX_MONEY), "total": total,
             "notes": _text(data.get("notes"), 500) or None, "source": source,
         },
-        "new_vendor": new_vendor, "lines": lines, "receive_stock": bool(data.get("receive_stock")),
+        "new_vendor": new_vendor, "lines": lines, "receive_stock": bool(data.get("receive_stock")) and purpose == "stock",
     }
 
 
@@ -259,9 +276,41 @@ def items_with_aliases() -> list[dict]:
 
 def _machines() -> list[dict]:
     try:
-        return supabase.select_all("machines", {"select": "id,name,branch,active", "order": "name.asc"})
+        return supabase.select_all("machines", {"select": "id,name,branch,active,make,model", "order": "name.asc"})
     except supabase.SupabaseError:
         return []
+
+
+def machine_models(machines: list[dict]) -> list[str]:
+    """The machine models to choose from for a reference bill: "MYCOM 8WB-HE" (make + model), each once."""
+    out: dict = {}
+    for m in machines:
+        if m.get("model"):
+            name = " ".join(x for x in (m.get("make"), m.get("model")) if x).strip()
+            out.setdefault(name.lower(), name)
+    return sorted(out.values())
+
+
+def model_matches(machine: dict, model_text: Optional[str]) -> bool:
+    """A reference bill's model is this machine's: its model code is in the text (spaces, dashes and capitals do not matter)."""
+    code = re.sub(r"[\s\-_.]", "", str(machine.get("model") or "")).lower()
+    return bool(code) and code in re.sub(r"[\s\-_.]", "", str(model_text or "")).lower()
+
+
+_probe30 = {"at": 0.0, "ok": False}
+
+
+def has_v30() -> bool:
+    now = time.time()
+    if now - _probe30["at"] < 30:
+        return _probe30["ok"]
+    try:
+        supabase.select("purchase_bills", {"select": "purpose,machine_id,machine_model", "limit": "1"})
+        ok = True
+    except supabase.SupabaseError:
+        ok = False
+    _probe30.update(at=now, ok=ok)
+    return ok
 
 
 def options() -> dict:
@@ -269,7 +318,9 @@ def options() -> dict:
     if not ready:
         return {"ready": False, "suppliers": [], "items": [], "machines": [], "branches": BRANCHES}
     suppliers = [{"id": s["id"], "name": s["name"], "active": s.get("active", True)} for s in shops.of_kind("supplier", shops._load())]
-    return {"ready": True, "suppliers": suppliers, "items": items_with_aliases(), "machines": _machines(), "branches": BRANCHES}
+    machines = _machines()
+    return {"ready": True, "suppliers": suppliers, "items": items_with_aliases(), "machines": machines, "branches": BRANCHES,
+            "purposes": PURPOSES, "machine_models": machine_models(machines), "purpose_ready": has_v30()}
 
 
 def draft_from_extraction(ex: dict, items: list[dict]) -> dict:
@@ -374,6 +425,10 @@ def save_bill(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicates
                                       f"{' · ' + str(first['bill_no']) if first.get('bill_no') else ''} · {first['bill_date']})")
 
     bill = dict(clean["bill"])
+    if clean["purpose"] != "stock" and not has_v30():
+        raise InvalidPurchase(NEEDS_V30)
+    if has_v30():
+        bill.update(purpose=clean["purpose"], machine_id=clean["machine_id"], machine_model=clean["machine_model"])
     if clean["new_vendor"]:
         bill["vendor_id"] = _create_supplier(clean["new_vendor"])
     if payload.get("extraction") and isinstance(payload["extraction"], dict):
@@ -409,6 +464,13 @@ def save_bill(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicates
                       "notes": f"จากบิล {bill.get('bill_no') or ''}".strip()} for s in saved if s.get("item_id") and s.get("quantity")]
             if moves:
                 supabase.insert("stock_moves", moves)
+        if clean["purpose"] == "repair":                          # the machine's history gets the repair (deleted with the bill)
+            machine = next((m for m in _machines() if m["id"] == clean["machine_id"]), {})
+            vendor = bill.get("vendor_name") or next((s["name"] for s in suppliers if s["id"] == bill.get("vendor_id")), "") or "ไม่ระบุร้าน"
+            supabase.insert("machine_events", [{
+                "branch": bill.get("branch") or machine.get("branch") or BRANCHES[0], "machine_id": clean["machine_id"], "event_date": bill["bill_date"], "kind": "ซ่อม",
+                "summary": f"ซ่อม / อะไหล่จาก {vendor} ({len(saved)} รายการ)"[:300], "vendor": vendor[:200], "cost": bill.get("total"),
+                "notes": f"จากบิลซื้อของ{' เลขที่ ' + bill['bill_no'] if bill.get('bill_no') else ''}", "purchase_bill_id": bill_id}])
     except Exception:
         supabase.delete("purchase_bills", {"id": f"eq.{bill_id}"})          # the lines and attachments go with it
         supabase.storage_delete(uploaded)
@@ -423,11 +485,14 @@ def _vendor_names() -> dict:
 def list_bills(limit: int = 100) -> dict:
     if not (supabase.configured() and has_v16()):
         return {"ready": False, "bills": []}
-    bills = supabase.select("purchase_bills", {"select": "id,vendor_id,vendor_name,bill_date,bill_no,branch,total,vat_mode,source,created_at,purchase_lines(count)",
+    bills = supabase.select("purchase_bills", {"select": "id,vendor_id,vendor_name,bill_date,bill_no,branch,total,vat_mode,source,created_at,purchase_lines(count)"
+                                               + (",purpose,machine_id,machine_model" if has_v30() else ""),
                                                "order": "bill_date.desc,created_at.desc", "limit": str(max(1, min(500, limit)))})
     names = _vendor_names()
-    return {"ready": True, "bills": [{**b, "vendor": names.get(b.get("vendor_id")) or b.get("vendor_name"),
-                                      "lines": (b.pop("purchase_lines", None) or [{"count": 0}])[0]["count"]} for b in bills]}
+    machines = {m["id"]: m["name"] for m in _machines()}
+    return {"ready": True, "bills": [{**b, "vendor": names.get(b.get("vendor_id")) or b.get("vendor_name"), "purpose": b.get("purpose") or "stock",
+                                      "machine_name": machines.get(b.get("machine_id")),
+                                      "lines": (b.pop("purchase_lines", None) or [{"count": 0}])[0]["count"]} for b in bills], "purposes": PURPOSES}
 
 
 def bill_detail(bill_id: str) -> dict:
@@ -442,9 +507,39 @@ def bill_detail(bill_id: str) -> dict:
     items = {i["id"]: i["name"] for i in supabase.select_all("stock_items", {"select": "id,name", "order": "name.asc"})}
     machines = {m["id"]: m["name"] for m in _machines()}
     b.pop("extraction", None)
-    return {**b, "vendor": _vendor_names().get(b.get("vendor_id")) or b.get("vendor_name"),
+    return {**b, "vendor": _vendor_names().get(b.get("vendor_id")) or b.get("vendor_name"), "purpose": b.get("purpose") or "stock", "machine_name": machines.get(b.get("machine_id")),
             "lines": [{**ln, "item_name": items.get(ln.get("item_id")), "machine_name": machines.get(ln.get("machine_id"))} for ln in lines],
             "attachments": [{"id": a["id"], "mime_type": a["mime_type"], "url": supabase.public_url(a["storage_path"])} for a in atts]}
+
+
+def machine_prices(machine_id: str) -> dict:
+    """Every price and part known for one machine: its repair bills, the lines of other bills marked for it, and the reference parts lists of its model
+    (those cost nothing: they are prices seen, not money spent). Newest first."""
+    _require()
+    _uuid_or_none(machine_id, "เครื่อง")
+    machine = next((m for m in _machines() if m["id"] == machine_id), None)
+    if not machine:
+        raise NotFound()
+    v30 = has_v30()
+    cols = "id,vendor_id,vendor_name,bill_date,bill_no,total" + (",purpose,machine_id,machine_model" if v30 else "")
+    bills = {b["id"]: b for b in supabase.select_all("purchase_bills", {"select": cols, "order": "bill_date.desc,id.asc"})}
+    mine = {bid for bid, b in bills.items() if (b.get("purpose") == "repair" and b.get("machine_id") == machine_id)
+            or (b.get("purpose") == "reference" and model_matches(machine, b.get("machine_model")))}
+    lines = supabase.select_all("purchase_lines", {"select": "id,bill_id,line_number,description,quantity,unit,unit_cost,line_total,machine_id", "order": "line_number.asc"})
+    names = _vendor_names()
+    rows = []
+    for ln in lines:
+        b = bills.get(ln["bill_id"])
+        if not b or not (ln["bill_id"] in mine or ln.get("machine_id") == machine_id):
+            continue
+        purpose = b.get("purpose") or "stock"
+        rows.append({"bill_id": b["id"], "bill_date": b["bill_date"], "bill_no": b.get("bill_no"), "vendor": names.get(b.get("vendor_id")) or b.get("vendor_name"),
+                     "purpose": purpose, "purpose_label": PURPOSES[purpose], "description": ln["description"], "quantity": ln.get("quantity"), "unit": ln.get("unit"),
+                     "unit_cost": ln.get("unit_cost"), "line_total": ln.get("line_total"), "counts": purpose != "reference"})
+    rows.sort(key=lambda r: (str(r["bill_date"]), r["description"]), reverse=True)
+    spent = round(sum(float(r["line_total"] or 0) for r in rows if r["counts"]), 2)
+    return {"machine": {"id": machine["id"], "name": machine["name"], "make": machine.get("make"), "model": machine.get("model")}, "rows": rows,
+            "spent": spent, "bills": len({r["bill_id"] for r in rows}), "reference_lines": sum(1 for r in rows if not r["counts"]), "ready": v30}
 
 
 def delete_bill(bill_id: str) -> None:

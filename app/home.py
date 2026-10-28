@@ -133,7 +133,10 @@ def _spend(today: date) -> dict:
     repairs = supabase.select_all("v_events", {"select": "event_id,event_date,total_cost", "event_date": f"gte.{since}", "order": "event_id.asc"})
     out = {"ready": True, "repairs": build_spend(repairs, "total_cost", "event_date", today), "purchases": {"ready": False}}
     if purchasing.has_v16():
-        bills = supabase.select_all("purchase_bills", {"select": "id,bill_date,total", "bill_date": f"gte.{since}", "order": "id.asc"})
+        params = {"select": "id,bill_date,total", "bill_date": f"gte.{since}", "order": "id.asc"}
+        if purchasing.has_v30():
+            params["purpose"] = "neq.reference"                    # a reference parts list is not money spent
+        bills = supabase.select_all("purchase_bills", params)
         out["purchases"] = {"ready": True, **build_spend(bills, "total", "bill_date", today)}
     return out
 

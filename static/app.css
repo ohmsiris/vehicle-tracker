@@ -1228,3 +1228,13 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .rqjob-main { min-width: 0; flex: 1 1 280px; display: grid; gap: 2px; }
 .rqjob-title { font-weight: 600; }
 .rqjob-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---- บิลซื้อของ: what a bill is, and a machine's prices ---- */
+#bnPurposes { margin-bottom: 6px; }
+.bn-purpose { border-left: 4px solid var(--line); padding-left: 12px; margin-bottom: 12px; }
+.bn-purpose.repair { border-left-color: var(--accent); }
+.bn-purpose.reference { border-left-color: var(--warn); }
+.mp-q { width: 100%; margin: 6px 0 10px; }
+.mp-table td { vertical-align: middle; padding: 5px 6px; }
+.mp-table tr.mp-ref td { color: var(--text-2); }
+.mp-table td.r, .mp-table th.r { text-align: right; }
