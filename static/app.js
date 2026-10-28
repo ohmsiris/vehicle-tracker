@@ -315,7 +315,8 @@ function render(draft, pickedVehicle) {
     eventField("วันที่ (ในบิลเป็น พ.ศ.)", el("div", {}, flagInput(inp("evDate", "date", ev.event_date), flags.has("event_date")), el("div", { id: "evDateCap", class: "datecap" }))),
     // a free text box that also offers the shops (and the other names used before) -- for when the bill's name was not read, or is written another way
     eventField("ร้าน / อู่", el("div", {}, flagInput(inp("evVendor", "text", ev.vendor, { list: "evVendorList", autocomplete: "off", placeholder: "พิมพ์ หรือเลือกจากรายการ" }), flags.has("vendor")),
-      el("datalist", { id: "evVendorList" }, ...vendorNames().map((n) => el("option", { value: n }))))),
+      el("datalist", { id: "evVendorList" }, ...vendorNames().map((n) => el("option", { value: n }))),
+      ev.vendor_read && ev.vendor && ev.vendor_read !== ev.vendor ? el("div", { class: "datecap", text: `บิลเขียนว่า “${ev.vendor_read}” — รวมเป็นร้านนี้ (แก้ได้)` }) : null)),
     eventField("สาขา", flagInput(inp("evBranch", "text", ev.branch), flags.has("branch"))),
     eventField("เลขไมล์", el("div", {}, flagInput(inp("evMileage", "number", ev.mileage, { inputmode: "numeric" }), flags.has("mileage")), el("div", { id: "evMileHint", class: "datecap mileage-hint" }))),
     eventField("ไมล์ครั้งต่อไป", el("div", {}, flagInput(inp("evNext", "number", ev.next_service_mileage, { inputmode: "numeric" }), flags.has("next_service_mileage")), el("div", { id: "evNextHint", class: "datecap" }))),

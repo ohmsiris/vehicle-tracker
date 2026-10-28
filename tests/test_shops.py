@@ -117,3 +117,13 @@ def test_a_bills_shop_is_stored_under_the_shops_own_name():
     assert shops.fold_vendor("ร้านที่ไม่รู้จัก  สาขา 2") == "ร้านที่ไม่รู้จัก สาขา 2"            # not a known shop: kept (spaces tidied)
     assert shops.fold_vendor("") is None and shops.fold_vendor(None) is None
     assert shops.fold_vendor("ซ่อมในโรงงาน") == "ซ่อมในโรงงาน" and shops.fold_vendor("ช่างเอ๋") == "ช่างเอ๋"      # in-house names are left alone
+
+
+def test_a_spelling_no_word_matches_is_merged_into_a_shop_with_a_nearly_identical_name():
+    from app import shops
+    repair = shops.of_kind("repair", shops.builtin_shops())
+    assert shops.similar_shop("อู่ช่างเก่งเจริญยนร์", repair) == "อู่ช่างเก่ง เจริญยนต์"                  # a typo
+    assert shops.similar_shop("บริษัท ชมรมย์การช่าง จำกัด", repair) == "ชมรมย์การช่าง"                   # the company words do not count
+    assert shops.similar_shop("ร้านชมรมยการชาง", repair) == "ชมรมย์การช่าง"                              # missing marks
+    for other in ("ไดนาโม", "มิตรภาพไดนาโม", "ร้านใหม่ ทดสอบ", "อู่", "บริษัท จำกัด"):                    # a common word alone, another shop, nothing left
+        assert shops.similar_shop(other, repair) is None, other

@@ -746,6 +746,7 @@ The plan reads the bills every time it is shown, so a new rule or a new bill tak
 
 ## One name per shop on a bill (`shops.fold_vendor`)
 A bill's shop is stored under the shop's own name from the shops list: "บริษัท จึงกงเฮงอีซูซุ จำกัด (ศูนย์ซ่อมสีและตัวถังแก่งคอย)", "(สาขาแก่งคอย)" and "อิซูซุจึงกงเฮง" are all stored as
-"อิซูซุจึงกงเฮงแก่งคอย" -- when the bill is read, when it is saved or edited. In-house names, people and shops the list does not know are kept as written.
-`scripts/fold_vendor_names.py [--apply] [--only "<text>"]` did the same for the bills already saved (12 จึงกงเฮง bills on 28 Oct 2026; 5 others -- ช่างเก่งเจริญยนต์, ฮีโน่ เอเชีย -- wait for a yes).
+"อิซูซุจึงกงเฮงแก่งคอย" -- when the bill is read, when it is saved or edited. In-house names, people and shops the list does not know are kept as written. A spelling no word matches is still merged when its whole name is nearly the same as a shop's (`shops.similar_shop`: company words like บริษัท / จำกัด / อู่ / ร้าน and a
+department in brackets are ignored; a typo or a missing mark is enough, a bare common word like "ไดนาโม" never is). The new-bill form then says "บิลเขียนว่า “…” — รวมเป็นร้านนี้ (แก้ได้)".
+`scripts/fold_vendor_names.py [--apply] [--only "<text>"]` did the same for the bills already saved (17 bills on 28 Oct 2026).
 Fleet numbers are per size class: a small and a big truck can both be #2 at one branch (both are in use at Kaeng Khoi).

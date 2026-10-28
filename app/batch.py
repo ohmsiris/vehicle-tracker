@@ -253,6 +253,7 @@ def build_draft(
             "next_service_mileage": next_service_mileage,
             "job_type": job_type,
             "vendor": shops.fold_vendor(vendor),
+            "vendor_read": vendor,                        # as written on the bill: the form says when it was merged into a shop
             "branch": branch,
             "total_cost": total_cost,
             "notes": "",

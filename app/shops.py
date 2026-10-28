@@ -14,13 +14,18 @@ factory buys parts from, schema_v16.sql; matched on the purchase bills the same 
 car side only ever sees the repair shops.
 
 A dealership with several departments is ONE shop: its departments are contacts (ศูนย์บริการ / ศูนย์ซ่อมสีและตัวถัง), not
-separate shops. The department stays visible on the bill itself (the log shows the name as written).
+separate shops. A bill's shop is STORED under the shop's own name (fold_vendor) -- the owner wants one name per shop everywhere.
+
+A spelling no word matches can still be the same shop written another way ("ช่างเก่งเจริญยนต์" for "อู่ช่างเก่ง เจริญยนต์", "บริษัท ฮีโน่ เอเชีย จำกัด" for
+"ฮีโน่ เอเซีย หนองแค"): similar_shop() compares the names with the company words taken off (บริษัท, จำกัด, อู่, ร้าน, ศูนย์ ..., a department in brackets) and
+takes the shop when the whole names are nearly the same (SIMILAR) -- a typo or a missing mark, never a bare common word like "ไดนาโม".
 
 The shops are kept in the database (schema_v15.sql) and changed on the settings page. The lists below are the built-in
 copy: the starting point the database was filled from, and what is used when the database cannot be read (and in tests).
 """
 import re
 import time
+from difflib import SequenceMatcher
 from typing import Optional
 
 from app import supabase
@@ -163,9 +168,47 @@ def of_kind(kind: str, shops: Optional[list[dict]] = None) -> list[dict]:
     return [s for s in (snapshot() if shops is None else shops) if s.get("kind", "repair") == kind]
 
 
+# similar names: the words that say what kind of business it is, not which one
+_COMPANY_WORDS = re.compile(r"บริษัท|จำกัด|มหาชน|ห้างหุ้นส่วน|หจก|co\.?,?\s*ltd\.?|company|limited|อู่|ร้าน|ศูนย์บริการ|ศูนย์", re.I)
+SIMILAR = 0.9                  # how alike two names must be (difflib ratio of the whole names, after the company words are taken off)
+MIN_CORE = 4                   # letters a name must keep after the company words are taken off
+
+
+def _core(text: Optional[str]) -> str:
+    t = re.sub(r"\([^)]*\)", " ", str(text or ""))                    # a department in brackets
+    return _norm(_COMPANY_WORDS.sub(" ", t))
+
+
+def _alike(a: str, b: str) -> float:
+    """How alike two cores are, as a whole (a short common word inside a longer name scores low: "ไดนาโม" is not "24 ไดนาโม")."""
+    if min(len(a), len(b)) < MIN_CORE:
+        return 0.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def similar_shop(name: Optional[str], shops: list[dict]) -> Optional[str]:
+    """The shop a name no word matches is most likely to be (its own name or one of its plain words nearly the same), or None."""
+    core = _core(name)
+    if len(core) < MIN_CORE:
+        return None
+    best = (0.0, None)
+    for s in shops:
+        for w in [s["name"], *s.get("aliases", [])]:
+            if "+" in w:
+                continue
+            score = _alike(core, _core(w))
+            if score > best[0]:
+                best = (score, s["name"])
+    return best[1] if best[0] >= SIMILAR else None
+
+
 def canonical(name: Optional[str]) -> str:
-    """The repair shop for a name as written on a bill / typed by a person ('' if blank)."""
-    return canonical_in(name, of_kind("repair"))
+    """The repair shop for a name as written on a bill / typed by a person ('' if blank): by its words, else by a similar name."""
+    repair = of_kind("repair")
+    hit = explain(name, repair)
+    if hit["matched"]:
+        return hit["shop"]
+    return similar_shop(name, repair) or hit["shop"]
 
 
 def fold_vendor(name: Optional[str]) -> Optional[str]:
@@ -174,8 +217,10 @@ def fold_vendor(name: Optional[str]) -> Optional[str]:
     raw = re.sub(r"\s+", " ", str(name or "")).strip()
     if not raw:
         return None
-    hit = explain(raw, of_kind("repair"))
-    return hit["shop"] if hit["matched"] and hit["shop"] != IN_HOUSE else raw
+    repair = of_kind("repair")
+    hit = explain(raw, repair)
+    shop = hit["shop"] if hit["matched"] else similar_shop(raw, repair)
+    return shop if shop and shop != IN_HOUSE else raw
 
 
 def find_supplier(name: Optional[str]) -> Optional[dict]:
