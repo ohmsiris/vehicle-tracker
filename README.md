@@ -731,3 +731,9 @@ reported, not added. New visits are saved as records made by hand (source "manua
 being flagged "date far from the day it was saved"); labour lines are ค่าแรง, parts go through the AI categoriser. 27 Oct 2026: #12, #13, #14 and #2 loaded (50 visits).
 The plan recognises the dealership's wording for the chassis check ("ตรวจสอบช่วงล่างทั้งหมด", "ตรวจเช็คช่วงล่าง").
 
+## Stray "อะไหล่" / "ค่าแรง" in front of a line (`app/linetext.py`)
+A dealership job sheet has a type column (ค่าแรง / อะไหล่ / วัสดุสิ้นเปลือง) in front of the description, and a photo of it was sometimes read with that word glued to the line.
+`strip_type_word` takes it off (only a whole word followed by a space: "ค่าแรงเปลี่ยนน้ำมัน" and a bare "ค่าแรง" stay) -- when the bill is read (`batch.py`), when an event is saved or
+edited (`events.py`), and the maintenance plan ignores it when it matches a line (`service_plan.classify_line`). `scripts/clean_line_type_words.py [--apply]` cleaned the lines already
+saved (77 on 27 Oct 2026).
+

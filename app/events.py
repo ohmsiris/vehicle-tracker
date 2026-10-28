@@ -20,6 +20,7 @@ from typing import Optional
 from app import history, supabase
 from app.extraction import CATEGORIES
 from app.files import UnsupportedFile, prepare_file
+from app.linetext import strip_type_word
 
 logger = logging.getLogger("vehicle_tracker.events")
 
@@ -204,7 +205,7 @@ def save_event(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicate
                 {
                     "attachment_id": prepared[ln["file_index"]]["id"] if ln.get("file_index") is not None else None,
                     "line_number": i + 1,
-                    "description": ln["description"].strip(),
+                    "description": strip_type_word(ln["description"])[0] or ln["description"].strip(),
                     "category": ln.get("category"),
                     "quantity": ln.get("quantity"),
                     "unit": ln.get("unit"),
@@ -308,7 +309,7 @@ def update_event(event_id: str, payload: dict) -> None:
             "line_items": [
                 {
                     "attachment_id": ln.get("attachment_id") or None,
-                    "description": ln["description"].strip(), "category": ln.get("category"),
+                    "description": strip_type_word(ln["description"])[0] or ln["description"].strip(), "category": ln.get("category"),
                     "quantity": ln.get("quantity"), "unit": ln.get("unit"),
                     "unit_cost": ln.get("unit_cost"), "line_total": ln.get("line_total"),
                     "low_confidence_fields": ln.get("low_confidence_fields") or [],

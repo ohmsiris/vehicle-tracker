@@ -21,6 +21,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from app.extraction import HEADER_CONFIDENCE_FIELDS
+from app.linetext import strip_type_word
 from app.roster import clean_vehicle_number, lookup_vehicle, normalize_plate
 
 # Model-side header field name -> event-level flag name
@@ -194,12 +195,13 @@ def build_draft(
                 line_flags.add("cost")  # 0 means "not itemized or not legible"
             if "[illegible]" in (item.get("description") or ""):
                 line_flags.add("description")
+            description, type_word = strip_type_word(item.get("description", ""))       # the sheet's "อะไหล่" / "ค่าแรง" column is the line's type, not part of its name
             line_items.append(
                 {
                     "file_index": f["index"],
                     "line_number": len(line_items) + 1,
-                    "description": item.get("description", ""),
-                    "category": item.get("category"),
+                    "description": description,
+                    "category": item.get("category") if not (type_word == "ค่าแรง" and not item.get("category")) else "ค่าแรง",
                     "quantity": qty if qty else None,
                     "unit": (item.get("unit") or "").strip() or None,
                     "unit_cost": round(cost / qty, 2) if qty and cost else None,

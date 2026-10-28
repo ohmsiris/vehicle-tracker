@@ -27,6 +27,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from app import events, logsource, mgr, supabase
+from app.linetext import strip_type_word
 
 logger = logging.getLogger("service_plan")
 
@@ -259,7 +260,7 @@ _TOP_UP = re.compile(r"เติม")
 
 def classify_line(description: Optional[str]) -> Optional[str]:
     """Which service item a bill line is, or None. A top-up ("น้ำมันเครื่อง (เติม)") is not a service."""
-    text = re.sub(r"\s+", " ", str(description or "")).strip()
+    text = re.sub(r"\s+", " ", strip_type_word(description)[0]).strip()                 # "อะไหล่ ไส้กรองอากาศ" is the air filter
     if not text or _TOP_UP.search(text):
         return None
     for key, pattern in _COMPILED:
