@@ -85,8 +85,8 @@ ITEMS = {
 }
 
 # Where a rule set calls an item something else. The small trucks (D-Max / Revo) have nowhere to grease "every point": the only grease job is the wheel
-# bearings (the mechanic cleans them and re-greases them whenever the wheel seals or the bearings are changed), so for them it is "อัดจารบีล้อ".
-LABEL_FOR = {(SMALL, "wheel_grease"): "อัดจารบีล้อ"}
+# bearings (the mechanic cleans and re-greases them whenever he checks them or changes the wheel seals / bearings), so for them it is "ตรวจเช็คลูกปืนล้อ".
+LABEL_FOR = {(SMALL, "wheel_grease"): "ตรวจเช็คลูกปืนล้อ"}
 
 # The category each item gets when it is recorded as a repair (the names of the categories table).
 ITEM_CATEGORY = {key: "ไส้กรองและของเหลว" for key in ITEMS}
@@ -259,13 +259,14 @@ _COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?(?:\s*ถอ
 # as the chassis having been looked at.
 _ANYWHERE = [
     ("engine_flush", re.compile(r"ฟลัช(?:ชิ่ง|ชิง)|flush|ล้างภายในเครื่อง|ล้างระบบหล่อลื่น", re.I)),
-    ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจสอบ|ตรวจเช็ค|ตรวจเช็ก|ตรวจ)\s*(?:สภาพ\s*)?ช่วงล่าง")),
+    # Isuzu's free "ตรวจเช็ก 8 ระบบสำคัญ" (engine, drive line, steering, electrics, SUSPENSION, brakes, A/C, safety) includes the suspension: wheel-bearing play, ball joints,
+    # bushes, shock absorbers, leaf springs, wheel nuts -- so that line counts as the chassis having been looked at.
+    ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจสอบ|ตรวจเช็ค|ตรวจเช็ก|ตรวจ)\s*(?:สภาพ\s*)?ช่วงล่าง|ตรวจเช็[คก]\s*(?:รถ)?\s*(?:ฟรี)?\s*[8๘]\s*ระบบ")),
 ]
 _TOP_UP = re.compile(r"เติม")
-# Only for the small trucks (D-Max / Revo): changing the wheel seals or the wheel bearings IS the wheel-bearing grease job (the bearings are cleaned and re-greased with it).
-# "ซีลล้อ", "ลูกปืนล้อ", "ซีลลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า". A line that only CHECKS ("ตรวจเช็คลูกปืนล้อ") is not the job.
+# Only for the small trucks (D-Max / Revo): checking the wheel bearings, or changing the wheel seals / bearings, IS the wheel-bearing job (the bearings are cleaned and
+# re-greased with it): "ตรวจเช็คลูกปืนล้อ", "ซีลล้อ", "ลูกปืนล้อ", "ซีลลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า".
 _SMALL_ONLY = [("wheel_grease", re.compile(r"(?:ซีล|ลูกปืน)\s*(?:ลูกปืน\s*)?ล้อ"))]
-_CHECK_ONLY = re.compile(r"^\s*(?:ตรวจ|เช็ค|เช็ก)")
 
 
 def classify_line(description: Optional[str], rule_set: Optional[str] = None) -> Optional[str]:
@@ -280,7 +281,7 @@ def classify_line(description: Optional[str], rule_set: Optional[str] = None) ->
     for key, pattern in _ANYWHERE:
         if pattern.search(text):
             return key
-    if rule_set == SMALL and not (_CHECK_ONLY.match(text) and "เปลี่ยน" not in text):
+    if rule_set == SMALL:
         for key, pattern in _SMALL_ONLY:
             if pattern.search(text):
                 return key

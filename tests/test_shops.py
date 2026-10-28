@@ -108,3 +108,12 @@ def test_suppliers_live_in_the_same_list_but_the_car_side_never_sees_them(monkey
     with pytest.raises(shops.InvalidShop):
         shops.clean_shop({"name": "x", "kind": "bank"}, others=[])
     assert shops.clean_shop({"name": "x", "kind": "supplier"}, others=[])["kind"] == "supplier"
+
+
+def test_a_bills_shop_is_stored_under_the_shops_own_name():
+    from app import shops
+    for written in ("บริษัท จึงกงเฮงอีซูซุ จำกัด (ศูนย์ซ่อมสีและตัวถังแก่งคอย)", "บริษัท จึงกงเฮงอีซูซุ จำกัด (สาขาแก่งคอย)", "อิซูซุจึงกงเฮง", "  จึงกงเฮง  "):
+        assert shops.fold_vendor(written) == "อิซูซุจึงกงเฮงแก่งคอย"
+    assert shops.fold_vendor("ร้านที่ไม่รู้จัก  สาขา 2") == "ร้านที่ไม่รู้จัก สาขา 2"            # not a known shop: kept (spaces tidied)
+    assert shops.fold_vendor("") is None and shops.fold_vendor(None) is None
+    assert shops.fold_vendor("ซ่อมในโรงงาน") == "ซ่อมในโรงงาน" and shops.fold_vendor("ช่างเอ๋") == "ช่างเอ๋"      # in-house names are left alone

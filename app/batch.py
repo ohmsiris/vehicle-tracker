@@ -20,6 +20,7 @@ from collections import Counter
 from datetime import date, timedelta
 from typing import Optional
 
+from app import shops
 from app.extraction import HEADER_CONFIDENCE_FIELDS
 from app.linetext import strip_type_word
 from app.roster import clean_vehicle_number, lookup_vehicle, normalize_plate
@@ -251,7 +252,7 @@ def build_draft(
             "mileage": mileage,
             "next_service_mileage": next_service_mileage,
             "job_type": job_type,
-            "vendor": vendor,
+            "vendor": shops.fold_vendor(vendor),
             "branch": branch,
             "total_cost": total_cost,
             "notes": "",

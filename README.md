@@ -737,9 +737,15 @@ A dealership job sheet has a type column (ค่าแรง / อะไหล�
 edited (`events.py`), and the maintenance plan ignores it when it matches a line (`service_plan.classify_line`). `scripts/clean_line_type_words.py [--apply]` cleaned the lines already
 saved (77 on 27 Oct 2026).
 
-## Small trucks: wheel-bearing grease (`service_plan.LABEL_FOR`, `_SMALL_ONLY`)
-A D-Max / Revo has nowhere to grease "every point": the only grease job is the wheel bearings (the mechanic cleans them and re-greases them whenever the wheel seals or bearings are
-changed). So for the small rule set only (รถเล็ก) the plan item is called **อัดจารบีล้อ** (big trucks keep "อัดจารบีทุกจุด"), and a bill line that changes the wheel seals or bearings
-("เปลี่ยนซีลล้อ", "เปลี่ยนลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า", also a part line "ซีลล้อ") counts as that job done that day. A line that only checks
-("ตรวจเช็คลูกปืนล้อ") does not. The plan reads the bills every time it is shown, so a new rule or a new bill takes effect at once: there is nothing to refresh.
+## Small trucks: the wheel-bearing job, and what Isuzu's free check covers (`service_plan.LABEL_FOR`, `_SMALL_ONLY`, `_ANYWHERE`)
+A D-Max / Revo has nowhere to grease "every point": the only grease job is the wheel bearings (the mechanic cleans and re-greases them whenever he checks them or changes the wheel
+seals / bearings). So for the small rule set only (รถเล็ก) the plan item is called **ตรวจเช็คลูกปืนล้อ** (big trucks keep "อัดจารบีทุกจุด"), and a bill line counts as that job done that day when it
+checks the wheel bearings or changes the wheel seals / bearings ("ตรวจเช็คลูกปืนล้อ", "เปลี่ยนซีลล้อ", "เปลี่ยนลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า", a part line
+"ซีลล้อ"). Isuzu's free **"ตรวจเช็ก 8 ระบบสำคัญ"** (it includes the suspension: wheel-bearing play, ball joints, bushes, shocks, leaf springs, wheel nuts) counts as **เช็คช่วงล่าง** for every truck.
+The plan reads the bills every time it is shown, so a new rule or a new bill takes effect at once: there is nothing to refresh.
 
+## One name per shop on a bill (`shops.fold_vendor`)
+A bill's shop is stored under the shop's own name from the shops list: "บริษัท จึงกงเฮงอีซูซุ จำกัด (ศูนย์ซ่อมสีและตัวถังแก่งคอย)", "(สาขาแก่งคอย)" and "อิซูซุจึงกงเฮง" are all stored as
+"อิซูซุจึงกงเฮงแก่งคอย" -- when the bill is read, when it is saved or edited. In-house names, people and shops the list does not know are kept as written.
+`scripts/fold_vendor_names.py [--apply] [--only "<text>"]` did the same for the bills already saved (12 จึงกงเฮง bills on 28 Oct 2026; 5 others -- ช่างเก่งเจริญยนต์, ฮีโน่ เอเชีย -- wait for a yes).
+Fleet numbers are per size class: a small and a big truck can both be #2 at one branch (both are in use at Kaeng Khoi).

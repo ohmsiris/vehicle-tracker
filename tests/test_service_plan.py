@@ -469,6 +469,7 @@ def test_the_intake_manifold_is_for_the_small_trucks_at_100000_km():
 
 @pytest.mark.parametrize("line,key", [
     ("ฟลัชชิ่งน้ำมันเครื่อง", "engine_flush"), ("flushing เครื่อง", "engine_flush"), ("ล้างภายในเครื่อง", "engine_flush"),
+    ("ตรวจเช็ก 8 ระบบสำคัญ", "chassis_check"), ("ตรวจเช็กรถฟรี 8 ระบบสำคัญ", "chassis_check"), ("ตรวจเช็ก 8 ระบบสำคัญ (ครอบคลุม 30 รายการ)", "chassis_check"),    # Isuzu's free check includes the suspension
     ("ตรวจสอบช่วงล่างทั้งหมด (ปกติ)", "chassis_check"), ("ตรวจเช็คช่วงล่าง", "chassis_check"), ("ตรวจสอบสภาพช่วงล่าง", "chassis_check"),    # the dealership's wording
     ("เช็คช่วงล่าง", "chassis_check"), ("เปลี่ยนโช้คอัพหน้า", "chassis_check"), ("เสริมแหนบ", "chassis_check"), ("สลักคอม้า", "chassis_check"),
     ("ล้างท่อร่วมไอดี", "intake_manifold"), ("ค่าล้างท่อไอดี", "intake_manifold"), ("ทำความสะอาดท่อร่วมไอดี", "intake_manifold"),
@@ -553,9 +554,9 @@ def test_every_bill_mileage_counts_as_an_odometer_reading_even_if_no_line_is_a_p
 @pytest.mark.parametrize("line,hit", [
     ("เปลี่ยนซีลล้อหน้า", True), ("เปลี่ยนลูกปืนล้อหลัง", True), ("ซีลล้อ", True), ("ลูกปืนล้อ SKF", True),
     ("เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า", True), ("ซีลลูกปืนล้อหน้า", True),
-    ("ตรวจเช็คลูกปืนล้อ", False), ("ตรวจ/เติมลมยางล้อหน้า", False), ("ลูกปืนคลัตช์", False), ("ซีลเพลาข้อเหวี่ยงหน้า", False), ("ตรวจเช็คลูกปืนล้อ และเปลี่ยนซีลล้อ", True),
+    ("ตรวจเช็คลูกปืนล้อ", True), ("ตรวจสอบลูกปืนล้อหน้า", True), ("ตรวจ/เติมลมยางล้อหน้า", False), ("ลูกปืนคลัตช์", False), ("ซีลเพลาข้อเหวี่ยงหน้า", False), ("ตรวจเช็คลูกปืนล้อ และเปลี่ยนซีลล้อ", True),
 ])
-def test_for_a_small_truck_changing_the_wheel_seals_or_bearings_is_the_wheel_grease_job(line, hit):
+def test_for_a_small_truck_checking_the_wheel_bearings_or_changing_the_seals_is_the_wheel_job(line, hit):
     assert (sp.classify_line(line, sp.SMALL) == "wheel_grease") is hit
     if "จาระบี" not in line:
         assert sp.classify_line(line, sp.BIG) != "wheel_grease" and sp.classify_line(line) != "wheel_grease"          # a big truck / no truck: not the grease job
@@ -565,9 +566,9 @@ def test_the_plan_of_a_small_truck_calls_it_wheel_grease_and_a_big_one_keeps_the
     small = {"code": "S3", "rule_set": sp.SMALL, "step_km": 10_000, "months_per_step": 3}
     big = {"code": "B6", "rule_set": sp.BIG, "step_km": 20_000, "months_per_step": 6}
     label = lambda group: next(i["label"] for i in sp.effective_plan(group) if i["key"] == "wheel_grease")
-    assert label(small) == "อัดจารบีล้อ" and label(big) == "อัดจารบีทุกจุด"
-    assert next(i["label"] for i in sp.rule_set_items(sp.SMALL) if i["key"] == "wheel_grease") == "อัดจารบีล้อ"
-    assert sp.item_label("wheel_grease", sp.SMALL) == "อัดจารบีล้อ" and sp.item_label("wheel_grease", sp.BIG) == "อัดจารบีทุกจุด" and sp.item_label("wheel_grease") == "อัดจารบีทุกจุด"
+    assert label(small) == "ตรวจเช็คลูกปืนล้อ" and label(big) == "อัดจารบีทุกจุด"
+    assert next(i["label"] for i in sp.rule_set_items(sp.SMALL) if i["key"] == "wheel_grease") == "ตรวจเช็คลูกปืนล้อ"
+    assert sp.item_label("wheel_grease", sp.SMALL) == "ตรวจเช็คลูกปืนล้อ" and sp.item_label("wheel_grease", sp.BIG) == "อัดจารบีทุกจุด" and sp.item_label("wheel_grease") == "อัดจารบีทุกจุด"
 
 
 def test_a_bill_with_new_wheel_seals_counts_as_the_grease_for_the_small_truck_only():

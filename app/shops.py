@@ -168,6 +168,16 @@ def canonical(name: Optional[str]) -> str:
     return canonical_in(name, of_kind("repair"))
 
 
+def fold_vendor(name: Optional[str]) -> Optional[str]:
+    """The name stored as a bill's shop: a name the shops list recognises is stored as THE shop's own name ("บริษัท จึงกงเฮงอีซูซุ จำกัด (ศูนย์ซ่อมสีและตัวถัง…)" ->
+    "อิซูซุจึงกงเฮงแก่งคอย"), so one shop is one name everywhere; anything else is kept as it is. In-house names are left alone (that is a person, not a branch)."""
+    raw = re.sub(r"\s+", " ", str(name or "")).strip()
+    if not raw:
+        return None
+    hit = explain(raw, of_kind("repair"))
+    return hit["shop"] if hit["matched"] and hit["shop"] != IN_HOUSE else raw
+
+
 def find_supplier(name: Optional[str]) -> Optional[dict]:
     """The supplier a vendor name on a purchase bill means (by its words), or None."""
     hit = explain(name, of_kind("supplier"))

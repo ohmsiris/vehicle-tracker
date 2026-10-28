@@ -17,7 +17,7 @@ import uuid
 from datetime import date, timedelta
 from typing import Optional
 
-from app import history, supabase
+from app import history, shops, supabase
 from app.extraction import CATEGORIES
 from app.files import UnsupportedFile, prepare_file
 from app.linetext import strip_type_word
@@ -186,7 +186,7 @@ def save_event(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicate
             "event_date": ev["event_date"],
             "mileage": ev.get("mileage"),
             "next_service_mileage": ev.get("next_service_mileage"),
-            "vendor": ev.get("vendor"),
+            "vendor": shops.fold_vendor(ev.get("vendor")),
             "performed_by": ev.get("performed_by"),
             "branch": ev.get("branch"),
             "total_cost": ev.get("total_cost"),
@@ -304,7 +304,7 @@ def update_event(event_id: str, payload: dict) -> None:
             "vehicle_id": vid or None,
             "event_date": ev["event_date"],
             "mileage": ev.get("mileage"), "next_service_mileage": ev.get("next_service_mileage"), "total_cost": ev.get("total_cost"),
-            "vendor": ev.get("vendor"), "performed_by": ev.get("performed_by"), "branch": ev.get("branch"),
+            "vendor": shops.fold_vendor(ev.get("vendor")), "performed_by": ev.get("performed_by"), "branch": ev.get("branch"),
             "notes": ev.get("notes"), "summary": ev.get("summary"),
             "line_items": [
                 {
