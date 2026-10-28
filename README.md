@@ -692,6 +692,9 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
   order, 6 empty boxes each -- one tick per piece taken, no names, no day of the week; "เกิน 6" box for more, a table for things not on the list, a "ลงระบบแล้ว" box.
   Cheap consumables (tape, glue, silicone, discs, wire, chemicals, chains, welding rods ...) have track_out off: they are not ticked but counted on the shelf with the
   **ใบนับของสิ้นเปลือง**, and the use is the difference.
+  **หมวด and หน่วย are pick-lists** (the ones already used + the usual ones; "+ เพิ่มใหม่…" types a new one) and are filled in as the parts are typed -- no AI, so it is instant:
+  the หมวด/หน่วย of the items that already have the same ชนิด, else a guess from words in the name (แมกเนติก/สายไฟ -> ไฟฟ้า, ลวดเชื่อม/ใบตัด -> เชื่อม-ตัด, ท่อ/ข้อต่อ -> ท่อ-ประปา ...).
+  The guess is shown ("เดาให้: … — เปลี่ยนได้") and stops as soon as the person picks one. Every quantity box in the stock forms has − / + (steps of 1, never below 0).
   **One standard name per item**: ชนิด + ยี่ห้อ + รุ่น + สเปค (`stock.compose_name`), built from the four fields, e.g. "แมกเนติก Fuji SC-N8 220V",
   "โอเวอร์โหลด Mitsubishi TH-T25 18-26A". The model code is the word a bill is matched by (spaces, dashes and capitals do not matter: SC-N2 = SCN2 = sc n2);
   a model that comes in several ratings uses a pair, "TR-N2/3+12-18A" (both must be on the bill line). The 27 Oct 2026 count of the electrical store and

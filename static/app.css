@@ -1162,16 +1162,16 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 
 /* ---- สต็อก: the weekly out-list ---- */
 .skw { display: grid; gap: 8px; margin: 12px 0; }
-.skw-row { display: grid; grid-template-columns: minmax(0, 2fr) 90px minmax(0, 1fr) 96px; gap: 8px; align-items: center; }
+.skw-row { display: grid; grid-template-columns: minmax(0, 2fr) 150px minmax(0, 1fr) 96px; gap: 8px; align-items: center; }
 .skw-row input, .skw-row select { width: 100%; }
 .skw-have { white-space: nowrap; }
-@media (max-width: 640px) { .skw-row { grid-template-columns: 1fr 90px; } .skw-row select, .skw-have { grid-column: 1 / -1; } }
-.skw-row.in { grid-template-columns: minmax(0, 3fr) 90px 110px; }
+@media (max-width: 640px) { .skw-row { grid-template-columns: 1fr 150px; } .skw-row select, .skw-have { grid-column: 1 / -1; } }
+.skw-row.in { grid-template-columns: minmax(0, 3fr) 150px 110px; }
 .skm { display: grid; gap: 10px; margin: 12px 0; }
-.skm-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1fr) 70px 80px; gap: 8px; align-items: center; }
+.skm-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1fr) 80px 140px; gap: 8px; align-items: center; }
 .skm-row input { width: 100%; }
 .skm-name { grid-column: 1 / -1; min-height: 1.2em; padding-left: 4px; }
-@media (max-width: 640px) { .skm-row { grid-template-columns: 1fr 1fr; } .skw-row.in { grid-template-columns: 1fr 90px; } }
+@media (max-width: 640px) { .skm-row { grid-template-columns: 1fr 1fr; } .skw-row.in { grid-template-columns: 1fr 150px; } }
 .skcascade { padding-top: 0; }
 .skcascade select { flex: 1 1 150px; }
 .skarrow { color: var(--muted); font-size: 20px; line-height: 1; }
@@ -1238,3 +1238,8 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .mp-table td { vertical-align: middle; padding: 5px 6px; }
 .mp-table tr.mp-ref td { color: var(--text-2); }
 .mp-table td.r, .mp-table th.r { text-align: right; }
+
+/* ---- สต็อก: − / + beside the number boxes ---- */
+.stepper { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.stepper input { flex: 1 1 auto; min-width: 0; text-align: center; }
+.stepbtn { flex: 0 0 auto; min-width: 36px; font-size: 18px; line-height: 1; padding: 6px 0; }

@@ -652,6 +652,85 @@ const SK_FIELDS = [["code", "รหัส (เว้นว่าง = ตั้�
   ["min_qty", "ขั้นต่ำ (ต่ำกว่านี้ขึ้นว่าควรสั่งเพิ่ม)", { type: "number" }], ["location", "ที่เก็บ / ชั้น", { maxlength: 60 }]];
 const skStandardName = (d) => [d.kind, d.brand, d.model, d.spec].map((x) => String(x || "").trim()).filter(Boolean).join(" ");
 
+// หมวด and หน่วย are picked from a list (the ones already used + the usual ones; "+ เพิ่มใหม่…" types a new one). The หมวด is guessed as the parts are typed:
+// first from the items of the same ชนิด already in the list (แมกเนติก -> ไฟฟ้า), then from words in the name (SK_CATEGORY_WORDS). No AI: instant and predictable.
+const SK_UNITS = ["ตัว", "ชิ้น", "อัน", "ชุด", "คู่", "ลูก", "ม้วน", "เส้น", "เมตร", "ขวด", "หลอด", "กระป๋อง", "กล่อง", "แพ็ก", "ถุง", "ลิตร", "กก."];
+const SK_CATEGORY_WORDS = [
+  ["ท่อ-ประปา", /ท่อ|ข้อต่อ|วาล์ว|ก๊อก|เทปพันเกลียว|กาวประสานท่อ|พีวีซี|pvc/i],
+  ["ไฟฟ้า", /แมกเนติก|โอเวอร์โหลด|เบรกเกอร์|เบรคเกอร์|รีเลย์|ไทเมอร์|สายไฟ|ปลั๊ก|สวิตช์|สวิทช์|หลอดไฟ|ไพลอต|ฟิวส์|เทปพันสายไฟ|เคเบิล|มอเตอร์|คอนแทค|ลูกลอย|ซ็อกเก็ต|อินเวอร์เตอร์|ตู้ไฟ|มิเตอร์|breaker|contactor|relay/i],
+  ["เชื่อม-ตัด", /ลวดเชื่อม|ใบตัด|ใบเจียร|ใบเลื่อย/],
+  ["โซ่", /โซ่|สเตอร์/],
+  ["ลูกปืน", /ลูกปืน|bearing/i],
+  ["สายพาน", /สายพาน|belt/i],
+  ["น้ำมัน-จาระบี", /น้ำมัน|จาระบี|จารบี|grease/i],
+  ["น้ำยา-กาว", /น้ำยา|กาว|ซิลิโคน|สเปรย์|silicone/i],
+  ["นอต-สกรู", /น็อต|นอต|สกรู|แหวนรอง|โบลท์|bolt/i],
+];
+
+function skMostCommon(values) {
+  const c = new Map();
+  for (const v of values) if (v) c.set(v, (c.get(v) || 0) + 1);
+  return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+}
+
+// {category, unit, why}: what an item with these parts most likely is
+function skGuess(d) {
+  const kind = String(d.kind || "").trim().toLowerCase();
+  const same = kind ? (bu.stock?.items || []).filter((i) => String(i.kind || "").trim().toLowerCase() === kind) : [];
+  let category = skMostCommon(same.map((i) => i.category)), why = category ? `ชนิด “${d.kind}” อยู่หมวดนี้` : "";
+  if (!category) {
+    const text = [d.kind, d.name, d.brand, d.model, d.spec].filter(Boolean).join(" ");
+    const hit = SK_CATEGORY_WORDS.find(([, re]) => re.test(text));
+    if (hit) { category = hit[0]; why = "จากคำในชื่อ"; }
+  }
+  return { category, unit: skMostCommon(same.map((i) => i.unit)), why };
+}
+
+const skCategories = () => [...new Set([...(bu.stock?.items || []).map((i) => i.category).filter(Boolean), ...SK_CATEGORY_WORDS.map(([c]) => c)])].sort((a, b) => a.localeCompare(b, "th"));
+const skUnits = () => [...new Set([...SK_UNITS, ...(bu.stock?.items || []).map((i) => i.unit).filter(Boolean)])];
+
+// a pick-list with "+ เพิ่มใหม่…" (a text box for a new value); box._set(value) chooses one from code, box._touched says the person chose
+function skChoice(d, key, label, values) {
+  const id = `mf_${key}`, opts = [...values];
+  const sel = el("select", { id }, el("option", { value: "", text: "— เลือก —" }), ...opts.map((v) => el("option", { value: v, text: v })), el("option", { value: "__new", text: "+ เพิ่มใหม่…" }));
+  const other = el("input", { type: "text", maxlength: key === "unit" ? "20" : "40", placeholder: "พิมพ์ชื่อใหม่", "aria-label": `${label} (ใหม่)`, hidden: true });
+  const hint = el("div", { class: "datecap" });
+  const box = el("div", { class: "mfield" }, el("label", { for: id, text: label }), sel, other, hint);
+  box._set = (v) => {
+    if (v && !opts.includes(v)) { opts.push(v); sel.insertBefore(el("option", { value: v, text: v }), sel.lastChild); }
+    sel.value = v || "";
+    other.hidden = true;
+    d[key] = v || "";
+  };
+  box._hint = (text) => fill(hint, text || "");
+  box._touched = false;
+  sel.addEventListener("change", () => {
+    box._touched = true;
+    box._hint("");
+    if (sel.value === "__new") { other.hidden = false; other.value = ""; d[key] = ""; other.focus(); }
+    else { other.hidden = true; d[key] = sel.value; }
+  });
+  other.addEventListener("input", () => { box._touched = true; d[key] = other.value.trim(); });
+  box._set(d[key]);
+  return box;
+}
+
+// − / + beside every number box of the stock forms (steps of 1, never below 0)
+function skSteppers(root) {
+  for (const input of root.querySelectorAll("input[type=number]")) {
+    if (input.closest(".stepper")) continue;
+    const bump = (n) => {
+      const v = Math.max(0, (parseFloat(String(input.value).replace(/,/g, "")) || 0) + n);
+      input.value = String(Math.round(v * 1000) / 1000);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const wrap = el("div", { class: "stepper" });
+    input.replaceWith(wrap);
+    wrap.append(el("button", { type: "button", class: "btn small stepbtn", "aria-label": "ลดลง 1", text: "−", onclick: () => bump(-1) }), input,
+      el("button", { type: "button", class: "btn small stepbtn", "aria-label": "เพิ่มขึ้น 1", text: "+", onclick: () => bump(1) }));
+  }
+}
+
 async function openStockItem(item) {
   const d = item ? { ...item, code: item.code || "", track_out: item.track_out !== false, kind: item.kind || "", brand: item.brand || "", model: item.model || "", min_qty: item.min_qty ?? "", aliases: (item.aliases || []).join(", ") }
     : { code: "", track_out: true, kind: "", brand: "", model: "", name: "", category: "", unit: "", spec: "", min_qty: "", location: "", aliases: "" };
@@ -660,8 +739,9 @@ async function openStockItem(item) {
     try { history = await api(`/api/stock/items/${item.id}/moves`); } catch (_) { history = []; }
   }
   const KIND = { in: "รับเข้า", out: "เบิก", count: "นับสต็อก" };
+  const catBox = skChoice(d, "category", "หมวด", skCategories()), unitBox = skChoice(d, "unit", "หน่วย", skUnits());
   buOpenDialog(item ? item.name : "เพิ่มรายการ", [
-    el("div", { class: "mfields" }, ...SK_FIELDS.map(([k, l, o]) => mfield(d, k, l, o)),
+    el("div", { class: "mfields" }, ...SK_FIELDS.map(([k, l, o]) => (k === "category" ? catBox : k === "unit" ? unitBox : mfield(d, k, l, o))),
       mfield(d, "aliases", "คำที่เจอในบิลแล้วนับเป็นรายการนี้ (คั่นด้วย , — ใส่รุ่นไว้ได้เลย เช่น SC-N8; รุ่นเดียวกันหลายสเปคใช้คู่ เช่น TR-N2/3+12-18A)", { wide: true, maxlength: 2000 })),
     el("label", { class: "mgcheck" }, (() => { const c = el("input", { type: "checkbox" }); c.checked = !!d.track_out; c.addEventListener("change", () => { d.track_out = c.checked; }); return c; })(),
       " เบิกด้วยใบติ๊กประจำสัปดาห์ ", el("span", { class: "muted small", text: "(ไม่ติ๊ก = ของสิ้นเปลือง นับที่ชั้นแทน ไม่ต้องติ๊กทุกชิ้น)" })),
@@ -681,8 +761,14 @@ async function openStockItem(item) {
     bu.opts = null;                                    // the bill page's item list is stale now
     await loadStock();
   });
-  for (const k of ["kind", "brand", "model", "spec"]) $(`mf_${k}`).addEventListener("input", () => skSyncName(d));
+  const guess = () => {                               // fill หมวด / หน่วย from what is typed, until the person picks one themselves
+    const g = skGuess(d);
+    if (!catBox._touched && !(item && item.category) && g.category) { catBox._set(g.category); catBox._hint(`เดาให้: ${g.category} (${g.why}) — เปลี่ยนได้`); }
+    if (!unitBox._touched && !(item && item.unit) && g.unit) { unitBox._set(g.unit); unitBox._hint(`เดาให้จากชนิดเดียวกัน — เปลี่ยนได้`); }
+  };
+  for (const k of ["kind", "brand", "model", "spec", "name"]) $(`mf_${k}`).addEventListener("input", () => { skSyncName(d); guess(); });
   skSyncName(d);
+  skSteppers($("buDlgBody"));
 }
 
 function skSyncName(d) {                       // while typing the parts, the name field shows the standard name (and cannot be typed over)
@@ -706,6 +792,7 @@ function openStockBatch(kind) {
     name.addEventListener("input", () => { const it = byName.get(name.value.trim()); fill(have, it ? `มี ${buQty(it.on_hand)} ${it.unit || ""}` : ""); });
     rows.push({ name, qty, machine });
     list.append(el("div", { class: `skw-row${isOut ? "" : " in"}` }, name, qty, isOut ? machine : null, have));
+    skSteppers(list);
   };
   for (let i = 0; i < 8; i++) addRow();
   buOpenDialog(isOut ? "เบิกของประจำสัปดาห์ (จากกระดาษของช่าง)" : "รับของเข้าสต็อกหลายรายการ", [
@@ -738,15 +825,18 @@ function openStockMulti() {
     const f = (ph, cls, type = "text") => el("input", { type, placeholder: ph, autocomplete: "off", class: cls, "aria-label": ph, ...(type === "number" ? { min: "0", step: "any", inputmode: "decimal" } : {}) });
     const r = { kind: f("ชนิด เช่น แมกเนติก", "skm-kind"), brand: f("ยี่ห้อ", "skm-brand"), model: f("รุ่น / เบอร์", "skm-model"), spec: f("สเปค เช่น 220V", "skm-spec"),
       unit: f("หน่วย", "skm-unit"), qty: f("จำนวน", "skm-qty", "number") }, name = el("div", { class: "skm-name muted small" });
+    r.unit.setAttribute("list", "skmUnitList");
     const sync = () => fill(name, skStandardName({ kind: r.kind.value, brand: r.brand.value, model: r.model.value, spec: r.spec.value }));
     for (const k of ["kind", "brand", "model", "spec"]) r[k].addEventListener("input", sync);
     rows.push(r);
     list.append(el("div", { class: "skm-row" }, r.kind, r.brand, r.model, r.spec, r.unit, r.qty, name));
+    skSteppers(list);
   };
   for (let i = 0; i < 6; i++) addRow();
   buOpenDialog("เพิ่มหลายรายการ", [
     el("p", { class: "muted small", text: "ใส่ชนิดอย่างน้อยในแต่ละแถว — ชื่อมาตรฐานสร้างให้เอง (โชว์ใต้แต่ละแถว) รุ่นจะถูกใช้เป็นคำที่เจอในบิลให้ด้วย จำนวนที่ใส่คือยอดตั้งต้นในสต็อก (เว้นว่างได้) ถ้ามีแถวไหนผิด ระบบจะบอกเลขแถวและยังไม่บันทึกอะไรเลย" }),
-    el("div", { class: "mfields" }, mfield(d, "category", "หมวดของชุดนี้ (เช่น ไฟฟ้า โซ่ เชื่อม-ตัด)", { maxlength: 40 })),
+    el("div", { class: "mfields" }, skChoice(d, "category", "หมวดของชุดนี้", skCategories())),
+    el("datalist", { id: "skmUnitList" }, ...skUnits().map((u) => el("option", { value: u }))),
     list,
     el("button", { class: "btn small", type: "button", text: "+ เพิ่มแถว", onclick: () => { addRow(); rows[rows.length - 1].kind.focus(); } }),
   ], async () => {
@@ -771,6 +861,7 @@ function openStockMove(item, kind) {
     bu.stock = await api("/api/stock/moves", jsonOpts("POST", { item_id: item.id, kind, ...d }));
     renderStock();
   });
+  skSteppers($("buDlgBody"));
 }
 
 // ================================================================== the dialog
