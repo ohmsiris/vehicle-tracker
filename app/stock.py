@@ -193,10 +193,12 @@ def _moves() -> list[dict]:
 def overview() -> dict:
     if not (supabase.configured() and has_v16()):
         return {"ready": False, "items": [], "machines": []}
-    items = items_with_aliases()
-    have = on_hand(_moves())
-    lines = supabase.select_all("purchase_lines", {"select": "item_id,unit_cost,unit_cost_ex_vat,quantity,unit,bill_id,created_at,purchase_bills(bill_date,vendor_name,vendor_id)",
-                                                   "item_id": "not.is.null", "order": "created_at.desc"})
+    items, moves, lines, machines = supabase.parallel(
+        items_with_aliases, _moves,
+        lambda: supabase.select_all("purchase_lines", {"select": "item_id,unit_cost,unit_cost_ex_vat,quantity,unit,bill_id,created_at,purchase_bills(bill_date,vendor_name,vendor_id)",
+                                                      "item_id": "not.is.null", "order": "created_at.desc"}),
+        _machines)
+    have = on_hand(moves)
     from app import shops
     names = {s["id"]: s["name"] for s in shops._load()}
     by: dict = {}
@@ -209,7 +211,7 @@ def overview() -> dict:
         qty = have.get(it["id"], 0)
         low = it.get("min_qty") is not None and qty < float(it["min_qty"])
         out.append({**it, "on_hand": qty, "low": low, "last": stats["last"], "lowest": stats["lowest"]})
-    return {"ready": True, "items": out, "machines": _machines()}
+    return {"ready": True, "items": out, "machines": machines}
 
 
 def create_item(data: dict) -> dict:

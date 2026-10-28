@@ -771,3 +771,13 @@ before it is checked, so an unchecked bill is in no truck history and no mainten
 The machine page has **ราคาและอะไหล่ทั้งหมด** (`GET /api/machines/{id}/prices`): every line of its repair bills, of other bills marked for it, and of its model's reference lists, with the
 machine's money spent (reference lists not counted).
 
+## Speed (28 Oct 2026)
+Most of a page's wait is round trips to the database (the app makes many small reads), plus the size of the JSON on a phone connection. So:
+- **GZip** on every answer over 1 KB (`main.py`): attendance 233 KB -> 18 KB, the people list 101 KB -> 11 KB, `buy.js` 81 KB -> 22 KB.
+- **A 5-second read cache** for the small reference tables (vehicles, drivers, shops, plan groups, machines, stock items, employees ...; `supabase.CACHED_TABLES`). One page load asks for the
+  same vehicles / drivers / shops from several places; the answer is reused. Any write through `app/supabase.py` drops that table's answers at once (a delete / rpc drops everything), and a
+  caller gets a copy. A change made from OUTSIDE the app (a script) shows within 5 seconds.
+- **Reads at the same time** (`supabase.parallel`, `select_all_parallel`): the stock page, attendance, the shop suggestions and the punches' pages wait for the slowest read, not the sum.
+- Measured from a laptop against the live database (each read ~120 ms there, much less on the server): stock 1.6 s -> 0.22 s, บิลซื้อของ list 1.1 -> 0.24, prices 1.1 -> 0.21,
+  people 0.6 -> 0.02, vehicles 0.72 -> 0.40, attendance 1.27 -> 0.72. The very first load after a deploy is still the slowest (cold: ~20 reads for the page's data).
+

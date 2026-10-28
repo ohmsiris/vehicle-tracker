@@ -479,7 +479,7 @@ def save_bill(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicates
 
 
 def _vendor_names() -> dict:
-    return {s["id"]: s["name"] for s in shops._load()}
+    return {s["id"]: s["name"] for s in shops.snapshot()}
 
 
 def list_bills(limit: int = 100) -> dict:

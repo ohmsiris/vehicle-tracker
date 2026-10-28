@@ -365,11 +365,15 @@ def import_report(data: bytes, filename: str) -> dict:
 def _load_month(month: str) -> dict:
     start, end = month_range(month)
     window = {"and": f"(punched_at.gte.{start - timedelta(days=1)}T00:00:00,punched_at.lt.{end + timedelta(days=3)}T00:00:00)"}
+    cols = _EMP_COLS + (",shift_start,shift_end" if has_v27() else "")
+    rows, reviews, emp_rows = supabase.parallel(
+        lambda: supabase.select_all_parallel("attendance_punches", {"select": "employee_id,punched_at", **window, "order": "employee_id.asc,punched_at.asc"}),
+        lambda: supabase.select_all("attendance_reviews", {"select": "*", "work_date": f"gte.{start}", "and": f"(work_date.lte.{end})", "order": "id.asc"}),
+        lambda: supabase.select_all("employees", {"select": cols, "order": "code.asc"}))
     punches: dict[str, list[datetime]] = {}
-    for r in supabase.select_all("attendance_punches", {"select": "employee_id,punched_at", **window, "order": "employee_id.asc,punched_at.asc"}):
+    for r in rows:
         punches.setdefault(r["employee_id"], []).append(datetime.fromisoformat(str(r["punched_at"])[:19]))
-    reviews = supabase.select_all("attendance_reviews", {"select": "*", "work_date": f"gte.{start}", "and": f"(work_date.lte.{end})", "order": "id.asc"})
-    emps = {e["id"]: e for e in supabase.select_all("employees", {"select": _EMP_COLS + (",shift_start,shift_end" if has_v27() else ""), "order": "code.asc"})}
+    emps = {e["id"]: e for e in emp_rows}
     return build_month(month, emps, punches, reviews)
 
 

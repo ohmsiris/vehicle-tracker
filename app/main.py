@@ -24,6 +24,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -48,6 +49,7 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="IceBox", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024)        # the big JSON / script answers travel 5-8x smaller (matters on a phone connection)
 
 MAX_PARALLEL_EXTRACTIONS = 4
 

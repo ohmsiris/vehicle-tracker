@@ -325,8 +325,11 @@ def known_fixers() -> list[str]:
     are folded into that shop's own name, so each shop is ONE option; in-house names and people are left as they are."""
     from app import shops
     seen: dict[str, None] = {}
-    for table, column in (("repair_requests", "fixed_by"), ("maintenance_events", "vendor"), ("maintenance_events", "performed_by")):
-        for r in supabase.select(table, {"select": column, column: "not.is.null", "order": "created_at.desc" if table == "maintenance_events" else "updated_at.desc", "limit": "200"}):
+    sources = (("repair_requests", "fixed_by"), ("maintenance_events", "vendor"), ("maintenance_events", "performed_by"))
+    answers = supabase.parallel(*[(lambda t=table, c=column: supabase.select(t, {"select": c, c: "not.is.null", "order": "created_at.desc" if t == "maintenance_events" else "updated_at.desc",
+                                                                                 "limit": "200"})) for table, column in sources])
+    for (table, column), rows in zip(sources, answers):
+        for r in rows:
             name = (r.get(column) or "").strip()
             if name:
                 shop = shops.canonical(name)
