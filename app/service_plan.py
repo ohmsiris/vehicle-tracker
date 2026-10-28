@@ -84,6 +84,10 @@ ITEMS = {
     "chassis_check": ("เช็คช่วงล่าง", "ช่วงล่าง / ส่งกำลัง"),
 }
 
+# Where a rule set calls an item something else. The small trucks (D-Max / Revo) have nowhere to grease "every point": the only grease job is the wheel
+# bearings (the mechanic cleans them and re-greases them whenever the wheel seals or the bearings are changed), so for them it is "อัดจารบีล้อ".
+LABEL_FOR = {(SMALL, "wheel_grease"): "อัดจารบีล้อ"}
+
 # The category each item gets when it is recorded as a repair (the names of the categories table).
 ITEM_CATEGORY = {key: "ไส้กรองและของเหลว" for key in ITEMS}
 ITEM_CATEGORY.update(valve_adjust="เครื่องยนต์", valve_cover_seal="เครื่องยนต์", injector_washers="เครื่องยนต์", intake_manifold="เครื่องยนต์",
@@ -155,7 +159,9 @@ GROUP_CODES = [g["code"] for g in DEFAULT_GROUPS]
 CHART_ROUNDS = {SMALL: 10, BIG: 8}
 
 
-def item_label(key: str) -> str:
+def item_label(key: str, rule_set: Optional[str] = None) -> str:
+    if (rule_set, key) in LABEL_FOR:
+        return LABEL_FOR[(rule_set, key)]
     return ITEMS[key][0] if key in ITEMS else key
 
 
@@ -208,7 +214,7 @@ def effective_plan(group: Optional[dict], overrides: Optional[list[dict]] = None
             continue
         km = saved[key]["interval_km"] if key in saved else base[key]
         months = item_months(km, group)
-        out.append({"key": key, "label": label, "group": grp, "default_km": base[key], "interval_km": km,
+        out.append({"key": key, "label": LABEL_FOR.get((group["rule_set"], key), label), "group": grp, "default_km": base[key], "interval_km": km,
                     "interval_months": months, "customised": key in saved})
     return out
 
@@ -217,7 +223,7 @@ def rule_set_items(rule_set: str, overrides: Optional[list[dict]] = None) -> lis
     """For the settings page: one rule set's items with default and saved km."""
     base = DEFAULT_KM.get(rule_set, {})
     saved = {o["item_key"]: o for o in (overrides or []) if o.get("vehicle_class") == rule_set and o.get("interval_km")}
-    return [{"key": key, "label": label, "default_km": base[key], "interval_km": saved[key]["interval_km"] if key in saved else base[key],
+    return [{"key": key, "label": LABEL_FOR.get((rule_set, key), label), "default_km": base[key], "interval_km": saved[key]["interval_km"] if key in saved else base[key],
              "customised": key in saved, "only_for": (ONLY_FOR.get((rule_set, key)) or (None,))[0]} for key, (label, _g) in ITEMS.items() if key in base]
 
 
@@ -256,10 +262,15 @@ _ANYWHERE = [
     ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจสอบ|ตรวจเช็ค|ตรวจเช็ก|ตรวจ)\s*(?:สภาพ\s*)?ช่วงล่าง")),
 ]
 _TOP_UP = re.compile(r"เติม")
+# Only for the small trucks (D-Max / Revo): changing the wheel seals or the wheel bearings IS the wheel-bearing grease job (the bearings are cleaned and re-greased with it).
+# "ซีลล้อ", "ลูกปืนล้อ", "ซีลลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า". A line that only CHECKS ("ตรวจเช็คลูกปืนล้อ") is not the job.
+_SMALL_ONLY = [("wheel_grease", re.compile(r"(?:ซีล|ลูกปืน)\s*(?:ลูกปืน\s*)?ล้อ"))]
+_CHECK_ONLY = re.compile(r"^\s*(?:ตรวจ|เช็ค|เช็ก)")
 
 
-def classify_line(description: Optional[str]) -> Optional[str]:
-    """Which service item a bill line is, or None. A top-up ("น้ำมันเครื่อง (เติม)") is not a service."""
+def classify_line(description: Optional[str], rule_set: Optional[str] = None) -> Optional[str]:
+    """Which service item a bill line is, or None. A top-up ("น้ำมันเครื่อง (เติม)") is not a service. `rule_set` (the truck's) adds the
+    lines that only count for that kind of truck (_SMALL_ONLY)."""
     text = re.sub(r"\s+", " ", strip_type_word(description)[0]).strip()                 # "อะไหล่ ไส้กรองอากาศ" is the air filter
     if not text or _TOP_UP.search(text):
         return None
@@ -269,17 +280,22 @@ def classify_line(description: Optional[str]) -> Optional[str]:
     for key, pattern in _ANYWHERE:
         if pattern.search(text):
             return key
+    if rule_set == SMALL and not (_CHECK_ONLY.match(text) and "เปลี่ยน" not in text):
+        for key, pattern in _SMALL_ONLY:
+            if pattern.search(text):
+                return key
     return None
 
 
-def bill_hits(events: list[dict]) -> list[dict]:
+def bill_hits(events: list[dict], rule_sets: Optional[dict] = None) -> list[dict]:
     """Confirmed events (each {vehicle_id, event_date, mileage, source, bill_line_items: [{description}]}) -> one hit per
     (truck, item, day): {vehicle_id, item_key, done_date, odometer_km, source: 'bill' or 'manual', event_id}.
-    An event is a bill, or a job recorded by hand (including from this programme)."""
+    An event is a bill, or a job recorded by hand (including from this programme). `rule_sets` = {vehicle_id: rule set} for the lines that count only for
+    one kind of truck."""
     seen, out = set(), []
     for ev in events:
         for line in ev.get("bill_line_items") or []:
-            key = classify_line(line.get("description"))
+            key = classify_line(line.get("description"), (rule_sets or {}).get(ev.get("vehicle_id")))
             if not key or not ev.get("vehicle_id") or not ev.get("event_date"):
                 continue
             ident = (ev["vehicle_id"], key, ev["event_date"])
@@ -786,7 +802,7 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
     overrides = supabase.select_all("service_intervals", {"select": "*", "order": "item_key.asc"}) if ready else []
     groups, assigned = _groups(), _vehicle_groups()
     events = _bill_events()
-    hits, odos = _group(bill_hits(events)), _group(bill_odometers(events))
+    hits, odos = _group(bill_hits(events, _rule_sets(vehicles, groups, assigned))), _group(bill_odometers(events))
     rows = []
     for v in vehicles:
         group = groups.get(assigned.get(v["id"]))
@@ -805,6 +821,11 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
             "trucks": {"overdue": sum(1 for r in rows if r["counts"]["overdue"]), "soon": sum(1 for r in rows if not r["counts"]["overdue"] and r["counts"]["soon"]),
                        "no_history": sum(1 for r in rows if r["has_plan"] and r["counts"]["unknown"] == len(r["items"])),
                        "no_group": sum(1 for r in rows if not r["has_plan"])}}
+
+
+def _rule_sets(vehicles: list[dict], groups: dict, assigned: dict) -> dict:
+    """vehicle id -> its rule set (from its group, else the vehicle class in the roster)."""
+    return {v["id"]: (groups.get(assigned.get(v["id"])) or {}).get("rule_set") or v.get("vehicle_class") for v in vehicles}
 
 
 def _numkey(value) -> tuple:
@@ -826,12 +847,13 @@ def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
     overrides = supabase.select_all("service_intervals", {"select": "*", "order": "item_key.asc"}) if ready else []
     events = supabase.select_all("maintenance_events", {"select": "id,vehicle_id,event_date,mileage,source,bill_line_items(description)",
                                                         "status": "eq.confirmed", "vehicle_id": f"eq.{vehicle_id}", "order": "id.asc"})
-    hits = bill_hits(events)
     groups = _groups()
     code = _vehicle_groups().get(vehicle_id)
+    rule_set = (groups.get(code) or {}).get("rule_set") or v.get("vehicle_class")
+    hits = bill_hits(events, {vehicle_id: rule_set})
     plan = vehicle_plan(v, group=groups.get(code), records=records + hits, readings=readings + bill_odometers(events), overrides=overrides, today=today, with_chart=True,
                         soon_days=_plan_settings()["soon_days"], snoozes=_snoozes().get(vehicle_id))
-    history = sorted([{**r, "label": item_label(r["item_key"])} for r in records + hits], key=lambda r: (r["done_date"], r["item_key"]), reverse=True)
+    history = sorted([{**r, "label": item_label(r["item_key"], rule_set)} for r in records + hits], key=lambda r: (r["done_date"], r["item_key"]), reverse=True)
     choices = [{**g, "months": group_months(g)} for g in sorted(groups.values(), key=lambda g: g.get("sort_order", 99))]
     return {"as_of": today.isoformat(), "simulated": today != real_today, "ready": ready, "vehicle": {k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model")},
             **plan, "group_code": code, "groups": choices, "history": history, "readings": readings}
@@ -876,7 +898,9 @@ def record_service(data: dict) -> dict:
     existing = supabase.select_all("maintenance_events", {"select": "id,vehicle_id,event_date,mileage,source,bill_line_items(description)",
                                                           "status": "eq.confirmed", "vehicle_id": f"eq.{clean['vehicle_id']}",
                                                           "event_date": f"eq.{clean['done_date'].isoformat()}", "order": "id.asc"})
-    keys = drop_done_already(clean["items"], clean["vehicle_id"], clean["done_date"], bill_hits(existing))
+    group = _groups().get(_vehicle_groups().get(clean["vehicle_id"])) or {}
+    rule_set = group.get("rule_set") or _vehicles(only=clean["vehicle_id"])[0].get("vehicle_class")
+    keys = drop_done_already(clean["items"], clean["vehicle_id"], clean["done_date"], bill_hits(existing, {clean["vehicle_id"]: rule_set}))
     if not keys:
         raise InvalidPlan("รายการเหล่านี้ถูกบันทึกไว้แล้วในวันนั้น (ดูในสมุดงานซ่อม)")
     try:

@@ -737,3 +737,9 @@ A dealership job sheet has a type column (ค่าแรง / อะไหล�
 edited (`events.py`), and the maintenance plan ignores it when it matches a line (`service_plan.classify_line`). `scripts/clean_line_type_words.py [--apply]` cleaned the lines already
 saved (77 on 27 Oct 2026).
 
+## Small trucks: wheel-bearing grease (`service_plan.LABEL_FOR`, `_SMALL_ONLY`)
+A D-Max / Revo has nowhere to grease "every point": the only grease job is the wheel bearings (the mechanic cleans them and re-greases them whenever the wheel seals or bearings are
+changed). So for the small rule set only (รถเล็ก) the plan item is called **อัดจารบีล้อ** (big trucks keep "อัดจารบีทุกจุด"), and a bill line that changes the wheel seals or bearings
+("เปลี่ยนซีลล้อ", "เปลี่ยนลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า", also a part line "ซีลล้อ") counts as that job done that day. A line that only checks
+("ตรวจเช็คลูกปืนล้อ") does not. The plan reads the bills every time it is shown, so a new rule or a new bill takes effect at once: there is nothing to refresh.
+

@@ -547,3 +547,32 @@ def test_every_bill_mileage_counts_as_an_odometer_reading_even_if_no_line_is_a_p
               {"id": "e2", "vehicle_id": VID, "event_date": "2026-06-01", "mileage": None, "source": "bill", "bill_line_items": []}]
     assert sp.bill_hits(events) == []
     assert sp.bill_odometers(events) == [{"vehicle_id": VID, "kind": "odometer", "end_date": "2026-05-28", "km": 199_694}]
+
+
+# ------------------------------------------------------------------ the small trucks' wheel-bearing grease
+@pytest.mark.parametrize("line,hit", [
+    ("เปลี่ยนซีลล้อหน้า", True), ("เปลี่ยนลูกปืนล้อหลัง", True), ("ซีลล้อ", True), ("ลูกปืนล้อ SKF", True),
+    ("เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า", True), ("ซีลลูกปืนล้อหน้า", True),
+    ("ตรวจเช็คลูกปืนล้อ", False), ("ตรวจ/เติมลมยางล้อหน้า", False), ("ลูกปืนคลัตช์", False), ("ซีลเพลาข้อเหวี่ยงหน้า", False), ("ตรวจเช็คลูกปืนล้อ และเปลี่ยนซีลล้อ", True),
+])
+def test_for_a_small_truck_changing_the_wheel_seals_or_bearings_is_the_wheel_grease_job(line, hit):
+    assert (sp.classify_line(line, sp.SMALL) == "wheel_grease") is hit
+    if "จาระบี" not in line:
+        assert sp.classify_line(line, sp.BIG) != "wheel_grease" and sp.classify_line(line) != "wheel_grease"          # a big truck / no truck: not the grease job
+
+
+def test_the_plan_of_a_small_truck_calls_it_wheel_grease_and_a_big_one_keeps_the_old_name():
+    small = {"code": "S3", "rule_set": sp.SMALL, "step_km": 10_000, "months_per_step": 3}
+    big = {"code": "B6", "rule_set": sp.BIG, "step_km": 20_000, "months_per_step": 6}
+    label = lambda group: next(i["label"] for i in sp.effective_plan(group) if i["key"] == "wheel_grease")
+    assert label(small) == "อัดจารบีล้อ" and label(big) == "อัดจารบีทุกจุด"
+    assert next(i["label"] for i in sp.rule_set_items(sp.SMALL) if i["key"] == "wheel_grease") == "อัดจารบีล้อ"
+    assert sp.item_label("wheel_grease", sp.SMALL) == "อัดจารบีล้อ" and sp.item_label("wheel_grease", sp.BIG) == "อัดจารบีทุกจุด" and sp.item_label("wheel_grease") == "อัดจารบีทุกจุด"
+
+
+def test_a_bill_with_new_wheel_seals_counts_as_the_grease_for_the_small_truck_only():
+    events = [{"id": "e1", "vehicle_id": "small", "event_date": "2026-04-17", "mileage": 423733, "source": "bill", "bill_line_items": [{"description": "เปลี่ยนซีลล้อหน้า"}]},
+              {"id": "e2", "vehicle_id": "big", "event_date": "2026-04-17", "mileage": 100000, "source": "bill", "bill_line_items": [{"description": "เปลี่ยนซีลล้อหน้า"}]}]
+    hits = sp.bill_hits(events, {"small": sp.SMALL, "big": sp.BIG})
+    assert [(h["vehicle_id"], h["item_key"]) for h in hits] == [("small", "wheel_grease")]
+    assert sp.bill_hits(events) == []                                                                       # without the trucks' rule sets nothing special counts
