@@ -1251,3 +1251,13 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .skprice-table td, .skprice-table th { padding: 5px 6px; vertical-align: top; }
 .skprice-table tr.cheapest td { background: var(--ok-soft); }
 .mfields .wide { grid-column: 1 / -1; }
+
+/* ---- เทียบราคา: a table, one row per thing; the name opens its own page ---- */
+.prtable { min-width: 760px; }
+.prtable th.r, .prtable td.r { text-align: right; }
+.prtable td { vertical-align: middle; padding: 7px 6px; border-top: 1px solid var(--line); }
+.prtable tr.cheapest td { background: var(--ok-soft); }
+.prtable .badge { margin-left: 6px; }
+.pisum { display: flex; gap: 8px 40px; flex-wrap: wrap; padding: 14px 16px; }
+.pibig { display: block; font-size: 24px; }
+#priceItemView .card { margin-bottom: 12px; }

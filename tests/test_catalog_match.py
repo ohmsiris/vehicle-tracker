@@ -83,3 +83,17 @@ def test_prices_are_compared_brand_by_brand():
     assert [b["brand"] for b in s["by_brand"]] == ["NSK", "SKF", "ไม่ระบุยี่ห้อ"]                          # cheapest latest first
     assert by["SKF"]["last_cost"] == 640 and by["SKF"]["lowest_cost"] == 580 and by["SKF"]["lowest_vendor"] == "ร้าน ค" and by["SKF"]["times"] == 3
     assert s["last"]["brand"] == "SKF"
+
+
+DISCS = [{"id": "g", "name": "ใบเจียร", "aliases": ["ใบเจียร", "แผ่นเจียร", "แผ่นเจียร์", "ใบเจียร์"]}, {"id": "t", "name": "ใบตัด", "aliases": ["ใบตัด", "แผ่นตัด"]}]
+
+
+@pytest.mark.parametrize("text,name", [('แผ่นเจียร์หนา คลีนิค 4"', "ใบเจียร"), ('แผ่นตัดเหล็ก 4"', "ใบตัด"), ('แผ่นตัดเหล็กบาง คลีนิค 4"*1mm.', "ใบตัด"), ("ใบเจียร 4 นิ้ว", "ใบเจียร")])
+def test_grinding_and_cutting_discs_by_their_bill_names(text, name):
+    assert pu.match_item(text, DISCS)["name"] == name
+
+
+def test_kana_chain_60_is_its_own_chain():
+    chains = [CHAIN, {"id": "c6", "name": "โซ่ KANA #60", "aliases": ["KANA #60", "KANA 60"]}]
+    assert pu.match_item("โซ่ลูกปืน KANA #60-1R", chains)["name"] == "โซ่ KANA #60"
+    assert pu.match_item("โซ่ญี่ปุ่น KANA #80-1R", chains)["name"] == "โซ่ KANA #80"

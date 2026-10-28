@@ -801,3 +801,12 @@ A B-29 belt is a B-29 from any maker, and one bearing unit goes by several names
 - 37 standard items were made from the machine parts index and the saved bills (17 belts, 16 bearing units, 4 deep-groove); 45 bill lines were linked to them and given their brand. Nothing is counted
   into stock yet.
 
+- **The shelf was counted on 28 Oct 2026** (bearings, entered as count moves): 16 sizes with their counts. Sizes never bought and not on the shelf (UCF205, UCF211) were removed; UCF208-24, UCP208-24,
+  6208 and 6206-2RS were added, 6307 became 6307-2RS. The belts are not counted yet; `Stock/ขั้นต่ำสายพาน.xlsx` (made with `scripts/export_stock_sheet.py`, plus a "แนะนำ" column = what one purchase
+  usually bought) is for filling the minimum of each belt, and goes back in through `scripts/import_stock_sheet.py`.
+- "แผ่นเจียร / แผ่นตัด" are words of ใบเจียร / ใบตัด; โซ่ KANA #60 is a chain item like #50 / #80.
+
+## เทียบราคา is a table (`#prices`, `#price=<item id>`)
+
+One row per thing: name · category · last price · last shop · date · the cheapest price ever paid (only shown when it is lower than the last) · how many times it was bought; every header sorts.
+The name opens the item's own page: price in each shop, price per brand (only when more than one brand was bought), and every purchase.

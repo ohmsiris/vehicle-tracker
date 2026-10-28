@@ -11,7 +11,7 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "stock", "sheet"];
+const FLEET_VIEWS = ["employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 
 // ------------------------------------------------------------------ routing
 function route() {
@@ -38,6 +38,8 @@ function route() {
   if (h === "purchases") return openPurchases();
   if (h === "purchase-new") return openPurchaseNew();
   if (h === "prices") return openPrices();
+  const pri = /^price=(.+)$/.exec(h);
+  if (pri && UUID_RE.test(pri[1])) return openPriceItem(pri[1]);
   if (h === "stock") return openStock();
   if (h === "stock-sheet") return openStockSheet();
   const mach = /^machine=(.+)$/.exec(h);

@@ -18,7 +18,7 @@ const bu = {
   jobs: [],                // the queue: { id, files, status: queued|reading|ready|error, error, t0, extraction, server, review, manual }
   cur: null,               // the job being checked
   nextId: 1, running: 0, timer: null, notice: "",
-  bills: [], prices: null, stock: null, vat: "inc", skSort: { key: "category", dir: 1 },
+  bills: [], prices: null, stock: null, vat: "inc", skSort: { key: "category", dir: 1 }, prSort: { key: "name", dir: 1 },
   dlgSave: null,
 };
 
@@ -552,30 +552,84 @@ async function loadPrices() {
 
 const buCost = (x) => (bu.vat === "ex" ? x.unit_cost_ex_vat : x.unit_cost);
 
+const PR_COLS = [["name", "ของ"], ["category", "หมวด"], ["last", "ราคาล่าสุด"], ["vendor", "ร้านล่าสุด"], ["date", "วันที่"], ["lowest", "ถูกสุดที่เคยซื้อ"], ["count", "ซื้อ (ครั้ง)"]];
+const prSortValue = (it, key) => (key === "last" ? (it.last ? Number(buCost(it.last)) : null) : key === "lowest" ? (it.lowest ? Number(buCost(it.lowest)) : null)
+  : key === "vendor" ? (it.last ? it.last.vendor || "" : "") : key === "date" ? (it.last ? it.last.bill_date || "" : "") : key === "count" ? it.count : (it[key] || ""));
+
+// one row per thing, the name opens its own page (shops, brands, every purchase); the cheaper-than-last price is the only thing marked
 function renderPrices() {
   const p = bu.prices;
   if (!p) return;
-  const per = (x, unit) => `${buMoney(buCost(x))} ฿${unit ? `/${unit}` : ""}`;
   const cat = $("prCat").value, vendor = $("prVendor").value;
   const shown = p.items.filter((it) => it.count > 0 && (!cat || it.category === cat) && (!vendor || it.by_vendor.some((v) => v.vendor === vendor)));
-  const cards = shown.map((it) => el("section", { class: "card prcard" },
-    el("div", { class: "prhead" }, el("strong", { text: it.name }), it.category ? el("span", { class: "badge", text: it.category }) : null,
-      el("span", { class: "muted small", text: `ซื้อ ${it.count} ครั้ง` })),
-    it.last ? el("div", { class: "prline" },
-      el("span", {}, "ล่าสุด ", el("strong", { text: per(it.last, it.unit || it.last.unit) }), ` · ${it.last.vendor || "ไม่ระบุร้าน"} · ${beDate(it.last.bill_date)}`),
-      it.lowest && (it.lowest.unit_cost !== it.last.unit_cost || it.lowest.vendor !== it.last.vendor) ? el("span", { class: "prlow" }, "ถูกสุด ", el("strong", { text: per(it.lowest, it.unit || it.lowest.unit) }), ` · ${it.lowest.vendor || "ไม่ระบุร้าน"} · ${beDate(it.lowest.bill_date)}`) : null)
-      : el("div", { class: "muted small", text: "ยังไม่มีราคา (บรรทัดในบิลไม่มีจำนวนหรือยอด)" }),
-    it.by_vendor.length > 1 ? el("div", { class: "chips" }, ...it.by_vendor.map((v, i) => el("span", { class: `badge${i === 0 ? " ok" : ""}`,
-      text: `${v.vendor} ${buMoney(bu.vat === "ex" ? v.last_cost_ex_vat : v.last_cost)} ฿ (${beDate(v.last_date)}${v.times > 1 ? ` · ${v.times} ครั้ง` : ""})` }))) : null,
-    it.by_brand && it.by_brand.length > 1 ? el("div", { class: "chips" }, ...it.by_brand.map((b, i) => el("span", { class: `badge${i === 0 ? " ok" : " shop"}`,
-      text: `${b.brand} ${buMoney(b.last_cost)} ฿ (${b.last_vendor || "ไม่ระบุร้าน"} · ${beDate(b.last_date)}${b.times > 1 ? ` · ${b.times} ครั้ง` : ""})` }))) : null,
-    it.remark ? el("div", { class: "muted small", text: it.remark }) : null,
-    el("details", {}, el("summary", { class: "small", text: "ประวัติการซื้อ" }),
-      ...it.history.map((h) => el("div", { class: "prhist small" }, el("span", { text: beDate(h.bill_date) }), el("span", { text: [h.vendor || "–", h.brand].filter(Boolean).join(" · ") }),
-        el("span", { class: "muted", text: h.description }), el("span", { text: `${buQty(h.quantity)} ${h.unit || ""}` }),
-        el("strong", { text: buCost(h) === null ? "–" : `${buMoney(buCost(h))} ฿` }))))));
-  fill($("prList"), ...(cards.length ? cards : [el("p", { class: "muted empty", text: p.items.some((it) => it.count > 0) ? "ไม่พบของที่ตรงกับตัวกรอง" : "ยังไม่มีราคาของ — บันทึกบิลซื้อของแล้วเลือกว่าแต่ละบรรทัดเป็นของอะไร ราคาจะขึ้นที่นี่" })]));
+  const { key, dir } = bu.prSort;
+  shown.sort((a, b) => {
+    const x = prSortValue(a, key), y = prSortValue(b, key);
+    if ((x === null || x === "") !== (y === null || y === "")) return x === null || x === "" ? 1 : -1;
+    return (typeof x === "number" ? x - y : String(x).localeCompare(String(y), "th", { numeric: true })) * dir || String(a.name).localeCompare(String(b.name), "th", { numeric: true });
+  });
+  const money = (x, unit) => `${buMoney(buCost(x))} ฿${unit ? `/${unit}` : ""}`;
+  const head = el("tr", {}, ...PR_COLS.map(([k, label]) => el("th", { class: ["last", "lowest", "count"].includes(k) ? "r" : "", "aria-sort": key === k ? (dir > 0 ? "ascending" : "descending") : "none" },
+    el("button", { class: "skth", type: "button", title: "เรียงตามคอลัมน์นี้", text: label + (key === k ? (dir > 0 ? " ▲" : " ▼") : ""),
+      onclick: () => { bu.prSort = { key: k, dir: bu.prSort.key === k ? -bu.prSort.dir : 1 }; renderPrices(); } }))));
+  const rows = shown.map((it) => {
+    const cheaper = it.last && it.lowest && Number(buCost(it.lowest)) < Number(buCost(it.last));
+    return el("tr", {},
+      el("td", {}, el("button", { class: "linkbtn", type: "button", text: it.name, onclick: () => goHash(`#price=${it.id}`) }),
+        it.by_brand && it.by_brand.length > 1 ? el("span", { class: "badge shop", text: `${it.by_brand.length} ยี่ห้อ` }) : null),
+      el("td", { class: "small", text: it.category || "" }),
+      el("td", { class: "r nowrap" }, it.last ? el("strong", { text: money(it.last, it.unit || it.last.unit) }) : "–"),
+      el("td", { text: it.last ? it.last.vendor || "ไม่ระบุร้าน" : "" }),
+      el("td", { class: "small nowrap", text: it.last ? beDate(it.last.bill_date) : "" }),
+      el("td", { class: "r nowrap" }, cheaper ? el("span", { class: "prlow" }, el("strong", { text: money(it.lowest, it.unit || it.lowest.unit) }), el("div", { class: "small", text: `${it.lowest.vendor || "ไม่ระบุร้าน"} · ${beDate(it.lowest.bill_date)}` }))
+        : el("span", { class: "muted small", text: it.last ? "ล่าสุดคือถูกสุด" : "" })),
+      el("td", { class: "r", text: String(it.count) }));
+  });
+  fill($("prList"), ...(rows.length ? [el("div", { class: "bu-scroll" }, el("table", { class: "lines prtable" }, el("thead", {}, head), el("tbody", {}, ...rows)))]
+    : [el("p", { class: "muted empty", text: p.items.some((it) => it.count > 0) ? "ไม่พบของที่ตรงกับตัวกรอง" : "ยังไม่มีราคาของ — บันทึกบิลซื้อของแล้วเลือกว่าแต่ละบรรทัดเป็นของอะไร ราคาจะขึ้นที่นี่" })]));
   renderUnlinked();
+}
+
+// ---- one item's page: the price in each shop, brand by brand (only when more than one brand was bought), and every purchase
+async function openPriceItem(id) {
+  showView("priceItem");
+  showErr("piError", "");
+  if (!bu.prices) {
+    try { [bu.prices] = await Promise.all([api("/api/prices"), bu.opts ? null : buLoadOptions()]); } catch (err) { showErr("piError", `โหลดราคาไม่สำเร็จ: ${err.message}`); return; }
+  }
+  renderPriceItem(id);
+}
+
+function renderPriceItem(id) {
+  const it = (bu.prices.items || []).find((x) => x.id === id);
+  if (!it) { fill($("piTitle"), "ไม่พบรายการนี้"); fill($("piSub"), ""); fill($("piBody"), ""); return; }
+  const unit = it.unit ? `/${it.unit}` : "";
+  const money = (v) => (v === null || v === undefined ? "–" : `${buMoney(v)} ฿${unit}`);
+  const vat = (inc, ex) => (bu.vat === "ex" ? ex : inc);
+  fill($("piTitle"), it.name);
+  fill($("piSub"), [it.category, it.remark, `ซื้อ ${it.count} ครั้ง`].filter(Boolean).join(" · "));
+  const tbl = (cols, rows) => el("div", { class: "bu-scroll" }, el("table", { class: "lines prtable" }, el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { text: c })))), el("tbody", {}, ...rows)));
+  const sections = [];
+  sections.push(el("div", { class: "card pisum" },
+    it.last ? el("div", {}, el("div", { class: "muted small", text: "ล่าสุด" }), el("strong", { class: "pibig", text: money(buCost(it.last)) }), el("div", { class: "small", text: `${it.last.vendor || "ไม่ระบุร้าน"} · ${beDate(it.last.bill_date)}` })) : null,
+    it.lowest ? el("div", {}, el("div", { class: "muted small", text: "ถูกสุดที่เคยซื้อ" }), el("strong", { class: "pibig prlow", text: money(buCost(it.lowest)) }), el("div", { class: "small", text: `${it.lowest.vendor || "ไม่ระบุร้าน"} · ${beDate(it.lowest.bill_date)}` })) : null));
+  sections.push(el("section", { class: "card" }, el("h3", { class: "section-title", text: "ราคาแต่ละร้าน" }),
+    tbl(["ร้าน", "ราคาล่าสุด", "วันที่", "ซื้อ (ครั้ง)"], it.by_vendor.map((v, i) => el("tr", { class: i === 0 && it.by_vendor.length > 1 ? "cheapest" : "" },
+      el("td", {}, el("strong", { text: v.vendor || "ไม่ระบุร้าน" }), i === 0 && it.by_vendor.length > 1 ? el("span", { class: "badge ok", text: "ถูกสุดตอนนี้" }) : null),
+      el("td", { class: "nowrap", text: money(vat(v.last_cost, v.last_cost_ex_vat)) }), el("td", { class: "small nowrap", text: beDate(v.last_date) }), el("td", { text: String(v.times) }))))));
+  if (it.by_brand && it.by_brand.length > 1) {
+    sections.push(el("section", { class: "card" }, el("h3", { class: "section-title", text: "ราคาแต่ละยี่ห้อ" }),
+      tbl(["ยี่ห้อ", "ราคาล่าสุด", "ร้าน", "วันที่", "ซื้อ (ครั้ง)"], it.by_brand.map((b, i) => el("tr", { class: i === 0 ? "cheapest" : "" },
+        el("td", {}, el("strong", { text: b.brand }), i === 0 ? el("span", { class: "badge ok", text: "ถูกสุดตอนนี้" }) : null),
+        el("td", { class: "nowrap", text: money(vat(b.last_cost, b.last_cost_ex_vat)) }), el("td", { text: b.last_vendor || "ไม่ระบุร้าน" }),
+        el("td", { class: "small nowrap", text: beDate(b.last_date) }), el("td", { text: String(b.times) }))))));
+  }
+  sections.push(el("section", { class: "card" }, el("h3", { class: "section-title", text: `ประวัติการซื้อ (${it.history.length}${it.count > it.history.length ? ` จาก ${it.count}` : ""})` }),
+    tbl(["วันที่", "ร้าน", "ยี่ห้อ", "ชื่อในบิล", "จำนวน", "ราคาต่อหน่วย"], it.history.map((h) => el("tr", {},
+      el("td", { class: "small nowrap", text: beDate(h.bill_date) }), el("td", { text: h.vendor || "–" }), el("td", { text: h.brand || "" }),
+      el("td", { class: "muted small", text: h.description }), el("td", { class: "nowrap", text: `${buQty(h.quantity)} ${h.unit || ""}` }),
+      el("td", { class: "r nowrap" }, el("strong", { text: buCost(h) === null ? "–" : `${buMoney(buCost(h))} ฿` })))))));
+  fill($("piBody"), ...sections);
 }
 
 function renderUnlinked() {
@@ -990,6 +1044,7 @@ function initBuy() {
   $("prQ").addEventListener("input", () => { clearTimeout(prTimer); prTimer = setTimeout(loadPrices, 300); });
   for (const id of ["prCat", "prVendor"]) $(id).addEventListener("change", renderPrices);
   $("prVat").addEventListener("change", () => { bu.vat = $("prVat").value; renderPrices(); });
+  $("piBack").addEventListener("click", () => goHash("#prices"));
   $("prUq").addEventListener("input", renderUnlinked);
   $("prUv").addEventListener("change", renderUnlinked);
   for (const id of ["skQ", "skCat", "skKind", "skBrand", "skVolt", "skLoc", "skLow"]) $(id).addEventListener(id === "skQ" ? "input" : "change", renderStock);
