@@ -721,3 +721,13 @@ manager's board, so there is one list to look after. More settings (the other th
   via `shops.canonical`), so each shop is one option; in-house names and people stay as they are.
 - **เลขไมล์** shows under the box what this truck's other bills say just before and just after the bill's date (`GET /api/vehicles/{id}/mileage`), and flags a mileage lower
   than an earlier bill's or higher than a later one's, so a misread odometer is seen at once. When editing, the bill itself is left out of the list.
+
+## Truck history from the dealership's report (`app/dealer_history.py`, `scripts/import_dealer_history.py`)
+The Isuzu service system's "ประวัติการซ่อม" PDF (one truck per file, no prices) is read into visits and lines -- date, odometer, and every labour / part line with the dealer's
+explanation in brackets -- and loaded as events:
+`.venv/Scripts/python.exe scripts/import_dealer_history.py "<report.pdf>" ... [--apply]` (dry run first; needs `pip install pymupdf` in the venv, a local tool only).
+The truck is found by its plate; a visit already on the site (same truck, day AND odometer) is skipped, so a report can be loaded again; the same day with another odometer is
+reported, not added. New visits are saved as records made by hand (source "manual", deletable one by one) with notes starting "ประวัติจากศูนย์บริการ" (which also keeps them from
+being flagged "date far from the day it was saved"); labour lines are ค่าแรง, parts go through the AI categoriser. 27 Oct 2026: #12, #13, #14 and #2 loaded (50 visits).
+The plan recognises the dealership's wording for the chassis check ("ตรวจสอบช่วงล่างทั้งหมด", "ตรวจเช็คช่วงล่าง").
+

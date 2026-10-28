@@ -469,6 +469,7 @@ def test_the_intake_manifold_is_for_the_small_trucks_at_100000_km():
 
 @pytest.mark.parametrize("line,key", [
     ("ฟลัชชิ่งน้ำมันเครื่อง", "engine_flush"), ("flushing เครื่อง", "engine_flush"), ("ล้างภายในเครื่อง", "engine_flush"),
+    ("ตรวจสอบช่วงล่างทั้งหมด (ปกติ)", "chassis_check"), ("ตรวจเช็คช่วงล่าง", "chassis_check"), ("ตรวจสอบสภาพช่วงล่าง", "chassis_check"),    # the dealership's wording
     ("เช็คช่วงล่าง", "chassis_check"), ("เปลี่ยนโช้คอัพหน้า", "chassis_check"), ("เสริมแหนบ", "chassis_check"), ("สลักคอม้า", "chassis_check"),
     ("ล้างท่อร่วมไอดี", "intake_manifold"), ("ค่าล้างท่อไอดี", "intake_manifold"), ("ทำความสะอาดท่อร่วมไอดี", "intake_manifold"),
     ("ล้างทำความสะอาดท่อไอดี", "intake_manifold"), ("ท่อร่วมไอดี", "intake_manifold"), ("เปลี่ยนท่อร่วมไอดี", "intake_manifold"),

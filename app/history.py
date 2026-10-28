@@ -77,6 +77,9 @@ DATE_SLACK_BEFORE = 366        # a bill dated more than a year before it was ent
 DATE_SLACK_AFTER = 1
 
 
+IMPORT_MARK = "ประวัติจากศูนย์บริการ"        # the start of the notes of an event loaded from a dealership history report (scripts/import_dealer_history.py)
+
+
 def review_reasons(event: dict, lines: list[dict]) -> list[str]:
     """
     Why a saved bill deserves another look, judged from the bill AS IT IS NOW --
@@ -93,6 +96,8 @@ def review_reasons(event: dict, lines: list[dict]) -> list[str]:
     elif total and abs(line_sum - total) > MONEY_TOLERANCE:
         reasons.append(f"ยอดรวมไม่ตรงกับรายการ (รายการรวม {line_sum:,.2f} / ยอดรวม {total:,.2f})")
     try:
+        if str(event.get("notes") or "").startswith(IMPORT_MARK):         # an old record loaded on purpose: its date is not "far from the day it was saved" by mistake
+            return reasons
         d = date.fromisoformat(str(event.get("event_date"))[:10])
         saved = date.fromisoformat(str(event.get("created_at") or event.get("event_date"))[:10])
         if d < saved - timedelta(days=DATE_SLACK_BEFORE) or d > saved + timedelta(days=DATE_SLACK_AFTER):

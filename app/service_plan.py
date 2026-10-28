@@ -252,7 +252,7 @@ _COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?(?:\s*ถอ
 # as the chassis having been looked at.
 _ANYWHERE = [
     ("engine_flush", re.compile(r"ฟลัช(?:ชิ่ง|ชิง)|flush|ล้างภายในเครื่อง|ล้างระบบหล่อลื่น", re.I)),
-    ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจ)\s*ช่วงล่าง")),
+    ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจสอบ|ตรวจเช็ค|ตรวจเช็ก|ตรวจ)\s*(?:สภาพ\s*)?ช่วงล่าง")),
 ]
 _TOP_UP = re.compile(r"เติม")
 
