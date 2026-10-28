@@ -795,7 +795,7 @@
     <div class="edit-banner" id="skNeedsV16" hidden>ยังใช้สต็อกไม่ได้ — ต้องรันไฟล์ <strong>schema_v16.sql</strong> ใน Supabase ก่อน</div>
     <div class="card bufilters">
       <input id="skQ" type="search" placeholder="ค้นหา: ชื่อ ชนิด ยี่ห้อ รุ่น สเปค ที่เก็บ" autocomplete="off" aria-label="ค้นหาของในสต็อก">
-      <button id="skWeekly" class="btn primary push" type="button">เบิกประจำสัปดาห์</button><button id="skIn" class="btn" type="button">รับเข้าหลายรายการ</button><button id="skMulti" class="btn" type="button">+ เพิ่มหลายรายการ</button><button id="skAdd" class="btn" type="button">+ เพิ่มรายการ</button>
+      <button id="skWeekly" class="btn primary push" type="button">เบิกประจำสัปดาห์</button><button id="skSheet" class="btn" type="button">พิมพ์ใบเบิก / ใบนับ</button><button id="skIn" class="btn" type="button">รับเข้าหลายรายการ</button><button id="skMulti" class="btn" type="button">+ เพิ่มหลายรายการ</button><button id="skAdd" class="btn" type="button">+ เพิ่มรายการ</button>
     </div>
     <div class="card bufilters skcascade" aria-label="กรองทีละชั้น">
       <select id="skCat" aria-label="หมวด"><option value="">ทุกหมวด</option></select><span class="skarrow" aria-hidden="true">›</span>
@@ -808,6 +808,18 @@
     </div>
     <p class="muted small" id="skCount"></p>
     <div id="skList"></div>
+  </section>
+
+  <section id="sheetView" hidden>
+    <div class="evbar">
+      <button id="shBack" class="btn small" type="button">← สต็อก</button>
+      <span class="grow"></span>
+      <select id="shKind" aria-label="ใบอะไร"><option value="out">ใบเบิกประจำสัปดาห์ (ติ๊ก)</option><option value="count">ใบนับของสิ้นเปลือง</option></select>
+      <button id="shPrint" class="btn primary" type="button">พิมพ์ (A4 แนวนอน)</button>
+    </div>
+    <p class="error" id="shError" hidden></p>
+    <p class="muted small" id="shCount"></p>
+    <div id="shPaper" class="shpapercol"></div>
   </section>
 
   <!-- ============ Settings: the repair shops ============ -->

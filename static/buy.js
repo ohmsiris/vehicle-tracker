@@ -570,7 +570,7 @@ const SK_NONE = "__none__";
 const SK_VOLT_RE = /(\d+(?:\.\d+)?)\s*V\s*(DC|AC)?/i;
 const skVolt = (i) => { const m = SK_VOLT_RE.exec(i.spec || ""); return m ? `${m[1]}V${m[2] ? m[2].toUpperCase() : ""}` : ""; };
 const SK_LEVELS = [["skCat", (i) => i.category || "", "ทุกหมวด"], ["skKind", (i) => i.kind || "", "ทุกชนิด"], ["skVolt", skVolt, "ทุกแรงดัน"], ["skBrand", (i) => i.brand || "", "ทุกยี่ห้อ"]];
-const SK_COLS = [["category", "หมวด"], ["kind", "ชนิด"], ["brand", "ยี่ห้อ"], ["model", "รุ่น"], ["spec", "สเปค"], ["on_hand", "คงเหลือ"], ["min_qty", "ขั้นต่ำ"], ["location", "ที่เก็บ"], ["last", "ราคาล่าสุด"]];
+const SK_COLS = [["code", "รหัส"], ["category", "หมวด"], ["kind", "ชนิด"], ["brand", "ยี่ห้อ"], ["model", "รุ่น"], ["spec", "สเปค"], ["on_hand", "คงเหลือ"], ["min_qty", "ขั้นต่ำ"], ["location", "ที่เก็บ"], ["last", "ราคาล่าสุด"]];
 const skSortValue = (i, key) => (key === "last" ? (i.last ? Number(i.last.unit_cost) : null) : key === "on_hand" || key === "min_qty" ? (i[key] === null || i[key] === undefined ? null : Number(i[key])) : (i[key] || "").toString());
 const skOptionText = (v, n) => `${v === SK_NONE ? "(ไม่ระบุ)" : v} (${n})`;
 
@@ -612,6 +612,7 @@ function renderStock() {
     , el("th", {}));
   fill($("skList"), ...(items.length ? [el("div", { class: "bu-scroll" }, el("table", { class: "lines sktable" }, el("thead", {}, head),
     el("tbody", {}, ...items.map((i) => el("tr", { class: i.low ? "low" : "", title: i.name },
+      el("td", { class: "small nowrap", text: i.code || "" }),
       el("td", { text: i.category || "" }),
       el("td", {}, el("button", { class: "linkbtn", type: "button", text: i.kind || i.name, onclick: () => openStockItem(i) }), i.kind ? null : el("div", { class: "muted small", text: "ยังไม่ได้จัดชนิด" })),
       el("td", { text: i.brand || "" }),
@@ -636,15 +637,15 @@ function skClearFilters() {
 }
 
 // one standard name per item: ชนิด + ยี่ห้อ + รุ่น + สเปค (the server builds it too; an item without a ชนิด keeps the name it was typed with)
-const SK_FIELDS = [["kind", "ชนิด (เช่น แมกเนติก โอเวอร์โหลด เบรกเกอร์)", { maxlength: 60 }], ["brand", "ยี่ห้อ", { maxlength: 40 }], ["model", "รุ่น / เบอร์", { maxlength: 60 }],
+const SK_FIELDS = [["code", "รหัส (เว้นว่าง = ตั้งให้เอง)", { maxlength: 12 }], ["kind", "ชนิด (เช่น แมกเนติก โอเวอร์โหลด เบรกเกอร์)", { maxlength: 60 }], ["brand", "ยี่ห้อ", { maxlength: 40 }], ["model", "รุ่น / เบอร์", { maxlength: 60 }],
   ["spec", "สเปค (เช่น 220V 40A)", { maxlength: 200 }], ["name", "ชื่อรายการ (ตั้งให้เองจาก ชนิด + ยี่ห้อ + รุ่น + สเปค)", { wide: true, maxlength: 120 }],
   ["category", "หมวด (เช่น ไฟฟ้า โซ่ เชื่อม-ตัด)", { maxlength: 40 }], ["unit", "หน่วย", { maxlength: 20 }],
   ["min_qty", "ขั้นต่ำ (ต่ำกว่านี้ขึ้นว่าควรสั่งเพิ่ม)", { type: "number" }], ["location", "ที่เก็บ / ชั้น", { maxlength: 60 }]];
 const skStandardName = (d) => [d.kind, d.brand, d.model, d.spec].map((x) => String(x || "").trim()).filter(Boolean).join(" ");
 
 async function openStockItem(item) {
-  const d = item ? { ...item, kind: item.kind || "", brand: item.brand || "", model: item.model || "", min_qty: item.min_qty ?? "", aliases: (item.aliases || []).join(", ") }
-    : { kind: "", brand: "", model: "", name: "", category: "", unit: "", spec: "", min_qty: "", location: "", aliases: "" };
+  const d = item ? { ...item, code: item.code || "", track_out: item.track_out !== false, kind: item.kind || "", brand: item.brand || "", model: item.model || "", min_qty: item.min_qty ?? "", aliases: (item.aliases || []).join(", ") }
+    : { code: "", track_out: true, kind: "", brand: "", model: "", name: "", category: "", unit: "", spec: "", min_qty: "", location: "", aliases: "" };
   let history = null;
   if (item) {
     try { history = await api(`/api/stock/items/${item.id}/moves`); } catch (_) { history = []; }
@@ -653,6 +654,8 @@ async function openStockItem(item) {
   buOpenDialog(item ? item.name : "เพิ่มรายการ", [
     el("div", { class: "mfields" }, ...SK_FIELDS.map(([k, l, o]) => mfield(d, k, l, o)),
       mfield(d, "aliases", "คำที่เจอในบิลแล้วนับเป็นรายการนี้ (คั่นด้วย , — ใส่รุ่นไว้ได้เลย เช่น SC-N8; รุ่นเดียวกันหลายสเปคใช้คู่ เช่น TR-N2/3+12-18A)", { wide: true, maxlength: 2000 })),
+    el("label", { class: "mgcheck" }, (() => { const c = el("input", { type: "checkbox" }); c.checked = !!d.track_out; c.addEventListener("change", () => { d.track_out = c.checked; }); return c; })(),
+      " เบิกด้วยใบติ๊กประจำสัปดาห์ ", el("span", { class: "muted small", text: "(ไม่ติ๊ก = ของสิ้นเปลือง นับที่ชั้นแทน ไม่ต้องติ๊กทุกชิ้น)" })),
     history && history.length ? el("details", { open: true }, el("summary", { text: `ความเคลื่อนไหว (${history.length})` }),
       ...history.map((m) => el("div", { class: "prhist small" }, el("span", { text: beDate(m.move_date) }), el("span", { text: KIND[m.kind] || m.kind }),
         el("strong", { text: `${m.qty > 0 ? "+" : ""}${buQty(m.qty)}` }), el("span", { class: "muted", text: [m.machine_name, m.notes].filter(Boolean).join(" · ") }),
@@ -662,7 +665,7 @@ async function openStockItem(item) {
           $("buDialog").close(); await loadStock();
         } })))) : null,
   ], async () => {
-    const body = { ...Object.fromEntries(SK_FIELDS.map(([k]) => [k, d[k]])) };
+    const body = { ...Object.fromEntries(SK_FIELDS.map(([k]) => [k, d[k]])), track_out: !!d.track_out };
     if (d.kind) delete body.name;                                  // the server builds the standard name from the parts
     if (item || d.aliases) body.aliases = String(d.aliases || "").split(",").map((w) => w.trim()).filter(Boolean);
     bu.stock = await api(item ? `/api/stock/items/${item.id}` : "/api/stock/items", jsonOpts(item ? "PATCH" : "POST", body));
@@ -823,6 +826,10 @@ function initBuy() {
   $("skWeekly").addEventListener("click", () => bu.stock && bu.stock.ready && openStockBatch("out"));
   $("skIn").addEventListener("click", () => bu.stock && bu.stock.ready && openStockBatch("in"));
   $("skMulti").addEventListener("click", () => bu.stock && bu.stock.ready && openStockMulti());
+  $("skSheet").addEventListener("click", () => goHash("#stock-sheet"));
+  $("shKind").addEventListener("change", renderStockSheet);
+  $("shPrint").addEventListener("click", skPrintSheet);
+  $("shBack").addEventListener("click", () => goHash("#stock"));
   $("buDlgCancel").addEventListener("click", () => $("buDialog").close());
   $("buViewerClose").addEventListener("click", () => $("buViewer").close());
   $("buViewer").addEventListener("click", (e) => { if (e.target === $("buViewer")) $("buViewer").close(); });          // a click on the dim area closes it
@@ -830,4 +837,66 @@ function initBuy() {
   $("buDlgSave").addEventListener("click", buDialogSave);
   // bills read but not saved live in this page only: warn before a refresh or closing the tab throws them away
   window.addEventListener("beforeunload", (e) => { if (bu.jobs.some((j) => j.status !== "error")) { e.preventDefault(); e.returnValue = ""; } });
+}
+
+
+// ================================================================== the printed sheets (#stock-sheet)
+// "out": the mechanic's weekly sheet -- every tracked item pre-printed in the stock table's order with 6 boxes: one tick per piece taken (no names to write,
+// no day of the week); the owner adds the ticks up when typing the week in. "count": the list for counting the cheap consumables on the shelf.
+const SHEET_BOXES = 6;
+
+function skSheetItems(kind) {
+  const keys = ["category", "kind", "brand", "model", "spec", "name"];
+  return bu.stock.items.filter((i) => i.active !== false && (kind === "out" ? i.track_out !== false : i.track_out === false))
+    .sort((a, b) => { for (const k of keys) { const c = String(a[k] || "").localeCompare(String(b[k] || ""), "th", { numeric: true }); if (c) return c; } return 0; });
+}
+
+async function openStockSheet() {
+  showView("sheet");
+  showErr("shError", "");
+  try { bu.stock = await api("/api/stock"); } catch (err) { showErr("shError", `โหลดสต็อกไม่สำเร็จ: ${err.message}`); return; }
+  renderStockSheet();
+}
+
+function renderStockSheet() {
+  if (!bu.stock) return;
+  const kind = $("shKind").value, items = skSheetItems(kind), today = beDateOf(new Date());
+  const blank = (w) => el("span", { class: "ss-blank", style: `min-width:${w}` });
+  const boxes = () => el("span", { class: "ss-boxes" }, ...Array.from({ length: SHEET_BOXES }, () => el("span", { class: "ss-box" })));
+  const rows = [];
+  let group = "";
+  for (const i of items) {
+    const g = [i.category, i.kind].filter(Boolean).join(" · ");
+    if (g !== group) { group = g; rows.push(el("tr", { class: "ss-group" }, el("td", { colspan: kind === "out" ? "5" : "5", text: g || "อื่นๆ" }))); }
+    rows.push(kind === "out"
+      ? el("tr", {}, el("td", { class: "ss-code", text: i.code || "" }), el("td", { class: "ss-name" }, i.name),
+          el("td", { class: "ss-have", text: buQty(i.on_hand) }), el("td", {}, boxes()), el("td", {}, el("span", { class: "ss-box wide" })))
+      : el("tr", {}, el("td", { class: "ss-code", text: i.code || "" }), el("td", { class: "ss-name" }, i.name),
+          el("td", { class: "ss-have", text: `${buQty(i.on_hand)} ${i.unit || ""}`.trim() }), el("td", {}, el("span", { class: "ss-box count" })), el("td", { class: "ss-note" })));
+  }
+  const table = el("table", { class: "ss-table" },
+    el("thead", {}, el("tr", {}, ...(kind === "out"
+      ? ["รหัส", "รายการ", "มี", "ติ๊ก 1 ช่อง = 1 ชิ้นที่หยิบ", "เกิน 6 ชิ้น เขียนจำนวน"]
+      : ["รหัส", "รายการ", "ระบบคิดว่ามี", "นับได้จริง", "หมายเหตุ"]).map((t) => el("th", { text: t })))),
+    el("tbody", {}, ...rows));
+  const extra = kind === "out" ? el("table", { class: "ss-table ss-extra" },
+    el("thead", {}, el("tr", {}, el("th", { text: "ของที่ไม่มีในรายการข้างบน (เขียนชื่อ/รุ่น)" }), el("th", { text: "จำนวน" }), el("th", { text: "ใช้กับ" }))),
+    el("tbody", {}, ...Array.from({ length: 6 }, () => el("tr", { class: "ss-line" }, el("td"), el("td"), el("td"))))) : null;
+  const head = kind === "out"
+    ? [el("h1", { text: "ใบเบิกอะไหล่ประจำสัปดาห์" }), el("div", { class: "ss-meta" }, "สัปดาห์ที่ ", blank("90px"), " ถึง ", blank("90px"), "   ช่าง ", blank("150px"), "   สาขา ", blank("90px")),
+       el("p", { class: "ss-how", text: "ติ๊ก 1 ช่องต่อ 1 ชิ้นที่หยิบ · เกิน 6 ชิ้นเขียนจำนวนในช่อง “เกิน 6” · ของที่ไม่มีในรายการเขียนในตารางท้ายใบ · ไม่ต้องเขียนวัน" })]
+    : [el("h1", { text: "ใบนับของสิ้นเปลือง" }), el("div", { class: "ss-meta" }, "วันที่นับ ", blank("110px"), "   ผู้นับ ", blank("150px")),
+       el("p", { class: "ss-how", text: "นับของจริงบนชั้นแล้วเขียนจำนวนในช่อง “นับได้จริง” — ระบบคิดของที่ใช้ไปจากผลต่าง" })];
+  const foot = kind === "out"
+    ? el("div", { class: "ss-foot" }, el("span", {}, "ลายเซ็นช่าง ", blank("170px")), el("span", {}, "ลงระบบแล้ว ", el("span", { class: "ss-box" }), "  วันที่ ", blank("90px"), "  ผู้บันทึก ", blank("110px")))
+    : el("div", { class: "ss-foot" }, el("span", {}, "ลงระบบแล้ว ", el("span", { class: "ss-box" }), "  วันที่ ", blank("90px"), "  ผู้บันทึก ", blank("110px")));
+  fill($("shPaper"), el("div", { class: "stocksheet" }, ...head, table, extra, foot, el("p", { class: "ss-stamp", text: `พิมพ์ ${today} · คอลัมน์ “มี” = จำนวนในระบบตอนพิมพ์` })));
+  fill($("shCount"), `${items.length} รายการ${kind === "out" ? " ที่เบิกด้วยใบติ๊ก" : " ที่นับที่ชั้น (ของสิ้นเปลือง)"}`);
+}
+
+function skPrintSheet() {
+  document.body.classList.add("printing-sheet");
+  const done = () => { document.body.classList.remove("printing-sheet"); window.removeEventListener("afterprint", done); };
+  window.addEventListener("afterprint", done);
+  window.print();
 }

@@ -687,6 +687,11 @@ the outside world, rounds and inspections. A group at the top of the sidebar wit
   **หมวด › ชนิด › แรงดัน (V, read from the spec) › ยี่ห้อ**, each list showing only what is left and how many items it has (e.g. ไฟฟ้า › แมกเนติก › 220V › Fuji), plus
   ที่เก็บ, search and "เฉพาะที่ควรสั่งเพิ่ม". **Minimums** are filled in an Excel sheet: `scripts/export_stock_sheet.py <out.xlsx>` writes every item with yellow cells for ขั้นต่ำ /
   ที่เก็บ and blank rows for new items; `scripts/import_stock_sheet.py <file> [--apply]` reads it back (dry run first).
+  **Paper for the mechanic** (`#stock-sheet`, button "พิมพ์ใบเบิก / ใบนับ", A4 landscape; `schema_v29.sql`, `scripts/assign_stock_codes.py`): every item has a short **code**
+  (E012: a letter by category + 3 digits, also for the shelf label) and a **track_out** flag. Items with track_out are printed on the **weekly tick sheet** in the stock table's
+  order, 6 empty boxes each -- one tick per piece taken, no names, no day of the week; "เกิน 6" box for more, a table for things not on the list, a "ลงระบบแล้ว" box.
+  Cheap consumables (tape, glue, silicone, discs, wire, chemicals, chains, welding rods ...) have track_out off: they are not ticked but counted on the shelf with the
+  **ใบนับของสิ้นเปลือง**, and the use is the difference.
   **One standard name per item**: ชนิด + ยี่ห้อ + รุ่น + สเปค (`stock.compose_name`), built from the four fields, e.g. "แมกเนติก Fuji SC-N8 220V",
   "โอเวอร์โหลด Mitsubishi TH-T25 18-26A". The model code is the word a bill is matched by (spaces, dashes and capitals do not matter: SC-N2 = SCN2 = sc n2);
   a model that comes in several ratings uses a pair, "TR-N2/3+12-18A" (both must be on the bill line). The 27 Oct 2026 count of the electrical store and

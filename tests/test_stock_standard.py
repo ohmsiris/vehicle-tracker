@@ -104,3 +104,14 @@ def test_a_bad_row_stops_the_whole_batch_and_is_named(sdb):
     with pytest.raises(stock.InvalidStock, match="ไม่มีรายการ"):
         stock.create_items_batch({"rows": [{"kind": ""}]})
     assert sdb.t["stock_items"] == []                                                                          # nothing was written by any of them
+
+
+def test_codes_follow_the_category_letter_and_never_repeat():
+    others = [{"name": "a", "code": "E001"}, {"name": "b", "code": "e012"}, {"name": "c", "code": "W003"}, {"name": "d", "code": None}]
+    assert stock.next_code("ไฟฟ้า", others) == "E013" and stock.next_code("เชื่อม-ตัด", others) == "W004" and stock.next_code("โซ่", others) == "C001" and stock.next_code("อื่นๆ", others) == "X001"
+    v = stock.clean_item({"kind": "รีเลย์", "category": "ไฟฟ้า"}, others=others)
+    assert v["code"] == "E013" and v["track_out"] is True
+    with pytest.raises(stock.InvalidStock, match="รหัส E012"):
+        stock.clean_item({"kind": "รีเลย์", "code": "e012"}, others=others)
+    w = stock.clean_item({"kind": "เทป", "code": "g009", "track_out": False}, others=others)
+    assert w["code"] == "G009" and w["track_out"] is False and w["name"] == "เทป"

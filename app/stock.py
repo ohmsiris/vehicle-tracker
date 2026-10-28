@@ -25,6 +25,7 @@ from app.purchasing import NEEDS_V16, _machines, has_v16, items_with_aliases, pr
 
 MAX_QTY = 1_000_000
 MOVE_KINDS = ("in", "out", "count")
+CODE_PREFIX = {"ไฟฟ้า": "E", "เชื่อม-ตัด": "W", "โซ่": "C", "น้ำยา-กาว": "G", "ท่อ-ประปา": "P"}      # the letter of an item's code by category (E012); other categories: X
 
 
 class InvalidStock(ValueError):
@@ -51,6 +52,13 @@ def _qty(value, what: str, *, allow_zero: bool) -> Optional[float]:
     return n
 
 
+def next_code(category, others: list[dict]) -> str:
+    """The next free code of the category's letter: E001, E002 ... (the code is printed on the shelf label and the weekly sheet)."""
+    prefix = CODE_PREFIX.get(category or "", "X")
+    nums = [int(m.group(1)) for o in others for m in [re.fullmatch(prefix + r"(\d+)", (o.get("code") or "").upper())] if m]
+    return f"{prefix}{max(nums, default=0) + 1:03d}"
+
+
 def compose_name(kind, brand, model, spec) -> str:
     """The standard name: ชนิด + ยี่ห้อ + รุ่น + สเปค, whichever are given, single-spaced."""
     return _text(" ".join(p for p in (_text(kind, 60), _text(brand, 40), _text(model, 60), _text(spec, 200)) if p), 120)
@@ -64,6 +72,13 @@ def clean_item(data: dict, *, existing: Optional[dict] = None, others: list[dict
     for key, limit in (("kind", 60), ("brand", 40), ("model", 60), ("category", 40), ("unit", 20), ("spec", 200), ("location", 60), ("notes", 500)):
         if creating or key in data:
             out[key] = _text(data.get(key), limit) or None
+    if creating or "code" in data:                                              # the short code on the shelf label and the weekly sheet
+        code = _text(data.get("code"), 12).upper()
+        if code and any((o.get("code") or "").upper() == code for o in others):
+            raise InvalidStock(f"รหัส {code} มีรายการอื่นใช้อยู่แล้ว")
+        out["code"] = code or (next_code(out.get("category"), others) if creating else None)
+    if creating or "track_out" in data:                                          # False = not on the weekly sheet: counted on the shelf instead
+        out["track_out"] = bool(data.get("track_out", True))
     final = {**(existing or {}), **out}
     composed = compose_name(final.get("kind"), final.get("brand"), final.get("model"), final.get("spec")) if final.get("kind") else ""
     typed = _text(data.get("name"), 120) if "name" in data else ""
