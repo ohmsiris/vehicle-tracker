@@ -353,15 +353,29 @@ function buBlankLine() {
 // The same rule as the server (app/shops.py explain): lower-case, no spaces / dots / dashes; "a+b" = both parts;
 // the most specific word wins. Used to show the match while a line is typed in.
 const buNorm = (t) => String(t || "").toLowerCase().replace(/[\s\-_.]/g, "");
+// one word of an item found in a bill line: spaces, dashes, dots and quotes between its characters do not matter (SC-N2 = SCN2), but a code is a WHOLE code ("B-1" is not in
+// "B-105", "UCF207" is not in "UCF207-20"). The same rule as the server's word_regex.
+function buWordRegex(word) {
+  const chars = [...String(word || "")].filter((c) => !/[\s\-_."']/.test(c));
+  if (!chars.length) return null;
+  const ascii = (c) => /^[A-Za-z0-9]$/.test(c);
+  const esc = (c) => c.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&");
+  const pre = ascii(chars[0]) ? "(?<![A-Za-z0-9])" : "";
+  const post = ascii(chars[chars.length - 1]) ? "(?![A-Za-z0-9]|[-/]\\d+(?![A-Za-z]))" : "";
+  return new RegExp(pre + chars.map(esc).join("[\\s\\-_.\"']*") + post, "i");
+}
+
 function buMatch(description) {
-  const n = buNorm(description);
-  if (!n || !bu.opts) return null;
+  const text = String(description || "");
+  if (!text.trim() || !bu.opts) return null;
   let best = null, bestLen = 0;
   for (const it of bu.opts.items) {
     for (const w of [...(it.aliases || []), it.name]) {
-      const parts = String(w).split("+").map(buNorm).filter(Boolean);
-      const len = parts.reduce((s, p) => s + p.length, 0);
-      if (parts.length && len > bestLen && parts.every((p) => n.includes(p))) { best = it; bestLen = len; }
+      const parts = String(w).split("+").map((p) => p.trim()).filter(Boolean);
+      const regexes = parts.map(buWordRegex);
+      if (!parts.length || regexes.some((r) => !r)) continue;
+      const len = parts.reduce((s, p) => s + buNorm(p).length, 0);
+      if (len > bestLen && regexes.every((r) => r.test(text))) { best = it; bestLen = len; }
     }
   }
   return best;
@@ -553,8 +567,11 @@ function renderPrices() {
       : el("div", { class: "muted small", text: "ยังไม่มีราคา (บรรทัดในบิลไม่มีจำนวนหรือยอด)" }),
     it.by_vendor.length > 1 ? el("div", { class: "chips" }, ...it.by_vendor.map((v, i) => el("span", { class: `badge${i === 0 ? " ok" : ""}`,
       text: `${v.vendor} ${buMoney(bu.vat === "ex" ? v.last_cost_ex_vat : v.last_cost)} ฿ (${beDate(v.last_date)}${v.times > 1 ? ` · ${v.times} ครั้ง` : ""})` }))) : null,
+    it.by_brand && it.by_brand.length > 1 ? el("div", { class: "chips" }, ...it.by_brand.map((b, i) => el("span", { class: `badge${i === 0 ? " ok" : " shop"}`,
+      text: `${b.brand} ${buMoney(b.last_cost)} ฿ (${b.last_vendor || "ไม่ระบุร้าน"} · ${beDate(b.last_date)}${b.times > 1 ? ` · ${b.times} ครั้ง` : ""})` }))) : null,
+    it.remark ? el("div", { class: "muted small", text: it.remark }) : null,
     el("details", {}, el("summary", { class: "small", text: "ประวัติการซื้อ" }),
-      ...it.history.map((h) => el("div", { class: "prhist small" }, el("span", { text: beDate(h.bill_date) }), el("span", { text: h.vendor || "–" }),
+      ...it.history.map((h) => el("div", { class: "prhist small" }, el("span", { text: beDate(h.bill_date) }), el("span", { text: [h.vendor || "–", h.brand].filter(Boolean).join(" · ") }),
         el("span", { class: "muted", text: h.description }), el("span", { text: `${buQty(h.quantity)} ${h.unit || ""}` }),
         el("strong", { text: buCost(h) === null ? "–" : `${buMoney(buCost(h))} ฿` }))))));
   fill($("prList"), ...(cards.length ? cards : [el("p", { class: "muted empty", text: p.items.some((it) => it.count > 0) ? "ไม่พบของที่ตรงกับตัวกรอง" : "ยังไม่มีราคาของ — บันทึกบิลซื้อของแล้วเลือกว่าแต่ละบรรทัดเป็นของอะไร ราคาจะขึ้นที่นี่" })]));
@@ -645,7 +662,7 @@ function renderStock() {
       el("td", { text: i.category || "" }),
       el("td", {}, el("button", { class: "linkbtn", type: "button", text: i.kind || i.name, onclick: () => openStockItem(i) }), i.kind ? null : el("div", { class: "muted small", text: "ยังไม่ได้จัดชนิด" })),
       el("td", { text: i.brand || "" }),
-      el("td", {}, el("button", { class: "linkbtn", type: "button", text: i.model || "", onclick: () => openStockItem(i) })),
+      el("td", {}, el("button", { class: "linkbtn", type: "button", text: i.model || "", onclick: () => openStockItem(i) }), i.remark ? el("div", { class: "muted small sk-remark", text: i.remark }) : null),
       el("td", { text: i.spec || "" }),
       el("td", { class: "r nowrap" }, el("strong", { text: `${buQty(i.on_hand)} ${i.unit || ""}`.trim() }), i.low ? el("div", { class: "badge urgent", text: "ควรสั่งเพิ่ม" }) : null),
       el("td", { class: "r", text: i.min_qty === null || i.min_qty === undefined ? "" : buQty(i.min_qty) }),
@@ -667,10 +684,14 @@ function skClearFilters() {
 
 // one standard name per item: ชนิด + ยี่ห้อ + รุ่น + สเปค (the server builds it too; an item without a ชนิด keeps the name it was typed with)
 const SK_FIELDS = [["code", "รหัส (เว้นว่าง = ตั้งให้เอง)", { maxlength: 12 }], ["kind", "ชนิด (เช่น แมกเนติก โอเวอร์โหลด เบรกเกอร์)", { maxlength: 60 }], ["brand", "ยี่ห้อ", { maxlength: 40 }], ["model", "รุ่น / เบอร์", { maxlength: 60 }],
-  ["spec", "สเปค (เช่น 220V 40A)", { maxlength: 200 }], ["name", "ชื่อรายการ (ตั้งให้เองจาก ชนิด + ยี่ห้อ + รุ่น + สเปค)", { wide: true, maxlength: 120 }],
+  ["spec", "สเปค (เช่น 220V 40A)", { maxlength: 200 }], ["name", "ชื่อรายการ (ตั้งให้เองจาก ชนิด + ยี่ห้อ + รุ่น + สเปค · สายพานและลูกปืน: ชนิด + รุ่น ไม่ใส่ยี่ห้อ)", { wide: true, maxlength: 120 }],
+  ["remark", "คำอธิบายสั้น (โชว์ใต้ชื่อ: รูมิล/รูหุน ชื่ออื่นของของชิ้นนี้)", { wide: true, maxlength: 200 }],
   ["category", "หมวด (เช่น ไฟฟ้า โซ่ เชื่อม-ตัด)", { maxlength: 40 }], ["unit", "หน่วย", { maxlength: 20 }],
   ["min_qty", "ขั้นต่ำ (ต่ำกว่านี้ขึ้นว่าควรสั่งเพิ่ม)", { type: "number" }], ["location", "ที่เก็บ / ชั้น", { maxlength: 60 }]];
-const skStandardName = (d) => [d.kind, d.brand, d.model, d.spec].map((x) => String(x || "").trim()).filter(Boolean).join(" ");
+const SK_BRAND_FREE = ["สายพาน", "ลูกปืน", "ตลับลูกปืน"];            // parts that interchange by size: named by kind + size only; the brand is a field (and a price column)
+const skStandardName = (d) => (SK_BRAND_FREE.some((k) => String(d.kind || "").trim().startsWith(k)) ? [d.kind, d.model] : [d.kind, d.brand, d.model, d.spec])
+  .map((x) => String(x || "").trim()).filter(Boolean).join(" ");
+const SK_SHORTHAND = "รูมิล = รูวัดเป็นมิลลิเมตร · รูหุน = รูวัดเป็นหุน (1 หุน = 1/8 นิ้ว = 3.2 มม. · 1 นิ้ว = 8 หุน)";
 
 // หมวด and หน่วย are picked from a list (the ones already used + the usual ones; "+ เพิ่มใหม่…" types a new one). The หมวด is guessed as the parts are typed:
 // first from the items of the same ชนิด already in the list (แมกเนติก -> ไฟฟ้า), then from words in the name (SK_CATEGORY_WORDS). No AI: instant and predictable.
@@ -752,8 +773,8 @@ function skSteppers(root) {
 }
 
 async function openStockItem(item) {
-  const d = item ? { ...item, code: item.code || "", track_out: item.track_out !== false, kind: item.kind || "", brand: item.brand || "", model: item.model || "", min_qty: item.min_qty ?? "", aliases: (item.aliases || []).join(", ") }
-    : { code: "", track_out: true, kind: "", brand: "", model: "", name: "", category: "", unit: "", spec: "", min_qty: "", location: "", aliases: "" };
+  const d = item ? { ...item, code: item.code || "", remark: item.remark || "", track_out: item.track_out !== false, kind: item.kind || "", brand: item.brand || "", model: item.model || "", min_qty: item.min_qty ?? "", aliases: (item.aliases || []).join(", ") }
+    : { code: "", remark: "", track_out: true, kind: "", brand: "", model: "", name: "", category: "", unit: "", spec: "", min_qty: "", location: "", aliases: "" };
   let history = null;
   if (item) {
     try { history = await api(`/api/stock/items/${item.id}/moves`); } catch (_) { history = []; }
@@ -762,9 +783,11 @@ async function openStockItem(item) {
   const catBox = skChoice(d, "category", "หมวด", skCategories()), unitBox = skChoice(d, "unit", "หน่วย", skUnits());
   buOpenDialog(item ? item.name : "เพิ่มรายการ", [
     el("div", { class: "mfields" }, ...SK_FIELDS.map(([k, l, o]) => (k === "category" ? catBox : k === "unit" ? unitBox : mfield(d, k, l, o))),
+      el("p", { class: "muted small wide", text: SK_SHORTHAND }),
       mfield(d, "aliases", "คำที่เจอในบิลแล้วนับเป็นรายการนี้ (คั่นด้วย , — ใส่รุ่นไว้ได้เลย เช่น SC-N8; รุ่นเดียวกันหลายสเปคใช้คู่ เช่น TR-N2/3+12-18A)", { wide: true, maxlength: 2000 })),
     el("label", { class: "mgcheck" }, (() => { const c = el("input", { type: "checkbox" }); c.checked = !!d.track_out; c.addEventListener("change", () => { d.track_out = c.checked; }); return c; })(),
       " เบิกด้วยใบติ๊กประจำสัปดาห์ ", el("span", { class: "muted small", text: "(ไม่ติ๊ก = ของสิ้นเปลือง นับที่ชั้นแทน ไม่ต้องติ๊กทุกชิ้น)" })),
+    item ? el("div", { id: "skPrices", class: "skprices" }) : null,
     history && history.length ? el("details", { open: true }, el("summary", { text: `ความเคลื่อนไหว (${history.length})` }),
       ...history.map((m) => el("div", { class: "prhist small" }, el("span", { text: beDate(m.move_date) }), el("span", { text: KIND[m.kind] || m.kind }),
         el("strong", { text: `${m.qty > 0 ? "+" : ""}${buQty(m.qty)}` }), el("span", { class: "muted", text: [m.machine_name, m.notes].filter(Boolean).join(" · ") }),
@@ -789,6 +812,28 @@ async function openStockItem(item) {
   for (const k of ["kind", "brand", "model", "spec", "name"]) $(`mf_${k}`).addEventListener("input", () => { skSyncName(d); guess(); });
   skSyncName(d);
   skSteppers($("buDlgBody"));
+  if (item) skLoadPrices(item);
+}
+
+// the prices this item was bought at, brand by brand and shop by shop (a B-29 belt is one item whoever made it: which make is cheapest, and where)
+async function skLoadPrices(item) {
+  const box = $("skPrices");
+  if (!box) return;
+  let r;
+  try { r = await api(`/api/stock/items/${item.id}/prices`); } catch (_) { return; }
+  if (!$("skPrices")) return;                                    // the dialog was closed meanwhile
+  const unit = item.unit ? `/${item.unit}` : "";
+  const money = (v) => (v === null || v === undefined ? "–" : `${buMoney(v)} ฿${unit}`);
+  if (!r.count) { fill(box, el("p", { class: "muted small", text: "ยังไม่เคยซื้อ — ราคาจะขึ้นที่นี่เมื่อบันทึกบิลที่มีของชิ้นนี้" })); return; }
+  fill(box, el("h4", { class: "section-title", text: "เทียบราคาที่เคยซื้อ" }),
+    el("table", { class: "lines skprice-table" },
+      el("thead", {}, el("tr", {}, ...["ยี่ห้อ", "ล่าสุด", "ถูกสุด (ร้าน)", "ซื้อ"].map((t) => el("th", { text: t })))),
+      el("tbody", {}, ...r.by_brand.map((b, i) => el("tr", { class: i === 0 && r.by_brand.length > 1 ? "cheapest" : "" },
+        el("td", {}, el("strong", { text: b.brand })),
+        el("td", { text: `${money(b.last_cost)} · ${b.last_vendor || "ไม่ระบุร้าน"} · ${beDate(b.last_date)}` }),
+        el("td", { text: `${money(b.lowest_cost)} · ${b.lowest_vendor || "ไม่ระบุร้าน"}` }),
+        el("td", { text: `${b.times} ครั้ง` }))))),
+    r.by_vendor.length ? el("div", { class: "chips" }, ...r.by_vendor.map((v, i) => el("span", { class: `badge${i === 0 ? " ok" : ""}`, text: `${v.vendor} ${buMoney(v.last_cost)} ฿ (${beDate(v.last_date)})` }))) : null);
 }
 
 function skSyncName(d) {                       // while typing the parts, the name field shows the standard name (and cannot be typed over)
@@ -996,9 +1041,9 @@ function renderStockSheet() {
     const g = [i.category, i.kind].filter(Boolean).join(" · ");
     if (g !== group) { group = g; rows.push(el("tr", { class: "ss-group" }, el("td", { colspan: kind === "out" ? "5" : "5", text: g || "อื่นๆ" }))); }
     rows.push(kind === "out"
-      ? el("tr", {}, el("td", { class: "ss-code", text: i.code || "" }), el("td", { class: "ss-name" }, i.name),
+      ? el("tr", {}, el("td", { class: "ss-code", text: i.code || "" }), el("td", { class: "ss-name" }, i.name, i.remark ? el("div", { class: "ss-remark", text: i.remark }) : null),
           el("td", { class: "ss-have", text: buQty(i.on_hand) }), el("td", {}, boxes()), el("td", {}, el("span", { class: "ss-box wide" })))
-      : el("tr", {}, el("td", { class: "ss-code", text: i.code || "" }), el("td", { class: "ss-name" }, i.name),
+      : el("tr", {}, el("td", { class: "ss-code", text: i.code || "" }), el("td", { class: "ss-name" }, i.name, i.remark ? el("div", { class: "ss-remark", text: i.remark }) : null),
           el("td", { class: "ss-have", text: `${buQty(i.on_hand)} ${i.unit || ""}`.trim() }), el("td", {}, el("span", { class: "ss-box count" })), el("td", { class: "ss-note" })));
   }
   const table = el("table", { class: "ss-table" },

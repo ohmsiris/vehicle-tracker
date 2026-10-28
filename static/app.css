@@ -1243,3 +1243,11 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .stepper { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .stepper input { flex: 1 1 auto; min-width: 0; text-align: center; }
 .stepbtn { flex: 0 0 auto; min-width: 36px; font-size: 18px; line-height: 1; padding: 6px 0; }
+
+/* ---- belts and bearings: the remark next to a name, and prices brand by brand ---- */
+.sk-remark { max-width: 280px; line-height: 1.35; }
+.ss-remark { font-size: 10.5px; font-weight: 400; color: #555; }
+.skprices { margin: 12px 0; }
+.skprice-table td, .skprice-table th { padding: 5px 6px; vertical-align: top; }
+.skprice-table tr.cheapest td { background: var(--ok-soft); }
+.mfields .wide { grid-column: 1 / -1; }

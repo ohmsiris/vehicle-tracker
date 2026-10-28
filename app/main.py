@@ -1044,6 +1044,13 @@ def api_stock_new_item(body: dict = Body(...), x_app_token: str = Header(default
     return _buy_call(stock.create_item, body)
 
 
+@app.get("/api/stock/items/{item_id}/prices")
+def api_stock_item_prices(item_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """One stock item's prices brand by brand and shop by shop, with its purchase history."""
+    _check_token(x_app_token, token)
+    return _buy_call(purchasing.item_prices, item_id)
+
+
 @app.post("/api/stock/items/batch")
 def api_stock_items_batch(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

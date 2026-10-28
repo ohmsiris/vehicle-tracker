@@ -207,13 +207,56 @@ def clean_bill(data: dict, *, today: date, vendors: set, items: set, machines: s
     }
 
 
-def match_item(description: Optional[str], items: list[dict]) -> Optional[dict]:
-    """The stock item a bill line means, by the item's words and name (longest wins), or None."""
-    hit = shops.explain(description, [{"name": i["name"], "aliases": i.get("aliases", [])} for i in items])
-    if not hit["matched"]:
+_SEP = r"[\s\-_.\"']*"
+
+
+def word_regex(word: str):
+    """How one word of an item is found in a bill line: spaces, dashes, dots and quotes between its characters do not matter (SC-N2 = SCN2 = sc n2), but a code is
+    a WHOLE code: 'B-1' is not in 'B-105', 'UCF207' is not in 'UCF207-20', 'F207' is not in 'UCF207'. Words that start / end in Thai letters match anywhere, as before."""
+    chars = [c for c in str(word or "") if not re.match(r"[\s\-_.\"']", c)]
+    if not chars:
         return None
-    item = next((i for i in items if i["name"] == hit["shop"]), None)
-    return {"id": item["id"], "name": item["name"], "word": hit["word"]} if item else None
+    body = _SEP.join(re.escape(c) for c in chars)
+    pre = r"(?<![A-Za-z0-9])" if chars[0].isascii() and chars[0].isalnum() else ""
+    post = r"(?![A-Za-z0-9]|[-/]\d+(?![A-Za-z]))" if chars[-1].isascii() and chars[-1].isalnum() else ""
+    return re.compile(pre + body + post, re.I)
+
+
+def match_item(description: Optional[str], items: list[dict]) -> Optional[dict]:
+    """The stock item a bill line means, by the item's words and name (the longest word wins; "a+b" needs both parts), or None."""
+    text = str(description or "")
+    if not text.strip():
+        return None
+    best = None
+    for it in items:
+        for w in [*it.get("aliases", []), it["name"]]:
+            parts = [p.strip() for p in str(w).split("+") if p.strip()]
+            regexes = [word_regex(p) for p in parts]
+            if not regexes or any(r is None for r in regexes):
+                continue
+            size = sum(len(re.sub(r"[\s\-_.\"']", "", p)) for p in parts)
+            if (best is None or size > best[0]) and all(r.search(text) for r in regexes):
+                best = (size, it, w)
+    return {"id": best[1]["id"], "name": best[1]["name"], "word": best[2]} if best else None
+
+
+# the brands read from a line's text, to price one item brand by brand (a belt or a bearing is one item whoever made it)
+BRANDS = {
+    "Mitsuboshi": ["มิตซูโบชิ", "มิตสุโบชิ", "mitsuboshi"], "Bando": ["bando", "บันโด"], "Gates": ["gates", "เกตส์"], "Optibelt": ["optibelt"], "Fenner": ["fenner"], "Goodyear": ["goodyear", "กู๊ดเยียร์"],
+    "SKF": ["skf"], "NSK": ["nsk"], "NTN": ["ntn"], "KOYO": ["koyo", "โคโย"], "FAG": ["fag"], "NACHI": ["nachi", "นาชิ"], "TIMKEN": ["timken"], "ASAHI": ["asahi", "อาซาฮี"], "FYH": ["fyh"], "IKO": ["iko"],
+}
+
+
+def detect_brand(text: Optional[str]) -> Optional[str]:
+    """The brand named in a bill line ('สายพานมิตซูโบชิ B29' -> Mitsuboshi, 'ลูกปืน SKF 6204' -> SKF), or None. On a belt line "Mitsubishi" is the belt maker Mitsuboshi."""
+    t = str(text or "")
+    for brand, words in BRANDS.items():
+        for w in words:
+            if re.search((r"(?<![A-Za-z])" + re.escape(w) + r"(?![A-Za-z])") if w.isascii() else re.escape(w), t, re.I):
+                return brand
+    if re.search(r"สายพาน|belt", t, re.I) and re.search(r"(?<![A-Za-z])mitsubishi(?![A-Za-z])", t, re.I):
+        return "Mitsuboshi"
+    return None
 
 
 def price_stats(rows: list[dict]) -> dict:
@@ -221,7 +264,7 @@ def price_stats(rows: list[dict]) -> dict:
     -> last / lowest / per-supplier latest, the newest first."""
     priced = sorted([r for r in rows if r.get("unit_cost") is not None], key=lambda r: (r["bill_date"], r.get("created_at") or ""), reverse=True)
     if not priced:
-        return {"count": len(rows), "last": None, "lowest": None, "by_vendor": []}
+        return {"count": len(rows), "last": None, "lowest": None, "by_vendor": [], "by_brand": []}
     lowest = min(priced, key=lambda r: r["unit_cost"])
     by_vendor: dict = {}
     for r in priced:
@@ -231,9 +274,18 @@ def price_stats(rows: list[dict]) -> dict:
                             "lowest_cost": r["unit_cost"], "times": 0}
         by_vendor[v]["times"] += 1
         by_vendor[v]["lowest_cost"] = min(by_vendor[v]["lowest_cost"], r["unit_cost"])
-    pick = lambda r: {k: r.get(k) for k in ("unit_cost", "unit_cost_ex_vat", "bill_date", "vendor", "quantity", "unit", "bill_id")}
+    by_brand: dict = {}                                            # the same, brand by brand: which make is cheapest for this size, and where it was bought
+    for r in priced:
+        b = r.get("brand") or "ไม่ระบุยี่ห้อ"
+        if b not in by_brand:
+            by_brand[b] = {"brand": b, "last_cost": r["unit_cost"], "last_cost_ex_vat": r.get("unit_cost_ex_vat"), "last_date": r["bill_date"], "last_vendor": r.get("vendor"),
+                           "lowest_cost": r["unit_cost"], "lowest_vendor": r.get("vendor"), "times": 0}
+        by_brand[b]["times"] += 1
+        if r["unit_cost"] < by_brand[b]["lowest_cost"]:
+            by_brand[b]["lowest_cost"], by_brand[b]["lowest_vendor"] = r["unit_cost"], r.get("vendor")
+    pick = lambda r: {k: r.get(k) for k in ("unit_cost", "unit_cost_ex_vat", "bill_date", "vendor", "quantity", "unit", "bill_id", "brand")}
     return {"count": len(rows), "last": pick(priced[0]), "lowest": pick(lowest),
-            "by_vendor": sorted(by_vendor.values(), key=lambda v: v["last_cost"])}
+            "by_vendor": sorted(by_vendor.values(), key=lambda v: v["last_cost"]), "by_brand": sorted(by_brand.values(), key=lambda v: v["last_cost"])}
 
 
 # ------------------------------------------------------------------ database
@@ -295,6 +347,23 @@ def model_matches(machine: dict, model_text: Optional[str]) -> bool:
     """A reference bill's model is this machine's: its model code is in the text (spaces, dashes and capitals do not matter)."""
     code = re.sub(r"[\s\-_.]", "", str(machine.get("model") or "")).lower()
     return bool(code) and code in re.sub(r"[\s\-_.]", "", str(model_text or "")).lower()
+
+
+_probe31 = {"at": 0.0, "ok": False}
+
+
+def has_v31() -> bool:
+    now = time.time()
+    if now - _probe31["at"] < 30:
+        return _probe31["ok"]
+    try:
+        supabase.select("purchase_lines", {"select": "brand", "limit": "1"})
+        supabase.select("stock_items", {"select": "remark", "limit": "1"})
+        ok = True
+    except supabase.SupabaseError:
+        ok = False
+    _probe31.update(at=now, ok=ok)
+    return ok
 
 
 _probe30 = {"at": 0.0, "ok": False}
@@ -467,7 +536,7 @@ def _write_lines(bill_id: str, bill: dict, clean: dict, items: list[dict], suppl
         rows.append({"bill_id": bill_id, "line_number": n + 1, "description": ln["description"], "item_id": item_id, "quantity": ln["quantity"],
                      "unit": ln["unit"], "unit_price": ln["unit_price"], "line_total": ln["line_total"], "unit_cost": ln["unit_cost"],
                      "unit_cost_ex_vat": ln["unit_cost_ex_vat"], "machine_id": ln["machine_id"], "used_for": ln["used_for"],
-                     "low_confidence_fields": ln["low_confidence_fields"]})
+                     "low_confidence_fields": ln["low_confidence_fields"], **({"brand": detect_brand(ln["description"])} if has_v31() else {})})
     saved = supabase.insert("purchase_lines", rows)
     if clean["receive_stock"]:
         moves = [{"item_id": s["item_id"], "move_date": bill["bill_date"], "kind": "in", "qty": s["quantity"], "purchase_line_id": s["id"],
@@ -551,6 +620,21 @@ def bill_detail(bill_id: str) -> dict:
             "attachments": [{"id": a["id"], "mime_type": a["mime_type"], "url": supabase.public_url(a["storage_path"])} for a in atts]}
 
 
+def item_prices(item_id: str) -> dict:
+    """One item's prices: the latest and lowest, brand by brand and shop by shop, with the purchase history (for the stock item's page)."""
+    _require()
+    _uuid_or_none(item_id, "รายการ")
+    rows = supabase.select_all("purchase_lines", {"select": "id,bill_id,description,quantity,unit,unit_cost,unit_cost_ex_vat,created_at," + ("brand," if has_v31() else "")
+                                                  + "purchase_bills(bill_date,vendor_id,vendor_name,bill_no)", "item_id": f"eq.{item_id}", "order": "created_at.desc"})
+    names = _vendor_names()
+    flat = []
+    for ln in rows:
+        b = ln.pop("purchase_bills", None) or {}
+        flat.append({**ln, "bill_date": b.get("bill_date"), "bill_no": b.get("bill_no"), "vendor": names.get(b.get("vendor_id")) or b.get("vendor_name")})
+    flat.sort(key=lambda r: (str(r["bill_date"]), r.get("created_at") or ""), reverse=True)
+    return {**price_stats(flat), "history": flat[:50]}
+
+
 def machine_prices(machine_id: str) -> dict:
     """Every price and part known for one machine: its repair bills, the lines of other bills marked for it, and the reference parts lists of its model
     (those cost nothing: they are prices seen, not money spent). Newest first."""
@@ -619,14 +703,14 @@ def prices(q: str = "") -> dict:
     """Every item with what it cost where, and the lines not linked to an item yet."""
     if not (supabase.configured() and has_v16()):
         return {"ready": False, "items": [], "unlinked": []}
-    lines = supabase.select_all("purchase_lines", {"select": "id,bill_id,description,item_id,quantity,unit,unit_cost,unit_cost_ex_vat,created_at,"
-                                                             "purchase_bills(bill_date,vendor_id,vendor_name,bill_no)", "order": "created_at.desc"})
+    lines = supabase.select_all("purchase_lines", {"select": "id,bill_id,description,item_id,quantity,unit,unit_cost,unit_cost_ex_vat,created_at," + ("brand," if has_v31() else "")
+                                                             + "purchase_bills(bill_date,vendor_id,vendor_name,bill_no)", "order": "created_at.desc"})
     names = _vendor_names()
     flat = []
     for ln in lines:
         b = ln.pop("purchase_bills", None) or {}
         flat.append({**ln, "bill_date": b.get("bill_date"), "bill_no": b.get("bill_no"), "vendor": names.get(b.get("vendor_id")) or b.get("vendor_name")})
-    items = supabase.select_all("stock_items", {"select": "id,name,unit,category,spec", "order": "name.asc"})
+    items = supabase.select_all("stock_items", {"select": "id,name,unit,category,spec" + (",remark" if has_v31() else ""), "order": "name.asc"})
     needle = _text(q, 80).lower()
     out = []
     for it in items:

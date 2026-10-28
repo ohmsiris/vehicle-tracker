@@ -787,3 +787,17 @@ machine's repair / a reference list). Saving writes the changes back to the same
 never leaves a bill empty; what the bill had put on the shelf is taken off and put on again from the new lines ("รับเข้าสต็อก" is ticked when it had), and a repair bill's machine entry is made again.
 A misread shop that made a new supplier is fixed by choosing the right shop here (and the misspellings of a supplier are added as its words in ตั้งค่า, so the next bill finds it by itself).
 
+## Belts and bearings: named by size, not by brand (`app/catalog.py`, `scripts/import_belts_bearings.py`, `schema_v31.sql`)
+A B-29 belt is a B-29 from any maker, and one bearing unit goes by several names (SKF "Y/UCF 207" = "FYJ 35 TF" = "UCF207" = the parts sheet's "F207 สี่เหลี่ยม"). So:
+- **Name = kind + size only** (`stock.BRAND_FREE_KINDS`: สายพาน, ลูกปืน...): "สายพาน B-29", "ลูกปืนตุ๊กตาหน้าแปลนเหลี่ยม UCF207", "ลูกปืนเม็ดกลม 6204-2RS". Brand and spec stay fields; the brand is read from each bill line
+  (`purchasing.detect_brand`, on `purchase_lines.brand`) so the item's page compares prices **brand by brand and shop by shop** (`GET /api/stock/items/{id}/prices`; also on เทียบราคา).
+- **Every name the part goes by is one of its words**; the bore is its own item (UCF207 = 35 mm, UCF207-20 = 1¼"): "-NN" is NN/16 inch, the last two digits x 5 are mm.
+  Housings: UCF square flange ("F"), UCFL oval flange (FYTB), UCP pillow block ("P"). The compressor internals (ทัสแบริ่ง, เมนแบริ่ง, ชาร์ปก้านสูบ) are repair parts, not stock; a chain called
+  "โซ่ลูกปืน" is a chain.
+- **A remark next to the name** (`stock_items.remark`, shown under the model in the table, on the printed sheets and on เทียบราคา) carries the shop shorthand and the other names:
+  "รูหุน 10 หุน (1¼ นิ้ว) · F207 สี่เหลี่ยม · FYJ 1.1/4 TF · ใช้กับ …". รูมิล = bore in mm; รูหุน = bore in หุน (1 หุน = 1/8 นิ้ว = 3.2 มม.; 1 นิ้ว = 8 หุน) -- also written in the item's dialog.
+- **Matching a bill line is by WHOLE codes** (`purchasing.word_regex`, mirrored in `buy.js buWordRegex`): spaces, dashes, dots and quotes inside a code do not matter, but "B-1" is not in "B-105",
+  "UCF207" is not in "UCF207-20", "F207" is not in "UCF207".
+- 37 standard items were made from the machine parts index and the saved bills (17 belts, 16 bearing units, 4 deep-groove); 45 bill lines were linked to them and given their brand. Nothing is counted
+  into stock yet.
+

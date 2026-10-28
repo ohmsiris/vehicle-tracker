@@ -25,7 +25,7 @@ from app.purchasing import NEEDS_V16, _machines, has_v16, items_with_aliases, pr
 
 MAX_QTY = 1_000_000
 MOVE_KINDS = ("in", "out", "count")
-CODE_PREFIX = {"ไฟฟ้า": "E", "เชื่อม-ตัด": "W", "โซ่": "C", "น้ำยา-กาว": "G", "ท่อ-ประปา": "P"}      # the letter of an item's code by category (E012); other categories: X
+CODE_PREFIX = {"ไฟฟ้า": "E", "เชื่อม-ตัด": "W", "โซ่": "C", "น้ำยา-กาว": "G", "ท่อ-ประปา": "P", "สายพาน": "V", "ลูกปืน": "R"}      # the letter of an item's code by category (E012); other categories: X
 
 
 class InvalidStock(ValueError):
@@ -59,8 +59,18 @@ def next_code(category, others: list[dict]) -> str:
     return f"{prefix}{max(nums, default=0) + 1:03d}"
 
 
+BRAND_FREE_KINDS = ("สายพาน", "ลูกปืน", "ตลับลูกปืน")       # parts that interchange by size: belts and bearings are named by kind + size only (app/catalog.py)
+
+
+def is_brand_free(kind) -> bool:
+    return any(str(kind or "").strip().startswith(k) for k in BRAND_FREE_KINDS)
+
+
 def compose_name(kind, brand, model, spec) -> str:
-    """The standard name: ชนิด + ยี่ห้อ + รุ่น + สเปค, whichever are given, single-spaced."""
+    """The standard name: ชนิด + ยี่ห้อ + รุ่น + สเปค, whichever are given, single-spaced. For a belt or a bearing it is ชนิด + รุ่น only: the brand and the spec
+    (a B-29 is a B-29 from any maker) are kept as fields, not in the name."""
+    if is_brand_free(kind):
+        return _text(" ".join(p for p in (_text(kind, 60), _text(model, 60)) if p), 120)
     return _text(" ".join(p for p in (_text(kind, 60), _text(brand, 40), _text(model, 60), _text(spec, 200)) if p), 120)
 
 
@@ -69,7 +79,7 @@ def clean_item(data: dict, *, existing: Optional[dict] = None, others: list[dict
     An item with a ชนิด gets its standard name from the parts (unless a name is typed); changing a part renames it."""
     creating = existing is None
     out: dict = {}
-    for key, limit in (("kind", 60), ("brand", 40), ("model", 60), ("category", 40), ("unit", 20), ("spec", 200), ("location", 60), ("notes", 500)):
+    for key, limit in (("kind", 60), ("brand", 40), ("model", 60), ("category", 40), ("unit", 20), ("spec", 200), ("location", 60), ("notes", 500), ("remark", 200)):
         if creating or key in data:
             out[key] = _text(data.get(key), limit) or None
     if creating or "code" in data:                                              # the short code on the shelf label and the weekly sheet
