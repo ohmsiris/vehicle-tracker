@@ -72,12 +72,15 @@ const NAV_OF = {
   roster: "navRoster", truck: "navRoster", event: "navLog", log: "navLog", where: "navWhere", plan: "navPlan", mgr: "navMgr", mgrRecurring: "navMgrRecurring", mgrSettings: "navMgrSettings", settings: "navSettings", machinery: "navMachIndex", machine: "navMachIndex", machineLog: "navMachLog", purchases: "navPurchases", purchaseNew: "navPurchases", prices: "navPrices", priceItem: "navPrices", stock: "navStock", sheet: "navStock",
 };
 
+const HR_VIEWS = ["employees", "employee", "loans", "loan", "attendance", "documents", "document"];
+
 function showView(name) {
   for (const v of VIEW_NAMES) $(v + "View").hidden = v !== name;
   if (["capture", "busy", "review", "done"].includes(name)) lastBillView = name === "busy" ? "capture" : name;
   for (const id of new Set(Object.values(NAV_OF))) $(id).classList.toggle("active", id === NAV_OF[name]);
   // The truck pages are addressed by the URL hash (so Back works); every other page clears it.
   if (!FLEET_VIEWS.includes(name) && location.hash) history.replaceState(null, "", location.pathname + location.search);
+  if (!HR_VIEWS.includes(name)) $("hrLockBox").hidden = true;       // the PIN box belongs to the พนักงาน pages only, it must not follow you to the others
   closeSidebarIfDrawer();
   window.scrollTo(0, 0);
 }
