@@ -33,9 +33,13 @@ const num = (v) => { const n = parseFloat(String(v).replace(/,/g, "")); return N
 
 // --------------------------------------------------------------- api
 // The พนักงาน section's own PIN (when the server has one): kept for this browser tab only, sent with every request.
-const hrPinValue = () => { try { return sessionStorage.getItem("vt_hr_pin") || ""; } catch (e) { return ""; } };
-const saveHrPin = (pin) => { try { sessionStorage.setItem("vt_hr_pin", pin); } catch (e) { /* storage blocked: asked again on the next page */ } };
+const hrPinValue = () => { try { const v = sessionStorage.getItem("vt_hr_pin") || ""; return isPlainAscii(v) ? v : ""; } catch (e) { return ""; } };
+// A request header can only carry plain keyboard characters: a code typed with the Thai keyboard on (ๆไำพะ...) would make every request fail with "String contains non ISO-8859-1 code point".
+const isPlainAscii = (s) => /^[ -~]*$/.test(String(s || ""));
+const NOT_ENGLISH_KEYS = "รหัสมีตัวอักษรภาษาไทย — สลับแป้นพิมพ์เป็นภาษาอังกฤษ (กด Alt + Shift ซ้าย หรือ ~) แล้วใส่ใหม่";
+const saveHrPin = (pin) => { try { sessionStorage.setItem("vt_hr_pin", isPlainAscii(pin) ? pin : ""); } catch (e) { /* storage blocked: asked again on the next page */ } };
 async function api(path, opts = {}) {
+  if (!isPlainAscii(state.token)) { const e = new Error(NOT_ENGLISH_KEYS); e.status = 403; throw e; }
   const res = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), "X-App-Token": state.token, ...(hrPinValue() ? { "X-HR-Pin": hrPinValue() } : {}) } });
   if (!res.ok) {
     let detail = "";
@@ -662,6 +666,7 @@ async function init() {
   const bootHash = location.hash;       // a bookmarked / reloaded truck or bill page: kept through start-up, routed to once the data is loaded
   const params = new URLSearchParams(location.search);
   state.token = params.get("token") || storedToken();
+  if (!isPlainAscii(state.token)) { state.token = ""; saveToken(""); }          // a code saved with the Thai keyboard on can never work: forget it
   if (params.get("token")) { saveToken(state.token); history.replaceState(null, "", location.pathname + (params.get("sample") ? "?sample=1" : "") + location.hash); }
 
   wireDrop("billDrop", "billInput", state.pickBills, true);
@@ -707,7 +712,11 @@ async function init() {
     }
     recategorize(eligible);
   });
-  $("tokenSave").addEventListener("click", () => { state.token = $("tokenInput").value.trim(); saveToken(state.token); loadMeta().then(loadBoard).then(() => { if (!$("homeView").hidden) loadHome(); }); });
+  $("tokenSave").addEventListener("click", () => {
+    const typed = $("tokenInput").value.trim();
+    $("tokenError").hidden = isPlainAscii(typed);
+    if (!isPlainAscii(typed)) { $("tokenInput").value = ""; $("tokenInput").focus(); return; }
+    state.token = typed; saveToken(state.token); loadMeta().then(loadBoard).then(() => { if (!$("homeView").hidden) loadHome(); }); });
 
   showView("home");                     // the app opens on the home page (clears the hash, as every non-truck page does)
   if (bootHash) history.replaceState(null, "", location.pathname + location.search + bootHash);
