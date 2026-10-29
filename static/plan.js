@@ -519,9 +519,25 @@ function openRecordDialog(v, preset = []) {
     el("div", { class: "mfields" },
       mfield(pl.dlg.draft, "done_date", "วันที่ทำ", { type: "date", caption: true }),
       mfield(pl.dlg.draft, "odometer_km", "เลขไมล์ (กม.) ถ้ามี", { type: "number" }),
-      mfield(pl.dlg.draft, "performed_by", "ผู้ทำ / ร้าน (ถ้ามี)"),
+      plShopPick(pl.dlg.draft, "performed_by", "ผู้ทำ / ร้าน (ถ้ามี)"),
       mfield(pl.dlg.draft, "notes", "หมายเหตุ")));
   plOpenDialog("บันทึกว่าทำแล้ว", "บันทึก");
+}
+
+// who did it: a pick-list of the shops and the mechanics the board knows (app.js vendorNames), or "พิมพ์เอง…" for someone else
+function plShopPick(draft, key, label) {
+  const names = vendorNames(), OWN = "__own";
+  const cur = draft[key] || "";
+  if (cur && !names.includes(cur)) names.push(cur);
+  const sel = el("select", { id: `mf_${key}` }, el("option", { value: "", text: "— ไม่ระบุ —" }), ...names.map((n) => el("option", { value: n, text: n })), el("option", { value: OWN, text: "+ พิมพ์เอง…" }));
+  const own = el("input", { type: "text", maxlength: "200", placeholder: "พิมพ์ชื่อผู้ทำ / ร้าน", "aria-label": `${label} (พิมพ์เอง)`, hidden: true });
+  sel.value = cur;
+  sel.addEventListener("change", () => {
+    if (sel.value === OWN) { own.hidden = false; own.value = ""; draft[key] = ""; own.focus(); }
+    else { own.hidden = true; draft[key] = sel.value; }
+  });
+  own.addEventListener("input", () => { draft[key] = own.value.trim(); });
+  return el("div", { class: "mfield" }, el("label", { for: `mf_${key}`, text: label }), sel, own);
 }
 
 function openReadingDialog(v) {
