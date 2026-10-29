@@ -244,7 +244,7 @@ function viewCards(v) {
       kvAll("ซ่อมทั้งหมด", v.repairs_total ? `${v.repairs_total} ครั้ง` : "ยังไม่มีประวัติการซ่อม"),
       kvAll("ค่าซ่อมรวม", v.repairs_total ? `${baht(v.spend_total)} ฿` : ""),
       kvAll("ซ่อมล่าสุด", v.last_service_date ? `${beDate(v.last_service_date)} · ${ago(v.days_since_service)}` : ""),
-      kvAll("ไมล์ล่าสุดที่บันทึก", v.last_known_mileage ? `${baht(v.last_known_mileage)} กม.${v.next_service_mileage ? ` → ${baht(v.next_service_mileage)}` : ""}` : ""),
+      kvAll("ไมล์ล่าสุดที่บันทึก", v.last_known_mileage ? `${baht(v.last_known_mileage)} กม.${v.next_service_mileage ? ` · ครบกำหนดที่ ${baht(v.next_service_mileage)}${v.next_service_mileage < v.last_known_mileage ? ` (เลยมาแล้ว ${baht(v.last_known_mileage - v.next_service_mileage)} กม.)` : ""}` : ""}` : ""),
       el("div", { class: "tk-link" }, el("button", { class: "btn small", type: "button", text: "ดูประวัติซ่อมทั้งหมด", onclick: () => showTruckLog(v.vehicle_id) }))),
     v.notes ? tkCard("หมายเหตุ", el("p", { class: "tk-notes", text: v.notes })) : null,
   ].filter(Boolean);
