@@ -31,6 +31,7 @@ VEHICLE_CLASSES = ["รถเล็ก", "รถใหญ่"]                  
 V7_VEHICLE_TEXT = ("color", "engine_number", "chassis_number", "registration_type", "owner_name", "holder_name")
 V7_VEHICLE_KEYS = ("vehicle_class", "registered_date") + V7_VEHICLE_TEXT
 V7_DRIVER_KEYS = ("nickname",)
+NEEDS_V32 = "ต้องรัน schema_v32.sql ใน Supabase ก่อน จึงจะทำเครื่องหมายว่าประวัติอัปเดตแล้วได้"
 NEEDS_V8 = "ต้องรัน schema_v8.sql ใน Supabase ก่อน จึงจะบันทึกชื่อเรียกรถได้"
 # statuses that mean a truck still has work in progress, so it cannot be retired yet
 BUSY = ("open", "at_shop", "awaiting_bill")
@@ -59,6 +60,23 @@ def has_v6() -> bool:
     except supabase.SupabaseError:
         ok = False
     _probe.update(at=now, ok=ok)
+    return ok
+
+
+_probe32 = {"at": 0.0, "ok": False}
+
+
+def has_v32() -> bool:
+    """True once schema_v32.sql (vehicles.history_current_on) has been run (probed, cached 30 s)."""
+    now = time.time()
+    if now - _probe32["at"] < 30:
+        return _probe32["ok"]
+    try:
+        supabase.select("vehicles", {"select": "history_current_on", "limit": "1"})
+        ok = True
+    except supabase.SupabaseError:
+        ok = False
+    _probe32.update(at=now, ok=ok)
     return ok
 
 
@@ -166,6 +184,8 @@ def clean_vehicle(data: dict, *, existing: Optional[dict] = None, others: list[d
             if not d.get("active", True):
                 raise InvalidFleet(f"{d['name']} เลิกขับแล้ว เลือกคนอื่นหรือเปิดใช้งานคนขับก่อน")
         values["main_driver_id"] = driver_id
+    if given("history_current"):                            # "the history is brought up to date": the day it was marked (kept while it stays marked), or cleared
+        values["history_current_on"] = ((existing or {}).get("history_current_on") or date.today().isoformat()) if data["history_current"] else None
     if given("active"):
         values["active"] = bool(data["active"])
         if not values["active"] and busy_vehicle:
@@ -334,6 +354,8 @@ def _all_vehicles() -> list[dict]:
         cols += "," + ",".join(V7_VEHICLE_KEYS)
     if has_v8():
         cols += ",nickname"
+    if has_v32():
+        cols += ",history_current_on"
     return supabase.select_all("vehicles", {"select": cols, "order": "id.asc"})
 
 
@@ -356,6 +378,8 @@ def edit_vehicle(vehicle_id: str, data: dict) -> dict:
     busy = data.get("active") is False and vid in _busy_vehicle_ids()
     values = clean_vehicle(data, existing=existing, others=[v for v in vehicles if v["id"] != vid], drivers=drivers_by_id(), busy_vehicle=busy)
     _require_v7_for(values, V7_VEHICLE_KEYS)
+    if "history_current_on" in values and not has_v32():
+        raise InvalidFleet(NEEDS_V32)
     if values:
         supabase.update("vehicles", {"id": f"eq.{vid}"}, values)
     _changed()

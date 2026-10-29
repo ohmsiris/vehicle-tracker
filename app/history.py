@@ -127,7 +127,7 @@ def vehicle_rows(vehicles: list[dict], status: dict[str, dict], events: list[dic
             "driver_id": v.get("main_driver_id") or "", "driver": (drivers.get(v.get("main_driver_id")) or {}).get("name", ""),
             "driver_nickname": (drivers.get(v.get("main_driver_id")) or {}).get("nickname") or "",
             "driver_phone": (drivers.get(v.get("main_driver_id")) or {}).get("phone") or "",
-            **{k: v.get(k) or "" for k in fleet.V7_VEHICLE_KEYS}, "nickname": v.get("nickname") or "",
+            **{k: v.get(k) or "" for k in fleet.V7_VEHICLE_KEYS}, "nickname": v.get("nickname") or "", "history_current_on": v.get("history_current_on") or "",
             "open_requests": int(st.get("open_requests") or 0), "awaiting_bill_requests": int(st.get("awaiting_bill_requests") or 0),
             "at_shop_requests": int(st.get("at_shop_requests") or 0),
             "last_service_date": st.get("last_service_date"), "days_since_service": st.get("days_since_service"),
@@ -161,7 +161,8 @@ def event_rows(events: list[dict], lines: list[dict], attachments: list[dict]) -
 def list_vehicles(include_inactive: bool = False) -> list[dict]:
     v6 = fleet.has_v6()
     params = {"select": "id,plate_number,plate_province,vehicle_number,make,model,branch,active" + (",usage,main_driver_id,notes" if v6 else "")
-                        + ("," + ",".join(fleet.V7_VEHICLE_KEYS) if fleet.has_v7() else "") + (",nickname" if fleet.has_v8() else ""),
+                        + ("," + ",".join(fleet.V7_VEHICLE_KEYS) if fleet.has_v7() else "") + (",nickname" if fleet.has_v8() else "")
+                        + (",history_current_on" if fleet.has_v32() else ""),
               "order": "branch.asc,vehicle_number.asc,id.asc"}
     if not include_inactive:
         params["active"] = "eq.true"

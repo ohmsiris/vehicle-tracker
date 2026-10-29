@@ -26,7 +26,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from app import events, logsource, mgr, supabase
+from app import events, fleet, logsource, mgr, supabase
 from app.linetext import strip_type_word
 
 logger = logging.getLogger("service_plan")
@@ -264,6 +264,9 @@ _ANYWHERE = [
     ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจสอบ|ตรวจเช็ค|ตรวจเช็ก|ตรวจ)\s*(?:สภาพ\s*)?ช่วงล่าง|ตรวจเช็[คก]\s*(?:รถ)?\s*(?:ฟรี)?\s*[8๘]\s*ระบบ")),
 ]
 _TOP_UP = re.compile(r"เติม")
+# The coolant CHANGE written as work: "เปลี่ยนน้ำหล่อเย็นเครื่องยนต์", "เปลี่ยนถ่ายน้ำหม้อน้ำ/เติมน้ำยา" (it says เติม but it is the change: checked before the top-up rule).
+# "ปลั๊กถ่ายน้ำหม้อน้ำ" (the drain plug, a part) and "เปลี่ยนหม้อน้ำ" (the radiator) start with something else and are left alone.
+_COOLANT_CHANGE = re.compile(r"^\s*(?:ค่า)?\s*(?:เปลี่ยน\s*ถ่าย|เปลี่ยน|ถ่าย)\s*น้ำ(?:หล่อเย็น|หม้อน้ำ)")
 # Only for the small trucks (D-Max / Revo): changing the wheel seals / bearings or greasing them IS the wheel-bearing job (the bearings are cleaned and re-greased with it):
 # "เปลี่ยนซีลล้อ", "ลูกปืนล้อ" (a part), "ซีลลูกปืนล้อ", the dealer's "เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า". A line that only CHECKS the bearings ("ตรวจเช็คลูกปืนล้อ" with no
 # seal, grease or replacement in it) does not count.
@@ -276,6 +279,8 @@ def classify_line(description: Optional[str], rule_set: Optional[str] = None) ->
     """Which service item a bill line is, or None. A top-up ("น้ำมันเครื่อง (เติม)") is not a service. `rule_set` (the truck's) adds the
     lines that only count for that kind of truck (_SMALL_ONLY)."""
     text = re.sub(r"\s+", " ", strip_type_word(description)[0]).strip()                 # "อะไหล่ ไส้กรองอากาศ" is the air filter
+    if text and _COOLANT_CHANGE.match(text):
+        return "coolant"
     if not text or _TOP_UP.search(text):
         return None
     for key, pattern in _COMPILED:
@@ -781,7 +786,7 @@ def _vehicle_groups() -> dict:
 
 
 def _vehicles(branch: str = "", vehicle_class: str = "", only: Optional[str] = None) -> list[dict]:
-    params = {"select": "id,plate_number,vehicle_number,nickname,branch,vehicle_class,make,model,usage,active", "order": "id.asc"}
+    params = {"select": "id,plate_number,vehicle_number,nickname,branch,vehicle_class,make,model,usage,active" + (",history_current_on" if fleet.has_v32() else ""), "order": "id.asc"}
     if only:
         params["id"] = f"eq.{only}"
     else:
@@ -812,7 +817,7 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
         group = groups.get(assigned.get(v["id"]))
         plan = vehicle_plan(v, group=group, records=records.get(v["id"], []) + hits.get(v["id"], []), readings=readings.get(v["id"], []) + odos.get(v["id"], []),
                             overrides=overrides, today=today, soon_days=soon_days, snoozes=snoozes.get(v["id"]))
-        rows.append({**{k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "usage")}, **plan})
+        rows.append({**{k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "usage", "history_current_on")}, **plan})
 
     def rank(r):
         c = r["counts"]

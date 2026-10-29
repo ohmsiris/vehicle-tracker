@@ -152,7 +152,7 @@ function planCard(v) {
   const known = v.counts.overdue + v.counts.soon + v.counts.ok;
   return el("div", { class: `card plcard ${v.counts.overdue ? "overdue" : v.counts.soon ? "soon" : ""}`.trim() },
     el("div", { class: "pl-top" },
-      el("a", { class: "pl-title", href: `#truck=${v.id}` }, el("strong", { text: plLabel(v) || "–" }), v.branch ? el("span", { class: "muted small", text: ` ${v.branch}` }) : null),
+      el("a", { class: "pl-title", href: `#truck=${v.id}` }, el("strong", { text: plLabel(v) || "–" }), historyTick(v), v.branch ? el("span", { class: "muted small", text: ` ${v.branch}` }) : null),
       el("span", { class: "badge", title: v.group ? v.group.label : "", text: v.group ? `${v.group.code} · ${plMonths(v.group.months)} ต่อ ${baht(v.group.step_km)} กม.` : "ยังไม่ได้เลือกกลุ่มแผน" }),
       el("span", { class: "grow" }),
       v.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, attention.map((i) => i.key)) }) : null),

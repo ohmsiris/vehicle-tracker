@@ -159,12 +159,12 @@ const PAPER_KEYS = ["registered_date", "registration_type", "engine_number", "ch
 // the page's form values, keyed by the API field names
 const draftFrom = (v) => (v ? {
   plate_number: v.plate, plate_province: v.province, vehicle_number: v.truck_number, branch: v.branch, vehicle_class: v.vehicle_class, usage: v.usage,
-  make: v.make, model: v.model, color: v.color, nickname: v.nickname, notes: v.notes, main_driver_id: v.driver_id, active: v.active !== false,
+  make: v.make, model: v.model, color: v.color, nickname: v.nickname, notes: v.notes, main_driver_id: v.driver_id, active: v.active !== false, history_current: !!v.history_current_on,
   registered_date: v.registered_date, registration_type: v.registration_type, engine_number: v.engine_number, chassis_number: v.chassis_number,
   owner_name: v.owner_name, holder_name: v.holder_name,
 } : {
   plate_number: "", plate_province: "", vehicle_number: "", branch: tk.lastBranch || "", vehicle_class: "", usage: "", make: "", model: "", color: "", nickname: "", notes: "",
-  main_driver_id: "", active: true, registered_date: "", registration_type: "", engine_number: "", chassis_number: "", owner_name: "", holder_name: "",
+  main_driver_id: "", active: true, history_current: false, registered_date: "", registration_type: "", engine_number: "", chassis_number: "", owner_name: "", holder_name: "",
 });
 
 async function openTruck(id) {
@@ -289,6 +289,8 @@ function editCards() {
       field("รุ่น", "model", { maxlength: 40, placeholder: "เช่น D-Max 2.5" }),
       state.fleetV7 ? field("สี", "color", { placeholder: "เช่น ขาว-เขียว" }) : null,
       el("datalist", { id: "tkUsageList" }, ...usageList().map((u) => el("option", { value: u })))),
+      v ? el("label", { class: "check tk-active" }, el("input", { type: "checkbox", checked: tk.draft.history_current, onchange: (e) => { tk.draft.history_current = e.target.checked; tk.dirty = true; } }),
+        " ✓ ประวัติซ่อมอัปเดตล่าสุดแล้ว ", el("span", { class: "muted small", text: "(ติ๊กเมื่อใส่บิลล่าสุดของรถคันนี้ครบแล้ว — จะมีเครื่องหมายถูกเล็ก ๆ ข้างรถทุกหน้า)" })) : null,
       v ? el("label", { class: "check tk-active" }, el("input", { type: "checkbox", checked: tk.draft.active, onchange: (e) => { tk.draft.active = e.target.checked; tk.dirty = true; } }),
         " ใช้งานอยู่ ", el("span", { class: "muted small", text: "(เอาติ๊กออก = เลิกใช้ เช่น ขายแล้ว รถจะไม่ขึ้นในตัวเลือก แต่ประวัติซ่อมยังอยู่)" })) : null),
     tkCard("คนขับหลัก",
@@ -327,7 +329,7 @@ async function saveTruck() {
   const v = tk.v, body = { ...tk.draft };
   if (!state.fleetV7) for (const k of ["vehicle_class", "color", ...PAPER_KEYS]) delete body[k];
   if (!state.fleetV8) delete body.nickname;
-  if (!v) delete body.active;                                // a new truck is simply active
+  if (!v) { delete body.active; delete body.history_current; }        // a new truck is simply active, its history not marked yet
   try {
     const res = v ? await api(`/api/vehicles/${v.vehicle_id}`, jsonOpts("PATCH", body)) : await api("/api/vehicles", jsonOpts("POST", body));
     tk.lastBranch = body.branch;

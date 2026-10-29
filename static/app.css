@@ -1261,3 +1261,6 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .pisum { display: flex; gap: 8px 40px; flex-wrap: wrap; padding: 14px 16px; }
 .pibig { display: block; font-size: 24px; }
 #priceItemView .card { margin-bottom: 12px; }
+
+/* ---- the tick next to a truck whose repair history is brought up to date ---- */
+.histok { display: inline-grid; place-items: center; width: 17px; height: 17px; margin-left: 6px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); font-size: 11px; font-weight: 700; line-height: 1; vertical-align: middle; cursor: help; }

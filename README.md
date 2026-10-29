@@ -810,3 +810,11 @@ A B-29 belt is a B-29 from any maker, and one bearing unit goes by several names
 
 One row per thing: name · category · last price · last shop · date · the cheapest price ever paid (only shown when it is lower than the last) · how many times it was bought; every header sorts.
 The name opens the item's own page: price in each shop, price per brand (only when more than one brand was bought), and every purchase.
+
+## "History is up to date" tick on a truck (`schema_v32.sql`)
+
+`vehicles.history_current_on` (a date, null = not marked). A small green ✓ shows next to the truck on the roster, the truck page and the service-plan list; set or cleared with the
+"✓ ประวัติซ่อมอัปเดตล่าสุดแล้ว" box on the truck's edit page (the date it was first marked is kept while it stays marked).
+
+Coolant: "เปลี่ยนน้ำหล่อเย็นเครื่องยนต์" and "เปลี่ยนถ่ายน้ำหม้อน้ำ/เติมน้ำยา" (the dealer's labour lines) now count as the coolant change (`service_plan._COOLANT_CHANGE`); the
+drain plug, the radiator itself and a plain top-up still do not.

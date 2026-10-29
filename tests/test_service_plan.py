@@ -577,3 +577,17 @@ def test_a_bill_with_new_wheel_seals_counts_as_the_grease_for_the_small_truck_on
     hits = sp.bill_hits(events, {"small": sp.SMALL, "big": sp.BIG})
     assert [(h["vehicle_id"], h["item_key"]) for h in hits] == [("small", "wheel_grease")]
     assert sp.bill_hits(events) == []                                                                       # without the trucks' rule sets nothing special counts
+
+
+@pytest.mark.parametrize("text,key", [
+    ("เปลี่ยนน้ำหล่อเย็นเครื่องยนต์", "coolant"),
+    ("เปลี่ยนถ่ายน้ำหม้อน้ำ/เติมน้ำยา", "coolant"),
+    ("น้ำยาหล่อเย็นหม้อน้ำ", "coolant"),
+    ("น้ำยาหล่อเย็น LLC-545 3 ลิตร", "coolant"),
+    ("ปลั๊กถ่ายน้ำหม้อน้ำ", None),            # the drain plug is a part
+    ("เปลี่ยนหม้อน้ำ", None),                  # the radiator itself
+    ("น้ำยาเติมหม้อน้ำ3L", None),              # a top-up
+    ("ตรวจสอบระบบหล่อเย็น", None),
+])
+def test_coolant_change_lines(text, key):
+    assert sp.classify_line(text) == key

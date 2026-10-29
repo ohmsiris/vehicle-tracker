@@ -107,7 +107,14 @@ function truckHead(r) {
     chip,
     el("strong", { class: "truckplate", text: r.plate || (r.truck_number && !hasNumber ? r.truck_number : "ไม่ระบุรถ") }),
     hasNumber && nick ? el("span", { class: "muted small", text: nick }) : null,
+    historyTick(r),
   ].filter(Boolean);
+}
+
+// the small tick of a truck whose repair history the owner has brought up to date (vehicles.history_current_on, set on the truck's edit page)
+function historyTick(r) {
+  const on = r && r.history_current_on;
+  return on ? el("span", { class: "histok", title: `ประวัติซ่อมอัปเดตล่าสุดแล้ว (ทำเครื่องหมายเมื่อ ${beDate(on)})`, text: "✓" }) : null;
 }
 
 // Some trucks have no separate fleet number (it is just their plate): don't print it twice, and use the nickname if it has one.
