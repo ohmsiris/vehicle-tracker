@@ -46,7 +46,7 @@ MAX_KM_PER_DAY = 1000
 MIN_ODOMETER_SPAN = 30               # days between two odometer readings before they beat the GPS figure
 MAX_KM = 3_000_000
 DAYS_PER_MONTH = 30.4375
-SAME_EVENT_DAYS = 3                  # items done within this many days of the latest one count as part of that event
+SAME_EVENT_DAYS = 3                  # items done within this many days of the latest one count as part of that event (at least; see build_chart)
 
 THAI_TZ = timezone(timedelta(hours=7))
 
@@ -480,6 +480,7 @@ def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odom
     no_history = not dated
     t0 = max(dated) if dated else today
     months = group_months(group)
+    same_round = max(SAME_EVENT_DAYS, int(months * DAYS_PER_MONTH / 4))      # a round is a few weeks of work (oil on the 22nd, gear oil on the 28th): a quarter of the step counts as one
     rounds = CHART_ROUNDS.get(group["rule_set"], 8)
     visits = [add_months_f(t0, n * months) for n in range(1, rounds + 1)]
     columns = [{"n": 0, "label": "ตอนนี้ (ไม่ทราบประวัติ)" if no_history else "ครั้งล่าสุด", "date": t0.isoformat(), "km": anchor_odometer}]
@@ -490,7 +491,7 @@ def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odom
     for item, s in zip(plan, statuses):
         cells: list[Optional[str]] = [None] * (rounds + 1)
         last = parse_date(s["last_date"]) if s["last_date"] else None
-        if last and (t0 - last).days <= SAME_EVENT_DAYS:
+        if last and (t0 - last).days <= same_round:
             cells[0] = "done"
         if no_history:
             cells[0] = "unknown"
