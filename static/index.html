@@ -89,6 +89,7 @@
     <nav class="side-items" id="sideMachinery">
       <button id="navMachIndex" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>ภาพรวมเครื่องจักร</span></button>
       <button id="navMachParts" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg><span>อะไหล่และสเปค</span></button>
+      <button id="navMachPlan" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14l2 2 4-4"/></svg><span>แผนซ่อมบำรุงเครื่องจักร</span></button>
       <button id="navMachLog" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg><span>บันทึกซ่อมบำรุง</span></button>
       <div class="side-sep" role="separator"></div>
       <button id="navPurchases" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>บิลซื้อของ</span></button>
@@ -987,11 +988,20 @@
     <div id="mcCardsTube" class="mcgrid"></div>
     <div class="mchead"><h3 class="section-title">น้ำแข็งซอง (บ่อซอง)</h3></div>
     <div id="mcCardsSong" class="mcgrid"></div>
-    <details class="mdetails mcjobs" id="mcJobs"><summary>ตั้งค่ารอบงาน (เดือน / ชั่วโมง / ระดับ)</summary>
-      <p class="muted small">แก้รอบหรือระดับของงานแล้วกด “บันทึก” — ใช้กับทุกเครื่องที่มีงานนั้น · ‘ไม่ต้องทำ’ = ไม่ขึ้นในแผน · รอบที่เป็น “ประมาณ” คือผมตั้งไว้ก่อน รอคุณยืนยัน</p>
-      <div id="mcJobList" class="jobsettings"></div>
-    </details>
+    <div class="mchead"><h3 class="section-title">ตารางรวม: ทุกเครื่อง × ทุกงาน</h3><a class="btn small" href="#machine-plan">ตั้งค่าโปรแกรม →</a></div>
+    <div id="mcMatrix"></div>
     <p class="muted small"><a href="#machine-parts">อะไหล่และสเปคทั้งหมด →</a></p>
+  </section>
+
+  <!-- ============ Machine maintenance programs (settings) ============ -->
+  <section id="machinePlanView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">แผนซ่อมบำรุงเครื่องจักร</h2>
+      <p class="muted small">โปรแกรม = เครื่องได้งานอะไรบ้าง ทำทุกกี่เดือน / กี่ชั่วโมง (อย่างไหนถึงก่อน) และระดับของงาน — เครื่องแต่ละเครื่องใช้หนึ่งโปรแกรม (เลือกได้ด้านล่าง) เหมือนกลุ่มของรถ</p>
+    </div>
+    <p class="error" id="mppError" hidden></p>
+    <div class="edit-banner" id="mppNeedsV34" hidden>ยังตั้งโปรแกรมไม่ได้ — ต้องรันไฟล์ <strong>schema_v34.sql</strong> ใน Supabase ก่อน</div>
+    <div id="mppList"></div>
   </section>
 
   <!-- ============ Machinery parts and specs ============ -->
@@ -1020,8 +1030,10 @@
     <p class="error" id="mdError" hidden></p>
     <div class="card tkhead" id="mdHead"></div>
     <div id="mdPlan" hidden>
-      <div class="mchead"><h3 class="section-title">งานบำรุงรักษา <span class="count" id="mdPlanCount"></span></h3></div>
-      <div id="mdPlanList" class="planlist"></div>
+      <div class="mchead"><h3 class="section-title">แผนซ่อมบำรุง <span class="count" id="mdPlanCount"></span></h3><span class="grow"></span><button id="mdJobsDone" class="btn small primary" type="button">+ บันทึกว่าทำแล้ว</button></div>
+      <div id="mdProgram" class="card pl-groupbar"></div>
+      <div id="mdChart"></div>
+      <details class="mdetails" id="mdPlanMore"><summary>รายละเอียดแต่ละงาน</summary><div id="mdPlanList" class="planlist"></div></details>
       <div class="mchead"><h3 class="section-title">มิเตอร์ชั่วโมง</h3><button id="mdReadAdd" class="btn small" type="button">+ บันทึกมิเตอร์</button></div>
       <div id="mdMeter" class="card meterbox"></div>
     </div>
@@ -1271,6 +1283,18 @@
     <span class="grow"></span>
     <button type="button" class="btn" id="pdCancel">ยกเลิก</button>
     <button type="button" class="btn primary" id="pdSave">บันทึก</button>
+  </div>
+</dialog>
+
+<!-- Planned jobs done on a machine -->
+<dialog id="jdDialog" class="wide">
+  <h3 id="jdTitle">บันทึกว่าทำแล้ว</h3>
+  <div id="jdBody"></div>
+  <p class="error" id="jdError" hidden></p>
+  <div class="dialog-actions">
+    <span class="grow"></span>
+    <button type="button" class="btn" id="jdCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="jdSave">บันทึก</button>
   </div>
 </dialog>
 

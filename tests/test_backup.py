@@ -147,5 +147,5 @@ def test_every_table_the_schema_files_create_is_in_the_backup():
     for sql in Path(__file__).resolve().parent.parent.glob("schema*.sql"):
         text = sql.read_text(encoding="utf-8")
         created |= set(re.findall(r"create table (?:if not exists )?(?:public\.)?(\w+)", text, re.I))
-    created -= {"service_custom_items"}                                     # made by schema_v18 and dropped again by schema_v20
+    created -= {"service_custom_items", "machine_job_settings"}            # made by schema_v18 / v33 and dropped again by schema_v20 / v34
     assert created - set(backup.TABLES) == set(), "a table is not backed up: add it to app/backup.py TABLES"

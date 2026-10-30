@@ -11,7 +11,7 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
+const FLEET_VIEWS = ["employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 
 // ------------------------------------------------------------------ routing
 function route() {
@@ -35,6 +35,7 @@ function route() {
   if (h === "mgr-settings") return openMgrSettings();
   if (h === "machinery") return openMachinery();
   if (h === "machine-parts") return openMachineParts();
+  if (h === "machine-plan") return openMachinePrograms();
   if (h === "machine-log") return openMachineLog();
   if (h === "purchases") return openPurchases();
   if (h === "purchase-new") return openPurchaseNew();

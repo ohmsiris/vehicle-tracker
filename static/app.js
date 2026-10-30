@@ -69,11 +69,11 @@ function initTheme() {
 
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
-const VIEW_NAMES = ["home", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
+const VIEW_NAMES = ["home", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrRecurring", "mgrSettings", "settings", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 // which sidebar entry lights up for each view
 const NAV_OF = {
   home: "navHome", employees: "navEmployees", employee: "navEmployees", loans: "navLoans", loan: "navLoans", attendance: "navAttendance", documents: "navDocs", document: "navDocs", board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
-  roster: "navRoster", truck: "navRoster", event: "navLog", log: "navLog", where: "navWhere", plan: "navPlan", mgr: "navMgr", mgrRecurring: "navMgrRecurring", mgrSettings: "navMgrSettings", settings: "navSettings", machinery: "navMachIndex", machine: "navMachIndex", machineParts: "navMachParts", machineLog: "navMachLog", purchases: "navPurchases", purchaseNew: "navPurchases", prices: "navPrices", priceItem: "navPrices", stock: "navStock", sheet: "navStock",
+  roster: "navRoster", truck: "navRoster", event: "navLog", log: "navLog", where: "navWhere", plan: "navPlan", mgr: "navMgr", mgrRecurring: "navMgrRecurring", mgrSettings: "navMgrSettings", settings: "navSettings", machinery: "navMachIndex", machine: "navMachIndex", machineParts: "navMachParts", machinePlan: "navMachPlan", machineLog: "navMachLog", purchases: "navPurchases", purchaseNew: "navPurchases", prices: "navPrices", priceItem: "navPrices", stock: "navStock", sheet: "navStock",
 };
 
 const HR_VIEWS = ["employees", "employee", "loans", "loan", "attendance", "documents", "document"];
@@ -694,6 +694,7 @@ async function init() {
   $("navMgrSettings").addEventListener("click", () => goHash("#mgr-settings"));
   $("navMachIndex").addEventListener("click", () => goHash("#machinery"));
   $("navMachParts").addEventListener("click", () => goHash("#machine-parts"));
+  $("navMachPlan").addEventListener("click", () => goHash("#machine-plan"));
   $("navMachLog").addEventListener("click", () => goHash("#machine-log"));
   $("navPurchases").addEventListener("click", () => goHash("#purchases"));
   $("navPrices").addEventListener("click", () => goHash("#prices"));

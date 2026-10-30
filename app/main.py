@@ -917,10 +917,42 @@ def api_delete_machine_reading(reading_id: str, x_app_token: str = Header(defaul
     return _machinery_call(machine_plan.delete_reading, reading_id)
 
 
-@app.patch("/api/machine-jobs/{job_key}")
-def api_edit_machine_job(job_key: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+@app.post("/api/machines/{machine_id}/jobs-done")
+def api_machine_jobs_done(machine_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """"บันทึกว่าทำแล้ว" for one or more planned jobs of a machine (one maintenance report each)."""
     _check_token(x_app_token, token)
-    return _machinery_call(machine_plan.edit_job_setting, job_key, body)
+    return _machinery_call(machine_plan.jobs_done, machine_id, body)
+
+
+@app.get("/api/machine-programs")
+def api_machine_programs(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.programs_view)
+
+
+@app.post("/api/machine-programs")
+def api_add_machine_program(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.add_program, body)
+
+
+@app.put("/api/machine-programs/{code}")
+def api_save_machine_program(code: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.save_program, code, body)
+
+
+@app.delete("/api/machine-programs/{code}")
+def api_delete_machine_program(code: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.delete_program, code)
+
+
+@app.put("/api/machine-program-assignments")
+def api_assign_machine_programs(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Which machine follows which program: {changes: [{machine_id, program_code}]}."""
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.assign_programs, body)
 
 
 # ------------------------------------------------------------- maintenance program
