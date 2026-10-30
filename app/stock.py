@@ -25,7 +25,7 @@ from app.purchasing import NEEDS_V16, _machines, has_v16, items_with_aliases, pr
 
 MAX_QTY = 1_000_000
 MOVE_KINDS = ("in", "out", "count")
-CODE_PREFIX = {"ไฟฟ้า": "E", "เชื่อม-ตัด": "W", "โซ่": "C", "น้ำยา-กาว": "G", "ท่อ-ประปา": "P", "สายพาน": "V", "ลูกปืน": "R"}      # the letter of an item's code by category (E012); other categories: X
+CODE_PREFIX = {"ไฟฟ้า": "E", "เชื่อม-ตัด": "W", "โซ่": "C", "น้ำยา-กาว": "G", "ท่อ-ประปา": "P", "สายพาน": "V", "ลูกปืน": "R", "น้ำมัน-จาระบี": "O"}      # the letter of an item's code by category (E012); other categories: X
 
 
 class InvalidStock(ValueError):
