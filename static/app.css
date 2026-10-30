@@ -1307,3 +1307,11 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .mtrow { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 12px; align-items: center; margin: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .mtrow input { width: 100%; font: inherit; }
 @media (max-width: 600px) { .mtrow { grid-template-columns: 1fr; } }
+.mechrow { display: grid; grid-template-columns: 1fr 1fr 1fr 110px; gap: 8px 10px; align-items: end; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 6px; }
+.mechrow.off { background: var(--bg); opacity: .75; }
+.mech-note { grid-column: 1 / 4; }
+.mech-on { margin: 0; align-self: center; }
+.mech-h { margin: 14px 0 6px; font-size: 15px; }
+.mechadd { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 10px; }
+.mechadd input { flex: 1 1 140px; min-width: 0; font: inherit; }
+@media (max-width: 800px) { .mechrow { grid-template-columns: 1fr 1fr; } .mech-note { grid-column: 1 / -1; } }

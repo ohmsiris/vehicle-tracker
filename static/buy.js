@@ -112,6 +112,7 @@ async function openPurchaseNew() {
   showErr("bnError", "");
   try { await buLoadOptions(); } catch (err) { showErr("bnError", `โหลดข้อมูลไม่สำเร็จ: ${err.message}`); return; }
   buNeedsV16("bnNeedsV16", bu.opts.ready);
+  if (bu.presetMachine && !bu.cur) buSetPurpose("repair");              // sent here by a machine's "บันทึกบิลซ่อม": the bills picked next are that machine's repair
   if (bu.cur) buShowReview(); else buShowHome();
 }
 
@@ -282,7 +283,7 @@ function buMakeReview(draft, purpose = "stock") {
   const models = (bu.opts && bu.opts.machine_models) || [];
   const review = {
     source: draft ? "bill" : "manual",
-    purpose, machine_id: "", machine_model: models.length === 1 ? models[0] : "",
+    purpose, machine_id: purpose === "repair" ? (bu.presetMachine || "") : "", machine_model: models.length === 1 ? models[0] : "",
     vendor_id: d.vendor_id || "", vendor_name: d.vendor_name || "", new_vendor: d.vendor_id ? "" : (d.vendor_name || ""),
     bill_date: d.date || todayISO(), bill_no: d.bill_no || "", branch: "สระบุรี", vat_mode: d.vat_mode || "none",
     subtotal: d.subtotal ?? "", vat_amount: d.vat_amount ?? "", discount: d.discount ?? "", total: d.total ?? "", notes: "", receive_stock: true,
@@ -1138,6 +1139,7 @@ const BU_PURPOSE_NOTE = {
 
 function buSetPurpose(purpose) {
   bu.purpose = purpose;
+  if (purpose !== "repair") bu.presetMachine = "";
   for (const b of document.querySelectorAll("#bnPurposes [data-purpose]")) {
     b.classList.toggle("active", b.dataset.purpose === purpose);
     b.setAttribute("aria-selected", String(b.dataset.purpose === purpose));

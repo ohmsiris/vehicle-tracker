@@ -826,3 +826,8 @@ The machinery menu: **ภาพรวมเครื่องจักร** (`#m
 - **Jobs and defaults** are in `machine_plan.JOBS`; entries marked `guess` show "ประมาณ". Screw and grinder motors start and stop all day, so their jobs count months, not hours.
 - **Hours**: from `machine_readings` when there are two readings a week apart, otherwise `hours_per_day x days_per_week` on the machine (24 x 7; brine-pond 24 x 6). `machines.never_overhauled` = a compressor never overhauled (red until the first overhaul is logged).
 - **Shared equipment**: `machine_parts.shared_machine_ids`. "Soon" = due within 30 days (`SOON_DAYS`). Tests: `tests/test_machine_plan.py`.
+
+### Machine mechanics, and the two ways to record work on a machine (`app/machine_mechanics.py`, `schema_v35.sql`)
+- **ช่างเครื่องจักร** (`machine_mechanics`, edited on `#machine-plan`): in-house and outside mechanics with phone and branch -- a SEPARATE list from the truck mechanics / shops. It is the "ผู้ทำ" pick-list on every machine job form.
+- **บันทึกบำรุงรักษา (ติ๊ก)** on a machine's page = planned jobs (PM): tick the jobs done, a date and who; cost / meter / notes are optional. **บันทึกบิลซ่อม (เสียจริง)** = a real repair with a bill: opens `#purchase-new` already set to "ซ่อมเครื่องจักร" for that machine (`bu.presetMachine`). The old free-form report is still under บันทึกซ่อมบำรุง.
+- A repair bill is linked to its machine report (`machine_events.purchase_bill_id`); the model's reference parts bill (purpose `reference`, e.g. "อุปกรณ์ MYCOM 8WBHE" by ช่างยุทธ, 25 lines) shows on every machine of that model under ราคาและอะไหล่.

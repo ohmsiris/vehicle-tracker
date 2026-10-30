@@ -111,7 +111,7 @@ async function renderMachinePlan(m) {
   }
   mpn.plan = res;
   if (!res.ready) {
-    $("mdReadAdd").hidden = $("mdJobsDone").hidden = true;
+    $("mdReadAdd").hidden = true;
     $("mdPlanCount").textContent = "";
     fill($("mdProgram"), el("span", { class: "muted", text: "ยังไม่มีแผนซ่อมบำรุง — ต้องรันไฟล์ schema_v33.sql ใน Supabase ก่อน" }));
     fill($("mdChart"));
@@ -119,7 +119,7 @@ async function renderMachinePlan(m) {
     fill($("mdMeter"));
     return;
   }
-  $("mdReadAdd").hidden = $("mdJobsDone").hidden = false;
+  $("mdReadAdd").hidden = false;
   const plan = res.plan;
   for (const j of plan.jobs) mpn.names[j.key] = j.name;
   $("mdPlanCount").textContent = `(เลยกำหนด ${plan.counts.late} · ใกล้ถึง ${plan.counts.soon} · ไม่มีบันทึก ${plan.counts.none})`;
@@ -190,7 +190,7 @@ function openJobsDone(m, preset = []) {
   if (!mpn.plan || !mpn.plan.plan) return;
   const jobs = mpn.plan.plan.chart ? mpn.plan.plan.chart.rows : mpn.plan.plan.jobs;
   const d = mpn.jd = { done_date: todayISO(), job_keys: new Set(preset), performed_by: "", cost: "", hours_at: "", notes: "" };
-  $("jdTitle").textContent = `บันทึกว่าทำแล้ว — ${m.name}`;
+  $("jdTitle").textContent = `บันทึกบำรุงรักษา (ติ๊ก) — ${m.name}`;
   const picks = jobs.map((j) => el("label", { class: "pl-pick" },
     el("input", { type: "checkbox", checked: d.job_keys.has(j.key), onchange: (e) => { if (e.target.checked) d.job_keys.add(j.key); else d.job_keys.delete(j.key); } }),
     el("span", { text: j.name })));
@@ -199,10 +199,13 @@ function openJobsDone(m, preset = []) {
     el("div", { class: "pl-picks" }, ...picks),
     el("div", { class: "mfields" },
       mfield(d, "done_date", "วันที่ทำ", { type: "date", caption: true }),
-      typeof plShopPick === "function" ? plShopPick(d, "performed_by", "ผู้ทำ / ร้าน") : mfield(d, "performed_by", "ผู้ทำ / ร้าน"),
-      mfield(d, "cost", "ค่าใช้จ่ายรวม (฿) — ไม่บังคับ", { type: "number" }),
-      mfield(d, "hours_at", "มิเตอร์ตอนทำ (ชม.) — ไม่บังคับ", { type: "number" }),
-      mfield(d, "notes", "หมายเหตุ", { wide: true, maxlength: 500 })));
+      mechanicPick(d, "performed_by", "ผู้ทำ")),
+    el("details", { class: "mdetails" }, el("summary", { text: "เพิ่มรายละเอียด (ค่าใช้จ่าย มิเตอร์ หมายเหตุ) — ไม่บังคับ" }),
+      el("div", { class: "mfields" },
+        mfield(d, "cost", "ค่าใช้จ่ายรวม (฿)", { type: "number" }),
+        mfield(d, "hours_at", "มิเตอร์ตอนทำ (ชม.)", { type: "number" }),
+        mfield(d, "notes", "หมายเหตุ", { wide: true, maxlength: 500 }))),
+    el("p", { class: "muted small" }, "เครื่องเสียจริง / มีบิลซ่อม? ใช้ปุ่ม “บันทึกบิลซ่อม (เสียจริง)” ในหน้าเครื่อง"));
   showErr("jdError", "");
   $("jdDialog").showModal();
 }
@@ -218,6 +221,33 @@ async function saveJobsDone() {
   }
   $("jdDialog").close();
   await refreshMachineryViews();
+}
+
+// "ผู้ทำ": the machine mechanics' own list (in-house, then outside), or "พิมพ์เอง…" -- the truck mechanics and shops are not in it
+function mechanicPick(draft, key, label) {
+  const OWN = "__own", cur = draft[key] || "";
+  const live = (mc.mechanics || []).filter((x) => x.active !== false);
+  const group = (kind, title) => {
+    const rows = live.filter((x) => x.kind === kind);
+    return rows.length ? el("optgroup", { label: title }, ...rows.map((x) => el("option", { value: x.name, text: x.name }))) : null;
+  };
+  const known = live.some((x) => x.name === cur);
+  const sel = el("select", { id: `mf_${key}` }, el("option", { value: "", text: "— ไม่ระบุ —" }), group("internal", "ช่างของเรา"), group("external", "ช่างนอก / ผู้รับเหมา"),
+    cur && !known ? el("option", { value: cur, text: cur }) : null, el("option", { value: OWN, text: "+ พิมพ์เอง…" }));
+  const own = el("input", { type: "text", maxlength: "100", placeholder: "พิมพ์ชื่อช่าง / ร้าน", "aria-label": `${label} (พิมพ์เอง)`, hidden: true });
+  sel.value = cur;
+  sel.addEventListener("change", () => {
+    if (sel.value === OWN) { own.hidden = false; own.value = ""; draft[key] = ""; own.focus(); } else { own.hidden = true; draft[key] = sel.value; }
+  });
+  own.addEventListener("input", () => { draft[key] = own.value.trim(); });
+  return el("div", { class: "mfield" }, el("label", { for: `mf_${key}`, text: label }), sel, own);
+}
+
+// a repair that really broke (an ammonia accident ...): the bill goes through the purchase page, already set to "ซ่อมเครื่องจักร" for this machine
+function openRepairBill(m) {
+  bu.purpose = "repair";
+  bu.presetMachine = m.id;
+  goHash("#purchase-new");
 }
 
 // ---- an hour-meter reading (dialog)
@@ -254,7 +284,7 @@ async function openMachinePrograms() {
 
 async function loadMachinePrograms() {
   try {
-    mpn.progs = await api("/api/machine-programs");
+    [mpn.progs, mpn.mech] = await Promise.all([api("/api/machine-programs"), api("/api/machine-mechanics?include_inactive=true")]);
   } catch (err) {
     showErr("mppError", `โหลดโปรแกรมไม่สำเร็จ: ${err.message}`);
     return;
@@ -266,7 +296,7 @@ function renderMachinePrograms() {
   const d = mpn.progs;
   if (!d) return;
   $("mppNeedsV34").hidden = d.ready;
-  fill($("mppList"), ...d.programs.map(programCard), addProgramCard(), assignCard());
+  fill($("mppList"), ...d.programs.map(programCard), addProgramCard(), assignCard(), mechanicsCard());
 }
 
 async function programCall(path, opts, msg) {
@@ -399,6 +429,62 @@ async function saveMeters() {
   await openMachineryData();
 }
 
+// ---- the machine mechanics (a separate list from the truck mechanics)
+async function mechanicsCall(path, opts, msg) {
+  try {
+    const res = await api(path, opts);
+    mc.mechanics = res.mechanics.filter((x) => x.active !== false);
+    mpn.mech = res;
+  } catch (err) {
+    msg.className = "error small";
+    msg.textContent = err.message;
+    return false;
+  }
+  renderMachinePrograms();
+  return true;
+}
+
+function mechanicsCard() {
+  const d = mpn.mech;
+  if (!d || !d.ready) return null;
+  const branches = state.branches || [];
+  const row = (x) => {
+    const f = (key, ph, w) => { const i = el("input", { type: "text", maxlength: "80", placeholder: ph, "aria-label": `${x.name} ${ph}` }); i.value = x[key] || ""; i.style.width = w; return i; };
+    const name = f("name", "ชื่อที่ใช้เรียก", "100%"), phone = f("phone", "เบอร์โทร", "100%"), full = f("full_name", "ชื่อเต็ม", "100%"), note = f("note", "หมายเหตุ", "100%");
+    const branch = el("select", { "aria-label": `${x.name} สาขา` }, el("option", { value: "", text: "ทุกสาขา" }), ...branches.map((b) => el("option", { value: b, text: b })));
+    branch.value = x.branch || "";
+    const active = el("input", { type: "checkbox", checked: x.active !== false, "aria-label": `${x.name} ใช้งานอยู่` });
+    const msg = el("span", { class: "muted small" });
+    return el("div", { class: `mechrow${x.active === false ? " off" : ""}` },
+      el("label", { class: "jr-f" }, el("span", { class: "muted small", text: "ชื่อ" }), name),
+      el("label", { class: "jr-f" }, el("span", { class: "muted small", text: "ชื่อเต็ม" }), full),
+      el("label", { class: "jr-f" }, el("span", { class: "muted small", text: "เบอร์โทร" }), phone,
+        x.phone ? el("a", { class: "small", href: `tel:${x.phone.replace(/[^0-9+]/g, "")}`, text: "โทร" }) : null),
+      el("label", { class: "jr-f" }, el("span", { class: "muted small", text: "สาขา" }), branch),
+      el("label", { class: "jr-f mech-note" }, el("span", { class: "muted small", text: "หมายเหตุ" }), note),
+      el("label", { class: "check mech-on" }, active, " ใช้งานอยู่"),
+      el("div", { class: "pl-set-actions" },
+        el("button", { class: "btn small", type: "button", text: "บันทึก", onclick: () => mechanicsCall(`/api/machine-mechanics/${x.id}`,
+          jsonOpts("PATCH", { name: name.value, full_name: full.value, phone: phone.value, branch: branch.value, note: note.value, active: active.checked }), msg) }),
+        el("button", { class: "btn small danger", type: "button", text: "ลบ", onclick: () => {
+          if (confirm(`เอา “${x.name}” ออกจากรายชื่อช่างเครื่องจักรใช่ไหม? (งานที่บันทึกไปแล้วยังมีชื่ออยู่)`)) mechanicsCall(`/api/machine-mechanics/${x.id}`, { method: "DELETE" }, msg);
+        } }), msg));
+  };
+  const add = (kind) => {
+    const name = el("input", { type: "text", maxlength: "60", placeholder: "ชื่อช่าง", "aria-label": "ชื่อช่างใหม่" });
+    const phone = el("input", { type: "text", maxlength: "40", placeholder: "เบอร์โทร", "aria-label": "เบอร์โทรช่างใหม่" });
+    const msg = el("span", { class: "muted small" });
+    return el("div", { class: "mechadd" }, name, phone, el("button", { class: "btn small", type: "button", text: "+ เพิ่ม",
+      onclick: () => mechanicsCall("/api/machine-mechanics", jsonOpts("POST", { name: name.value, phone: phone.value, kind }), msg) }), msg);
+  };
+  const section = (kind) => el("div", {}, el("h4", { class: "mech-h", text: d.kinds[kind] }),
+    ...d.mechanics.filter((x) => x.kind === kind).map(row), add(kind));
+  return el("section", { class: "card plset pl-wide" },
+    el("h3", { text: "ช่างเครื่องจักร" }),
+    el("p", { class: "muted small", text: "รายชื่อช่างที่ทำงานกับเครื่องจักรได้ — ใช้เป็นตัวเลือก “ผู้ทำ” ตอนบันทึกงานของเครื่อง · แยกจากช่างรถ (ช่างรถไม่ขึ้นที่นี่ และช่างเครื่องจักรไม่ขึ้นในงานซ่อมรถ)" }),
+    section("internal"), section("external"));
+}
+
 function initMachPlan() {
   $("mcMeters").addEventListener("click", openMetersDialog);
   $("mtCancel").addEventListener("click", () => $("metersDialog").close());
@@ -406,7 +492,6 @@ function initMachPlan() {
   $("mdReadAdd").addEventListener("click", openReadDialog);
   $("rdCancel").addEventListener("click", () => $("readDialog").close());
   $("rdSave").addEventListener("click", saveReading);
-  $("mdJobsDone").addEventListener("click", () => mc.current && openJobsDone(mc.current, []));
   $("jdCancel").addEventListener("click", () => $("jdDialog").close());
   $("jdSave").addEventListener("click", saveJobsDone);
 }

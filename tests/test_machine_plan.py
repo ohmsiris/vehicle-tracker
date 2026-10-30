@@ -235,3 +235,15 @@ def test_every_machine_plan_function_the_routes_call_exists():
     src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text(encoding="utf-8")
     names = set(re.findall(r"machine_plan\.(\w+)", src))
     assert names and all(callable(getattr(mp, n, None)) for n in names), sorted(n for n in names if not callable(getattr(mp, n, None)))
+
+
+# ------------------------------------------------------- machine mechanics (schema_v35)
+def test_a_machine_mechanic_is_checked():
+    from app import machine_mechanics as mm
+    v = mm.clean_mechanic({"name": " ช่างยุทธ ", "phone": "094-249-3423", "kind": "external"}, others=[{"name": "ช่างจรูญ"}])
+    assert v["name"] == "ช่างยุทธ" and v["kind"] == "external" and v["phone"] == "094-249-3423" and v["full_name"] is None and v["branch"] is None
+    for bad in ({"name": ""}, {"name": "ช่างจรูญ"}, {"name": "x", "kind": "boss"}):
+        with pytest.raises(mc.InvalidMachinery):
+            mm.clean_mechanic(bad, others=[{"name": "ช่างจรูญ"}])
+    edit = mm.clean_mechanic({"phone": "081"}, existing={"id": "a", "name": "ช่างจรูญ"}, others=[])
+    assert edit == {"phone": "081"}                                         # an edit changes only what it was given

@@ -14,7 +14,7 @@ const mc = {
   opts: { kinds: [], tube_types: [], event_kinds: [], part_statuses: [], ready: true },
   machines: [], parts: { rows: [], total: 0, facets: { locations: [], parts: [] } },
   events: { rows: [], total: 0, stats: { count: 0, total_cost: 0 } }, evLimit: 50,
-  current: null, editing: false, draft: {}, dirty: false,
+  mechanics: [], current: null, editing: false, draft: {}, dirty: false,
   partTarget: null, partDraft: {}, evTarget: null, evDraft: {},
 };
 
@@ -25,9 +25,10 @@ const STATUS_CLASS = { Good: "ok", New: "shop", Adjust: "warn", "?": "" };
 
 async function loadMachineryBase() {
   try {
-    const [opts, machines] = await Promise.all([api("/api/machinery/options"), api("/api/machines?include_inactive=true")]);
+    const [opts, machines, mech] = await Promise.all([api("/api/machinery/options"), api("/api/machines?include_inactive=true"), api("/api/machine-mechanics")]);
     mc.opts = opts;
     mc.machines = machines;
+    mc.mechanics = mech.mechanics || [];
     return true;
   } catch (err) {
     return err.message;
@@ -247,7 +248,7 @@ async function renderMachinePage() {
   const btn = (text, onclick, cls = "") => el("button", { class: `btn${cls ? ` ${cls}` : ""}`, type: "button", text, onclick });
   fill($("mdActions"), ...(mc.editing
     ? [btn("ยกเลิก", cancelMachineEdit), btn("บันทึก", saveMachine, "primary")]
-    : [btn("ราคาและอะไหล่ทั้งหมด", () => openMachinePrices(m)), btn("บันทึกงานซ่อมเครื่องนี้", () => openEventDialog(null, { machine_id: m.id })), btn("แก้ไข", startMachineEdit, "primary")]));
+    : [btn("ราคาและอะไหล่ทั้งหมด", () => openMachinePrices(m)), btn("บันทึกบิลซ่อม (เสียจริง)", () => openRepairBill(m)), btn("บันทึกบำรุงรักษา (ติ๊ก)", () => openJobsDone(m, []), "primary"), btn("แก้ไข", startMachineEdit)]));
   const cards = [];
   if (mc.editing) {
     const d = mc.draft;
@@ -411,7 +412,7 @@ function drawEventForm() {
       mfield(d, "equipment", "อุปกรณ์", { list: "evEquipList", placeholder: "เช่น พัดลม, ปั๊มน้ำเย็น", wide: true }),
       mfield(d, "summary", "ทำอะไร", { placeholder: "เช่น เปลี่ยนสายพานพัดลม", wide: true, maxlength: 500 }),
       mfield(d, "reason", "สาเหตุ / เหตุผล", { wide: true, maxlength: 500 }),
-      mfield(d, "performed_by", "ผู้ทำ", { placeholder: "เช่น ช่างเอ๋ / ชื่อร้าน" }), mfield(d, "cost", "ค่าใช้จ่าย (฿)", { type: "number" }),
+      mechanicPick(d, "performed_by", "ผู้ทำ"), mfield(d, "cost", "ค่าใช้จ่าย (฿)", { type: "number" }),
       d.job_key ? mfield(d, "hours_at", "มิเตอร์ตอนทำ (ชม.) — ไม่บังคับ แต่ทำให้นับชั่วโมงแม่นขึ้น", { type: "number", wide: true }) : null),
     d.job_key ? el("p", { class: "muted small", text: `งานตามแผน: ${(typeof planJobName === "function" && planJobName(d.job_key)) || d.job_key} — บันทึกแล้วระบบนับรอบใหม่จากวันที่นี้` }) : null,
     el("details", { class: "mdetails", open: hasDetail }, el("summary", { text: "ถ้าเปลี่ยนอะไหล่: ยี่ห้อ รุ่น ร้าน" }),
