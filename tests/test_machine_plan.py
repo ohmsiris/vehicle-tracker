@@ -111,31 +111,31 @@ def test_worst_first_and_counted():
 
 # --------------------------------------------------------------------- programs
 def test_each_kind_of_machine_gets_its_built_in_program():
-    assert mp.program_code_for(M, PROGRAMS) == "TUBE" and mp.program_code_for(SONG, PROGRAMS) == "SONG"
-    tube = {j["key"] for j in mp.jobs_for(PROGRAMS["TUBE"])}
-    song = {j["key"] for j in mp.jobs_for(PROGRAMS["SONG"])}
+    assert mp.program_code_for(M, PROGRAMS) == "T" and mp.program_code_for(SONG, PROGRAMS) == "B"
+    tube = {j["key"] for j in mp.jobs_for(PROGRAMS["T"])}
+    song = {j["key"] for j in mp.jobs_for(PROGRAMS["B"])}
     assert {"freezer_wash", "freezer_vac", "screw_grease", "screw_overhaul"} <= tube
     assert not ({"freezer_wash", "freezer_vac", "screw_grease", "screw_overhaul"} & song)          # no freezer on a brine pond
     assert {"overhaul", "oil", "cooling", "condenser"} <= song
-    assert mp.program_code_for({**SONG, "program_code": "P9"}, PROGRAMS) == "SONG"      # a program that is gone: back to the kind's
+    assert mp.program_code_for({**SONG, "program_code": "P9"}, PROGRAMS) == "B"      # a program that is gone: back to the kind's
 
 
 def test_a_saved_program_is_laid_over_the_defaults():
-    rows = [{"code": "TUBE", "label": "หลอด (ของเรา)", "step_months": 2,
+    rows = [{"code": "T", "label": "หลอด (ของเรา)", "step_months": 2,
              "jobs": {"cooling": {"months": 2}, "safety": {"on": False}, "headwash": {"level": "ไม่ต้องทำ"}}},
             {"code": "P1", "label": "แก่งคอย", "step_months": 3, "jobs": {"oil": {"on": True, "months": 6, "hours": 4000, "level": "ทำเอง"}}}]
     progs = mp.merge_programs(rows)
-    tube = {j["key"]: j for j in mp.jobs_for(progs["TUBE"])}
-    assert progs["TUBE"]["label"] == "หลอด (ของเรา)" and progs["TUBE"]["step_months"] == 2 and progs["TUBE"]["customised"]
+    tube = {j["key"]: j for j in mp.jobs_for(progs["T"])}
+    assert progs["T"]["label"] == "หลอด (ของเรา)" and progs["T"]["step_months"] == 2 and progs["T"]["customised"]
     assert tube["cooling"]["months"] == 2 and tube["oil"]["months"] == 6
     assert "safety" not in tube and "headwash" not in tube                    # switched off / ไม่ต้องทำ
     assert [j["key"] for j in mp.jobs_for(progs["P1"])] == ["oil"]               # an added program has only what was switched on
-    assert not progs["P1"]["builtin"] and progs["SONG"]["builtin"] and not progs["SONG"]["customised"]
+    assert not progs["P1"]["builtin"] and progs["B"]["builtin"] and not progs["B"]["customised"]
     assert [j["key"] for j in plan({**M, "program_code": "P1"}, programs=progs)["jobs"]] == ["oil"]
 
 
 def test_a_program_is_checked_before_it_is_saved():
-    cur = PROGRAMS["TUBE"]
+    cur = PROGRAMS["T"]
     v = mp.clean_program({"label": " หลอด ", "step_months": "2", "jobs": {"cooling": {"on": True, "months": "2", "hours": "", "level": "ทำเอง"}}}, cur)
     assert v == {"label": "หลอด", "step_months": 2, "jobs": {"cooling": {"on": True, "months": 2, "hours": None, "level": "ทำเอง"}}}
     off = mp.clean_program({"jobs": {"cooling": {"on": False, "months": "", "hours": "", "level": "ทำเอง"}}}, cur)   # off needs no interval
@@ -172,7 +172,7 @@ def test_the_chart_shows_a_never_overhauled_compressor():
 
 # -------------------------------------------------------------- "ทำแล้ว" form
 def test_jobs_done_form_is_checked():
-    jobs = mp.jobs_for(PROGRAMS["TUBE"])
+    jobs = mp.jobs_for(PROGRAMS["T"])
     v = mp.clean_jobs_done({"done_date": "2026-10-29", "job_keys": ["oil", "grease", "oil"], "cost": "1,500", "hours_at": "", "performed_by": " ช่างเอ๋ "}, jobs, today=TODAY)
     assert v["job_keys"] == ["oil", "grease"] and v["cost"] == 1500 and v["hours_at"] is None and v["performed_by"] == "ช่างเอ๋"
     for bad in ({"done_date": "", "job_keys": ["oil"]}, {"done_date": "2026-11-30", "job_keys": ["oil"]}, {"done_date": "2569-10-01", "job_keys": ["oil"]},

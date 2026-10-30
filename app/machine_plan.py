@@ -4,7 +4,7 @@ coming up, or have no record, counted from the maintenance reports (machine_even
 
 Like the truck groups, every machine follows a PROGRAM: which jobs it gets, each job's interval (months, running
 hours, or both -- whichever comes first) and its level (ทำเอง / ควรทำ / ผู้รับเหมา / ไม่ต้องทำ). Two programs are built in
-(TUBE for the หลอด machines, SONG for the brine-pond machines: no freezer or screw jobs); the owner changes them, adds
+(T = Tube for the หลอด machines, B = Block for the brine-pond machines: no freezer or screw jobs); the owner changes them, adds
 his own, and picks each machine's program on the settings page (machine_programs, machines.program_code).
 
 Running hours come from the hour-meter readings (machine_readings) when there are two a week apart, otherwise from an
@@ -31,7 +31,7 @@ DAYS_PER_MONTH = 30.4375
 CHART_ROUNDS = 8
 NEEDS_V34 = "ต้องรัน schema_v34.sql ใน Supabase ก่อน จึงจะตั้งโปรแกรมของเครื่องจักรได้"
 
-TUBE, SONG = "TUBE", "SONG"
+TUBE, SONG = "T", "B"
 # key, name, the built-in programs that include it, months, hours, level, event kind, other jobs that restart it, is it a guess, note
 JOBS: list[dict] = [
     dict(key="overhaul", name="โอเวอร์ฮอลคอมเพรสเซอร์", programs=(TUBE, SONG), months=None, hours=24000, level="ทำเอง", event_kind="เปลี่ยนอะไหล่", reset_by=(), guess=False,
@@ -62,8 +62,8 @@ JOBS: list[dict] = [
 JOB_BY_KEY = {j["key"]: j for j in JOBS}
 
 DEFAULT_PROGRAMS = [
-    {"code": TUBE, "label": "เครื่องน้ำแข็งหลอด", "step_months": 3, "sort_order": 1},
-    {"code": SONG, "label": "เครื่องบ่อซอง (คอมเพรสเซอร์ + ระบายความร้อน)", "step_months": 3, "sort_order": 2},
+    {"code": TUBE, "label": "Tube — เครื่องน้ำแข็งหลอด", "step_months": 3, "sort_order": 1},
+    {"code": SONG, "label": "Block — เครื่องบ่อซอง (คอมเพรสเซอร์ + ระบายความร้อน)", "step_months": 3, "sort_order": 2},
 ]
 BUILTIN = {p["code"] for p in DEFAULT_PROGRAMS}
 DEFAULT_FOR_KIND = {"เครื่อง": TUBE, "บ่อซอง": SONG}
