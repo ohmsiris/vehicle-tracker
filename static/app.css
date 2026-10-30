@@ -1264,3 +1264,29 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 
 /* ---- the tick next to a truck whose repair history is brought up to date ---- */
 .histok { display: inline-grid; place-items: center; width: 17px; height: 17px; margin-left: 6px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); font-size: 11px; font-weight: 700; line-height: 1; vertical-align: middle; cursor: help; }
+
+/* ------------------------------------------------- machine maintenance plan (machplan.js) */
+.mc-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
+.mc-next { margin-top: 4px; }
+.planlist { display: grid; gap: 8px; margin-bottom: 16px; }
+.planrow { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 14px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 14px; }
+.planrow.late, .planrow.never { border-left: 4px solid var(--bad); }
+.planrow.soon { border-left: 4px solid var(--warn-line); }
+.planrow.ok { border-left: 4px solid var(--ok); }
+.pl-name { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.pl-state { display: grid; gap: 4px; justify-items: start; }
+.meterbox { display: grid; gap: 4px; margin-bottom: 16px; }
+.rdrow { display: flex; gap: 10px; align-items: center; color: var(--text-2); }
+.linkbtn { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 13px; padding: 0; }
+.sharedpick { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.mcjobs { margin: 18px 0 10px; }
+.jobsettings { display: grid; gap: 8px; }
+.jobrow { display: grid; grid-template-columns: minmax(0, 2fr) 84px 84px 120px auto; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px; }
+.jr-f { display: grid; gap: 2px; margin: 0; }
+.jr-f input, .jr-f select { width: 100%; font: inherit; }
+.jr-save { display: grid; gap: 2px; justify-items: start; }
+@media (max-width: 800px) {
+  .planrow { grid-template-columns: 1fr; gap: 8px; }
+  .jobrow { grid-template-columns: 1fr 1fr 1fr; }
+  .jr-name { grid-column: 1 / -1; }
+}

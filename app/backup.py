@@ -44,6 +44,8 @@ TABLES: dict[str, str] = {
     "machines": "id.asc",
     "machine_parts": "id.asc",
     "machine_events": "id.asc",
+    "machine_readings": "id.asc",
+    "machine_job_settings": "job_key.asc",
     "service_groups": "code.asc",
     "vehicle_plans": "vehicle_id.asc",
     "service_records": "id.asc",

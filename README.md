@@ -818,3 +818,11 @@ The name opens the item's own page: price in each shop, price per brand (only wh
 
 Coolant: "เปลี่ยนน้ำหล่อเย็นเครื่องยนต์" and "เปลี่ยนถ่ายน้ำหม้อน้ำ/เติมน้ำยา" (the dealer's labour lines) now count as the coolant change (`service_plan._COOLANT_CHANGE`); the
 drain plug, the radiator itself and a plain top-up still do not.
+
+## ภาพรวมเครื่องจักร: the machine maintenance programme (`app/machine_plan.py`, `static/machplan.js`, `schema_v33.sql`)
+Run `schema_v33.sql` once. The machinery menu is now: **ภาพรวมเครื่องจักร** (`#machinery`, a card per machine: jobs overdue / coming up / without a record, the most urgent one, the hour meter), **อะไหล่และสเปค** (`#machine-parts`, the old parts list) and **บันทึกซ่อมบำรุง**. A card opens the machine's page: its planned jobs with "บันทึกว่าทำแล้ว", its hour-meter readings, its details, parts (a shared grinder carries "ใช้ร่วมกับ เครื่อง 2") and latest reports.
+- **A job done = a maintenance report with a `job_key`** (`machine_events.job_key`, optional `hours_at`); the plan counts from the latest report of that key. An overhaul also restarts the oil, 12,000 h check and ล้างฝาสูบ clocks.
+- **Jobs** are in `machine_plan.JOBS` (compressor: overhaul 24,000 h, optional 12,000 h check, oil 4,000 h / 6 months, motor grease 4,000 h, belts, yearly safety-switch test, cooling 3 m, condenser 6 m, ล้างฝาสูบ; หลอด machines: freezer wash 3 m, freezer vacuum 6 m, screw/grinder grease 3 m and overhaul 24 m -- those motors are on/off so they count months, not hours). Entries marked `guess` show "ประมาณ". The owner changes an interval or level (ทำเอง / ควรทำ / ผู้รับเหมา / ไม่ต้องทำ) in the "ตั้งค่ารอบงาน" box (`machine_job_settings`); ไม่ต้องทำ hides the job.
+- **Hours**: from `machine_readings` when there are two readings a week apart, otherwise `hours_per_day x days_per_week` on the machine (24 x 7; the brine-pond machines 24 x 6). `machines.never_overhauled` marks a compressor that has never been overhauled (red until the first overhaul is logged).
+- **Shared equipment**: `machine_parts.shared_machine_ids` -- the other machines a part serves.
+- "Soon" means due within 30 days (`SOON_DAYS`). Tests: `tests/test_machine_plan.py`.

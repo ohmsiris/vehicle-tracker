@@ -49,6 +49,25 @@ def has_v9() -> bool:
     return ok
 
 
+_probe33 = {"at": 0.0, "ok": False}
+NEEDS_V33 = "ต้องรัน schema_v33.sql ใน Supabase ก่อน จึงจะใช้แผนซ่อมบำรุงเครื่องจักรได้"
+
+
+def has_v33() -> bool:
+    """True once schema_v33.sql has been run (probed, cached 30 s)."""
+    now = time.time()
+    if now - _probe33["at"] < 30:
+        return _probe33["ok"]
+    try:
+        supabase.select("machine_readings", {"select": "id", "limit": "1"})
+        supabase.select("machine_events", {"select": "job_key", "limit": "1"})
+        ok = True
+    except supabase.SupabaseError:
+        ok = False
+    _probe33.update(at=now, ok=ok)
+    return ok
+
+
 # ------------------------------------------------------------------ helpers
 def _clean(value, limit: int) -> str:
     return re.sub(r"\s+", " ", str(value if value is not None else "")).strip()[:limit]
@@ -123,6 +142,15 @@ def clean_machine(data: dict, *, existing: Optional[dict] = None, others: list[d
         values["notes"] = _clean(data.get("notes"), 300) or None
     if given("active"):
         values["active"] = bool(data["active"])
+    if given("hours_per_day"):
+        values["hours_per_day"] = _number(data.get("hours_per_day"), "ชั่วโมงเดินเครื่องต่อวัน", maximum=24)
+    if given("days_per_week"):
+        days = _number(data.get("days_per_week"), "วันเดินเครื่องต่อสัปดาห์", maximum=7)
+        if days is not None and days < 1:
+            raise InvalidMachinery("วันเดินเครื่องต่อสัปดาห์ต้องอย่างน้อย 1 วัน")
+        values["days_per_week"] = days
+    if given("never_overhauled"):
+        values["never_overhauled"] = bool(data["never_overhauled"])
 
     final = {**(existing or {}), **values}
     if final.get("kind", "เครื่อง") == "เครื่อง" and not final.get("number"):
@@ -175,7 +203,19 @@ def clean_part(data: dict, *, existing: Optional[dict] = None, machine_ids: set)
         values["machine_id"] = mid
     if "sort_order" in data:
         values["sort_order"] = int(_number(data.get("sort_order"), "ลำดับ", maximum=100000) or 0)
+    if "shared_machine_ids" in data:
+        shared = []
+        for raw in data.get("shared_machine_ids") or []:
+            sid = _uuid_or_none(raw)
+            if sid is None or sid in shared:
+                continue
+            if sid not in machine_ids:
+                raise InvalidMachinery("ไม่พบเครื่องที่เลือกใช้ร่วม")
+            shared.append(sid)
+        values["shared_machine_ids"] = shared
     final = {**(existing or {}), **values}
+    if "shared_machine_ids" in values and final.get("machine_id"):
+        values["shared_machine_ids"] = [s for s in shared if s != final["machine_id"]]       # a part is never "shared with" its own machine
     if not any(final.get(k) for k in ("equipment", "part", "spec")):
         raise InvalidMachinery("ใส่อย่างน้อยอุปกรณ์ ชิ้นส่วน หรือสเปค")
     return values
@@ -226,6 +266,10 @@ def clean_event(data: dict, *, existing: Optional[dict] = None, machines: dict[s
         values["cost"] = cost
     if "part_id" in data:
         values["part_id"] = _uuid_or_none(data.get("part_id"))
+    if "job_key" in data:
+        values["job_key"] = _clean(data.get("job_key"), 40) or None
+    if "hours_at" in data:
+        values["hours_at"] = _number(data.get("hours_at"), "ชั่วโมงที่มิเตอร์", maximum=1e7)
     # branch: the machine's when there is one, else what was sent
     final = {**(existing or {}), **values}
     machine = machines.get(final.get("machine_id") or "")
@@ -249,7 +293,7 @@ def filter_parts(parts: list[dict], machines: dict[str, dict], *, q: str = "", m
     tokens = [t for t in (_squash(w) for w in str(q or "").split()) if t]
     out = []
     for p in parts:
-        if machine_id and p.get("machine_id") != machine_id:
+        if machine_id and p.get("machine_id") != machine_id and machine_id not in (p.get("shared_machine_ids") or []):
             continue
         if location and p.get("location") != location:
             continue
@@ -304,6 +348,15 @@ def _require() -> None:
         raise InvalidMachinery(NEEDS_V9)
 
 
+V33_COLUMNS = ("hours_per_day", "days_per_week", "never_overhauled", "shared_machine_ids", "job_key", "hours_at")
+
+
+def _require_v33_for(values: dict) -> None:
+    """The columns added by schema_v33.sql may only be written once it has been run."""
+    if any(k in values for k in V33_COLUMNS) and not has_v33():
+        raise InvalidMachinery(NEEDS_V33)
+
+
 def _machines(include_inactive: bool = True) -> list[dict]:
     params = {"select": "*", "order": "branch.asc,kind.asc,number.asc,id.asc"}
     if not include_inactive:
@@ -346,6 +399,7 @@ def get_machine(machine_id: str) -> dict:
 def create_machine(data: dict) -> dict:
     _require()
     values = clean_machine(data, others=_machines())
+    _require_v33_for(values)
     return {"machine_id": supabase.insert("machines", [values])[0]["id"]}
 
 
@@ -357,6 +411,7 @@ def edit_machine(machine_id: str, data: dict) -> dict:
     if existing is None:
         raise NotFound()
     values = clean_machine(data, existing=existing, others=[m for m in all_ if m["id"] != mid])
+    _require_v33_for(values)
     if values:
         supabase.update("machines", {"id": f"eq.{mid}"}, values)
     return {"ok": True}
@@ -380,6 +435,7 @@ def _machine_ids() -> set:
 def create_part(data: dict) -> dict:
     _require()
     values = clean_part(data, machine_ids=_machine_ids())
+    _require_v33_for(values)
     return {"part_id": supabase.insert("machine_parts", [values])[0]["id"]}
 
 
@@ -395,6 +451,7 @@ def edit_part(part_id: str, data: dict) -> dict:
     _require()
     existing = _get_part(part_id)
     values = clean_part(data, existing=existing, machine_ids=_machine_ids())
+    _require_v33_for(values)
     if values:
         supabase.update("machine_parts", {"id": f"eq.{existing['id']}"}, values)
     return {"ok": True}
@@ -423,6 +480,8 @@ def list_events(*, q: str = "", machine_id: str = "", area: str = "", kind: str 
 def create_event(data: dict) -> dict:
     _require()
     values = clean_event(data, machines={m["id"]: m for m in _machines()})
+    _require_v33_for(values)
+    _clear_never_overhauled(values)
     return {"event_id": supabase.insert("machine_events", [values])[0]["id"]}
 
 
@@ -433,6 +492,14 @@ def edit_event(event_id: str, data: dict) -> dict:
     if not rows:
         raise NotFound()
     values = clean_event(data, existing=rows[0], machines={m["id"]: m for m in _machines()})
+    _require_v33_for(values)
+    _clear_never_overhauled({**rows[0], **values})
     if values:
         supabase.update("machine_events", {"id": f"eq.{eid}"}, values)
     return {"ok": True}
+
+
+def _clear_never_overhauled(event: dict) -> None:
+    """Logging an overhaul means the compressor is no longer "never overhauled"."""
+    if event.get("job_key") == "overhaul" and event.get("machine_id") and has_v33():
+        supabase.update("machines", {"id": f"eq.{event['machine_id']}"}, {"never_overhauled": False})

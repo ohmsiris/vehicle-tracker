@@ -2,7 +2,8 @@
 
 // เครื่องจักร: the machines, an index of what is on them (motors, pumps, belts, bearings, breakers ... with
 // their specs), and the maintenance reports.
-//   #machinery      the index: the machines as cards + the searchable parts / specs list
+//   #machinery      the overview: a card per machine with its overdue / coming-up jobs (machplan.js)
+//   #machine-parts  the searchable parts / specs list (อะไหล่และสเปค)
 //   #machine=<id>   one machine: its details (view / edit), its parts, its latest reports
 //   #machine-log    the maintenance reports: filter, add, correct
 // Lists are read-only; a row opens a form (parts, reports) or a page (machines) where changes are made and saved
@@ -41,28 +42,12 @@ function showReady(bannerId) {
 }
 
 // ================================================================== the index (#machinery)
-async function openMachinery() {
-  showView("machinery");
-  showErr("mcError", "");
+async function openMachineParts() {
+  showView("machineParts");
+  showErr("mpError", "");
   const ok = await loadMachineryBase();
-  if (ok !== true) { showErr("mcError", `โหลดข้อมูลเครื่องจักรไม่สำเร็จ: ${ok}`); return; }
-  showReady("mcNeedsV9");
-  renderMachineCards();
+  if (ok !== true) { showErr("mpError", `โหลดข้อมูลเครื่องจักรไม่สำเร็จ: ${ok}`); return; }
   await loadParts();
-}
-
-function renderMachineCards() {
-  const live = mc.machines.filter((m) => m.active !== false);
-  fill($("mcCards"), ...(live.length ? live.map(machineCard) : [el("p", { class: "muted empty", text: needsV9() ? "" : "ยังไม่มีเครื่อง — กด “+ เพิ่มเครื่อง”" })]));
-}
-
-function machineCard(m) {
-  return el("a", { class: "mccard", href: `#machine=${m.id}` },
-    el("div", { class: "mc-name", text: m.name }),
-    el("div", { class: "muted small", text: machineSub(m) || m.branch }),
-    el("div", { class: "mc-counts small" },
-      el("span", { text: `${m.part_count} รายการอะไหล่` }), el("span", { text: `${m.event_count} งานซ่อม` }),
-      m.last_event_date ? el("span", { class: "muted", text: `ล่าสุด ${beDate(m.last_event_date)}` }) : null));
 }
 
 // ---- parts / specs list
@@ -80,7 +65,7 @@ async function loadParts() {
   try {
     mc.parts = await api(`/api/machine-parts?${partQuery()}`);
   } catch (err) {
-    showErr("mcError", `โหลดรายการอะไหล่ไม่สำเร็จ: ${err.message}`);
+    showErr("mpError", `โหลดรายการอะไหล่ไม่สำเร็จ: ${err.message}`);
     return;
   }
   const keepL = $("mpLocation").value, keepP = $("mpPart").value;
@@ -93,9 +78,15 @@ async function loadParts() {
 }
 
 // one row per part; the electrical details (hp, amps, breaker, contactor, overload) sit under the spec
-function partRows(rows, { emptyText, showLocation = true } = {}) {
+function sharedNames(p, contextId) {
+  const ids = [p.machine_id, ...(p.shared_machine_ids || [])].filter((id) => id && id !== contextId);
+  return (p.shared_machine_ids || []).length ? ids.map((id) => (machineById(id) || { name: "?" }).name) : [];
+}
+
+function partRows(rows, { emptyText, showLocation = true, contextId = "" } = {}) {
   if (!rows.length) return [el("p", { class: "muted empty", text: emptyText || "ยังไม่มีรายการ" })];
   return rows.map((p) => {
+    const shared = sharedNames(p, contextId);
     const electric = [p.motor_hp ? `${p.motor_hp} hp` : null, p.delta_a ? `Δ ${p.delta_a} A` : null, p.star_a ? `★ ${p.star_a} A` : null,
       p.breaker ? `Breaker: ${p.breaker.replace(/\n/g, " / ")}` : null, p.contactor ? `Contactor: ${p.contactor.replace(/\n/g, " / ")}` : null,
       p.overload ? `Overload: ${p.overload.replace(/\n/g, " / ")}` : null].filter(Boolean).join(" · ");
@@ -103,7 +94,8 @@ function partRows(rows, { emptyText, showLocation = true } = {}) {
       showLocation ? el("div", { class: "mp-loc", text: p.location }) : null,
       el("div", { class: "mp-main" },
         el("div", { class: "mp-title" }, el("strong", { text: p.equipment || p.part || "–" }), p.equipment && p.part ? el("span", { class: "badge", text: p.part }) : null,
-          p.status ? el("span", { class: `badge ${STATUS_CLASS[p.status] || ""}`.trim(), text: p.status }) : null),
+          p.status ? el("span", { class: `badge ${STATUS_CLASS[p.status] || ""}`.trim(), text: p.status }) : null,
+          shared.length ? el("span", { class: "badge warn", text: `ใช้ร่วมกับ ${shared.join(", ")}` }) : null),
         p.spec ? el("div", { class: "mp-spec", text: p.spec }) : null,
         electric ? el("div", { class: "muted small", text: electric }) : null,
         p.notes ? el("div", { class: "muted small", text: p.notes }) : null),
@@ -151,7 +143,8 @@ function mselect(draft, key, label, options, { blank = "— ไม่ระบ�
 
 function openPartDialog(p, defaults = {}) {
   mc.partTarget = p || null;
-  mc.partDraft = p ? { ...p, qty: p.qty ?? "", machine_id: p.machine_id || "" } : { location: "", machine_id: "", status: "", ...defaults };
+  mc.partDraft = p ? { ...p, qty: p.qty ?? "", machine_id: p.machine_id || "", shared_machine_ids: [...(p.shared_machine_ids || [])] }
+    : { location: "", machine_id: "", shared_machine_ids: [], status: "", ...defaults };
   $("pdTitle").textContent = p ? "รายละเอียดอะไหล่ / สเปค" : "เพิ่มรายการอะไหล่ / สเปค";
   const d = mc.partDraft;
   const hasElectric = PART_ELECTRIC.some(([k]) => d[k] !== undefined && d[k] !== null && d[k] !== "");
@@ -159,7 +152,8 @@ function openPartDialog(p, defaults = {}) {
     el("div", { class: "mfields" },
       ...PART_FIELDS.map(([k, l, o]) => mfield(d, k, l, o)),
       mselect(d, "machine_id", "ผูกกับเครื่อง", mc.machines.filter((m) => m.active !== false).map((m) => [m.id, m.name]), { blank: "— ไม่ผูกเครื่อง (พื้นที่ทั่วไป) —" }),
-      mselect(d, "status", "สถานะ", mc.opts.part_statuses.map((s) => [s, s]), { blank: "— ไม่ระบุ —" })),
+      mselect(d, "status", "สถานะ", mc.opts.part_statuses.map((s) => [s, s]), { blank: "— ไม่ระบุ —" }),
+      sharedPicker(d)),
     el("details", { class: "mdetails", open: hasElectric }, el("summary", { text: "ข้อมูลมอเตอร์ / ไฟฟ้า" }),
       el("div", { class: "mfields" }, ...PART_ELECTRIC.map(([k, l, o]) => mfield(d, k, l, o)))),
     el("div", { class: "mfields" }, mfield(d, "notes", "หมายเหตุ", { wide: true })),
@@ -170,9 +164,22 @@ function openPartDialog(p, defaults = {}) {
   $("partDialog").showModal();
 }
 
+// the other machines a part also serves (a grinder shared by machines 1 and 2)
+function sharedPicker(d) {
+  const live = mc.machines.filter((m) => m.active !== false);
+  return el("div", { class: "mfield wide" }, el("label", { text: "ใช้ร่วมกับเครื่องอื่น (เช่น เครื่องบดที่ใช้ร่วมกัน)" }),
+    el("div", { class: "sharedpick" }, ...live.map((m) => el("label", { class: "check" },
+      el("input", { type: "checkbox", checked: (d.shared_machine_ids || []).includes(m.id), onchange: (e) => {
+        const set = new Set(d.shared_machine_ids || []);
+        if (e.target.checked) set.add(m.id); else set.delete(m.id);
+        d.shared_machine_ids = [...set];
+      } }), ` ${m.name}`))));
+}
+
 async function savePart() {
   const body = {};
   for (const [k] of [...PART_FIELDS, ...PART_ELECTRIC, ["machine_id"], ["status"], ["notes"]]) body[k] = mc.partDraft[k] ?? "";
+  if ((mc.partDraft.shared_machine_ids || []).length || (mc.partTarget && (mc.partTarget.shared_machine_ids || []).length)) body.shared_machine_ids = mc.partDraft.shared_machine_ids || [];
   try {
     if (mc.partTarget) await api(`/api/machine-parts/${mc.partTarget.id}`, jsonOpts("PATCH", body));
     else await api("/api/machine-parts", jsonOpts("POST", body));
@@ -200,7 +207,8 @@ async function deletePart() {
 // whatever machinery page is showing reloads (counts, lists)
 async function refreshMachineryViews() {
   await loadMachineryBase();
-  if (!$("machineryView").hidden) { renderMachineCards(); await loadParts(); }
+  if (!$("machineryView").hidden) await openMachineryData();
+  if (!$("machinePartsView").hidden) await loadParts();
   if (!$("machineView").hidden && mc.current) await renderMachinePage();
   if (!$("machineLogView").hidden) await loadEvents(true);
 }
@@ -227,7 +235,8 @@ async function openMachinePage(id) {
 }
 
 const machineDraft = (m) => ({ branch: m.branch, kind: m.kind, number: m.number ?? "", tube_type: m.tube_type || "", make: m.make || "", model: m.model || "",
-  capacity_tons: m.capacity_tons ?? "", notes: m.notes || "", active: m.active !== false, name: m.name });
+  capacity_tons: m.capacity_tons ?? "", notes: m.notes || "", active: m.active !== false, name: m.name,
+  hours_per_day: m.hours_per_day ?? "", days_per_week: m.days_per_week ?? "", never_overhauled: !!m.never_overhauled });
 
 async function renderMachinePage() {
   const m = mc.current;
@@ -249,25 +258,33 @@ async function renderMachinePage() {
       mfield(d, "tube_type", "ชนิดหลอด", { list: "mdTubeList", placeholder: "หลอดใหญ่ / หลอดเหลี่ยม / หลอดเล็ก" }),
       mfield(d, "make", "ยี่ห้อ", { placeholder: "MYCOM / Sabroe" }), mfield(d, "model", "รุ่น", { placeholder: "8WB-HE" }),
       mfield(d, "capacity_tons", "ขนาด (ตัน)", { type: "number" }),
+      mfield(d, "hours_per_day", "เดินเครื่องกี่ชม./วัน (ถ้าไม่มีมิเตอร์)", { type: "number", placeholder: "24" }),
+      mfield(d, "days_per_week", "เดินเครื่องกี่วัน/สัปดาห์", { type: "number", placeholder: d.kind === "บ่อซอง" ? "6" : "7" }),
       mfield(d, "name", "ชื่อที่แสดง (ว่างไว้ = ตั้งให้เอง)", { wide: true, maxlength: 80 }),
       el("datalist", { id: "mdTubeList" }, ...mc.opts.tube_types.map((t) => el("option", { value: t })))),
-      m ? el("label", { class: "check tk-active" }, el("input", { type: "checkbox", checked: d.active, onchange: (e) => { d.active = e.target.checked; mc.dirty = true; } }), " ใช้งานอยู่") : null),
+      m ? el("label", { class: "check tk-active" }, el("input", { type: "checkbox", checked: d.active, onchange: (e) => { d.active = e.target.checked; mc.dirty = true; } }), " ใช้งานอยู่") : null,
+      el("label", { class: "check tk-active" }, el("input", { type: "checkbox", checked: d.never_overhauled, onchange: (e) => { d.never_overhauled = e.target.checked; mc.dirty = true; } }),
+        " ไม่เคยโอเวอร์ฮอลคอมเพรสเซอร์ตัวนี้ ", el("span", { class: "muted small", text: "(ระบบจะขึ้นเป็นงานเร่งด่วน จนกว่าจะบันทึกโอเวอร์ฮอลครั้งแรก)" }))),
       tkCard("หมายเหตุ", el("div", { class: "mfields" }, mfield(d, "notes", "หมายเหตุ (ไม่บังคับ)", { wide: true }))));
     document.querySelectorAll("#mdBody input, #mdBody select, #mdBody textarea").forEach((n) => n.addEventListener("input", () => { mc.dirty = true; }));
   } else {
     const c = mc.current;
     cards.push(tkCard("ข้อมูลเครื่อง", kvAll("สาขา", c.branch), kvAll("ประเภท", c.kind), kvAll("เลขเครื่อง", c.number), kvAll("ชนิดหลอด", c.tube_type), kvAll("ยี่ห้อ", c.make), kvAll("รุ่น", c.model),
-      kvAll("ขนาด", c.capacity_tons ? `${c.capacity_tons} ตัน` : ""), kvAll("สถานะ", c.active === false ? "เลิกใช้แล้ว" : "ใช้งานอยู่")));
+      kvAll("ขนาด", c.capacity_tons ? `${c.capacity_tons} ตัน` : ""), kvAll("สถานะ", c.active === false ? "เลิกใช้แล้ว" : "ใช้งานอยู่"),
+      kvAll("เดินเครื่อง", c.hours_per_day || c.days_per_week ? `${c.hours_per_day || 24} ชม./วัน × ${c.days_per_week || (c.kind === "บ่อซอง" ? 6 : 7)} วัน/สัปดาห์` : ""),
+      kvAll("โอเวอร์ฮอล", c.never_overhauled ? "ไม่เคยโอเวอร์ฮอล" : "")));
     if (c.notes) cards.push(tkCard("หมายเหตุ", el("p", { class: "tk-notes", text: c.notes })));
   }
   fill($("mdBody"), ...cards);
   // the machine's parts and latest reports (only for a saved machine)
   $("mdParts").hidden = !m || mc.editing;
   $("mdEvents").hidden = !m || mc.editing;
+  $("mdPlan").hidden = !m || mc.editing;
   if (m && !mc.editing) {
+    await renderMachinePlan(m);
     const [parts, events] = await Promise.all([api(`/api/machine-parts?machine_id=${m.id}&limit=500`), api(`/api/machine-events?machine_id=${m.id}&limit=8`)]);
     $("mdPartCount").textContent = parts.total ? `(${parts.total})` : "";
-    fill($("mdPartList"), ...partRows(parts.rows, { emptyText: "ยังไม่มีรายการอะไหล่ของเครื่องนี้ — กด “+ เพิ่มรายการ”", showLocation: false }));
+    fill($("mdPartList"), ...partRows(parts.rows, { emptyText: "ยังไม่มีรายการอะไหล่ของเครื่องนี้ — กด “+ เพิ่มรายการ”", showLocation: false, contextId: m.id }));
     $("mdEventCount").textContent = events.total ? `(${events.total})` : "";
     fill($("mdEventList"), ...(events.rows.length ? events.rows.map(eventRow) : [el("p", { class: "muted empty", text: "ยังไม่มีบันทึกงานซ่อมของเครื่องนี้" })]));
     $("mdEventAll").hidden = events.total <= events.rows.length;
@@ -370,7 +387,7 @@ function openEventDialog(e, defaults = {}) {
   mc.evTarget = e || null;
   mc.evDraft = e ? { ...e, machine_id: e.machine_id || "", cost: e.cost ?? "" }
     : { event_date: todayISO(), machine_id: "", branch: (state.branches || [])[0] || "", area: "", equipment: "", kind: "ซ่อม", summary: "", reason: "", brand: "", model: "",
-        serial_number: "", vendor: "", vendor_contact: "", performed_by: "", cost: "", notes: "", ...defaults };
+        serial_number: "", vendor: "", vendor_contact: "", performed_by: "", cost: "", notes: "", job_key: "", hours_at: "", ...defaults };
   $("evdTitle").textContent = e ? "แก้ไขบันทึกซ่อมบำรุง" : "บันทึกงานซ่อมบำรุง";
   drawEventForm();
   showErr("evdError", "");
@@ -394,7 +411,9 @@ function drawEventForm() {
       mfield(d, "equipment", "อุปกรณ์", { list: "evEquipList", placeholder: "เช่น พัดลม, ปั๊มน้ำเย็น", wide: true }),
       mfield(d, "summary", "ทำอะไร", { placeholder: "เช่น เปลี่ยนสายพานพัดลม", wide: true, maxlength: 500 }),
       mfield(d, "reason", "สาเหตุ / เหตุผล", { wide: true, maxlength: 500 }),
-      mfield(d, "performed_by", "ผู้ทำ", { placeholder: "เช่น ช่างเอ๋ / ชื่อร้าน" }), mfield(d, "cost", "ค่าใช้จ่าย (฿)", { type: "number" })),
+      mfield(d, "performed_by", "ผู้ทำ", { placeholder: "เช่น ช่างเอ๋ / ชื่อร้าน" }), mfield(d, "cost", "ค่าใช้จ่าย (฿)", { type: "number" }),
+      d.job_key ? mfield(d, "hours_at", "มิเตอร์ตอนทำ (ชม.) — ไม่บังคับ แต่ทำให้นับชั่วโมงแม่นขึ้น", { type: "number", wide: true }) : null),
+    d.job_key ? el("p", { class: "muted small", text: `งานตามแผน: ${(typeof planJobName === "function" && planJobName(d.job_key)) || d.job_key} — บันทึกแล้วระบบนับรอบใหม่จากวันที่นี้` }) : null,
     el("details", { class: "mdetails", open: hasDetail }, el("summary", { text: "ถ้าเปลี่ยนอะไหล่: ยี่ห้อ รุ่น ร้าน" }),
       el("div", { class: "mfields" }, ...EVENT_DETAIL.map(([k, l]) => mfield(d, k, l, { wide: k === "vendor_contact" })))),
     el("div", { class: "mfields" }, mfield(d, "notes", "หมายเหตุ", { wide: true, maxlength: 500 })),
@@ -406,6 +425,8 @@ async function saveEvent() {
   const body = { event_date: d.event_date, kind: d.kind || "ซ่อม", machine_id: d.machine_id || "", equipment: d.equipment, summary: d.summary, reason: d.reason,
     performed_by: d.performed_by, cost: d.cost, notes: d.notes };
   for (const [k] of EVENT_DETAIL) body[k] = d[k];
+  if (d.job_key || (mc.evTarget && mc.evTarget.job_key)) body.job_key = d.job_key || "";
+  if (d.hours_at !== "" && d.hours_at !== null && d.hours_at !== undefined) body.hours_at = d.hours_at;
   if (!d.machine_id) { body.branch = d.branch; body.area = d.area; }
   try {
     if (mc.evTarget) await api(`/api/machine-events/${mc.evTarget.id}`, jsonOpts("PATCH", body));
@@ -420,6 +441,7 @@ async function saveEvent() {
 
 // ================================================================== init
 function initMachinery() {
+  initMachPlan();
   $("mpQ").addEventListener("input", () => scheduleParts());
   for (const id of ["mpLocation", "mpPart"]) $(id).addEventListener("change", () => scheduleParts(0));
   $("mpAdd").addEventListener("click", () => openPartDialog(null));

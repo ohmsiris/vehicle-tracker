@@ -28,7 +28,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import attendance, dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
+from app import attendance, dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -890,6 +890,37 @@ def api_create_machine_event(body: dict = Body(...), x_app_token: str = Header(d
 def api_edit_machine_event(event_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
     return _machinery_call(machinery.edit_event, event_id, body)
+
+
+@app.get("/api/machinery/overview")
+def api_machinery_overview(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The front page: every machine with its overdue / coming-up jobs, plus the job catalogue (intervals and levels)."""
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.overview)
+
+
+@app.get("/api/machines/{machine_id}/plan")
+def api_machine_plan(machine_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.machine_plan, machine_id)
+
+
+@app.post("/api/machines/{machine_id}/readings")
+def api_add_machine_reading(machine_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.add_reading, machine_id, body)
+
+
+@app.delete("/api/machine-readings/{reading_id}")
+def api_delete_machine_reading(reading_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.delete_reading, reading_id)
+
+
+@app.patch("/api/machine-jobs/{job_key}")
+def api_edit_machine_job(job_key: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _machinery_call(machine_plan.edit_job_setting, job_key, body)
 
 
 # ------------------------------------------------------------- maintenance program
