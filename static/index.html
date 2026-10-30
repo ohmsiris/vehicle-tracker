@@ -984,7 +984,7 @@
     <p class="error" id="mcError" hidden></p>
     <div class="edit-banner" id="mcNeedsV9" hidden>ยังใช้ระบบเครื่องจักรไม่ได้ — ต้องรันไฟล์ <strong>schema_v9.sql</strong> ใน Supabase ก่อน</div>
     <div class="edit-banner" id="mcNeedsV33" hidden>ยังไม่มีแผนซ่อมบำรุง — ต้องรันไฟล์ <strong>schema_v33.sql</strong> ใน Supabase ก่อน</div>
-    <div class="mchead"><h3 class="section-title">น้ำแข็งหลอด</h3><button id="mcAddMachine" class="btn small" type="button">+ เพิ่มเครื่อง</button></div>
+    <div class="mchead"><h3 class="section-title">น้ำแข็งหลอด</h3><span class="grow"></span><button id="mcMeters" class="btn small primary" type="button">อัปเดตมิเตอร์ทุกเครื่อง</button> <button id="mcAddMachine" class="btn small" type="button">+ เพิ่มเครื่อง</button></div>
     <div id="mcCardsTube" class="mcgrid"></div>
     <div class="mchead"><h3 class="section-title">น้ำแข็งซอง (บ่อซอง)</h3></div>
     <div id="mcCardsSong" class="mcgrid"></div>
@@ -1295,6 +1295,18 @@
     <span class="grow"></span>
     <button type="button" class="btn" id="jdCancel">ยกเลิก</button>
     <button type="button" class="btn primary" id="jdSave">บันทึก</button>
+  </div>
+</dialog>
+
+<!-- Every machine's hour meter at once -->
+<dialog id="metersDialog" class="wide">
+  <h3>อัปเดตมิเตอร์ชั่วโมง</h3>
+  <div id="mtBody"></div>
+  <p class="error" id="mtError" hidden></p>
+  <div class="dialog-actions">
+    <span class="grow"></span>
+    <button type="button" class="btn" id="mtCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="mtSave">บันทึก</button>
   </div>
 </dialog>
 

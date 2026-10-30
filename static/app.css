@@ -1303,3 +1303,7 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
   .jr-name { grid-column: 1 / -1; }
   .mpprog-head .jr-f:not(.grow) { width: 46%; }
 }
+.mtlist { display: grid; gap: 6px; margin-top: 8px; }
+.mtrow { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 12px; align-items: center; margin: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.mtrow input { width: 100%; font: inherit; }
+@media (max-width: 600px) { .mtrow { grid-template-columns: 1fr; } }

@@ -19,7 +19,7 @@ const planJobName = (key) => mpn.names[key] || "";
 function jobIntervalText(j) {
   const parts = [];
   if (j.months) parts.push(`${Number(j.months)} เดือน`);
-  if (j.hours) parts.push(`${Number(j.hours).toLocaleString()} ชม.`);
+  if (j.hours) parts.push(`${Number(j.hours).toLocaleString()} ชม.${j.hours_months ? ` ≈ ${j.hours_months} เดือน` : ""}`);
   return parts.length ? `ทุก ${parts.join(" / ")}` : "";
 }
 
@@ -27,7 +27,7 @@ function jobDueText(j) {
   if (j.state === "never") return `ไม่เคยทำ${j.hours_since ? ` · มิเตอร์รวม ~${Math.round(j.hours_since).toLocaleString()} ชม.` : ""}`;
   if (j.state === "none") return "ยังไม่มีบันทึก";
   const d = j.days_left;
-  return `ครบ ${beDate(j.due_date)} · ${d < 0 ? `เลยมา ${-d} วัน` : d === 0 ? "ครบวันนี้" : `อีก ${d} วัน`}`;
+  return `ครบ ${beDate(j.due_date)} · ${d < 0 ? `เลยมา ${-d} วัน` : d === 0 ? "ครบวันนี้" : d >= 45 ? `อีก ${d} วัน ≈ ${(d / 30.4375).toFixed(1)} เดือน` : `อีก ${d} วัน`}`;
 }
 
 // ================================================================== the overview (#machinery)
@@ -164,7 +164,7 @@ function machinePlanRow(j, m) {
       el("div", { class: "pl-name" }, el("strong", { text: j.name }), j.level !== "ทำเอง" ? el("span", { class: "badge shop", text: j.level }) : null, j.guess ? el("span", { class: "badge", text: "ประมาณ" }) : null),
       j.note ? el("div", { class: "muted small", text: j.note }) : null),
     el("div", { class: "pl-when small" }, el("div", { text: last }), el("div", { class: "muted", text: jobIntervalText(j) }),
-      j.hours_since != null && j.hours ? el("div", { class: "muted", text: `${Math.round(j.hours_since).toLocaleString()} / ${Number(j.hours).toLocaleString()} ชม.${j.hours_estimated ? " (ประมาณ)" : ""}` }) : null),
+      j.hours_since != null && j.hours ? el("div", { class: "muted", text: `ใช้ไป ${Math.round(j.hours_since).toLocaleString()} / ${Number(j.hours).toLocaleString()} ชม.${j.hours_left != null ? ` · เหลือ ~${Math.max(0, j.hours_left).toLocaleString()} ชม.` : ""}${j.hours_estimated ? " (ประมาณ)" : ""}` }) : null),
     el("div", { class: "pl-state" }, el("span", { class: `badge ${cls}`.trim(), text: label }), el("div", { class: "small", text: jobDueText(j) })),
     el("button", { class: "btn small", type: "button", text: "ทำแล้ว", onclick: () => openJobsDone(m, [j.key]) }));
 }
@@ -174,8 +174,8 @@ function renderMachineMeter(res, m) {
   fill($("mdMeter"),
     el("div", {}, el("strong", { text: h ? `ประมาณ ${Math.round(h.hours).toLocaleString()} ชม. วันนี้` : "ยังไม่ได้บันทึกมิเตอร์" }),
       h ? el("span", { class: "muted small", text: ` · อ่านล่าสุด ${Number(h.reading).toLocaleString()} ชม. เมื่อ ${beDate(h.read_on)}` }) : null),
-    el("div", { class: "muted small", text: r.source === "มิเตอร์" ? `เดินเฉลี่ย ${r.per_day.toFixed(1)} ชม./วัน (คำนวณจากมิเตอร์)`
-      : `สมมติเดิน ${r.assumed} — ใส่มิเตอร์ 2 ครั้งห่างกันตั้งแต่ 1 สัปดาห์ ระบบจะคำนวณจากมิเตอร์เอง (แก้ที่สมมติได้ที่ “แก้ไข”)` }),
+    el("div", { class: "muted small", text: r.source === "มิเตอร์" ? `เดินเฉลี่ย ${r.per_day.toFixed(1)} ชม./วัน ≈ ${Math.round(r.per_day * 30.4375).toLocaleString()} ชม./เดือน (จากมิเตอร์ ${r.readings} ครั้ง ย้อนหลัง ${r.span_days} วัน) — ระบบเอาอัตรานี้แปลงชั่วโมงเป็นเดือนให้ทุกงาน`
+      : `สมมติเดิน ${r.assumed} ≈ ${Math.round(r.per_day * 30.4375).toLocaleString()} ชม./เดือน — ใส่มิเตอร์ 2 ครั้งห่างกันตั้งแต่ 1 สัปดาห์ ระบบจะคำนวณจากมิเตอร์เอง แล้วแปลงชั่วโมงเป็นเดือนให้ (แก้ที่สมมติได้ที่ “แก้ไข”)` }),
     ...res.readings.map((rd) => el("div", { class: "rdrow small" },
       el("span", { text: `${beDate(rd.read_on)} · ${Number(rd.hours).toLocaleString()} ชม.${rd.notes ? ` · ${rd.notes}` : ""}` }),
       el("button", { class: "linkbtn", type: "button", text: "ลบ", onclick: async () => {
@@ -364,7 +364,45 @@ function assignCard() {
     list, el("div", { class: "pl-set-actions pl-trucks-actions" }, save, msg));
 }
 
+// ---- every machine's meter in one go (the regular round: date once, a figure per machine, blanks skipped)
+function openMetersDialog() {
+  const ms = (mpn.data && mpn.data.machines || []).filter((m) => m.plan);
+  const d = mpn.mt = { read_on: todayISO(), hours: {} };
+  fill($("mtBody"),
+    el("p", { class: "muted small", text: "ใส่ชั่วโมงที่อ่านได้จากมิเตอร์ของแต่ละเครื่อง เว้นว่างเครื่องที่ไม่ได้อ่าน — ระบบเอาไปคำนวณว่าเครื่องเดินวันละกี่ชั่วโมง แล้วแปลงรอบที่เป็นชั่วโมงเป็นเดือนให้" }),
+    el("div", { class: "mfields" }, mfield(d, "read_on", "วันที่อ่าน", { type: "date", caption: true })),
+    el("div", { class: "mtlist" }, ...ms.map((m) => {
+      const h = m.plan.hours_now;
+      const input = el("input", { type: "number", inputmode: "decimal", min: "0", step: "any", placeholder: "ชม.", "aria-label": `${m.name} มิเตอร์` });
+      input.addEventListener("input", () => { d.hours[m.id] = input.value; });
+      return el("label", { class: "mtrow" }, el("span", { class: "mt-name" }, el("strong", { text: m.name }),
+        el("span", { class: "muted small", text: h ? ` · อ่านล่าสุด ${Number(h.reading).toLocaleString()} ชม. (${beDate(h.read_on)})` : " · ยังไม่เคยกรอก" })), input);
+    })));
+  showErr("mtError", "");
+  $("metersDialog").showModal();
+}
+
+async function saveMeters() {
+  const d = mpn.mt, todo = Object.entries(d.hours).filter(([, v]) => String(v).trim() !== "");
+  if (!todo.length) { showErr("mtError", "ยังไม่ได้ใส่ชั่วโมงของเครื่องไหนเลย"); return; }
+  const failed = [];
+  for (const [id, hours] of todo) {
+    try {
+      await api(`/api/machines/${id}/readings`, jsonOpts("POST", { read_on: d.read_on, hours }));
+    } catch (err) {
+      const m = mpn.data.machines.find((x) => x.id === id);
+      failed.push(`${m ? m.name : "?"}: ${err.message}`);
+    }
+  }
+  if (failed.length) { showErr("mtError", `บันทึกไม่ได้ ${failed.length} เครื่อง — ${failed.join(" · ")}`); await openMachineryData(); return; }
+  $("metersDialog").close();
+  await openMachineryData();
+}
+
 function initMachPlan() {
+  $("mcMeters").addEventListener("click", openMetersDialog);
+  $("mtCancel").addEventListener("click", () => $("metersDialog").close());
+  $("mtSave").addEventListener("click", saveMeters);
   $("mdReadAdd").addEventListener("click", openReadDialog);
   $("rdCancel").addEventListener("click", () => $("readDialog").close());
   $("rdSave").addEventListener("click", saveReading);

@@ -215,3 +215,23 @@ def test_machine_running_pattern_and_never_overhauled_are_validated():
     for bad in ({"hours_per_day": 30}, {"days_per_week": 0}, {"days_per_week": 9}):
         with pytest.raises(mc.InvalidMachinery):
             mc.clean_machine(bad, existing=base, others=[])
+
+
+def test_the_rate_uses_the_last_half_year_of_meter_readings_and_hours_become_months():
+    readings = [{"read_on": "2026-04-01", "hours": 0}, {"read_on": "2026-08-01", "hours": 2000}, {"read_on": "2026-10-30", "hours": 3500}]
+    r = mp.machine_rate(M, readings)                                                    # 2026-04-01 is 212 days back: outside the window
+    assert r["source"] == "มิเตอร์" and r["span_days"] == 90 and r["per_day"] == pytest.approx(1500 / 90) and r["readings"] == 2
+    j = status("oil", [ev("oil", "2026-10-01", hours_at=3000)], readings=readings)[0]
+    assert j["hours_months"] == round(4000 / (1500 / 90 * mp.DAYS_PER_MONTH), 1) and j["hours_left"] == 3500
+    # 3500 h left at 16.7 h a day = 210 days: the 6 months (to 2027-04-01) come first (153 days)
+    assert j["due_date"] == "2027-04-01"
+    # a one-reading machine has no measured rate
+    assert mp.machine_rate(M, readings[:1])["source"] == "สมมติ"
+
+
+def test_every_machine_plan_function_the_routes_call_exists():
+    """A rewrite of machine_plan.py once dropped add_reading / delete_reading and nothing noticed: the routes in main.py name these."""
+    import re
+    src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text(encoding="utf-8")
+    names = set(re.findall(r"machine_plan\.(\w+)", src))
+    assert names and all(callable(getattr(mp, n, None)) for n in names), sorted(n for n in names if not callable(getattr(mp, n, None)))

@@ -25,6 +25,7 @@ from app.machinery import InvalidMachinery, NotFound
 LEVELS = ["ทำเอง", "ควรทำ", "ผู้รับเหมา", "ไม่ต้องทำ"]
 SOON_DAYS = 30                       # "coming up" = due within this many days
 MIN_RATE_SPAN_DAYS = 7               # two meter readings closer than this say nothing about the running rate
+RATE_WINDOW_DAYS = 180               # the running rate is measured over about the last half year of readings
 DEFAULT_RUN = {"เครื่อง": (24.0, 7.0), "บ่อซอง": (24.0, 6.0)}
 STATE_RANK = {"never": 0, "late": 1, "soon": 2, "none": 3, "ok": 4}
 DAYS_PER_MONTH = 30.4375
@@ -128,16 +129,17 @@ def _as_date(value) -> Optional[date]:
 
 
 def machine_rate(machine: dict, readings: list[dict]) -> dict:
-    """Running hours per calendar day: worked out from the hour-meter readings when two of them are at least a
-    week apart, otherwise the assumed pattern (hours a day x days a week / 7)."""
+    """Running hours per calendar day: worked out from the hour-meter readings -- the latest one against the oldest one
+    within the last RATE_WINDOW_DAYS, when they are at least a week apart (so one odd week does not move it much) --
+    otherwise the assumed pattern (hours a day x days a week / 7)."""
     pts = sorted(((_as_date(r["read_on"]), float(r["hours"])) for r in readings if r.get("read_on") is not None and r.get("hours") is not None))
     if len(pts) >= 2:
         last_d, last_h = pts[-1]
-        for d, h in reversed(pts[:-1]):
-            if (last_d - d).days >= MIN_RATE_SPAN_DAYS:
-                if last_h > h:
-                    return {"per_day": (last_h - h) / (last_d - d).days, "source": "มิเตอร์"}
-                break
+        older = [(d, h) for d, h in pts[:-1] if MIN_RATE_SPAN_DAYS <= (last_d - d).days <= RATE_WINDOW_DAYS]
+        if older:
+            d, h = older[0]
+            if last_h > h:
+                return {"per_day": (last_h - h) / (last_d - d).days, "source": "มิเตอร์", "span_days": (last_d - d).days, "readings": len(older) + 1}
     hpd, dpw = DEFAULT_RUN.get(machine.get("kind") or "เครื่อง", (24.0, 7.0))
     if machine.get("hours_per_day"):
         hpd = float(machine["hours_per_day"])
@@ -174,7 +176,9 @@ def job_status(job: dict, machine: dict, events: list[dict], rate_per_day: float
     last = max(mine, key=lambda e: (e["event_date"], e.get("created_at") or "")) if mine else None
     out = {"key": job["key"], "name": job["name"], "level": job["level"], "months": job["months"], "hours": job["hours"], "guess": job["guess"],
            "note": job["note"], "event_kind": job["event_kind"], "last_date": None, "last_job": None, "due_date": None, "days_left": None,
-           "hours_since": None, "hours_estimated": False, "state": "none"}
+           "hours_since": None, "hours_estimated": False, "hours_left": None, "hours_months": None, "state": "none"}
+    if job["hours"] and rate_per_day > 0:
+        out["hours_months"] = round(job["hours"] / (rate_per_day * DAYS_PER_MONTH), 1)          # what the hours interval is worth in months at this running rate
     if last is None:
         if job["key"] == "overhaul" and machine.get("never_overhauled"):
             out["state"] = "never"
@@ -192,7 +196,7 @@ def job_status(job: dict, machine: dict, events: list[dict], rate_per_day: float
         else:
             since, estimated = (today - last_d).days * rate_per_day, True
         due.append(today + timedelta(days=math.floor((job["hours"] - since) / rate_per_day)))
-        out.update(hours_since=round(since), hours_estimated=estimated)
+        out.update(hours_since=round(since), hours_estimated=estimated, hours_left=round(job["hours"] - since))
     if not due:
         out["state"] = "ok"
         return out
@@ -235,7 +239,7 @@ def build_chart(statuses: list[dict], jobs: list[dict], rate_per_day: float, ste
                 n = next(i for i, e in enumerate(ends, 1) if e >= nxt)
                 cells[n] = cells[n] or "due"
                 k += 1
-        rows.append({"key": s["key"], "name": s["name"], "months": s["months"], "hours": s["hours"], "level": s["level"], "state": s["state"],
+        rows.append({"key": s["key"], "name": s["name"], "months": s["months"], "hours": s["hours"], "hours_months": s["hours_months"], "level": s["level"], "state": s["state"],
                      "last_date": s["last_date"], "last_job": s["last_job"], "due_date": s["due_date"], "days_left": s["days_left"], "cells": cells})
     return {"columns": columns, "rows": rows, "step_months": step_months}
 
@@ -490,3 +494,38 @@ def jobs_done(machine_id: str, data: dict, today: Optional[date] = None) -> dict
                                       "cost": clean["cost"] if i == 0 else None, "notes": notes})
         ids.append(res["event_id"])
     return {"event_ids": ids}
+
+
+def add_reading(machine_id: str, data: dict, today: Optional[date] = None) -> dict:
+    """An hour-meter reading. Refuses a figure that runs backwards against the readings on either side of its date."""
+    today = today or date.today()
+    if not machinery.has_v33():
+        raise InvalidMachinery(machinery.NEEDS_V33)
+    machine = machinery.get_machine(machine_id)
+    raw = str(data.get("read_on") or "").strip()
+    try:
+        d = date.fromisoformat(raw) if raw else today
+    except ValueError:
+        raise InvalidMachinery("วันที่ไม่ถูกต้อง")
+    if d.year >= 2400:
+        raise InvalidMachinery(f"วันที่: ปี {d.year} ดูเหมือนเป็น พ.ศ. แต่ช่องนี้ต้องเป็น ค.ศ. (ปี {d.year - 543})")
+    if d > today:
+        raise InvalidMachinery("วันที่เป็นวันในอนาคต")
+    hours = machinery._number(data.get("hours"), "ชั่วโมงที่มิเตอร์", maximum=1e7)
+    if hours is None:
+        raise InvalidMachinery("ใส่ชั่วโมงที่อ่านได้จากมิเตอร์ด้วย")
+    for r in supabase.select_all("machine_readings", {"select": "read_on,hours", "machine_id": f"eq.{machine['id']}", "order": "read_on.asc,created_at.asc"}):
+        if r["read_on"] < d.isoformat() and float(r["hours"]) > hours:
+            raise InvalidMachinery(f"มิเตอร์ต้องไม่น้อยกว่าครั้งก่อน ({float(r['hours']):g} ชม. เมื่อ {r['read_on']})")
+        if r["read_on"] > d.isoformat() and float(r["hours"]) < hours:
+            raise InvalidMachinery(f"มิเตอร์มากกว่าครั้งหลัง ({float(r['hours']):g} ชม. เมื่อ {r['read_on']})")
+    notes = machinery._clean(data.get("notes"), 200) or None
+    return {"reading_id": supabase.insert("machine_readings", [{"machine_id": machine["id"], "read_on": d.isoformat(), "hours": hours, "notes": notes}])[0]["id"]}
+
+
+def delete_reading(reading_id: str) -> dict:
+    rid = machinery._uuid_or_none(reading_id)
+    if not machinery.has_v33() or not rid:
+        raise NotFound()
+    supabase.delete("machine_readings", {"id": f"eq.{rid}"})
+    return {"ok": True}
