@@ -255,10 +255,12 @@ _COMPILED.append(("wheel_grease", re.compile(r"^\s*(?:ค่า)?อัด\s*จ
 # "ประเก็น" so it is not the manifold.
 _COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?(?:\s*(?:ถอด|เปลี่ยน|ล้าง|ทำความสะอาด))*\s*ท่อร่วมไอดี")))
 _COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?(?:\s*ถอด)?(?:\s*(?:ล้าง|ทำความสะอาด))+\s*ท่อไอดี")))
-# These two are found ANYWHERE in the line (the owner's own words): a flush; any suspension work (leaf springs, king pins, arms, shocks) counts
+# These are found ANYWHERE in the line (the owner's own words): a flush; any suspension work (leaf springs, king pins, arms, shocks) counts
 # as the chassis having been looked at.
 _ANYWHERE = [
     ("engine_flush", re.compile(r"ฟลัช(?:ชิ่ง|ชิง)|flush|ล้างภายในเครื่อง|ล้างระบบหล่อลื่น", re.I)),
+    # the dealer puts the washers in the note of the injector line: "เปลี่ยน หรือ ถอด-ใส่หัวฉีด... ; 4J** **เปลี่ยนแหวนรองหัวฉีดทั้งหมด**"
+    ("injector_washers", re.compile(r"แหวน(?:ทองแดง)?รอง(?:หน้า)?หัวฉีด|(?:ปะ|ประ)เก็นหัวฉีด")),
     # Isuzu's free "ตรวจเช็ก 8 ระบบสำคัญ" (engine, drive line, steering, electrics, SUSPENSION, brakes, A/C, safety) includes the suspension: wheel-bearing play, ball joints,
     # bushes, shock absorbers, leaf springs, wheel nuts -- so that line counts as the chassis having been looked at.
     ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจสอบ|ตรวจเช็ค|ตรวจเช็ก|ตรวจ)\s*(?:สภาพ\s*)?ช่วงล่าง|ตรวจเช็[คก]\s*(?:รถ)?\s*(?:ฟรี)?\s*[8๘]\s*ระบบ")),

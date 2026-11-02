@@ -179,6 +179,14 @@ def test_bill_hits_keep_the_km_when_a_tick_and_a_bill_share_a_day():
     assert len(hits) == 1 and hits[0]["odometer_km"] == 622_380
 
 
+def test_injector_washers_in_the_dealers_note_count():
+    line = "เปลี่ยน หรือ ถอด-ใส่หัวฉีดน้ำมันเชื้อเพลิง (ดีเซล)1 หัว; 4J** **เปลี่ยนแหวนรองหัวฉีดทั้งหมด**"
+    assert sp.classify_line(line) == "injector_washers"
+    assert sp.classify_line("เปลี่ยน หรือ ถอด-ติดตั้งแป๊ปหัวฉีดน้ำมันเชื้อเพลิง1 เส้น; 4J** **ทั้งหมด**") is None
+    assert sp.classify_line("ปะเก็นแหวนทองแดงรองหัวฉีด RZ4E(อีซูซุ)(ใหม่)") == "injector_washers"      # the copper washer
+    assert sp.classify_line("ปะเก็นเบ้ารองแป๊ปหัวฉีด 4JJ3(อีซูซุ)(ใหม่)-AC") is None                     # the pipe seat, not the washer
+
+
 def test_item_with_no_history_is_unknown():
     s = sp.item_status(item(), None, None, None, TODAY)
     assert s["state"] == "unknown" and s["due_date"] is None
