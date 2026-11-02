@@ -301,19 +301,21 @@ def bill_hits(events: list[dict], rule_sets: Optional[dict] = None) -> list[dict
     (truck, item, day): {vehicle_id, item_key, done_date, odometer_km, source: 'bill' or 'manual', event_id}.
     An event is a bill, or a job recorded by hand (including from this programme). `rule_sets` = {vehicle_id: rule set} for the lines that count only for
     one kind of truck."""
-    seen, out = set(), []
+    seen, out = {}, []
     for ev in events:
         for line in ev.get("bill_line_items") or []:
             key = classify_line(line.get("description"), (rule_sets or {}).get(ev.get("vehicle_id")))
             if not key or not ev.get("vehicle_id") or not ev.get("event_date"):
                 continue
             ident = (ev["vehicle_id"], key, ev["event_date"])
-            if ident in seen:
+            if ident in seen:                          # the same job twice that day (a tick and the shop's bill): keep one, with the km if either has it
+                if seen[ident]["odometer_km"] is None and ev.get("mileage") is not None:
+                    seen[ident]["odometer_km"] = ev["mileage"]
                 continue
-            seen.add(ident)
-            out.append({"vehicle_id": ev["vehicle_id"], "item_key": key, "done_date": ev["event_date"],
-                        "odometer_km": ev.get("mileage"), "source": "manual" if ev.get("source") == "manual" else "bill",
-                        "event_id": ev.get("id")})
+            seen[ident] = {"vehicle_id": ev["vehicle_id"], "item_key": key, "done_date": ev["event_date"],
+                           "odometer_km": ev.get("mileage"), "source": "manual" if ev.get("source") == "manual" else "bill",
+                           "event_id": ev.get("id")}
+            out.append(seen[ident])
     return out
 
 
@@ -414,6 +416,10 @@ def last_done(item_key: str, records: list[dict]) -> Optional[dict]:
         rank = (d, 0 if r.get("source") == "bill" else 1)
         if best is None or rank > best[0]:
             best = (rank, {"date": d, "odometer_km": r.get("odometer_km"), "source": r.get("source") or "manual", "id": r.get("id"), "event_id": r.get("event_id")})
+    if best and best[1]["odometer_km"] is None:        # a tick without km and the bill of the same day: the bill's odometer, not a guess from km per day
+        same_day = [r.get("odometer_km") for r in records if r.get("item_key") == item_key and parse_date(r.get("done_date")) == best[1]["date"] and r.get("odometer_km") is not None]
+        if same_day:
+            best[1]["odometer_km"] = max(same_day)
     return best[1] if best else None
 
 

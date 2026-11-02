@@ -165,6 +165,20 @@ def test_last_done_takes_the_newest_and_prefers_a_typed_record_on_a_tie():
     assert sp.last_done("diff_oil", rows) is None
 
 
+def test_last_done_borrows_the_odometer_of_a_bill_on_the_same_day():
+    # truck 4: "บันทึกว่าทำแล้ว" ticked without km on 11 Aug, and the shop's bill of that day says 622,380
+    rows = [rec("engine_oil", "2026-08-11", source="manual"), rec("engine_oil", "2026-08-11", odo=622_380, source="bill")]
+    d = sp.last_done("engine_oil", rows)
+    assert d["source"] == "manual" and d["odometer_km"] == 622_380
+
+
+def test_bill_hits_keep_the_km_when_a_tick_and_a_bill_share_a_day():
+    events = [{"id": "e1", "vehicle_id": "v", "event_date": "2026-08-11", "mileage": None, "source": "manual", "bill_line_items": [{"description": "ถ่ายน้ำมันเครื่อง"}]},
+              {"id": "e2", "vehicle_id": "v", "event_date": "2026-08-11", "mileage": 622_380, "source": "bill", "bill_line_items": [{"description": "ถ่ายน้ำมันเครื่อง"}]}]
+    hits = [h for h in sp.bill_hits(events) if h["item_key"] == "engine_oil"]
+    assert len(hits) == 1 and hits[0]["odometer_km"] == 622_380
+
+
 def test_item_with_no_history_is_unknown():
     s = sp.item_status(item(), None, None, None, TODAY)
     assert s["state"] == "unknown" and s["due_date"] is None

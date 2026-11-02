@@ -236,3 +236,12 @@ def test_vehicle_rows_carry_the_at_shop_count_and_default_to_zero_before_the_mig
     status = {"v1": {"at_shop_requests": 2}}                       # v2 has no status row; and "at_shop_requests" is absent entirely pre-v5
     rows = {r["plate"]: r for r in history.vehicle_rows(vehicles, status, [])}
     assert rows["A"]["at_shop_requests"] == 2 and rows["B"]["at_shop_requests"] == 0
+
+
+def test_latest_odometer_takes_a_typed_reading_newer_than_the_last_bill():
+    status = {"v1": {"vehicle_id": "v1", "last_known_mileage": 625_711}, "v2": {"vehicle_id": "v2", "last_known_mileage": 90_000}}
+    history.latest_odometer(status, [{"vehicle_id": "v1", "kind": "odometer", "km": 627_728}, {"vehicle_id": "v2", "kind": "odometer", "km": 80_000},
+                                     {"vehicle_id": "v2", "kind": "gps", "km": 500_000}, {"vehicle_id": "v3", "kind": "odometer", "km": 1_000}])
+    assert status["v1"]["last_known_mileage"] == 627_728        # the reading is newer than the bill
+    assert status["v2"]["last_known_mileage"] == 90_000         # an older reading and a GPS distance change nothing
+    assert status["v3"]["last_known_mileage"] == 1_000          # no bill yet: the reading alone

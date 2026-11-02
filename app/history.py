@@ -172,7 +172,27 @@ def list_vehicles(include_inactive: bool = False) -> list[dict]:
                   + (",at_shop_requests" if repair_requests.has_v5() else ""),
         "order": "vehicle_id.asc"})}
     events = supabase.select_all("v_events", {"select": "vehicle_id,total_cost", "order": "event_id.asc"})
+    _merge_odometer_readings(status)
     return vehicle_rows(vehicles, status, events, fleet.drivers_by_id() if v6 else None)
+
+
+def latest_odometer(status: dict, readings: list[dict]) -> None:
+    """"ไมล์ล่าสุดที่บันทึก" is the highest of the bills' odometers AND the odometer readings typed on the plan page (km_readings kind
+    'odometer'): a reading taken after the last repair would otherwise never show."""
+    for r in readings:
+        if r.get("kind") != "odometer" or r.get("km") is None:
+            continue
+        st = status.setdefault(r["vehicle_id"], {"vehicle_id": r["vehicle_id"]})
+        if st.get("last_known_mileage") is None or int(r["km"]) > int(st["last_known_mileage"]):
+            st["last_known_mileage"] = int(r["km"])
+
+
+def _merge_odometer_readings(status: dict) -> None:
+    try:
+        readings = supabase.select_all("km_readings", {"select": "vehicle_id,kind,km", "kind": "eq.odometer", "order": "id.asc"})
+    except supabase.SupabaseError:                     # the plan's schema is not in yet: the bills' figure alone
+        return
+    latest_odometer(status, readings)
 
 
 def vehicle_events(vehicle_id: str) -> list[dict]:
