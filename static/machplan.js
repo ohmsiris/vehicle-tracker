@@ -395,8 +395,14 @@ function assignCard() {
 }
 
 // ---- every machine's meter in one go (the regular round: date once, a figure per machine, blanks skipped)
-function openMetersDialog() {
-  const ms = (mpn.data && mpn.data.machines || []).filter((m) => m.plan);
+async function openMetersDialog() {
+  let ms = (mpn.data && mpn.data.machines || []).filter((m) => m.plan);
+  if (!ms.length) {                                            // the page's copy can be empty or stale: ask the server again rather than show a dialog with no machines
+    try {
+      mpn.data = await api("/api/machinery/overview");
+      ms = mpn.data.machines.filter((m) => m.plan);
+    } catch { /* shown below */ }
+  }
   const d = mpn.mt = { read_on: todayISO(), hours: {} };
   fill($("mtBody"),
     el("p", { class: "muted small", text: "ใส่ชั่วโมงที่อ่านได้จากมิเตอร์ของแต่ละเครื่อง เว้นว่างเครื่องที่ไม่ได้อ่าน — ระบบเอาไปคำนวณว่าเครื่องเดินวันละกี่ชั่วโมง แล้วแปลงรอบที่เป็นชั่วโมงเป็นเดือนให้" }),
@@ -408,7 +414,7 @@ function openMetersDialog() {
       return el("label", { class: "mtrow" }, el("span", { class: "mt-name" }, el("strong", { text: m.name }),
         el("span", { class: "muted small", text: h ? ` · อ่านล่าสุด ${Number(h.reading).toLocaleString()} ชม. (${beDate(h.read_on)})` : " · ยังไม่เคยกรอก" })), input);
     })));
-  showErr("mtError", "");
+  showErr("mtError", ms.length ? "" : "โหลดรายชื่อเครื่องไม่สำเร็จ — ปิดแล้วลองกดใหม่อีกครั้ง");
   $("metersDialog").showModal();
 }
 
