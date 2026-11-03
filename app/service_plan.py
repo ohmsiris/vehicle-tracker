@@ -244,7 +244,6 @@ _LINE_RULES = [
     ("wheel_grease", r"จา(?:ร|ระ)บี\s*(?:ลูกปืน)?ล้อ"),
     ("valve_adjust", r"(?:ปรับ)?ตั้งวาล์ว|ปรับวาล์ว"),
     ("valve_cover_seal", r"(?:ปะ|ประ)เก็นฝา(?:วาล์ว|ครอบวาล์ว)|ซีลฝาครอบหัวฉีด"),
-    ("injector_washers", r"แหวนรอง(?:หัวฉีด)?|(?:ปะ|ประ)เก็นหัวฉีด"),
 ]
 _COMPILED = [(key, re.compile(_PREFIX + pat)) for key, pat in _LINE_RULES]
 # "อัดจารบี" on its own (no "ล้อ"): the mechanic greases everything in one go, so it counts as the wheel-bearing grease.
@@ -259,8 +258,10 @@ _COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?(?:\s*ถอ
 # as the chassis having been looked at.
 _ANYWHERE = [
     ("engine_flush", re.compile(r"ฟลัช(?:ชิ่ง|ชิง)|flush|ล้างภายในเครื่อง|ล้างระบบหล่อลื่น", re.I)),
-    # the dealer puts the washers in the note of the injector line: "เปลี่ยน หรือ ถอด-ใส่หัวฉีด... ; 4J** **เปลี่ยนแหวนรองหัวฉีดทั้งหมด**"
-    ("injector_washers", re.compile(r"แหวน(?:ทองแดง)?รอง(?:หน้า)?หัวฉีด|(?:ปะ|ประ)เก็นหัวฉีด")),
+    # the injector washers, however a shop writes them: แหวนรองหัวฉีด, แหวนปลายหัวฉีด (ช่างเก่ง), (ปะเก็น)แหวนทองแดงรองหัวฉีด, แหวนรองหน้าหัวฉีด, ซีลแหวนหัวฉีด --
+    # also inside the dealer's note ("เปลี่ยน หรือ ถอด-ใส่หัวฉีด... ; 4J** **เปลี่ยนแหวนรองหัวฉีดทั้งหมด**"). "หัวฉีด" must be in it: a bare "แหวนรอง" is any washer
+    # (the drain plug's แหวนรองน๊อตถ่าย, the shock's แหวนรองโช้คอัพ).
+    ("injector_washers", re.compile(r"แหวน\S{0,12}หัวฉีด|(?:ปะ|ประ)เก็นหัวฉีด")),
     # Isuzu's free "ตรวจเช็ก 8 ระบบสำคัญ" (engine, drive line, steering, electrics, SUSPENSION, brakes, A/C, safety) includes the suspension: wheel-bearing play, ball joints,
     # bushes, shock absorbers, leaf springs, wheel nuts -- so that line counts as the chassis having been looked at.
     ("chassis_check", re.compile(r"แหนบ|สลักคอม้า|ปีกนก|โช้ค|(?:เช็ค|เช็ก|ตรวจสอบ|ตรวจเช็ค|ตรวจเช็ก|ตรวจ)\s*(?:สภาพ\s*)?ช่วงล่าง|ตรวจเช็[คก]\s*(?:รถ)?\s*(?:ฟรี)?\s*[8๘]\s*ระบบ")),

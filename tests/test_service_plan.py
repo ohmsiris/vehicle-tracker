@@ -185,6 +185,10 @@ def test_injector_washers_in_the_dealers_note_count():
     assert sp.classify_line("เปลี่ยน หรือ ถอด-ติดตั้งแป๊ปหัวฉีดน้ำมันเชื้อเพลิง1 เส้น; 4J** **ทั้งหมด**") is None
     assert sp.classify_line("ปะเก็นแหวนทองแดงรองหัวฉีด RZ4E(อีซูซุ)(ใหม่)") == "injector_washers"      # the copper washer
     assert sp.classify_line("ปะเก็นเบ้ารองแป๊ปหัวฉีด 4JJ3(อีซูซุ)(ใหม่)-AC") is None                     # the pipe seat, not the washer
+    assert sp.classify_line("ค่าแรงเปลี่ยนแหวนปลายหัวฉีด") == "injector_washers"                         # ช่างเก่ง's wording
+    assert sp.classify_line("แหวนปลายหัวฉีด") == "injector_washers"
+    for washer in ("แหวนรองน๊อตแคร้ง", "แหวนรองน๊อตถ่าย", "แหวนรองเพลากลาง", "แหวนรอง"):
+        assert sp.classify_line(washer) is None, washer                                                  # any other washer is not the injectors'
 
 
 def test_item_with_no_history_is_unknown():
