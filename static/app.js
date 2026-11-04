@@ -323,7 +323,7 @@ function render(draft, pickedVehicle) {
   const blocks = $("billBlocks");
   blocks.replaceChildren(...draft.bills.map((b) => billBlock(b, draft.line_items.filter((li) => li.file_index === b.file_index))));
   updateTotals();
-  tp.vehicleId = null; tp.picked = new Set();      // a new bill: no wheels picked yet
+  tp.vehicleId = null; tp.picked = new Set(); tp.touched = false;      // a new bill: no wheels picked yet
   renderTyrePick();
 }
 
@@ -640,7 +640,22 @@ const TP_BRANDS = ["MICHELIN", "BRIDGESTONE", "DUNLOP", "YOKOHAMA", "GOODYEAR", 
 const tpIsTyre = (d) => !TP_NOT.test(d || "") && /ยาง|tire|tyre/i.test(d || "") && (TP_SIZE.test(d || "") || /ยางเรเดียล|ยางนอก/.test(d || ""));
 const tpSize = (d) => { const m = TP_SIZE.exec(d || ""); return m ? `${m[1]}/${m[2]}R${m[3]}` : ""; };
 const tpBrand = (d) => { const up = String(d || "").toUpperCase(); const b = TP_BRANDS.find((x) => up.includes(x)); return b ? b[0] + b.slice(1).toLowerCase() : ""; };
-const tp = { vehicleId: null, data: null, picked: new Set(), seq: 0 };
+const tp = { vehicleId: null, data: null, picked: new Set(), seq: 0, touched: false, suggested: "" };
+
+// which wheels a tyre bill most likely is, from the truck's sizes: a size that is only the front's -> the front pair, only the rear's -> the
+// rear wheels; as many tyres as the truck has wheels -> all. Same size front and rear (or a 6-wheeler's 2 rear tyres) -> no guess.
+function tpSuggest(d, size, qty) {
+  const s = d.spec || {}, all = d.positions.map((w) => w.position);
+  const front = all.filter((p) => p === "FL" || p === "FR"), rear = all.filter((p) => !front.includes(p));
+  if (qty >= all.length) return { picks: all, why: "จำนวนเส้นเท่ากับจำนวนล้อ" };
+  if (!size) return { picks: [], why: "" };
+  const isFront = s.front_size === size, isRear = s.rear_size === size;
+  if (isFront && isRear) return { picks: [], why: `ขนาด ${size} ใช้ทั้งหน้าและหลัง — เลือกเองว่าล้อไหน` };
+  if (isFront && qty === front.length) return { picks: front, why: `${size} = ยางหน้า` };
+  if (isRear && qty === rear.length) return { picks: rear, why: `${size} = ยางหลัง` };
+  if (isFront || isRear) return { picks: [], why: `${size} = ยาง${isFront ? "หน้า" : "หลัง"} แต่มี ${qty} เส้น — เลือกเองว่าล้อไหน` };
+  return { picks: [], why: s.front_size || s.rear_size ? `${size} ไม่ตรงกับขนาดยางที่บันทึกไว้ของรถคันนี้ (หน้า ${s.front_size || "–"} · หลัง ${s.rear_size || "–"})` : "" };
+}
 
 async function renderTyrePick() {
   const card = $("tyrePickCard");
@@ -650,9 +665,9 @@ async function renderTyrePick() {
   const lines = state.draft ? readLines().filter((l) => tpIsTyre(l.description)) : [];
   if (!lines.length) { card.hidden = true; return; }
   card.hidden = false;
-  if (!veh) { fill(card, el("h2", { text: "ยางในบิลนี้" }), el("p", { class: "muted small", text: "เลือกรถก่อน แล้วเลือกล้อที่เปลี่ยนได้ที่นี่" })); return; }
+  if (!veh) { fill(card, el("h2", { text: "ยางในบิลนี้" }), el("p", { class: "warn-text small", text: "⚠ ยังไม่ได้เลือกรถ — เลือกรถด้านบนก่อน แล้วระบบจะแนะนำล้อให้ตามขนาดยางของรถคันนั้น" })); return; }
   if (tp.vehicleId !== veh.id) {
-    tp.vehicleId = veh.id; tp.data = null; tp.picked = new Set();
+    tp.vehicleId = veh.id; tp.data = null; tp.picked = new Set(); tp.touched = false; tp.suggested = "";
     const seq = ++tp.seq;
     fill(card, el("h2", { text: "ยางในบิลนี้" }), el("p", { class: "muted small", text: "กำลังโหลดล้อของรถคันนี้…" }));
     try { const d = await api(`/api/vehicles/${veh.id}/tyres`); if (seq === tp.seq) tp.data = d; } catch (err) { if (seq === tp.seq) tp.data = { error: err.message }; }
@@ -664,16 +679,20 @@ async function renderTyrePick() {
     return;
   }
   const qty = lines.reduce((n, l) => n + (l.quantity || 1), 0);
+  const sizes = [...new Set(lines.map((l) => tpSize(l.description)).filter(Boolean))];
+  const hint = tpSuggest(d, sizes.length === 1 ? sizes[0] : "", qty);
+  if (!tp.touched) { tp.picked = new Set(hint.picks); tp.suggested = hint.picks.length ? `แนะนำจากขนาดยางของรถเบอร์ ${veh.truck_number || "?"} (${hint.why}) — แก้ได้` : ""; }
   const age = (m) => (m == null ? "" : m < 12 ? `${m} ด.` : `${Math.floor(m / 12)} ปี`);
   const boxes = d.positions.map((w) => {
     const b = el("input", { type: "checkbox", value: w.position, checked: tp.picked.has(w.position) });
-    b.addEventListener("change", () => { b.checked ? tp.picked.add(w.position) : tp.picked.delete(w.position); count.textContent = countText(); });
+    b.addEventListener("change", () => { tp.touched = true; b.checked ? tp.picked.add(w.position) : tp.picked.delete(w.position); count.textContent = countText(); });
     return el("label", { class: "check ty-pick" }, b, ` ${w.label}`, w.tyre ? el("span", { class: "muted small", text: ` (เดิม ${[w.tyre.brand, age(w.months)].filter(Boolean).join(" · ") || "มีข้อมูล"})` }) : null);
   });
   const countText = () => `เลือกแล้ว ${tp.picked.size} / ${qty} ล้อ`;
   const count = el("span", { class: "muted small", text: countText() });
   fill(card, el("h2", {}, "ยางในบิลนี้ ", el("span", { class: "muted small", text: `${lines.map((l) => `${tpSize(l.description) || l.description} × ${l.quantity || 1}`).join(", ")} — เลือกล้อที่เปลี่ยน (ไม่เลือกก็ได้ ใส่ทีหลังที่หน้ารถ)` })),
-    el("div", { class: "ty-picks" }, ...boxes), count);
+    el("div", { class: "ty-picks" }, ...boxes), count,
+    tp.suggested && !tp.touched ? el("p", { class: "muted small", text: `💡 ${tp.suggested}` }) : !hint.picks.length && hint.why ? el("p", { class: "muted small", text: hint.why }) : null);
 }
 
 // after the bill is saved: the picked wheels get the new tyres, pointing at this bill
