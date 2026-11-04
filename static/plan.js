@@ -154,9 +154,11 @@ function planCard(v) {
   const attention = v.items.filter((i) => i.state === "overdue" || i.state === "soon");
   const never = v.history_current_on ? v.items.filter((i) => i.state === "unknown") : [];
   const known = v.counts.overdue + v.counts.soon + v.counts.ok;
-  return el("div", { class: `card plcard ${v.counts.overdue ? "overdue" : v.counts.soon ? "soon" : ""}`.trim() },
+  const shop = v.at_shop;                                                        // on the repair board as "อยู่ที่อู่": the plan can wait until it is back
+  return el("div", { class: `card plcard ${v.counts.overdue ? "overdue" : v.counts.soon ? "soon" : ""}${shop ? " at-shop" : ""}`.trim() },
     el("div", { class: "pl-top" },
       el("a", { class: "pl-title", href: `#truck=${v.id}` }, el("strong", { text: plLabel(v) || "–" }), historyTick(v), v.branch ? el("span", { class: "muted small", text: ` ${v.branch}` }) : null),
+      shop ? el("span", { class: "badge shop", title: "อยู่ในบอร์ดซ่อมว่า “อยู่ที่อู่” — รอให้กลับมาก่อนค่อยดูแผน", text: `🔧 อยู่ที่อู่${shop.shop ? ` · ${shop.shop}` : ""}${shop.since ? ` · ตั้งแต่ ${beDate(shop.since)}` : ""}` }) : null,
       el("span", { class: "badge", title: v.group ? v.group.label : "", text: v.group ? `${v.group.code} · ${plMonths(v.group.months)} ต่อ ${baht(v.group.step_km)} กม.` : "ยังไม่ได้เลือกกลุ่มแผน" }),
       el("span", { class: "grow" }),
       v.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, attention.map((i) => i.key)) }) : null),

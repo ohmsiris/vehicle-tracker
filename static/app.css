@@ -1317,3 +1317,5 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 @media (max-width: 800px) { .mechrow { grid-template-columns: 1fr 1fr; } .mech-note { grid-column: 1 / -1; } }
 
 .badge.never { background: transparent; color: var(--muted); border: 1px dashed var(--line-strong); }
+.plcard.at-shop { opacity: .62; }
+.plcard.at-shop:hover { opacity: 1; }

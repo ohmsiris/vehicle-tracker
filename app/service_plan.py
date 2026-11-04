@@ -822,17 +822,19 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
     groups, assigned = _groups(), _vehicle_groups()
     events = _bill_events()
     hits, odos = _group(bill_hits(events, _rule_sets(vehicles, groups, assigned))), _group(bill_odometers(events))
+    at_shop = _at_shop()
     rows = []
     for v in vehicles:
         group = groups.get(assigned.get(v["id"]))
         plan = vehicle_plan(v, group=group, records=records.get(v["id"], []) + hits.get(v["id"], []), readings=readings.get(v["id"], []) + odos.get(v["id"], []),
                             overrides=overrides, today=today, soon_days=soon_days, snoozes=snoozes.get(v["id"]))
-        rows.append({**{k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "usage", "history_current_on")}, **plan})
+        rows.append({**{k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "usage", "history_current_on")}, **plan,
+                     "at_shop": at_shop.get(v["id"])})
 
     def rank(r):
         c = r["counts"]
         known = c["overdue"] + c["soon"] + c["ok"]
-        return (-c["overdue"], -c["soon"], 0 if known else 1, str(r.get("branch")), _numkey(r.get("vehicle_number")))
+        return (1 if r.get("at_shop") else 0, -c["overdue"], -c["soon"], 0 if known else 1, str(r.get("branch")), _numkey(r.get("vehicle_number")))      # at a shop: last
 
     rows.sort(key=rank)
     totals = {s: sum(r["counts"][s] for r in rows) for s in ("overdue", "soon", "ok", "unknown")}
@@ -840,6 +842,19 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
             "trucks": {"overdue": sum(1 for r in rows if r["counts"]["overdue"]), "soon": sum(1 for r in rows if not r["counts"]["overdue"] and r["counts"]["soon"]),
                        "no_history": sum(1 for r in rows if r["has_plan"] and r["counts"]["unknown"] == len(r["items"])),
                        "no_group": sum(1 for r in rows if not r["has_plan"])}}
+
+
+def _at_shop() -> dict:
+    """vehicle id -> {shop, since} for the trucks the repair board has at a shop now: their plan can wait until they are back."""
+    try:
+        rows = supabase.select_all("repair_requests", {"select": "vehicle_id,shop,sent_date", "status": "eq.at_shop", "order": "id.asc"})
+    except supabase.SupabaseError:
+        return {}
+    out: dict = {}
+    for r in rows:
+        if r.get("vehicle_id") and r["vehicle_id"] not in out:
+            out[r["vehicle_id"]] = {"shop": r.get("shop"), "since": r.get("sent_date")}
+    return out
 
 
 def _rule_sets(vehicles: list[dict], groups: dict, assigned: dict) -> dict:
