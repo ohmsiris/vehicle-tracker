@@ -338,14 +338,14 @@ function kmRow(rule, it) {
 // ================================================================== one truck's plan
 async function renderTruckPlan(v, editing) {
   const box = $("tkPlan");
-  if (!v || editing || !v.vehicle_id) { box.hidden = true; fill(box); return; }
+  if (!v || editing || !v.vehicle_id) { box.hidden = true; fill(box, tyreBox()); return; }
   box.hidden = false;
-  fill(box, el("p", { class: "muted small", text: "กำลังโหลดแผนซ่อมบำรุง…" }));
+  fill(box, el("p", { class: "muted small", text: "กำลังโหลดแผนซ่อมบำรุง…" }), tyreBox());
   let d;
   try {
     d = await api(`/api/plan/vehicles/${v.vehicle_id}${plAsOfQuery()}`);
   } catch (err) {
-    fill(box, el("p", { class: "error", text: `โหลดแผนซ่อมบำรุงไม่สำเร็จ: ${err.message}` }));
+    fill(box, el("p", { class: "error", text: `โหลดแผนซ่อมบำรุงไม่สำเร็จ: ${err.message}` }), tyreBox());
     return;
   }
   if (!tk.v || tk.v.vehicle_id !== v.vehicle_id || tk.editing) return;      // the page moved on while this was loading
@@ -368,7 +368,7 @@ function truckPlanNodes(d) {
       d.group ? el("div", { class: "muted small", text: `ทุกรายการนับ ${plMonths(d.group.months)} ต่อ ${baht(d.group.step_km)} กม. (อย่างไหนถึงก่อน)` }) : null),
     el("a", { class: "muted small", href: "#plan-settings", text: "เปลี่ยนกลุ่มได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ" }));
   if (!d.has_plan) {
-    return [head, groupBar, el("p", { class: "muted", text: "ยังไม่ได้เลือกกลุ่ม จึงยังไม่มีตาราง — เลือกได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ (หรือปล่อยว่างถ้ารถคันนี้ไม่ต้องทำตาราง)" })];
+    return [head, groupBar, el("p", { class: "muted", text: "ยังไม่ได้เลือกกลุ่ม จึงยังไม่มีตาราง — เลือกได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ (หรือปล่อยว่างถ้ารถคันนี้ไม่ต้องทำตาราง)" }), tyreBox()];
   }
   const odo = d.odometer ? ` · เลขไมล์ล่าสุด ${plKm(d.odometer.km)} (${beDate(d.odometer.date)})` : "";
   // History = the repair records themselves (bills and jobs recorded by hand): the same records as สมุดงานซ่อม, edited there.
@@ -386,7 +386,7 @@ function truckPlanNodes(d) {
       el("span", { class: "muted small", text: r.notes || "" }),
       el("button", { class: "btn small danger", type: "button", text: "ลบ", onclick: () => deleteReading(r) })))) : null;
   const simBanner = d.simulated ? el("div", { class: "edit-banner", text: `กำลังดูล่วงหน้า ณ ${beDate(d.as_of)} (จำลองเฉยๆ ไม่ได้บันทึกอะไร) — เลื่อนแถบที่หน้า “แผนซ่อมบำรุง” กลับมาวันนี้เพื่อเลิกจำลอง` }) : null;
-  return [head, simBanner, groupBar, el("p", { class: "muted small", text: `ระยะทางต่อวัน: ${plKmPerDay(d.km_per_day)}${odo}` }), planCalc(d), planChart(d), history, readings];
+  return [head, simBanner, groupBar, el("p", { class: "muted small", text: `ระยะทางต่อวัน: ${plKmPerDay(d.km_per_day)}${odo}` }), planCalc(d), planChart(d), tyreBox(), history, readings];      // ยาง (tyres.js) sits under the table
 }
 
 // The Isuzu-style chart: columns = the latest event, then the next rounds; rows = the items.

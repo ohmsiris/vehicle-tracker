@@ -1,16 +1,18 @@
 "use strict";
 
-// ยาง on the truck page (below the truck's details, above the plan and history): a chassis drawing seen from above, front at the top.
+// ยาง on the truck page (inside แผนซ่อมบำรุง, under its table and above the history): a chassis drawing seen from above, front at the top.
 // Each wheel shows its tyre's age (green under 1 year, yellow 1-2 years, red older, grey dashed = nothing recorded); tap a wheel for the
 // tyre on it (brand, size, since when, km used, price, shop) and the tyres it had before. "+ บันทึกเปลี่ยนยาง" puts new tyres on chosen
 // wheels (it can start from a tyre bill already saved on the truck), "สลับยาง" moves tyres between wheels, "ขนาดยาง" edits the size /
 // wheel count. Data: /api/vehicles/<id>/tyres (app/tyres.py). Loaded after plan.js, before app.js.
 
-const ty = { v: null, d: null, sel: null };
+const ty = { v: null, d: null, sel: null, box: null };
+// the section lives INSIDE the plan block (under its table), which re-draws itself: keep hold of the node so it can be moved, not lost
+const tyreBox = () => ty.box || (ty.box = $("tkTyres"));
 const TY_STATE = { ok: "ใหม่กว่า 1 ปี", warn: "1–2 ปี", old: "เกิน 2 ปี", unknown: "ไม่ทราบวันที่ใส่", none: "ยังไม่มีข้อมูล" };
 
 async function renderTruckTyres(v, editing) {
-  const box = $("tkTyres");
+  const box = tyreBox();
   if (!v || editing || !v.vehicle_id) { box.hidden = true; fill(box); return; }
   box.hidden = false;
   if (!ty.v || ty.v.vehicle_id !== v.vehicle_id) ty.sel = null;
@@ -36,11 +38,11 @@ function drawTyres() {
   const d = ty.d, v = ty.v;
   const btn = (text, onclick, cls = "") => el("button", { class: `btn small${cls ? ` ${cls}` : ""}`, type: "button", text, onclick });
   if (d.ready === false) {
-    fill($("tkTyres"), el("section", { class: "card tycard" }, el("h3", { text: "ยาง" }), el("p", { class: "muted small", text: "ยังใช้ส่วนยางไม่ได้ — ต้องรันไฟล์ schema_v36.sql ใน Supabase ก่อน" })));
+    fill(tyreBox(), el("section", { class: "card tycard" }, el("h3", { text: "ยาง" }), el("p", { class: "muted small", text: "ยังใช้ส่วนยางไม่ได้ — ต้องรันไฟล์ schema_v36.sql ใน Supabase ก่อน" })));
     return;
   }
   const hasTyres = d.positions.some((w) => w.tyre);
-  fill($("tkTyres"), el("section", { class: "card tycard" },
+  fill(tyreBox(), el("section", { class: "card tycard" },
     el("div", { class: "ty-head" },
       el("h3", { text: "ยาง" }),
       el("button", { class: "linkbtn small", type: "button", title: "แก้ขนาดยาง / จำนวนล้อ", text: tySpecText(d.spec), onclick: openTyreSpec }),
