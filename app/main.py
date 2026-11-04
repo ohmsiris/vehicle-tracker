@@ -28,7 +28,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import attendance, dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase
+from app import attendance, dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -800,6 +800,59 @@ def api_edit_vehicle(vehicle_id: str, body: dict = Body(...), x_app_token: str =
     """Edits only the fields present in the body (usage, main driver, details, active = retire / bring back)."""
     _check_token(x_app_token, token)
     return _fleet_call(fleet.edit_vehicle, vehicle_id, body)
+
+
+# ------------------------------------------------------------- tyres (truck page)
+def _tyre_call(fn, *args, **kwargs):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return fn(*args, **kwargs)
+    except tyres.InvalidTyre as exc:
+        raise HTTPException(422, str(exc))
+    except tyres.NotFound:
+        raise HTTPException(404, "ไม่พบข้อมูลนี้")
+    except supabase.SupabaseError:
+        logger.exception("tyre call failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/vehicles/{vehicle_id}/tyres")
+def api_vehicle_tyres(vehicle_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The truck's wheels: the tyre on each now, its age and km, the wheel's history, tyre bills not placed on a wheel yet."""
+    _check_token(x_app_token, token)
+    return _tyre_call(tyres.vehicle_tyres, vehicle_id)
+
+
+@app.put("/api/vehicles/{vehicle_id}/tyre-spec")
+def api_vehicle_tyre_spec(vehicle_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _tyre_call(tyres.save_spec, vehicle_id, body)
+
+
+@app.post("/api/vehicles/{vehicle_id}/tyres")
+def api_vehicle_tyre_change(vehicle_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """"บันทึกเปลี่ยนยาง": new tyres on the chosen wheels (the old ones are closed, not overwritten)."""
+    _check_token(x_app_token, token)
+    return _tyre_call(tyres.record_change, vehicle_id, body)
+
+
+@app.post("/api/vehicles/{vehicle_id}/tyres/rotate")
+def api_vehicle_tyre_rotate(vehicle_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _tyre_call(tyres.rotate, vehicle_id, body)
+
+
+@app.patch("/api/tyres/{tyre_id}")
+def api_edit_tyre(tyre_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _tyre_call(tyres.edit_tyre, tyre_id, body)
+
+
+@app.delete("/api/tyres/{tyre_id}")
+def api_delete_tyre(tyre_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _tyre_call(tyres.delete_tyre, tyre_id)
 
 
 # ------------------------------------------------------------- machinery
