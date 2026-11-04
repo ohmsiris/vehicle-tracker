@@ -314,6 +314,7 @@ function render(draft, pickedVehicle) {
   $("evTotal").addEventListener("input", () => { state.totalManual = true; });
   bindDateField($("evDate"), $("evDateCap"));
   vSel.addEventListener("change", renderFixes);   // the "which repairs does this close" list follows the truck
+  vSel.addEventListener("change", renderTyrePick);  // so do the wheels of a tyre bill
   bindVehicleAutofill({ vehicleSel: vSel, branchEl: $("evBranch"), mileageEl: $("evMileage"), nextEl: $("evNext"), hintEl: $("evNextHint"), fillBranchNow: true });
   bindMileageHistory({ vehicleSel: vSel, dateEl: $("evDate"), mileageEl: $("evMileage"), hintEl: $("evMileHint") });
   renderFixes();
@@ -322,6 +323,8 @@ function render(draft, pickedVehicle) {
   const blocks = $("billBlocks");
   blocks.replaceChildren(...draft.bills.map((b) => billBlock(b, draft.line_items.filter((li) => li.file_index === b.file_index))));
   updateTotals();
+  tp.vehicleId = null; tp.picked = new Set();      // a new bill: no wheels picked yet
+  renderTyrePick();
 }
 
 function billBlock(bill, items) {
@@ -519,6 +522,7 @@ const lineSum = () => readLines().reduce((s, l) => s + (l.line_total || 0), 0);
 // the user has typed their own total (then it's theirs to keep).
 function linesChanged() {
   syncVat();
+  renderTyrePick();
   if (!state.totalManual) {
     const t = $("evTotal");
     t.value = String(round2(lineSum()));
@@ -614,8 +618,9 @@ async function confirmSave() {
     $("doneText").textContent =
       `${veh ? vehicleLabel(veh) : ""} · ${beDate(p.event.event_date)} · ${p.line_items.length} รายการ · ${state.billFiles.length + state.refFiles.length} ไฟล์ (รหัส ${saved.event_id.slice(0, 8)})`;
     const closed = p.fixes_request_ids.length;
-    $("doneClosed").hidden = closed === 0;
-    $("doneClosed").textContent = closed ? `ปิดงานซ่อมให้แล้ว ${closed} งาน` : "";
+    const tyresNote = await saveTyrePick(veh, p, saved.event_id);
+    $("doneClosed").hidden = closed === 0 && !tyresNote;
+    $("doneClosed").textContent = [closed ? `ปิดงานซ่อมให้แล้ว ${closed} งาน` : "", tyresNote].filter(Boolean).join(" · ");
     resetAfterSave();
     rqSaved(veh ? veh.id : null);                          // off the queue of bills waiting to be checked
     showView("done");
@@ -625,6 +630,65 @@ async function confirmSave() {
     saving = false;
     btn.disabled = false;
     btn.textContent = "ยืนยันและบันทึก";
+  }
+}
+
+// ---- a tyre bill: pick the wheels right here, before saving (the tyres go on the truck's ยาง section with this bill)
+const TP_SIZE = /(\d{3})\s*\/\s*(\d{2})\s*(?:Z?R|-)?\s*(\d{2}(?:\.\d)?)/i;
+const TP_NOT = /ยางใน|จุ๊บ|ปะ|ยางกันฝุ่น|ยางแท่น|ยางรอง|ยางหูโช้ค|ยางกันกระแทก|ยางปัด|ท่อยาง|ลูกยาง|ยางฝา|ยางเบ้า|ยางกัน|ยางโอริง|ยางหิ้ว|ยางรัด|ซีลยาง/;
+const TP_BRANDS = ["MICHELIN", "BRIDGESTONE", "DUNLOP", "YOKOHAMA", "GOODYEAR", "MAXXIS", "DEESTONE", "OTANI", "TOYO", "HANKOOK", "FALKEN", "CONTINENTAL", "KUMHO", "NITTO", "PIRELLI"];
+const tpIsTyre = (d) => !TP_NOT.test(d || "") && /ยาง|tire|tyre/i.test(d || "") && (TP_SIZE.test(d || "") || /ยางเรเดียล|ยางนอก/.test(d || ""));
+const tpSize = (d) => { const m = TP_SIZE.exec(d || ""); return m ? `${m[1]}/${m[2]}R${m[3]}` : ""; };
+const tpBrand = (d) => { const up = String(d || "").toUpperCase(); const b = TP_BRANDS.find((x) => up.includes(x)); return b ? b[0] + b.slice(1).toLowerCase() : ""; };
+const tp = { vehicleId: null, data: null, picked: new Set(), seq: 0 };
+
+async function renderTyrePick() {
+  const card = $("tyrePickCard");
+  if (!card) return;
+  const sel = $("evVehicle");
+  const veh = sel ? selectedVehicle(sel) : null;
+  const lines = state.draft ? readLines().filter((l) => tpIsTyre(l.description)) : [];
+  if (!lines.length) { card.hidden = true; return; }
+  card.hidden = false;
+  if (!veh) { fill(card, el("h2", { text: "ยางในบิลนี้" }), el("p", { class: "muted small", text: "เลือกรถก่อน แล้วเลือกล้อที่เปลี่ยนได้ที่นี่" })); return; }
+  if (tp.vehicleId !== veh.id) {
+    tp.vehicleId = veh.id; tp.data = null; tp.picked = new Set();
+    const seq = ++tp.seq;
+    fill(card, el("h2", { text: "ยางในบิลนี้" }), el("p", { class: "muted small", text: "กำลังโหลดล้อของรถคันนี้…" }));
+    try { const d = await api(`/api/vehicles/${veh.id}/tyres`); if (seq === tp.seq) tp.data = d; } catch (err) { if (seq === tp.seq) tp.data = { error: err.message }; }
+    if (seq !== tp.seq) return;
+  }
+  const d = tp.data;
+  if (!d || d.error || d.ready === false) {
+    fill(card, el("h2", { text: "ยางในบิลนี้" }), el("p", { class: "muted small", text: d && d.error ? `โหลดล้อไม่สำเร็จ: ${d.error} — บันทึกบิลได้ แล้วใส่ตำแหน่งทีหลังที่หน้ารถ` : "ใส่ตำแหน่งยางได้ที่หน้ารถหลังบันทึก" }));
+    return;
+  }
+  const qty = lines.reduce((n, l) => n + (l.quantity || 1), 0);
+  const age = (m) => (m == null ? "" : m < 12 ? `${m} ด.` : `${Math.floor(m / 12)} ปี`);
+  const boxes = d.positions.map((w) => {
+    const b = el("input", { type: "checkbox", value: w.position, checked: tp.picked.has(w.position) });
+    b.addEventListener("change", () => { b.checked ? tp.picked.add(w.position) : tp.picked.delete(w.position); count.textContent = countText(); });
+    return el("label", { class: "check ty-pick" }, b, ` ${w.label}`, w.tyre ? el("span", { class: "muted small", text: ` (เดิม ${[w.tyre.brand, age(w.months)].filter(Boolean).join(" · ") || "มีข้อมูล"})` }) : null);
+  });
+  const countText = () => `เลือกแล้ว ${tp.picked.size} / ${qty} ล้อ`;
+  const count = el("span", { class: "muted small", text: countText() });
+  fill(card, el("h2", {}, "ยางในบิลนี้ ", el("span", { class: "muted small", text: `${lines.map((l) => `${tpSize(l.description) || l.description} × ${l.quantity || 1}`).join(", ")} — เลือกล้อที่เปลี่ยน (ไม่เลือกก็ได้ ใส่ทีหลังที่หน้ารถ)` })),
+    el("div", { class: "ty-picks" }, ...boxes), count);
+}
+
+// after the bill is saved: the picked wheels get the new tyres, pointing at this bill
+async function saveTyrePick(veh, p, eventId) {
+  if (!veh || tp.vehicleId !== veh.id || !tp.picked.size) { tp.vehicleId = null; return ""; }
+  const line = p.line_items.find((l) => tpIsTyre(l.description)) || {};
+  const price = line.unit_cost || (line.line_total && line.quantity ? line.line_total / line.quantity : null);
+  const positions = [...tp.picked];
+  tp.vehicleId = null; tp.picked = new Set();
+  try {
+    await api(`/api/vehicles/${veh.id}/tyres`, jsonOpts("POST", { positions, fitted_on: p.event.event_date, fitted_km: p.event.mileage, size: tpSize(line.description),
+      brand: tpBrand(line.description), price, vendor: p.event.vendor, event_id: eventId }));
+    return `ใส่ยาง ${positions.length} ล้อให้แล้ว`;
+  } catch (err) {
+    return `บันทึกล้อไม่สำเร็จ (${err.message}) — ใส่ตำแหน่งได้ที่หน้ารถ`;
   }
 }
 
