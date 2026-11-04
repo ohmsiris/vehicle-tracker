@@ -1256,4 +1256,11 @@ def reminder_preview(*, today: Optional[date] = None) -> dict:
     snoozed = [{"truck": _truck_label(r), "label": it["label"], "until": it["snoozed_until"]} for r in rows for it in r["items"]
                if it.get("snoozed_until") and it["key"] in cfg["items"]]
     return {"as_of": today.isoformat(), "soon_days": cfg["soon_days"], "enabled": cfg["enabled"], "items": found, "snoozed": snoozed,
-            "text": reminder_text(found, today, cfg["soon_days"]) if found else ""}
+            "never": never_done(rows, cfg["items"]), "text": reminder_text(found, today, cfg["soon_days"]) if found else ""}
+
+
+def never_done(rows: list[dict], items: list[str]) -> list[dict]:
+    """The items a truck has NEVER had, for the trucks whose history is complete (the green tick): there, "no record" means it was never
+    done, not that the bill is missing. Shown grey beside the reminders; not counted in them."""
+    return [{"vehicle_id": r["id"], "item_key": it["key"], "label": it["label"]} for r in rows
+            if r.get("has_plan") and r.get("history_current_on") for it in r["items"] if it["state"] == "unknown" and it["key"] in items]

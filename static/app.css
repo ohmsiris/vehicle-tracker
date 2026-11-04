@@ -1315,3 +1315,5 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .mechadd { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 10px; }
 .mechadd input { flex: 1 1 140px; min-width: 0; font: inherit; }
 @media (max-width: 800px) { .mechrow { grid-template-columns: 1fr 1fr; } .mech-note { grid-column: 1 / -1; } }
+
+.badge.never { background: transparent; color: var(--muted); border: 1px dashed var(--line-strong); }

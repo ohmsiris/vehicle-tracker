@@ -147,8 +147,12 @@ function plKpi(label, value, sub, tone) {
   return el("div", { class: `kpi ${tone}`.trim() }, el("div", { class: "kpi-label", text: label }), el("div", { class: "kpi-value", text: String(value) }), el("div", { class: "kpi-sub", text: sub }));
 }
 
+// a truck with the green tick has its whole history in: an item with no record there was never done (grey, not counted as due)
+const plNeverChip = (i) => el("span", { class: "badge never", title: "รถคันนี้ประวัติครบ (✓) แต่ไม่เคยมีบันทึกรายการนี้ — อาจไม่เคยทำเลย", text: `${i.label} · ไม่เคยทำ` });
+
 function planCard(v) {
   const attention = v.items.filter((i) => i.state === "overdue" || i.state === "soon");
+  const never = v.history_current_on ? v.items.filter((i) => i.state === "unknown") : [];
   const known = v.counts.overdue + v.counts.soon + v.counts.ok;
   return el("div", { class: `card plcard ${v.counts.overdue ? "overdue" : v.counts.soon ? "soon" : ""}`.trim() },
     el("div", { class: "pl-top" },
@@ -157,7 +161,7 @@ function planCard(v) {
       el("span", { class: "grow" }),
       v.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, attention.map((i) => i.key)) }) : null),
     !v.has_plan ? el("p", { class: "muted small" }, "ยังไม่ได้เลือกกลุ่มแผน — เลือกได้ที่ ", el("a", { href: "#plan-settings", text: "ตั้งค่าระยะ › รถแต่ละคันใช้กลุ่มไหน" }), " (หรือปล่อยว่างถ้าไม่ต้องทำตาราง)")
-      : attention.length ? el("div", { class: "pl-chips" }, ...attention.map((i) => plChip(i, v)))
+      : attention.length || never.length ? el("div", { class: "pl-chips" }, ...attention.map((i) => plChip(i, v)), ...never.map(plNeverChip))
       : el("p", { class: "muted small", text: known ? `ปกติทุกรายการที่มีประวัติ (${known}/${v.items.length} รายการ)` : "ยังไม่มีประวัติเลย — กด “บันทึกว่าทำแล้ว” เพื่อเริ่มนับ" }),
     v.has_plan ? el("div", { class: "muted small", text: plKmPerDay(v.km_per_day) }) : null);
 }

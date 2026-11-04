@@ -182,9 +182,10 @@ async function loadDueStrip() {
   const byTruck = new Map();
   for (const it of r.items || []) {
     if (queued.has(it.vehicle_id)) continue;               // already in the queue for its round
-    if (!byTruck.has(it.vehicle_id)) byTruck.set(it.vehicle_id, { due: true, vehicle_id: it.vehicle_id, truck: it.truck, branch: it.branch, items: [] });
+    if (!byTruck.has(it.vehicle_id)) byTruck.set(it.vehicle_id, { due: true, vehicle_id: it.vehicle_id, truck: it.truck, branch: it.branch, items: [], never: [] });
     byTruck.get(it.vehicle_id).items.push(it);
   }
+  for (const n of r.never || []) if (byTruck.has(n.vehicle_id)) byTruck.get(n.vehicle_id).never.push(n);
   board.due = [...byTruck.values()].sort((a, b) => Math.min(...a.items.map((i) => i.days_left)) - Math.min(...b.items.map((i) => i.days_left)));
   renderDueStrip();
 }
@@ -199,7 +200,8 @@ function renderDueStrip() {
     const card = el("div", { class: `duecard${late ? " late" : ""}`, title: "ลากลงไปที่ “รอซ่อม” เพื่อเข้าคิว" },
       el("div", { class: "duecard-top" }, el("a", { href: `#truck=${d.vehicle_id}`, text: d.truck }), d.branch ? el("span", { class: "muted small", text: d.branch }) : null),
       el("div", { class: "duecard-items small" }, ...d.items.slice(0, 3).map((i) => el("span", { class: `badge ${i.stage === "soon" ? "warn" : "urgent"}`, text: `${i.label} · ${dueText(i)}` })),
-        d.items.length > 3 ? el("span", { class: "muted small", text: `+${d.items.length - 3}` }) : null),
+        ...d.never.slice(0, Math.max(0, 3 - d.items.length)).map((n) => el("span", { class: "badge never", title: "ประวัติครบ (✓) แต่ไม่เคยมีบันทึกรายการนี้", text: `${n.label} · ไม่เคยทำ` })),
+        d.items.length + d.never.length > 3 ? el("span", { class: "muted small", text: `+${d.items.length + d.never.length - 3}` }) : null),
       el("button", { class: "btn small", type: "button", text: "เข้าคิว ↓", onclick: () => queueDue(d) }));
     card.draggable = true;
     card.addEventListener("dragstart", (e) => {

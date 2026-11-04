@@ -617,3 +617,11 @@ def test_a_bill_with_new_wheel_seals_counts_as_the_grease_for_the_small_truck_on
 ])
 def test_coolant_change_lines(text, key):
     assert sp.classify_line(text) == key
+
+
+def test_never_done_only_for_trucks_with_the_green_tick():
+    rows = [{"id": "a", "has_plan": True, "history_current_on": "2026-11-01", "items": [{"key": "gearbox_oil", "label": "น้ำมันเกียร์", "state": "unknown"},
+                                                                                       {"key": "engine_oil", "label": "น้ำมันเครื่อง", "state": "overdue"}]},
+            {"id": "b", "has_plan": True, "history_current_on": None, "items": [{"key": "gearbox_oil", "label": "น้ำมันเกียร์", "state": "unknown"}]}]
+    assert sp.never_done(rows, ["gearbox_oil", "engine_oil"]) == [{"vehicle_id": "a", "item_key": "gearbox_oil", "label": "น้ำมันเกียร์"}]
+    assert sp.never_done(rows, ["engine_oil"]) == []
