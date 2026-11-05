@@ -773,7 +773,8 @@ table.pl-chart { border-collapse: separate; border-spacing: 0; width: 100%; min-
 .pl-chart td.pl-due, .pl-legend b.pl-due { color: #2d5bd8; }
 .pl-chart td.pl-over, .pl-legend b.pl-over { color: var(--bad); background: var(--bad-soft); }
 .pl-chart td.pl-unk, .pl-legend b.pl-unk { color: var(--muted); background: var(--bg); }
-.pl-chart tr.overdue th.pl-rowh { box-shadow: inset 3px 0 0 var(--bad); }
+.pl-chart tr.pl-st-overdue th.pl-rowh, .pl-chart tr.overdue th.pl-rowh { box-shadow: inset 3px 0 0 var(--bad); }
+.pl-chart tr.pl-st-check th.pl-rowh { box-shadow: inset 3px 0 0 var(--warn-line); }
 .pl-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px 16px; }
 .pl-legend b { padding: 0 6px; border-radius: 4px; }
 /* settings: groups and km per item */
@@ -1492,4 +1493,4 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 
 /* ---- truck plan: the "ไมล์เสีย" switch beside the group */
 .pl-groupside { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.pl-groupside .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.pl-groupside .pl-odo { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }

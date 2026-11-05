@@ -378,7 +378,7 @@ function truckPlanNodes(d) {
         : `นับตามกม.เป็นหลัก · ครบ ${plMonths(d.group.months)} ต่อ ${baht(d.group.step_km)} กม. = ถึงเวลาเช็คเลขไมล์ · เกิน 6 เดือนต่อ ${baht(d.group.rule_set === "รถใหญ่" ? 20000 : 10000)} กม. = เลยกำหนด` }) : null),
     el("div", { class: "pl-groupside" },
       el("a", { class: "muted small", href: "#plan-settings", text: "เปลี่ยนกลุ่มได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ" }),
-      el("label", { class: "check small", title: "เลขไมล์ของรถคันนี้ใช้ไม่ได้ — แผนจะนับตามเวลาของกลุ่มแทนกม." },
+      el("label", { class: "pl-odo small", title: "เลขไมล์ของรถคันนี้ใช้ไม่ได้ — แผนจะนับตามเวลาของกลุ่มแทนกม." },
         el("input", { type: "checkbox", checked: !!d.vehicle.odometer_broken, onchange: (e) => plSetOdometerBroken(d.vehicle.id, e.target.checked, e.target) }), " ไมล์เสีย (นับตามเวลา)")));
   if (!d.has_plan) {
     return [head, groupBar, el("p", { class: "muted", text: "ยังไม่ได้เลือกกลุ่ม จึงยังไม่มีตาราง — เลือกได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ (หรือปล่อยว่างถ้ารถคันนี้ไม่ต้องทำตาราง)" }), tyreBox()];
@@ -431,7 +431,7 @@ function planChart(d) {
     el("div", { class: "pl-ch-date small", text: beDate(col.date) }),
     el("div", { class: "pl-ch-km small", text: col.km !== null && col.km !== undefined ? `${baht(col.km)} กม.` : (col.n === 0 ? "ไม่ทราบเลขไมล์" : "") })));
   const noHistory = c.no_history ? el("div", { class: "edit-banner" }, "ยังไม่มีประวัติของรถคันนี้ — ตารางนับรอบจากวันนี้ ช่อง ? คือไม่ทราบว่าแต่ละรายการเคยทำเมื่อไหร่ (ควรตรวจ) ส่วนรอบถัดไปบอกว่าแต่ละรอบต้องทำอะไร พอมีบิลหรือกด “+ บันทึกว่าทำแล้ว” ตารางจะนับจากวันที่ทำจริง") : null;
-  const body = c.rows.map((r) => el("tr", { class: r.state },
+  const body = c.rows.map((r) => el("tr", { class: `pl-st-${r.state}` },          // (prefixed: a bare "check" class is the big ✓ of the saved screen)
     el("th", { class: "pl-rowh", scope: "row" }, el("div", { class: "pl-rowname", text: r.label }),
       el("div", { class: "muted small", text: `ทุก ${[r.interval_km ? plKm(r.interval_km) : null, r.interval_months ? plMonths(r.interval_months) : null].filter(Boolean).join(" / ")}` })),
     el("td", { class: "pl-last" }, r.last_date ? beDate(r.last_date) : "–", r.last_date ? el("div", { class: "muted small", text: plSourceText(r.last_source) }) : null),
