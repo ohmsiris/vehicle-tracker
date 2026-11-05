@@ -1380,9 +1380,21 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .mcl-main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
 .mcl-cal { min-width: 0; }
 .mcl-side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; padding: 14px 16px; }
-.mcl-side .section-title { margin: 14px 0 8px; font-size: 15px; }
-.mcl-side .section-title:first-child, .mcl-back + .section-title, .mcl-back + .mcl-visit .section-title { margin-top: 4px; }
-.mcl-back { margin-bottom: 8px; }
+.mcl-h { font-size: 15px; font-weight: 700; margin: 16px 0 8px; }
+.mcl-side > .mcl-h:first-child, .mcl-crumb + .mcl-h { margin-top: 2px; }
+.mcl-crumb { background: none; border: 0; padding: 0; margin: 0 0 10px; font: inherit; font-size: 14px; color: var(--accent); cursor: pointer; text-align: left; }
+.mcl-crumb:hover { text-decoration: underline; }
+.mcl-dayhead { display: block; background: none; border: 0; padding: 0; margin: 10px 0 4px; font: inherit; font-size: 12px; font-weight: 650; color: var(--muted); cursor: pointer; }
+.mcl-dayhead:hover { color: var(--accent); }
+.mcl-rowtext { flex: 1 1 auto; min-width: 0; }
+.mcl-count { color: var(--muted); font-size: 16px; line-height: 1; }
+.mcl-title-link { font-size: 18px; font-weight: 700; margin: 6px 0 8px; }
+.mcl-headline { background: color-mix(in srgb, var(--c) 12%, var(--surface)); border-left: 4px solid var(--c); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px; }
+.mcl-headline strong { font-size: 18px; }
+.mcl-headline.late { background: var(--bad-soft); border-left-color: var(--bad); color: var(--bad); }
+.mcl-headline.late .small { color: var(--text); }
+.mcl-shop { border: 1px dashed var(--warn-line); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px; }
+.mcl-shop strong { color: var(--warn); }
 
 .mcl-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
 .mcl-wd { padding: 6px 8px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); background: var(--surface-2); text-align: center; }
@@ -1398,7 +1410,10 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mcl-chip:hover { background: color-mix(in srgb, var(--c) 26%, var(--surface)); }
 .mcl-chip.late { border-color: var(--bad); border-left-color: var(--c); box-shadow: inset 0 0 0 1px var(--bad); }
-.mcl-chip.group { font-weight: 650; background: var(--bad-soft); color: var(--bad); }
+.mcl-chip.group { font-weight: 650; }
+.mcl-chip.late { color: var(--bad); }
+.mcl-chip.shop { border-style: dashed; border-color: var(--c); border-left-style: solid; }
+.mcl-chip.routine { background: transparent; border: 1px dashed var(--c); border-left: 3px solid var(--c); }
 .mcl-chip.on { outline: 2px solid var(--accent); outline-offset: 1px; }
 .mcl-more { background: none; border: 0; font: inherit; font-size: 12px; color: var(--muted); text-align: left; padding: 0 6px; cursor: pointer; }
 .mcl-more:hover { color: var(--accent); }
@@ -1433,12 +1448,10 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .mcl-wait { margin-top: 14px; }
 .mcl-wait summary { cursor: pointer; margin-bottom: 6px; }
 .mcl-dhead { display: flex; align-items: center; gap: 6px; }
-.mcl-visit { padding: 2px 0 10px; }
-.mcl-visit + .mcl-visit { border-top: 1px solid var(--line); padding-top: 10px; }
-.mcl-vtitle { font-weight: 650; }
-.mcl-along { margin-top: 6px; font-size: 14px; }
+.mcl-along { margin-top: 10px; font-size: 14px; }
+.mcl-along > strong { font-size: 15px; }
 .mcl-along ul { margin: 2px 0 0; padding-left: 20px; }
-.mcl-along.maybe { color: var(--muted); }
+.mcl-along.nohist { color: var(--muted); }
 .mcl-notes { white-space: pre-wrap; }
 .mcl-actions { display: flex; gap: 8px; margin-top: 10px; }
 @media (max-width: 1100px) {

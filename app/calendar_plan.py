@@ -10,12 +10,13 @@ with a due date are added by the page itself (it has them already).
 
 The pure functions below are unit-tested; `calendar()` only gathers the two overviews.
 """
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
-from app import machine_plan, service_plan
+from app import machine_plan, mgr, mgr_recurring, service_plan, supabase
 
 SOON_DAYS = 14                       # yellow: within this many days (the same window as the board's "ล่วงหน้า")
+ROUTINE_DAYS = 400                   # how far ahead the routine work (งานประจำ) is laid out
 SLACK_DAYS = 7                       # an item due within a week of the NEXT oil change waits for that one
 OIL = "engine_oil"
 
@@ -57,7 +58,7 @@ def truck_visit(row: dict, today: date) -> Optional[dict]:
     num, plate = str(row.get("vehicle_number") or "").strip(), str(row.get("plate_number") or "").strip()
     label = " · ".join(x for x in (f"#{num}" if num and num != plate else "", plate) if x) or "รถ"
     return {"kind": "truck", "id": row["id"], "label": label, "branch": row.get("branch"), "date": day, "days_left": left, "tone": tone(left),
-            "main": oil["label"], "together": together if day else [], "maybe": maybe if day else [], "at_shop": bool(row.get("at_shop")),
+            "main": oil["label"], "together": together if day else [], "maybe": maybe if day else [], "at_shop": row.get("at_shop") or None,
             "green_tick": bool(row.get("history_current_on"))}
 
 
@@ -78,6 +79,32 @@ def machine_entries(machine: dict, today: date) -> list[dict]:
     return out
 
 
+def routine_entries(rules: list[dict], made: set, today: date, until: Optional[date] = None) -> list[dict]:
+    """The coming occurrences of the routine work (mgr_recurring), as calendar entries -- the board only creates each one when its
+    day comes (or `lead_days` before). `made` = {(recurring_id, due_date)} already on the board, so they are not shown twice.
+    A rule that waits for the last one to be done (mode after_done) shows only its next one."""
+    until = until or today + timedelta(days=ROUTINE_DAYS)
+    out = []
+    for r in rules:
+        if not r.get("active", True) or not r.get("next_due"):
+            continue
+        nxt = date.fromisoformat(str(r["next_due"])[:10])
+        end = min(until, date.fromisoformat(str(r["end_date"])[:10])) if r.get("end_date") else until
+        if r.get("mode") == "after_done":
+            days = [nxt] if nxt <= end else []
+        else:
+            anchor = date.fromisoformat(str(r["start_date"])[:10]) if r.get("start_date") else nxt
+            days = [d for d in mgr_recurring.occurrences(r["rule"], anchor, end) if d >= max(nxt, today)]
+        for d in days:
+            if (r["id"], d.isoformat()) in made:
+                continue
+            out.append({"kind": "routine", "id": f"{r['id']}:{d.isoformat()}", "recurring_id": r["id"], "label": r["title"], "date": d.isoformat(),
+                        "days_left": (d - today).days, "tone": tone((d - today).days), "type_key": r.get("type_key"), "main": r.get("type_label") or "",
+                        "time": str(r["time_of_day"])[:5] if r.get("time_of_day") else None, "place": r.get("place"), "notes": r.get("notes"),
+                        "described": r.get("described"), "together": [], "maybe": []})
+    return out
+
+
 def build(truck_rows: list[dict], machines: list[dict], today: date) -> dict:
     entries = [e for e in (truck_visit(r, today) for r in truck_rows) if e]
     for m in machines:
@@ -92,4 +119,9 @@ def calendar(today: Optional[date] = None) -> dict:
     today = today or service_plan.today_th()
     trucks = service_plan.overview(today=today)["vehicles"] if service_plan.has_v10() else []
     mo = machine_plan.overview(today)
-    return build(trucks, mo["machines"] if mo.get("ready") else [], today)
+    out = build(trucks, mo["machines"] if mo.get("ready") else [], today)
+    rules = mgr.list_recurring()
+    made = {(t["recurring_id"], str(t["due_date"])[:10]) for t in supabase.select_all("mgr_tickets", {"select": "recurring_id,due_date", "recurring_id": "not.is.null", "order": "id.asc"})
+            if t.get("due_date")} if rules else set()
+    out["routine"] = routine_entries(rules, made, today)
+    return out

@@ -61,3 +61,14 @@ def test_build_sorts_by_day_and_keeps_the_undated_apart():
     d = cp.build(rows, [], TODAY)
     assert [e["id"] for e in d["entries"]] == ["b", "a"] and d["entries"][0]["tone"] == "late"
     assert [x["id"] for x in d["no_date"]] == ["c"]
+
+
+def test_routine_work_is_laid_out_ahead_without_the_ones_already_on_the_board():
+    weekly = {"id": "r1", "title": "เช็คสต็อก", "active": True, "next_due": "2026-11-09", "start_date": "2026-01-05", "mode": "calendar",
+              "rule": {"every": 1, "unit": "week", "weekdays": [0]}, "type_key": "report"}
+    after = {"id": "r2", "title": "ล้างแอร์", "active": True, "next_due": "2026-12-01", "mode": "after_done", "rule": {"every": 3, "unit": "month", "day": 1}}
+    off = {**weekly, "id": "r3", "active": False}
+    out = cp.routine_entries([weekly, after, off], {("r1", "2026-11-16")}, TODAY, until=date(2026, 11, 30))
+    assert [(e["recurring_id"], e["date"]) for e in out] == [("r1", "2026-11-09"), ("r1", "2026-11-23"), ("r1", "2026-11-30")]
+    out = cp.routine_entries([after], set(), TODAY, until=date(2027, 6, 30))
+    assert [e["date"] for e in out] == ["2026-12-01"]                      # waits for the last one: only the next
