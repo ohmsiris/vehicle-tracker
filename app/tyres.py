@@ -192,7 +192,7 @@ def clean_change(data: dict, wheels: int, today: date, spec: Optional[dict] = No
     return picked + [UNKNOWN] * unknown, tyre
 
 
-def clean_rotation(moves: dict, current: dict, wheels: int) -> dict:
+def clean_rotation(moves: dict, current: dict, wheels: int, spec: Optional[dict] = None) -> dict:
     """"สลับยาง": {from position: to position} for the tyres on the truck now. Every target is a real wheel and no two tyres land on one."""
     allowed = positions(wheels)
     if not isinstance(moves, dict) or not moves:
@@ -203,6 +203,9 @@ def clean_rotation(moves: dict, current: dict, wheels: int) -> dict:
             raise InvalidTyre(f"ล้อ{LABELS.get(src, src)}ไม่มียางที่บันทึกไว้")
         if dst not in allowed:
             raise InvalidTyre(f"ตำแหน่งล้อไม่ถูกต้อง: {dst}")
+        why = wrong_axle(current[src].get("size"), dst, spec) if src != dst else None
+        if why:
+            raise InvalidTyre(f"ยาง{LABELS.get(src, src)}: {why}")
         if src != dst:
             out[src] = dst
     if not out:
@@ -334,7 +337,7 @@ def rotate(vehicle_id: str, data: dict) -> dict:
     spec = _spec(v["id"])
     wheels = (spec or {}).get("wheels") or default_wheels(v)
     current = {r["position"]: r for r in _rows(v["id"]) if not r.get("removed_on") and r["position"] != UNKNOWN}
-    moves = clean_rotation(data.get("moves") or {}, current, wheels)
+    moves = clean_rotation(data.get("moves") or {}, current, wheels, spec)
     for src, dst in moves.items():
         note = f"สลับจาก{LABELS[src]}"
         old = current[src].get("notes")

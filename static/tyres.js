@@ -233,8 +233,14 @@ function openTyreChange({ positions = [], bill = null }) {
 
 function openTyreRotate() {
   const d = ty.d;
+  const s = d.spec || {}, f = (s.front_size || "").toUpperCase(), r = (s.rear_size || "").toUpperCase();
+  const fits = (tyre, pos) => {               // same rule as the server: a size that is one axle's stays on that axle
+    const sz = (tyre.size || "").toUpperCase(), front = pos === "FL" || pos === "FR";
+    return !(sz && f && r && f !== r && ((front && sz === r) || (!front && sz === f)));
+  };
   const rows = d.positions.filter((w) => w.tyre).map((w) => {
-    const sel = el("select", { "aria-label": `${w.label} ไปล้อ` }, ...d.positions.map((x) => el("option", { value: x.position, text: x.position === w.position ? `${x.label} (อยู่ที่เดิม)` : x.label })));
+    const sel = el("select", { "aria-label": `${w.label} ไปล้อ` }, ...d.positions.filter((x) => fits(w.tyre, x.position))
+      .map((x) => el("option", { value: x.position, text: x.position === w.position ? `${x.label} (อยู่ที่เดิม)` : x.label })));
     sel.value = w.position;
     return { w, sel, row: el("div", { class: "ty-rot" }, el("span", { text: `${w.label} · ${[w.tyre.brand, tyAge(w.months)].filter(Boolean).join(" · ")}` }), el("span", { class: "muted", text: "→" }), sel) };
   });

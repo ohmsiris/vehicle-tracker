@@ -100,3 +100,12 @@ def test_a_rear_size_cannot_go_on_the_front_and_the_other_way_round():
         ty.clean_change({**ok, "positions": ["RR"], "size": "205/70 R15"}, 4, TODAY, spec)
     assert ty.clean_change({**ok, "positions": ["FL"]}, 4, TODAY, {"front_size": "225/75R15", "rear_size": "225/75R15"})     # same size all round: anywhere
     assert ty.clean_change({**ok, "positions": ["FL"], "size": "215/70R15"}, 4, TODAY, spec)                               # another size: allowed (just unusual)
+
+
+
+def test_rotation_keeps_each_size_on_its_own_axle():
+    spec = {"front_size": "205/70R15", "rear_size": "225/75R14"}
+    current = {"RL": {"id": "a", "size": "225/75R14"}, "RR": {"id": "b", "size": "225/75R14"}, "FL": {"id": "c", "size": "205/70R15"}}
+    assert ty.clean_rotation({"RL": "RR", "RR": "RL"}, current, 4, spec) == {"RL": "RR", "RR": "RL"}
+    with pytest.raises(ty.InvalidTyre):
+        ty.clean_rotation({"RL": "FR"}, current, 4, spec)
