@@ -47,7 +47,7 @@ def test_the_coming_close_window_is_adjustable():
 # ----------------------------------------------------------------- snoozing
 def plan(snoozes=None, today=TODAY, records=None):
     records = records if records is not None else [rec("engine_oil", "2026-09-01")]                 # due 2026-11-01
-    return sp.vehicle_plan({"id": VID}, group=S2, records=records, readings=[], overrides=[], today=today, snoozes=snoozes)
+    return sp.vehicle_plan({"id": VID, "odometer_broken": True}, group=S2, records=records, readings=[], overrides=[], today=today, snoozes=snoozes)      # the time rule: these tests are about the reminders
 
 
 def item(p, key="engine_oil"):

@@ -50,6 +50,17 @@ SAME_EVENT_DAYS = 3                  # items done within this many days of the l
 
 THAI_TZ = timezone(timedelta(hours=7))
 
+# KM FIRST (owner, 5 Nov 2026): an item is due when the truck reaches its km. Time is only
+#   * a hard limit for what ages sitting still: "6 months per 10,000 km" for the small trucks (S6), "6 months per 20,000 km"
+#     for the big ones (B6) -- engine oil 6 months, the 40,000 km items 24 months ... (CAP_STEP_KM below)
+#   * a reminder to READ THE ODOMETER when the truck's group time has passed (S2 / S3 ...): state "check", yellow -- not a reason to
+#     send it to a shop. An estimate (last reading + km per day) that passes the km is also only "check"; red needs a real reading.
+# A truck whose odometer is broken (vehicles.odometer_broken) goes by its group's months as before.
+CAP_STEP_KM = {"รถเล็ก": 10_000, "รถใหญ่": 20_000}
+CAP_MONTHS_PER_STEP = 6
+ANOMALY_FACTOR = 1.8                 # a new reading that ran this many times the usual km per day (and ANOMALY_MIN_KM more) is suspicious
+ANOMALY_MIN_KM = 1_500
+
 
 def today_th() -> date:
     return datetime.now(THAI_TZ).date()
@@ -214,8 +225,9 @@ def effective_plan(group: Optional[dict], overrides: Optional[list[dict]] = None
             continue
         km = saved[key]["interval_km"] if key in saved else base[key]
         months = item_months(km, group)
+        cap = round(km / CAP_STEP_KM[group["rule_set"]] * CAP_MONTHS_PER_STEP, 1) if group["rule_set"] in CAP_STEP_KM else None
         out.append({"key": key, "label": LABEL_FOR.get((group["rule_set"], key), label), "group": grp, "default_km": base[key], "interval_km": km,
-                    "interval_months": months, "customised": key in saved})
+                    "interval_months": months, "cap_months": cap, "customised": key in saved})
     return out
 
 
@@ -427,16 +439,113 @@ def last_done(item_key: str, records: list[dict]) -> Optional[dict]:
 
 
 def item_status(item: dict, last: Optional[dict], kmpd: Optional[float], odo_now: Optional[dict], today: date,
-                soon_days: int = SOON_DAYS, est_kmpd: Optional[float] = None) -> dict:
+                soon_days: int = SOON_DAYS, est_kmpd: Optional[float] = None, *, km_first: bool = True, km_trusted: bool = True) -> dict:
+    """One item of one truck. KM FIRST (see CAP_STEP_KM): states 'overdue' (a real odometer reading is past the km, or the hard
+    time limit has passed) / 'check' (time to read the odometer: the group's months have passed, or only the ESTIMATE is past the km)
+    / 'soon' / 'ok' / 'unknown'. `check_reason` says which. A truck with a broken odometer (km_first False) keeps the old rule:
+    km or the group's months, whichever comes first."""
+    if not km_first or not item.get("cap_months"):
+        return item_status_by_time(item, last, kmpd, odo_now, today, soon_days, est_kmpd)
+    out = _blank_status(item)
+    if last is None:
+        return out
+    done = last["date"]
+    days = max((today - done).days, 0)
+    out.update(last_date=done.isoformat(), last_source=last["source"], last_odometer_km=last.get("odometer_km"))
+    if last.get("odometer_km") is not None and item.get("interval_km"):
+        out["due_km"] = last["odometer_km"] + item["interval_km"]
+    read_left = None                                   # what a REAL reading says is left (no estimate in it)
+    km_since = basis = None
+    if odo_now and last.get("odometer_km") is not None and odo_now["date"] >= done and odo_now["km"] >= last["odometer_km"]:
+        read_left = item["interval_km"] - (odo_now["km"] - last["odometer_km"])
+        km_since, basis = odo_now["km"] - last["odometer_km"], "odometer"
+        if kmpd:
+            km_since += kmpd * max((today - odo_now["date"]).days, 0)
+    elif kmpd:
+        km_since, basis = kmpd * days, "estimate"
+    out["read_km_left"] = read_left
+    used, candidates = [], []
+    cap_date = add_months_f(done, item["cap_months"])
+    candidates.append((cap_date, "months"))
+    used.append(days / (item["cap_months"] * DAYS_PER_MONTH))
+    if km_since is not None:
+        out.update(km_since=round(km_since), km_basis=basis, km_left=round(item["interval_km"] - km_since))
+        used.append(km_since / item["interval_km"])
+        if kmpd:
+            candidates.append((today + timedelta(days=math.ceil(out["km_left"] / kmpd)), "km"))
+    elif est_kmpd:
+        out["est_km_since"] = round(est_kmpd * days)
+        out["est_km_left"] = round(item["interval_km"] - est_kmpd * days)
+    out["progress"] = round(max(used), 3)
+    due, by = min(candidates)
+    left = (due - today).days
+    check_at = add_months_f(done, item["interval_months"]) if item.get("interval_months") else None
+    if cap_date < today:
+        state, by = "overdue", "months"
+    elif read_left is not None and read_left <= 0 and not km_trusted:
+        state, out["check_reason"] = "check", "anomaly"          # the km data of this truck looks wrong: check the odometer, not the shop
+    elif read_left is not None and read_left <= 0:
+        state, by = "overdue", "km"
+        # how late: the day the reading says the km were passed (from the km per day), not the time limit still ahead
+        due = odo_now["date"] - timedelta(days=math.ceil(-read_left / kmpd)) if kmpd else odo_now["date"]
+        left = (due - today).days
+    elif out["km_left"] is not None and out["km_left"] <= 0:
+        state, out["check_reason"] = "check", "estimate"         # only the estimate says it is due: read the odometer first
+    elif check_at and check_at <= today and not (odo_now and odo_now["date"] >= check_at and read_left is not None):
+        state, out["check_reason"] = "check", "months"           # the group's months have passed and nobody has read the odometer since
+    elif left <= soon_days:
+        state = "soon"
+    else:
+        state = "ok"
+    if state == "check" and left < 0:                  # "check" is about reading the odometer now, not a number of days late
+        due, left = today, 0
+    out.update(due_date=due.isoformat(), due_by=by, days_left=left, state=state)
+    return out
+
+
+def _blank_status(item: dict) -> dict:
+    return {"key": item["key"], "label": item["label"], "group": item["group"], "interval_km": item.get("interval_km"),
+            "interval_months": item.get("interval_months"), "cap_months": item.get("cap_months"), "customised": item.get("customised", False),
+            "last_date": None, "last_source": None, "last_odometer_km": None, "km_since": None, "km_basis": None,
+            "due_date": None, "due_by": None, "days_left": None, "km_left": None, "state": "unknown", "check_reason": None,
+            "progress": None, "est_km_since": None, "est_km_left": None, "due_km": None, "read_km_left": None}
+
+
+def odometer_anomaly(points: list[dict], kmpd: Optional[float]) -> Optional[dict]:
+    """Does the latest odometer figure fit the truck's usual driving? A reading LOWER than the one before, or one that ran far more
+    than usual since the previous (often: the truck was away a long time and nothing was recorded in between) means the km data is
+    incomplete -- the estimates should not be trusted until someone checks. `points` = odometer_points(); `kmpd` = the usual rate."""
+    if len(points) < 2:
+        return None
+    a, b = points[-2], points[-1]
+    da, db = parse_date(a["end_date"]), parse_date(b["end_date"])
+    gap = (db - da).days if da and db else 0
+    if b["km"] < a["km"]:
+        return {"kind": "lower", "text": f"เลขไมล์ล่าสุด ({b['km']:,} กม.) น้อยกว่าครั้งก่อน ({a['km']:,} กม.) — ตรวจว่าพิมพ์ผิดหรือไม่"}
+    if gap <= 0:
+        return None
+    run, rate = b["km"] - a["km"], (b["km"] - a["km"]) / gap
+    if rate > MAX_KM_PER_DAY:
+        return {"kind": "impossible", "text": f"เลขไมล์ {a['km']:,} → {b['km']:,} กม. ใน {gap} วัน ({rate:,.0f} กม./วัน) เป็นไปไม่ได้ — น่าจะพิมพ์ผิดตัวใดตัวหนึ่ง"}
+    base = None
+    if len(points) >= 3:                                # the usual rate BEFORE the latest step
+        first, prev = points[0], points[-2]
+        span = (parse_date(prev["end_date"]) - parse_date(first["end_date"])).days
+        if span > 0 and prev["km"] >= first["km"]:
+            base = (prev["km"] - first["km"]) / span
+    base = base or kmpd
+    if base and rate > base * ANOMALY_FACTOR and run - base * gap >= ANOMALY_MIN_KM:
+        return {"kind": "jump", "text": f"ช่วง {gap} วันล่าสุดวิ่ง {run:,} กม. ({rate:.0f} กม./วัน) มากกว่าปกติ (~{base:.0f} กม./วัน) — ข้อมูลไมล์อาจไม่ครบ"}
+    return None
+
+
+def item_status_by_time(item: dict, last: Optional[dict], kmpd: Optional[float], odo_now: Optional[dict], today: date,
+                        soon_days: int = SOON_DAYS, est_kmpd: Optional[float] = None) -> dict:
     """One item of one truck: state ('overdue' / 'soon' / 'ok' / 'unknown'), when it falls due and by which limit.
     `kmpd` is the MEASURED km per day (None when nothing is measured: then only the months decide); `est_kmpd` (what the
     truck's group assumes) is only used for the "about N km left" shown beside the real figures.
     `progress` is how much of the interval is used up (0 = just done, 1 = due, above 1 = overdue)."""
-    out = {"key": item["key"], "label": item["label"], "group": item["group"], "interval_km": item.get("interval_km"),
-           "interval_months": item.get("interval_months"), "customised": item.get("customised", False),
-           "last_date": None, "last_source": None, "last_odometer_km": None, "km_since": None, "km_basis": None,
-           "due_date": None, "due_by": None, "days_left": None, "km_left": None, "state": "unknown",
-           "progress": None, "est_km_since": None, "est_km_left": None}
+    out = _blank_status(item)
     if last is None:
         return out
     done = last["date"]
@@ -476,7 +585,7 @@ def item_status(item: dict, last: Optional[dict], kmpd: Optional[float], odo_now
     return out
 
 
-STATE_ORDER = {"overdue": 0, "soon": 1, "unknown": 3, "ok": 2}
+STATE_ORDER = {"overdue": 0, "check": 1, "soon": 2, "ok": 3, "unknown": 4}
 
 
 def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odometer: Optional[int], today: date) -> Optional[dict]:
@@ -534,7 +643,10 @@ def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], r
     est = estimate_km_per_day(readings, today, default_kmpd, records)
     odo = latest_odometer(readings, records)
     measured = est["value"] if est["source"] in ("gps", "odometer") else None
-    statuses = [item_status(it, last_done(it["key"], records), measured, odo, today, soon_days, default_kmpd) for it in plan]
+    km_first = not vehicle.get("odometer_broken")
+    anomaly = odometer_anomaly(odometer_points(readings, records), measured) if km_first else None
+    statuses = [item_status(it, last_done(it["key"], records), measured, odo, today, soon_days, default_kmpd, km_first=km_first, km_trusted=not anomaly)
+                for it in plan]
     for s in statuses:                                  # a snooze counts only for the due date it was made for
         s["snoozed_until"] = s["snooze_ended"] = None
         sn = (snoozes or {}).get(s["key"])
@@ -542,10 +654,10 @@ def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], r
         if until and s["due_date"] and sn.get("for_due") == s["due_date"]:
             s["snoozed_until" if until > today else "snooze_ended"] = until.isoformat()
     items = sorted(statuses, key=lambda i: (STATE_ORDER[i["state"]], i["days_left"] if i["days_left"] is not None else 10**6))
-    counts = {s: sum(1 for i in items if i["state"] == s) for s in ("overdue", "soon", "ok", "unknown")}
-    worst = next((s for s in ("overdue", "soon", "ok", "unknown") if counts[s]), None)
+    counts = {s: sum(1 for i in items if i["state"] == s) for s in ("overdue", "check", "soon", "ok", "unknown")}
+    worst = next((s for s in ("overdue", "check", "soon", "ok", "unknown") if counts[s]), None)
     out = {"vehicle_id": vehicle["id"], "group": ({**group, "months": group_months(group)} if group else None), "km_per_day": est,
-           "odometer": ({"date": odo["date"].isoformat(), "km": odo["km"]} if odo else None),
+           "odometer": ({"date": odo["date"].isoformat(), "km": odo["km"]} if odo else None), "km_first": km_first, "odometer_anomaly": anomaly,
            "items": items, "counts": counts, "worst": worst, "has_plan": bool(plan), "soon_days": soon_days}
     if with_chart:
         anchor = None
@@ -796,7 +908,7 @@ def _vehicle_groups() -> dict:
 
 
 def _vehicles(branch: str = "", vehicle_class: str = "", only: Optional[str] = None) -> list[dict]:
-    params = {"select": "id,plate_number,vehicle_number,nickname,branch,vehicle_class,make,model,usage,active" + (",history_current_on" if fleet.has_v32() else ""), "order": "id.asc"}
+    params = {"select": "id,plate_number,vehicle_number,nickname,branch,vehicle_class,make,model,usage,active,odometer_broken" + (",history_current_on" if fleet.has_v32() else ""), "order": "id.asc"}
     if only:
         params["id"] = f"eq.{only}"
     else:
@@ -828,18 +940,21 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
         group = groups.get(assigned.get(v["id"]))
         plan = vehicle_plan(v, group=group, records=records.get(v["id"], []) + hits.get(v["id"], []), readings=readings.get(v["id"], []) + odos.get(v["id"], []),
                             overrides=overrides, today=today, soon_days=soon_days, snoozes=snoozes.get(v["id"]))
-        rows.append({**{k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "usage", "history_current_on")}, **plan,
+        rows.append({**{k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "usage", "history_current_on", "odometer_broken")}, **plan,
                      "at_shop": at_shop.get(v["id"])})
 
     def rank(r):
         c = r["counts"]
-        known = c["overdue"] + c["soon"] + c["ok"]
-        return (1 if r.get("at_shop") else 0, -c["overdue"], -c["soon"], 0 if known else 1, str(r.get("branch")), _numkey(r.get("vehicle_number")))      # at a shop: last
+        known = c["overdue"] + c["check"] + c["soon"] + c["ok"]
+        return (1 if r.get("at_shop") else 0, -c["overdue"], -c["check"], -c["soon"], 0 if known else 1, str(r.get("branch")), _numkey(r.get("vehicle_number")))      # at a shop: last
 
     rows.sort(key=rank)
-    totals = {s: sum(r["counts"][s] for r in rows) for s in ("overdue", "soon", "ok", "unknown")}
+    totals = {s: sum(r["counts"][s] for r in rows) for s in ("overdue", "check", "soon", "ok", "unknown")}
     return {"as_of": today.isoformat(), "simulated": today != real_today, "soon_days": soon_days, "ready": ready, "vehicles": rows, "totals": totals,
-            "trucks": {"overdue": sum(1 for r in rows if r["counts"]["overdue"]), "soon": sum(1 for r in rows if not r["counts"]["overdue"] and r["counts"]["soon"]),
+            "trucks": {"overdue": sum(1 for r in rows if r["counts"]["overdue"]),
+                       "check": sum(1 for r in rows if not r["counts"]["overdue"] and r["counts"]["check"]),
+                       "soon": sum(1 for r in rows if not r["counts"]["overdue"] and not r["counts"]["check"] and r["counts"]["soon"]),
+                       "anomaly": sum(1 for r in rows if r.get("odometer_anomaly")),
                        "no_history": sum(1 for r in rows if r["has_plan"] and r["counts"]["unknown"] == len(r["items"])),
                        "no_group": sum(1 for r in rows if not r["has_plan"])}}
 
@@ -867,6 +982,15 @@ def _numkey(value) -> tuple:
     return (0, int(m.group(1)), str(value)) if m else (1, 0, str(value or ""))
 
 
+def set_odometer_broken(vehicle_id: str, broken) -> dict:
+    """"ไมล์เสีย": the truck's odometer does not work -- its plan goes by its group's months instead of km."""
+    _uuid(vehicle_id, "รถ")
+    rows = supabase.update("vehicles", {"id": f"eq.{vehicle_id}"}, {"odometer_broken": bool(broken)})
+    if not rows:
+        raise NotFound()
+    return {"odometer_broken": bool(rows[0].get("odometer_broken"))}
+
+
 def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
     real_today = today_th()
     today = today or real_today
@@ -889,7 +1013,7 @@ def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
                         soon_days=_plan_settings()["soon_days"], snoozes=_snoozes().get(vehicle_id))
     history = sorted([{**r, "label": item_label(r["item_key"], rule_set)} for r in records + hits], key=lambda r: (r["done_date"], r["item_key"]), reverse=True)
     choices = [{**g, "months": group_months(g)} for g in sorted(groups.values(), key=lambda g: g.get("sort_order", 99))]
-    return {"as_of": today.isoformat(), "simulated": today != real_today, "ready": ready, "vehicle": {k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model")},
+    return {"as_of": today.isoformat(), "simulated": today != real_today, "ready": ready, "vehicle": {k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "odometer_broken")},
             **plan, "group_code": code, "groups": choices, "history": history, "readings": readings}
 
 
@@ -1206,13 +1330,14 @@ def collect_reminders(rows: list[dict], today: date, soon_days: int, items: list
             dl = it.get("days_left")
             if it["key"] not in items or it["state"] == "unknown" or dl is None or dl > soon_days or it.get("snoozed_until"):
                 continue
-            stage = "overdue" if dl < 0 else "due" if dl == 0 else "soon"
+            check = it["state"] == "check"
+            stage = "soon" if check else "overdue" if dl < 0 else "due" if dl == 0 else "soon"
             suffix = f":s{it['snooze_ended']}" if it.get("snooze_ended") else ""
             tail = f"over{(-dl) // OVERDUE_REPEAT_DAYS}" if stage == "overdue" else stage
             km = it["km_left"] if it.get("km_left") is not None else it.get("est_km_left")
             out.append({"key": f"plan:{r['id']}:{it['key']}:{it['due_date']}:{tail}{suffix}", "stage": stage, "vehicle_id": r["id"], "truck": _truck_label(r),
                         "branch": r.get("branch"), "item_key": it["key"], "label": it["label"], "days_left": dl, "due_date": it["due_date"],
-                        "km_left": km, "km_real": it.get("km_left") is not None})
+                        "km_left": km, "km_real": it.get("km_left") is not None, "check": check})
     out += _with_the_oil_change(rows, today, soon_days, items, out)
     order = {"overdue": 0, "due": 1, "soon": 2}
     return sorted(out, key=lambda x: (order[x["stage"]], x["days_left"], x["truck"]))
@@ -1230,7 +1355,9 @@ def _with_the_oil_change(rows: list[dict], today: date, soon_days: int, items: l
         oil = next((i for i in r["items"] if i["key"] == "engine_oil"), None)
         if not oil or oil["state"] == "unknown" or oil.get("snoozed_until") or oil.get("days_left") is None or oil["days_left"] > soon_days:
             continue
-        horizon = oil["days_left"] + (oil.get("interval_months") or 2) * DAYS_PER_MONTH       # the day of the next oil change after this one
+        kmpd = (r.get("km_per_day") or {}).get("value")
+        every = min(oil["interval_km"] / kmpd, (oil.get("cap_months") or 6) * DAYS_PER_MONTH) if r.get("km_first", True) and kmpd and oil.get("interval_km")             else (oil.get("interval_months") or 2) * DAYS_PER_MONTH
+        horizon = oil["days_left"] + every                     # the day of the next oil change after this one
         have = {x["item_key"] for x in found if x["vehicle_id"] == r["id"]}
         for it in r["items"]:
             dl = it.get("days_left")
@@ -1258,7 +1385,7 @@ def reminder_text(reminders: list[dict], today: date, soon_days: int) -> str:
                                  ("soon", f"ใกล้ถึงรอบ (ภายใน {soon_days} วัน)", lambda x: f" · อีก {x['days_left']} วัน")):
         rows = [x for x in reminders if x["stage"] == stage]
         if rows:
-            lines += [f"{title} ({len(rows)})"] + [f"• {x['truck']} — {x['label']}{phrase(x)}{_km_text(x)}{' · ทำพร้อมน้ำมันเครื่อง' if x.get('together') else ''}" for x in rows] + [""]
+            lines += [f"{title} ({len(rows)})"] + [f"• {x['truck']} — {x['label']}{' · ถึงเวลาเช็คเลขไมล์' if x.get('check') else phrase(x)}{_km_text(x)}{' · ทำพร้อมน้ำมันเครื่อง' if x.get('together') else ''}" for x in rows] + [""]
     return "\n".join(lines).strip()
 
 

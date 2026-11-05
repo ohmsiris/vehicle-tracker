@@ -82,7 +82,7 @@ function mclItems() {
   for (const e of mcl.plan.entries) {
     if (!mcl.kinds[e.kind] || !keepBranch(e)) continue;
     const late = e.days_left < 0;
-    const shop = e.at_shop ? " (ที่ร้าน)" : "";
+    const shop = e.at_shop ? " (ที่ร้าน)" : e.check ? " (เช็คไมล์)" : "";
     out.push({ ...e, key: `${e.kind}:${e.id}:${e.main}`, due: e.date, date: late ? today : e.date, late,
       color: mclTypeColor(e.kind === "truck" ? "truck_plan" : "machine_plan", e.kind === "truck" ? "#92400e" : "#475569"),
       group: `${e.kind}${late ? "-late" : ""}`, text: `${e.label}${shop}` });
@@ -326,13 +326,17 @@ function mclDetail(x) {
 function mclVisit(e) {
   const href = e.kind === "truck" ? `#truck=${e.id}` : `#machine=${e.id}`;
   const what = e.kind === "truck" && e.main === "น้ำมันเครื่อง" ? "ถ่ายน้ำมันเครื่อง" : e.main;
-  const head = e.late ? `เลยรอบ${what} ${-e.days_left} วัน` : `ถึงรอบ${what}`;
+  const head = e.late ? `เลยรอบ${what} ${-e.days_left} วัน` : e.check ? `ถึงเวลาเช็คเลขไมล์ — ${what}` : `ถึงรอบ${what}`;
+  const kmText = e.km_left !== null && e.km_left !== undefined
+    ? `${e.km_estimated ? "≈ " : ""}${e.km_left >= 0 ? "เหลือ" : "เกิน"} ${Math.abs(e.km_left).toLocaleString("th-TH")} กม.${e.due_km ? ` (ครบที่ ${e.due_km.toLocaleString("th-TH")})` : ""}` : "";
   const shop = e.at_shop;
   return [
     el("div", { class: "mcl-dhead", style: `--c:${e.color}` }, el("span", { class: "mgdot" }), el("span", { class: "muted small", text: e.kind === "truck" ? "รอบซ่อมบำรุงรถ" : "รอบซ่อมบำรุงเครื่องจักร" })),
     el("h3", { class: "mcl-title-link" }, el("a", { href, text: e.label })),
-    el("div", { class: `mcl-headline${e.late ? " late" : ""}` }, el("strong", { text: head }),
-      el("span", { class: "small", text: `${beDate(e.due)}${e.late ? "" : ` · ${mclWhen(e.days_left)}`}${e.branch ? ` · ${e.branch}` : ""}` })),
+    el("div", { class: `mcl-headline${e.late ? " late" : ""}${e.check ? " check" : ""}` }, el("strong", { text: head }),
+      el("span", { class: "small", text: [e.check ? (e.check_reason === "estimate" ? "ค่าประมาณว่าถึงระยะแล้ว — อ่านเลขไมล์ก่อนส่งซ่อม" : e.check_reason === "anomaly" ? "เลขไมล์ผิดปกติ — ตรวจเลขไมล์ก่อนส่งซ่อม" : "ครบเวลาตามกลุ่ม — อ่านเลขไมล์ก่อนส่งซ่อม") : `${beDate(e.due)}${e.late ? "" : ` · ${mclWhen(e.days_left)}`}`,
+        kmText, e.branch].filter(Boolean).join(" · ") })),
+    e.anomaly ? el("p", { class: "warn-text small", text: `⚠ ${e.anomaly}` }) : null,
     shop ? el("div", { class: "mcl-shop" }, el("strong", { text: `อยู่ที่ร้าน${shop.shop ? ` ${shop.shop}` : ""}` }),
       el("span", { class: "small", text: `${shop.since ? `ตั้งแต่ ${beDate(shop.since)} · ` : ""}ฝากทำรอบนี้พร้อมกันได้เลย` })) : null,
     e.together && e.together.length ? el("div", { class: "mcl-along" }, el("strong", { text: "ทำพร้อมกันเลย" }), el("ul", {}, ...e.together.map((t) => el("li", { text: t })))) : null,

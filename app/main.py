@@ -1066,6 +1066,13 @@ def _plan_call(fn, *args, **kwargs):
         raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
 
 
+@app.put("/api/plan/vehicles/{vehicle_id}/odometer-broken")
+def api_plan_odometer_broken(vehicle_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """"ไมล์เสีย": this truck's plan goes by its group's months instead of km."""
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.set_odometer_broken, vehicle_id, body.get("broken"))
+
+
 @app.post("/api/plan/services")
 def api_plan_record_service(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

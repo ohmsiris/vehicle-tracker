@@ -15,14 +15,19 @@ const pl = {
   dlg: null,                       // what the open dialog is doing: { kind, vehicle, draft }
 };
 
-const PL_STATE_TEXT = { overdue: "เลยกำหนด", soon: "ใกล้ถึงกำหนด", ok: "ปกติ", unknown: "ยังไม่มีประวัติ" };
-const PL_BADGE = { overdue: "urgent", soon: "warn", ok: "ok", unknown: "" };
+const PL_STATE_TEXT = { overdue: "เลยกำหนด", check: "ถึงเวลาเช็คเลขไมล์", soon: "ใกล้ถึงกำหนด", ok: "ปกติ", unknown: "ยังไม่มีประวัติ" };
+const PL_BADGE = { overdue: "urgent", check: "warn", soon: "warn", ok: "ok", unknown: "" };
+const plNeedsAttention = (i) => i.state === "overdue" || i.state === "check" || i.state === "soon";
+// km first: "check" = read the odometer before sending the truck anywhere (the group's months have passed, or only the estimate is past the km)
+const plCheckText = (i) => (i.check_reason === "estimate" ? "ประมาณว่าถึงระยะแล้ว — อ่านเลขไมล์ก่อน"
+  : i.check_reason === "anomaly" ? "เลขไมล์ของรถคันนี้ผิดปกติ — ตรวจเลขไมล์ก่อน" : "ครบเวลาตามกลุ่ม — อ่านเลขไมล์ก่อน");
 const plToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const plKm = (n) => (n === null || n === undefined ? "–" : `${baht(n)} กม.`);
 const plMonths = (m) => (m === null || m === undefined ? "–" : `${Number.isInteger(m) ? m : (Math.round(m * 10) / 10)} เดือน`);
 
 function plDueText(i) {
   if (i.state === "unknown") return "ยังไม่มีประวัติ";
+  if (i.state === "check") return plCheckText(i);
   if (i.days_left === null) return "ปกติ";
   const by = i.due_by === "km" ? "ครบระยะทาง" : "ครบเวลา";
   if (i.days_left < 0) return `${by} เลยมา ${-i.days_left} วัน`;
@@ -44,7 +49,8 @@ const plAsOf = () => (pl.simDays > 0 ? addDaysISO(plToday(), pl.simDays) : "");
 const plAsOfQuery = (sep = "?") => (pl.simDays > 0 ? `${sep}as_of=${plAsOf()}` : "");
 
 function plChip(i, v) {
-  const when = i.days_left < 0 ? `เลย ${-i.days_left} วัน` : i.days_left === 0 ? "วันนี้" : `อีก ${i.days_left} วัน`;
+  const when = i.state === "check" ? `เช็คเลขไมล์${i.km_left !== null && i.km_left !== undefined ? ` · ≈ ${i.km_left >= 0 ? "เหลือ" : "เกิน"} ${baht(Math.abs(i.km_left))} กม.` : ""}`
+    : i.days_left < 0 ? `เลย ${-i.days_left} วัน` : i.days_left === 0 ? "วันนี้" : `อีก ${i.days_left} วัน`;
   if (i.snoozed_until) return el("span", { class: "badge", title: "เลื่อนเตือนอยู่", text: `💤 ${i.label} · เลื่อนเตือนถึง ${beDate(i.snoozed_until)}` });
   if (!v) return el("span", { class: `badge ${PL_BADGE[i.state]}`.trim(), title: plDueText(i), text: `${i.label} · ${when}` });
   return el("button", { class: `badge ${PL_BADGE[i.state]} plchip-btn`.trim(), type: "button", title: `${plDueText(i)} — กดเพื่อเลื่อนเตือน`, text: `${i.label} · ${when}`, onclick: () => openSnoozeDialog(v, i) });
@@ -126,7 +132,8 @@ function renderOverview() {
   if (!o) return;
   const t = o.totals, k = o.trucks;
   fill($("plKpis"),
-    plKpi("รถที่มีรายการเลยกำหนด", k.overdue, `${t.overdue} รายการ`, k.overdue ? "bad" : ""),
+    plKpi("รถที่มีรายการเลยกำหนด", k.overdue, `${t.overdue} รายการ (เลขไมล์จริงถึงระยะ หรือเกินเวลาสูงสุด)`, k.overdue ? "bad" : ""),
+    plKpi("รถที่ควรอ่านเลขไมล์", k.check || 0, `${t.check || 0} รายการ — อ่านเลขไมล์ก่อนส่งซ่อม${k.anomaly ? ` · ข้อมูลไมล์ผิดปกติ ${k.anomaly} คัน` : ""}`, k.check ? "warn" : ""),
     plKpi("รถที่ใกล้ถึงกำหนด", k.soon, `ภายใน ${o.soon_days || pl.opts.soon_days} วัน · ${t.soon} รายการ`, k.soon ? "warn" : ""),
     plKpi("รถที่ยังไม่มีประวัติเลย", k.no_history, "บันทึกครั้งล่าสุดเพื่อเริ่มนับ", ""),
     plKpi("รายการที่ปกติ", t.ok, "อยู่ในระยะ", ""));
@@ -134,8 +141,8 @@ function renderOverview() {
   const show = $("plShow").value;
   const rows = o.vehicles.filter((v) => {
     if (q && ![v.plate_number, v.vehicle_number, v.nickname, v.make, v.model, v.usage].filter(Boolean).join(" ").toLowerCase().includes(q)) return false;
-    if (show === "due") return v.counts.overdue || v.counts.soon;
-    if (show === "nohistory") return v.has_plan && !(v.counts.overdue + v.counts.soon + v.counts.ok);
+    if (show === "due") return v.counts.overdue || v.counts.check || v.counts.soon || v.odometer_anomaly;
+    if (show === "nohistory") return v.has_plan && !(v.counts.overdue + (v.counts.check || 0) + v.counts.soon + v.counts.ok);
     return true;
   });
   const nothing = show === "due" && !rows.length;
@@ -151,11 +158,11 @@ function plKpi(label, value, sub, tone) {
 const plNeverChip = (i) => el("span", { class: "badge never", title: "รถคันนี้ประวัติครบ (✓) แต่ไม่เคยมีบันทึกรายการนี้ — อาจไม่เคยทำเลย", text: `${i.label} · ไม่เคยทำ` });
 
 function planCard(v) {
-  const attention = v.items.filter((i) => i.state === "overdue" || i.state === "soon");
+  const attention = v.items.filter(plNeedsAttention);
   const never = v.history_current_on ? v.items.filter((i) => i.state === "unknown") : [];
-  const known = v.counts.overdue + v.counts.soon + v.counts.ok;
+  const known = v.counts.overdue + (v.counts.check || 0) + v.counts.soon + v.counts.ok;
   const shop = v.at_shop;                                                        // on the repair board as "อยู่ที่อู่": the plan can wait until it is back
-  return el("div", { class: `card plcard ${v.counts.overdue ? "overdue" : v.counts.soon ? "soon" : ""}${shop ? " at-shop" : ""}`.trim() },
+  return el("div", { class: `card plcard ${v.counts.overdue ? "overdue" : v.counts.check || v.counts.soon ? "soon" : ""}${shop ? " at-shop" : ""}`.trim() },
     el("div", { class: "pl-top" },
       el("a", { class: "pl-title", href: `#truck=${v.id}` }, el("strong", { text: plLabel(v) || "–" }), historyTick(v), v.branch ? el("span", { class: "muted small", text: ` ${v.branch}` }) : null),
       shop ? el("span", { class: "badge shop", title: "อยู่ในบอร์ดซ่อมว่า “อยู่ที่อู่” — รอให้กลับมาก่อนค่อยดูแผน", text: `🔧 อยู่ที่อู่${shop.shop ? ` · ${shop.shop}` : ""}${shop.since ? ` · ตั้งแต่ ${beDate(shop.since)}` : ""}` }) : null,
@@ -165,7 +172,8 @@ function planCard(v) {
     !v.has_plan ? el("p", { class: "muted small" }, "ยังไม่ได้เลือกกลุ่มแผน — เลือกได้ที่ ", el("a", { href: "#plan-settings", text: "ตั้งค่าระยะ › รถแต่ละคันใช้กลุ่มไหน" }), " (หรือปล่อยว่างถ้าไม่ต้องทำตาราง)")
       : attention.length || never.length ? el("div", { class: "pl-chips" }, ...attention.map((i) => plChip(i, v)), ...never.map(plNeverChip))
       : el("p", { class: "muted small", text: known ? `ปกติทุกรายการที่มีประวัติ (${known}/${v.items.length} รายการ)` : "ยังไม่มีประวัติเลย — กด “บันทึกว่าทำแล้ว” เพื่อเริ่มนับ" }),
-    v.has_plan ? el("div", { class: "muted small", text: plKmPerDay(v.km_per_day) }) : null);
+    v.odometer_anomaly ? el("p", { class: "warn-text small", text: `⚠ ${v.odometer_anomaly.text}` }) : null,
+    v.has_plan ? el("div", { class: "muted small", text: v.km_first === false ? "ไมล์เสีย — นับตามเวลาของกลุ่ม" : plKmPerDay(v.km_per_day) }) : null);
 }
 
 // ================================================================== the settings (second tab)
@@ -365,8 +373,13 @@ function truckPlanNodes(d) {
     el("div", { class: "pl-groupinfo" },
       el("div", { class: "muted small", text: "กลุ่มของรถคันนี้" }),
       el("div", {}, d.group ? el("strong", { text: `${d.group.code} · ${d.group.label}` }) : el("strong", { class: "muted", text: "ยังไม่ได้เลือกกลุ่ม (ไม่ทำตาราง)" })),
-      d.group ? el("div", { class: "muted small", text: `ทุกรายการนับ ${plMonths(d.group.months)} ต่อ ${baht(d.group.step_km)} กม. (อย่างไหนถึงก่อน)` }) : null),
-    el("a", { class: "muted small", href: "#plan-settings", text: "เปลี่ยนกลุ่มได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ" }));
+      d.group ? el("div", { class: "muted small", text: d.km_first === false
+        ? `ไมล์เสีย: นับตามเวลา ${plMonths(d.group.months)} ต่อ ${baht(d.group.step_km)} กม. (อย่างไหนถึงก่อน)`
+        : `นับตามกม.เป็นหลัก · ครบ ${plMonths(d.group.months)} ต่อ ${baht(d.group.step_km)} กม. = ถึงเวลาเช็คเลขไมล์ · เกิน 6 เดือนต่อ ${baht(d.group.rule_set === "รถใหญ่" ? 20000 : 10000)} กม. = เลยกำหนด` }) : null),
+    el("div", { class: "pl-groupside" },
+      el("a", { class: "muted small", href: "#plan-settings", text: "เปลี่ยนกลุ่มได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ" }),
+      el("label", { class: "check small", title: "เลขไมล์ของรถคันนี้ใช้ไม่ได้ — แผนจะนับตามเวลาของกลุ่มแทนกม." },
+        el("input", { type: "checkbox", checked: !!d.vehicle.odometer_broken, onchange: (e) => plSetOdometerBroken(d.vehicle.id, e.target.checked, e.target) }), " ไมล์เสีย (นับตามเวลา)")));
   if (!d.has_plan) {
     return [head, groupBar, el("p", { class: "muted", text: "ยังไม่ได้เลือกกลุ่ม จึงยังไม่มีตาราง — เลือกได้ที่ แผนซ่อมบำรุง › ตั้งค่าระยะ (หรือปล่อยว่างถ้ารถคันนี้ไม่ต้องทำตาราง)" }), tyreBox()];
   }
@@ -386,7 +399,21 @@ function truckPlanNodes(d) {
       el("span", { class: "muted small", text: r.notes || "" }),
       el("button", { class: "btn small danger", type: "button", text: "ลบ", onclick: () => deleteReading(r) })))) : null;
   const simBanner = d.simulated ? el("div", { class: "edit-banner", text: `กำลังดูล่วงหน้า ณ ${beDate(d.as_of)} (จำลองเฉยๆ ไม่ได้บันทึกอะไร) — เลื่อนแถบที่หน้า “แผนซ่อมบำรุง” กลับมาวันนี้เพื่อเลิกจำลอง` }) : null;
-  return [head, simBanner, groupBar, el("p", { class: "muted small", text: `ระยะทางต่อวัน: ${plKmPerDay(d.km_per_day)}${odo}` }), planCalc(d), planChart(d), tyreBox(), history, readings];      // ยาง (tyres.js) sits under the table
+  const anomaly = d.odometer_anomaly ? el("div", { class: "warnings" }, el("strong", { text: "ข้อมูลไมล์ผิดปกติ" }), el("p", { class: "small", text: `${d.odometer_anomaly.text} — ค่าประมาณของรถคันนี้อาจไม่แม่น ตรวจเลขไมล์และบิลที่ขาดไป` })) : null;
+  return [head, simBanner, groupBar, anomaly, el("p", { class: "muted small", text: `ระยะทางต่อวัน: ${plKmPerDay(d.km_per_day)}${odo}` }), planCalc(d), planChart(d), tyreBox(), history, readings];      // ยาง (tyres.js) sits under the table
+}
+
+async function plSetOdometerBroken(id, on, box) {
+  box.disabled = true;
+  try {
+    await api(`/api/plan/vehicles/${id}/odometer-broken`, jsonOpts("PUT", { broken: on }));
+    await plRefreshTruck();
+  } catch (err) {
+    box.checked = !on;
+    alert(`บันทึกไม่สำเร็จ: ${err.message}`);
+  } finally {
+    box.disabled = false;
+  }
 }
 
 // The Isuzu-style chart: columns = the latest event, then the next rounds; rows = the items.
@@ -451,27 +478,34 @@ function planCalc(d) {
   if (!rows.length) return null;
   return el("div", { class: "card plcalc" },
     el("h4", { class: "mgh", text: "เหลืออีกเท่าไหร่ถึงรอบ" }),
-    el("p", { class: "muted small", text: `แถบเต็ม = ถึงรอบ · เหลือง = เหลือไม่เกิน ${d.soon_days} วัน · แดง = เลยกำหนด · กม. ที่มี ≈ เป็นค่าประมาณจากกลุ่มของรถ (ใส่เลขไมล์จะแม่นขึ้น)` }),
+    el("p", { class: "muted small", text: d.km_first === false
+      ? `แถบเต็ม = ถึงรอบ · เหลือง = เหลือไม่เกิน ${d.soon_days} วัน · แดง = เลยกำหนด (ไมล์เสีย: นับตามเวลา)`
+      : `นับตามกม.: แดง = เลขไมล์จริงถึงระยะ หรือเกินเวลาสูงสุด · เหลือง “เช็คเลขไมล์” = ครบเวลาตามกลุ่ม หรือค่าประมาณถึงระยะ — อ่านเลขไมล์ก่อนส่งซ่อม · กม. ที่มี ≈ คือค่าประมาณ` }),
     ...rows.map((i) => calcRow(d, i)));
 }
 
 function calcRow(d, i) {
   const pct = Math.round(i.progress * 100);
-  const tone = i.state === "overdue" ? "bad" : i.state === "soon" ? "warn" : "ok";
+  const tone = i.state === "overdue" ? "bad" : i.state === "soon" || i.state === "check" ? "warn" : "ok";
   const left = (n, approx) => `${n >= 0 ? "เหลือ" : "เกิน"} ${approx ? "≈ " : ""}${baht(Math.abs(n))} กม.${approx ? " (ประมาณ)" : ""}`;
-  const km = i.km_left !== null ? left(i.km_left, false) : i.est_km_left !== null ? left(i.est_km_left, true) : null;
-  const days = i.days_left === null ? null : i.days_left < 0 ? `เลยมา ${-i.days_left} วัน` : i.days_left === 0 ? "ครบวันนี้" : `อีก ${i.days_left} วัน`;
+  const approx = i.km_basis !== "odometer" || (d.odometer && d.odometer.date !== d.as_of);
+  const km = i.km_left !== null ? left(i.km_left, approx) : i.est_km_left !== null ? left(i.est_km_left, true) : null;
+  const days = i.state === "check" ? plCheckText(i)
+    : i.days_left === null ? null : i.days_left < 0 ? `เลยมา ${-i.days_left} วัน` : i.days_left === 0 ? "ครบวันนี้" : `อีก ${i.days_left} วัน`;
   const v = { id: d.vehicle.id, plate_number: d.vehicle.plate_number, vehicle_number: d.vehicle.vehicle_number, nickname: d.vehicle.nickname };
   const snooze = i.snoozed_until
     ? el("span", { class: "plcalc-snz" }, el("span", { class: "badge", text: `💤 เลื่อนเตือนถึง ${beDate(i.snoozed_until)}` }),
         el("button", { class: "btn small", type: "button", text: "ยกเลิกการเลื่อน", onclick: () => clearSnooze(v, i) }))
-    : (i.state === "soon" || i.state === "overdue") && !d.simulated ? el("button", { class: "btn small", type: "button", text: "💤 เลื่อนเตือน", onclick: () => openSnoozeDialog(v, i) }) : null;
+    : plNeedsAttention(i) && !d.simulated ? el("button", { class: "btn small", type: "button", text: "💤 เลื่อนเตือน", onclick: () => openSnoozeDialog(v, i) }) : null;
   return el("div", { class: `plcalc-row ${tone}` },
-    el("div", { class: "plcalc-head" }, el("strong", { text: i.label }), el("span", { class: "muted small", text: `ทุก ${[i.interval_km ? plKm(i.interval_km) : null, i.interval_months ? plMonths(i.interval_months) : null].filter(Boolean).join(" / ")}` }), el("span", { class: "grow" }), snooze),
+    el("div", { class: "plcalc-head" }, el("strong", { text: i.label }),
+      el("span", { class: "muted small", text: d.km_first === false || !i.cap_months
+        ? `ทุก ${[i.interval_km ? plKm(i.interval_km) : null, i.interval_months ? plMonths(i.interval_months) : null].filter(Boolean).join(" / ")}`
+        : `ทุก ${plKm(i.interval_km)}${i.due_km ? ` (ครบที่ ${baht(i.due_km)})` : ""} · ไม่เกิน ${plMonths(i.cap_months)}` }), el("span", { class: "grow" }), snooze),
     el("div", { class: `pl-bar ${tone}`, role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.min(pct, 100)), title: `ใช้ไป ${pct}%` },
       el("span", { style: `width:${Math.min(pct, 100)}%` })),
     el("div", { class: "plcalc-text small" }, el("span", { text: `ใช้ไป ${pct}%` }), km ? el("span", { text: km }) : null,
-      days ? el("span", { class: `plcalc-days ${tone}`, text: `${days}${i.due_date ? ` (${beDate(i.due_date)}${i.due_by === "km" ? " · ครบระยะทาง" : ""})` : ""}` }) : null));
+      days ? el("span", { class: `plcalc-days ${tone}`, text: i.state === "check" ? days : `${days}${i.due_date ? ` (${beDate(i.due_date)}${i.due_by === "km" ? " · ครบระยะทาง" : " · ครบเวลาสูงสุด"})` : ""}` }) : null));
 }
 
 // ---- snooze: "do not remind me about this for N days"
@@ -515,7 +549,7 @@ function openRecordDialog(v, preset = []) {
     box.addEventListener("change", () => { if (box.checked) pl.dlg.picked.add(i.key); else pl.dlg.picked.delete(i.key); syncAll(); });
     boxes.push(box);
     return el("label", { class: "pl-pick", for: `plp_${i.key}` }, box, el("span", { text: i.label }),
-      i.state === "overdue" || i.state === "soon" ? el("span", { class: `badge ${PL_BADGE[i.state]}`, text: PL_STATE_TEXT[i.state] }) : null);
+      plNeedsAttention(i) ? el("span", { class: `badge ${PL_BADGE[i.state]}`, text: PL_STATE_TEXT[i.state] }) : null);
   }));
   syncAll();
   fill($("pdlgBody"),

@@ -40,15 +40,21 @@ def truck_visit(row: dict, today: date) -> Optional[dict]:
     if oil.get("snoozed_until"):                          # snoozed: the day it was put off to
         day = oil["snoozed_until"]
         left = (date.fromisoformat(day) - today).days
+    if oil["state"] == "check":                           # read the odometer now: it sits on today, yellow
+        day, left = today.isoformat(), 0
     if oil["state"] == "unknown":
         day = left = None
     together, maybe = [], []
-    every = (oil.get("interval_months") or 2) * service_plan.DAYS_PER_MONTH
+    kmpd = (row.get("km_per_day") or {}).get("value")
+    if row.get("km_first", True) and kmpd and oil.get("interval_km"):
+        every = min(oil["interval_km"] / kmpd, (oil.get("cap_months") or 6) * service_plan.DAYS_PER_MONTH)     # until the NEXT oil change, by km
+    else:
+        every = (oil.get("interval_months") or 2) * service_plan.DAYS_PER_MONTH
     for it in items:
         if it["key"] == OIL:
             continue
         dl = it.get("days_left")
-        if it["state"] == "overdue":
+        if it["state"] in ("overdue", "check"):
             together.append(it["label"])
         elif it["state"] == "unknown":
             if row.get("history_current_on"):             # green tick: no record = never done
@@ -59,7 +65,9 @@ def truck_visit(row: dict, today: date) -> Optional[dict]:
     label = " · ".join(x for x in (f"#{num}" if num and num != plate else "", plate) if x) or "รถ"
     return {"kind": "truck", "id": row["id"], "label": label, "branch": row.get("branch"), "date": day, "days_left": left, "tone": tone(left),
             "main": oil["label"], "together": together if day else [], "maybe": maybe if day else [], "at_shop": row.get("at_shop") or None,
-            "green_tick": bool(row.get("history_current_on"))}
+            "green_tick": bool(row.get("history_current_on")), "check": oil["state"] == "check", "check_reason": oil.get("check_reason"),
+            "km_left": oil.get("km_left"), "due_km": oil.get("due_km"), "km_estimated": oil.get("km_basis") != "odometer" or (row.get("odometer") or {}).get("date") != today.isoformat(),
+            "odometer": row.get("odometer"), "anomaly": (row.get("odometer_anomaly") or {}).get("text"), "km_first": row.get("km_first", True)}
 
 
 def machine_entries(machine: dict, today: date) -> list[dict]:

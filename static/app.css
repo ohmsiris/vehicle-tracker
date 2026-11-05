@@ -1393,6 +1393,8 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .mcl-headline strong { font-size: 18px; }
 .mcl-headline.late { background: var(--bad-soft); border-left-color: var(--bad); color: var(--bad); }
 .mcl-headline.late .small { color: var(--text); }
+.mcl-headline.check { background: var(--warn-soft); border-left-color: var(--warn-line); }
+.mcl-headline.check strong { color: var(--warn); }
 .mcl-shop { border: 1px dashed var(--warn-line); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px; }
 .mcl-shop strong { color: var(--warn); }
 
@@ -1487,3 +1489,7 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .filewrap { position: relative; }
 .filedel { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(27, 31, 39, .72); color: #fff; font-size: 13px; cursor: pointer; line-height: 1; }
 .filedel:hover { background: var(--bad); }
+
+/* ---- truck plan: the "ไมล์เสีย" switch beside the group */
+.pl-groupside { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.pl-groupside .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }

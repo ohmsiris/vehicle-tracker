@@ -6,7 +6,8 @@ from app import service_plan as sp
 
 TODAY = date(2026, 10, 22)
 VID = "11111111-1111-1111-1111-111111111111"
-TRUCK = {"id": VID}
+TRUCK = {"id": VID, "odometer_broken": True}            # the old time rule: the chart and counting tests below are about rounds, not km-first
+KM_TRUCK = {"id": VID}
 GROUPS = sp.merge_groups(None)
 S2, S3, B5, B6, KK1 = (GROUPS[c] for c in ("S2", "S3", "B5", "B6", "KK1"))
 
@@ -625,3 +626,65 @@ def test_never_done_only_for_trucks_with_the_green_tick():
             {"id": "b", "has_plan": True, "history_current_on": None, "items": [{"key": "gearbox_oil", "label": "น้ำมันเกียร์", "state": "unknown"}]}]
     assert sp.never_done(rows, ["gearbox_oil", "engine_oil"]) == [{"vehicle_id": "a", "item_key": "gearbox_oil", "label": "น้ำมันเกียร์"}]
     assert sp.never_done(rows, ["engine_oil"]) == []
+
+
+# --------------------------------------------------------------- km first (5 Nov 2026)
+S3 = sp.merge_groups(None)["S3"]
+
+
+def km_item(key="engine_oil"):
+    return next(i for i in sp.effective_plan(S3, None, KM_TRUCK) if i["key"] == key)
+
+
+def test_every_item_gets_the_s6_time_limit():
+    caps = {i["key"]: i["cap_months"] for i in sp.effective_plan(S3, None, KM_TRUCK)}
+    assert caps["engine_oil"] == 6 and caps["gearbox_oil"] == 24 and caps["wheel_grease"] == 18 and caps["engine_flush"] == 36
+    big = {i["key"]: i["cap_months"] for i in sp.effective_plan(sp.merge_groups(None)["B6"], None, KM_TRUCK)}
+    assert big["engine_oil"] == 6 and big["gearbox_oil"] == 12
+
+
+def test_truck_13_is_not_overdue_on_time_alone():
+    # oil done 31 May at 406,825; read 413,044 on 5 Nov; 44 km a day. S3's 3 months have passed -> only "check", not overdue.
+    last = {"date": date(2026, 5, 31), "odometer_km": 406_825, "source": "manual"}
+    stale = sp.item_status(km_item(), last, 44.0, {"date": date(2026, 6, 20), "km": 407_700}, date(2026, 11, 5))
+    assert stale["state"] == "check" and stale["check_reason"] == "months"   # 3 months gone, no reading since: read the odometer
+    s = sp.item_status(km_item(), last, 44.0, {"date": date(2026, 11, 5), "km": 413_044}, date(2026, 11, 5))
+    assert s["state"] == "ok" and s["km_left"] == 3781 and s["read_km_left"] == 3781        # read on 5 Nov: the km are known, nothing to check
+    assert s["due_date"] == "2026-11-30" and s["due_by"] == "months"          # the 6-month limit comes before ~86 days of driving
+
+
+def test_red_needs_a_real_reading_or_the_time_limit():
+    last = {"date": date(2026, 9, 1), "odometer_km": 100_000, "source": "manual"}
+    est = sp.item_status(km_item(), last, 200.0, {"date": date(2026, 9, 1), "km": 100_000}, date(2026, 10, 24))    # ~10,600 km by estimate
+    assert est["state"] == "check" and est["check_reason"] == "estimate" and est["days_left"] == 0
+    real = sp.item_status(km_item(), last, 200.0, {"date": date(2026, 10, 20), "km": 110_200}, date(2026, 10, 24))
+    assert real["state"] == "overdue" and real["due_by"] == "km" and real["days_left"] < 0      # 200 km over at 200 km a day: a day before the reading
+    old = sp.item_status(km_item(), {"date": date(2026, 3, 1), "odometer_km": 100_000, "source": "manual"}, 10.0,
+                         {"date": date(2026, 10, 20), "km": 102_000}, date(2026, 10, 24))
+    assert old["state"] == "overdue" and old["due_by"] == "months"            # past 6 months: the oil has aged
+
+
+def test_a_broken_odometer_keeps_the_time_rule():
+    recs = [{"item_key": "engine_oil", "done_date": "2026-05-31", "odometer_km": 406_825, "source": "manual"}]
+    reads = [{"kind": "odometer", "end_date": "2026-11-05", "km": 413_044}]
+    on = sp.vehicle_plan(KM_TRUCK, group=S3, records=recs, readings=reads, overrides=[], today=date(2026, 11, 5))
+    off = sp.vehicle_plan({**KM_TRUCK, "odometer_broken": True}, group=S3, records=recs, readings=reads, overrides=[], today=date(2026, 11, 5))
+    oil = lambda p: next(i for i in p["items"] if i["key"] == "engine_oil")      # noqa: E731
+    assert oil(on)["state"] == "ok" and on["km_first"] and oil(off)["state"] == "overdue" and not off["km_first"]
+
+
+def test_odometer_anomalies():
+    pts = [{"end_date": "2026-01-01", "km": 100_000}, {"end_date": "2026-05-01", "km": 105_000}, {"end_date": "2026-06-01", "km": 112_000}]
+    assert sp.odometer_anomaly(pts, 40)["kind"] == "jump"                      # ~41 km a day, then 7,000 km in a month
+    assert sp.odometer_anomaly(pts[:2] + [{"end_date": "2026-06-01", "km": 106_300}], 40) is None
+    assert sp.odometer_anomaly(pts[:2] + [{"end_date": "2026-06-01", "km": 104_000}], 40)["kind"] == "lower"
+
+
+def test_an_impossible_reading_is_flagged_and_does_not_turn_red():
+    pts = [{"end_date": "2026-08-19", "km": 473_386}, {"end_date": "2026-10-30", "km": 622_043}]          # truck #36: ~2,000 km a day
+    assert sp.odometer_anomaly(pts, None)["kind"] == "impossible"
+    recs = [{"item_key": "engine_oil", "done_date": "2026-08-19", "odometer_km": 473_386, "source": "bill"}]
+    p = sp.vehicle_plan(KM_TRUCK, group=sp.merge_groups(None)["B6"], records=recs, readings=[{"kind": "odometer", "end_date": "2026-10-30", "km": 622_043}],
+                        overrides=[], today=date(2026, 11, 5))
+    oil = next(i for i in p["items"] if i["key"] == "engine_oil")
+    assert p["odometer_anomaly"]["kind"] == "impossible" and oil["state"] == "check" and oil["check_reason"] == "anomaly"
