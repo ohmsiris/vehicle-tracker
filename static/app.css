@@ -1494,3 +1494,7 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 /* ---- truck plan: the "ไมล์เสีย" switch beside the group */
 .pl-groupside { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .pl-groupside .pl-odo { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+/* ---- tyres: the wheels the app picked from the bill's tyre size */
+.ty-pick.ty-suggest { background: var(--flag-bg); box-shadow: 0 0 0 1px var(--flag-line); border-radius: var(--radius-sm); padding: 2px 8px; }
+.ty-suggest-note { margin: 6px 0 0; padding: 4px 10px; background: var(--flag-bg); border-left: 3px solid var(--flag-line); border-radius: var(--radius-sm); }

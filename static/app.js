@@ -696,7 +696,8 @@ async function renderTyrePick() {
   const boxes = d.positions.map((w) => {
     const b = el("input", { type: "checkbox", value: w.position, checked: tp.picked.has(w.position) });
     b.addEventListener("change", () => { tp.touched = true; b.checked ? tp.picked.add(w.position) : tp.picked.delete(w.position); count.textContent = countText(); });
-    return el("label", { class: "check ty-pick" }, b, ` ${w.label}`, w.tyre ? el("span", { class: "muted small", text: ` (เดิม ${[w.tyre.brand, age(w.months)].filter(Boolean).join(" · ") || "มีข้อมูล"})` }) : null);
+    const auto = !tp.touched && hint.picks.includes(w.position);
+    return el("label", { class: `check ty-pick${auto ? " ty-suggest" : ""}`, title: auto ? "ระบบเลือกให้จากขนาดยาง — แก้ได้" : "" }, b, ` ${w.label}`, w.tyre ? el("span", { class: "muted small", text: ` (เดิม ${[w.tyre.brand, age(w.months)].filter(Boolean).join(" · ") || "มีข้อมูล"})` }) : null);
   });
   const countText = () => `เลือกแล้ว ${tp.picked.size} / ${qty} ล้อ`;
   const count = el("span", { class: "muted small", text: countText() });

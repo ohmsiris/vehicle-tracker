@@ -157,11 +157,18 @@ const tyInput = (value, attrs = {}) => { const i = el("input", { type: "text", a
 
 function openTyreChange({ positions = [], bill = null }) {
   const d = ty.d, s = d.spec;
+  // from a bill: pre-tick the wheels its size fits (front pair / rear pair / all), highlighted yellow so it is clear the app chose them
+  const hint = bill && !positions.length && typeof tpSuggest === "function" ? tpSuggest(d, bill.size || "", Number(bill.qty) || 1) : null;
+  const suggested = new Set(hint ? hint.picks : []);
+  if (suggested.size) positions = [...suggested];
   const picks = d.positions.map((w) => {
     const box = el("input", { type: "checkbox", value: w.position });
     box.checked = positions.includes(w.position);
-    return el("label", { class: "check ty-pick" }, box, ` ${w.label}${w.tyre ? "" : " (ว่าง)"}`);
+    return el("label", { class: `check ty-pick${suggested.has(w.position) ? " ty-suggest" : ""}`, title: suggested.has(w.position) ? "ระบบเลือกให้จากขนาดยาง — แก้ได้" : "" },
+      box, ` ${w.label}${w.tyre ? "" : " (ว่าง)"}`);
   });
+  const hintNote = hint && (hint.picks.length || hint.why)
+    ? el("p", { class: `small ${hint.picks.length ? "ty-suggest-note" : "muted"}`, text: hint.picks.length ? `💡 ระบบเลือกให้ (ไฮไลต์เหลือง): ${hint.why} — แก้ได้` : hint.why }) : null;
   const date = tyInput(bill ? bill.date : todayISO(), { type: "date" });
   const cap = el("div", { class: "datecap" });
   bindDateField(date, cap);
@@ -176,7 +183,7 @@ function openTyreChange({ positions = [], bill = null }) {
   const billNote = bill ? el("p", { class: "muted small", text: `จากบิล ${beDate(bill.date)} · ${bill.description}${bill.qty ? ` × ${bill.qty} เส้น — เลือกล้อให้ครบ ${bill.qty} ล้อ` : ""}` }) : null;
   tyreDialog("บันทึกเปลี่ยนยาง", el("div", {},
     billNote,
-    el("div", { class: "muted small", text: "ล้อที่เปลี่ยน" }), el("div", { class: "ty-picks" }, ...picks),
+    el("div", { class: "muted small", text: "ล้อที่เปลี่ยน" }), el("div", { class: "ty-picks" }, ...picks), hintNote,
     el("div", { class: "ty-fields" },
       tyField("วันที่เปลี่ยน", date, cap), tyField("เลขไมล์", km), tyField("ขนาด", size), tyField("ยี่ห้อ / รุ่น", brand),
       tyField("ราคาต่อเส้น (฿)", price), tyField("ร้าน", vendor),
