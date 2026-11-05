@@ -13,7 +13,6 @@ const mg = {
   edit: null, draft: {}, waiting: null,
   rec: [], recEdit: null, recDraft: {},
   set: null,
-  cal: null, calMonth: "", calPick: "", calOpen: true, calWired: false,
 };
 
 const MG_COLS = [["todo", "ต้องทำ"], ["doing", "กำลังทำ"], ["waiting", "รอคนอื่น / รอผล"], ["done", "เสร็จแล้ว"]];
@@ -30,7 +29,6 @@ const mgDaysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${
 async function openMgr() {
   showView("mgr");
   showErr("mgError", "");
-  loadMgCal();
   await loadMgrBoard();
 }
 
@@ -44,6 +42,7 @@ async function loadMgrBoard() {
   $("mgNeedsV12").hidden = mg.data.ready !== false;
   fillMgSelects();
   renderMgBoard();
+  if (typeof mclRefresh === "function") mclRefresh();          // a job saved from the calendar page: redraw it
   if (typeof loadToday === "function") loadToday(true);
   return true;
 }
@@ -99,117 +98,6 @@ function renderMgBoard() {
     el("strong", { text: `${d.tickets.length} เรื่องที่ยังเปิดอยู่` }),
     overdue ? el("span", { class: "badge urgent", text: `เลยกำหนด ${overdue}` }) : null,
     followUps ? el("span", { class: "badge warn", text: `ถึงวันติดตาม ${followUps}` }) : null);
-  renderMgCal();
-}
-
-// ============================================================ the small calendar (above the board)
-// One visit per truck / machine on the day its oil change is due (/api/mgr/calendar, app/calendar_plan.py), with what to do in the
-// same visit; plus the board's own to-dos that have a due date. Overdue visits are not put on past days: they are counted in the red
-// "เลยกำหนด" chip. Trucks / machines with no oil change on record are the grey chip (no date yet).
-const MG_CAL_KIND = { truck: "รถ", machine: "เครื่อง", job: "งาน" };
-
-async function loadMgCal() {
-  mgCalWire();
-  try {
-    mg.cal = await api("/api/mgr/calendar");
-  } catch (err) {
-    fill($("mgCalDetail"), el("p", { class: "error small", text: `โหลดปฏิทินไม่สำเร็จ: ${err.message}` }));
-    return;
-  }
-  if (!mg.calMonth) mg.calMonth = mg.cal.today.slice(0, 7);
-  renderMgCal();
-}
-
-function mgCalWire() {
-  if (mg.calWired) return;
-  mg.calWired = true;
-  mg.calOpen = !window.matchMedia("(max-width: 760px)").matches;            // folded on a phone (it is tall there), open on a computer
-  try { const saved = localStorage.getItem("mgCalOpen"); if (saved !== null) mg.calOpen = saved === "1"; } catch { /* storage blocked */ }
-  const shift = (n) => {
-    const [y, m] = mg.calMonth.split("-").map(Number);
-    const d = new Date(y, m - 1 + n, 1);
-    mg.calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    renderMgCal();
-  };
-  $("mgCalPrev").onclick = () => shift(-1);
-  $("mgCalNext").onclick = () => shift(1);
-  $("mgCalToggle").onclick = () => {
-    mg.calOpen = !mg.calOpen;
-    try { localStorage.setItem("mgCalOpen", mg.calOpen ? "1" : "0"); } catch { /* fine */ }
-    renderMgCal();
-  };
-}
-
-function mgCalTone(days) {
-  if (days === null || days === undefined) return "none";
-  return days < 0 ? "late" : days <= (mg.cal ? mg.cal.soon_days : 14) ? "soon" : "later";
-}
-
-// The server's visits plus the board's open to-dos with a due date.
-function mgCalEntries() {
-  const out = [...mg.cal.entries];
-  for (const t of (mg.data ? mg.data.tickets : [])) {
-    if (!t.due_date) continue;
-    const days = Math.round((new Date(`${t.due_date}T00:00:00`) - new Date(`${mg.cal.today}T00:00:00`)) / 86400000);
-    out.push({ kind: "job", id: t.id, label: t.title, date: t.due_date, days_left: days, tone: mgCalTone(days), main: t.type_label || "", together: [], maybe: [] });
-  }
-  return out;
-}
-
-function renderMgCal() {
-  if (!mg.cal) return;
-  const today = mg.cal.today;
-  const all = mgCalEntries();
-  const late = all.filter((e) => e.tone === "late");
-  const byDay = new Map();
-  for (const e of all) if (e.tone !== "late") byDay.set(e.date, [...(byDay.get(e.date) || []), e]);
-  const flag = (key, cls, text) => el("button", { type: "button", class: `mgcal-flag ${cls}${mg.calPick === key ? " on" : ""}`, text,
-    onclick: () => { mg.calPick = mg.calPick === key ? "" : key; if (!mg.calOpen) mg.calOpen = true; renderMgCal(); } });
-  fill($("mgCalFlags"),
-    late.length ? flag("late", "late", `เลยกำหนด ${late.length}`) : null,
-    mg.cal.no_date.length ? flag("nodate", "none", `ยังไม่มีประวัติถ่ายน้ำมัน ${mg.cal.no_date.length}`) : null);
-  $("mgCalToggle").setAttribute("aria-expanded", String(mg.calOpen));
-  $("mgCalBody").hidden = !mg.calOpen;
-  if (!mg.calOpen) return;
-
-  const [y, m] = mg.calMonth.split("-").map(Number);
-  $("mgCalTitle").textContent = `${MG_MONTHS[m - 1]} ${y + 543}`;
-  const first = new Date(y, m - 1, 1), days = new Date(y, m, 0).getDate();
-  const lead = (first.getDay() + 6) % 7;                        // weeks start on Monday
-  const cells = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"].map((w) => el("div", { class: "mgcal-wd", text: w }));
-  for (let i = 0; i < lead; i++) cells.push(el("div"));
-  for (let d = 1; d <= days; d++) {
-    const iso = `${mg.calMonth}-${String(d).padStart(2, "0")}`;
-    const list = byDay.get(iso) || [];
-    const worst = list.some((e) => e.tone === "soon") ? "soon" : "later";
-    cells.push(el("button", { type: "button", class: `mgcal-day${list.length ? " has" : ""}${iso === today ? " today" : ""}${iso < today ? " past" : ""}${mg.calPick === iso ? " on" : ""}`,
-      "aria-label": `${d} ${MG_MONTHS[m - 1]}${list.length ? ` · ${list.length} รายการ` : ""}`,
-      onclick: list.length ? () => { mg.calPick = mg.calPick === iso ? "" : iso; renderMgCal(); } : null },
-      el("span", { text: String(d) }), list.length ? el("span", { class: `mgcal-n ${worst}`, text: String(list.length) }) : null));
-  }
-  fill($("mgCalGrid"), ...cells);
-
-  let title, list;
-  if (mg.calPick === "late") [title, list] = ["เลยกำหนด", late.sort((a, b) => a.days_left - b.days_left)];
-  else if (mg.calPick === "nodate") [title, list] = ["ยังไม่มีประวัติถ่ายน้ำมัน — ยังไม่มีวัน (บันทึกครั้งแรกที่หน้ารถ / หน้าเครื่อง)", mg.cal.no_date];
-  else if (mg.calPick) [title, list] = [beDate(mg.calPick), byDay.get(mg.calPick) || []];
-  else {
-    const next = all.filter((e) => e.tone === "soon").sort((a, b) => a.date.localeCompare(b.date));
-    [title, list] = [`ภายใน ${mg.cal.soon_days} วัน`, next];
-  }
-  fill($("mgCalDetail"), el("div", { class: "section-title small", text: `${title} (${list.length})` }),
-    ...(list.length ? list.map(mgCalItem) : [el("p", { class: "muted small", text: "ไม่มี" })]));
-}
-
-function mgCalItem(e) {
-  const href = e.kind === "truck" ? `#truck=${e.id}` : e.kind === "machine" ? `#machine=${e.id}` : null;
-  const when = e.days_left === null || e.days_left === undefined ? "" : e.days_left < 0 ? `เลย ${-e.days_left} วัน` : e.days_left === 0 ? "วันนี้" : `อีก ${e.days_left} วัน`;
-  return el("div", { class: `mgcal-item ${e.tone || "none"}` },
-    el("div", {}, el("span", { class: "mgcal-kind", text: MG_CAL_KIND[e.kind] || "" }),
-      href ? el("a", { href, text: e.label }) : el("strong", { text: e.label }),
-      el("span", { class: "muted small", text: ` · ${e.main}${e.date && mg.calPick !== e.date ? ` · ${beDate(e.date)}` : ""}${when ? ` · ${when}` : ""}${e.at_shop ? " · อยู่ที่ร้าน" : ""}` })),
-    e.together && e.together.length ? el("p", { class: "mgcal-along", text: `ทำพร้อมกันเลย: ${e.together.join(" · ")}` }) : null,
-    e.maybe && e.maybe.length ? el("p", { class: "mgcal-along maybe", text: `ถ้ามีโอกาส: ${e.maybe.join(" · ")}` }) : null);
 }
 
 // A row of chips to filter by the kind of ticket (instead of a drop-down, which opens upwards at the bottom of the screen).

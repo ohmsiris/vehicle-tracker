@@ -42,6 +42,7 @@
     </button>
     <nav class="side-items" id="sideMgr">
       <button id="navMgr" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg><span>บอร์ดของฉัน</span></button>
+      <button id="navMgrCal" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>ปฏิทิน</span></button>
       <button id="navMgrRecurring" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg><span>งานประจำ</span></button>
       <button id="navMgrSettings" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>ตั้งค่า</span></button>
     </nav>
@@ -896,20 +897,6 @@
       <div id="mgTypes" class="mgplaces" role="group" aria-label="กรองตามประเภท"></div>
       <div id="mgPlaces" class="mgplaces" role="group" aria-label="กรองตามสถานที่"></div>
     </div>
-    <div class="card mgcal" id="mgCal">
-      <div class="mgcal-head">
-        <button type="button" class="mgcal-toggle" id="mgCalToggle" aria-expanded="true">ปฏิทินซ่อมบำรุง <span class="muted small">(วันถ่ายน้ำมัน รถ · เครื่องจักร · งานที่มีกำหนด)</span></button>
-        <div class="mgcal-flags" id="mgCalFlags"></div>
-      </div>
-      <div class="mgcal-body" id="mgCalBody">
-        <div class="mgcal-month">
-          <div class="mgcal-nav"><button type="button" class="btn small" id="mgCalPrev" aria-label="เดือนก่อน">‹</button><strong id="mgCalTitle"></strong><button type="button" class="btn small" id="mgCalNext" aria-label="เดือนถัดไป">›</button></div>
-          <div class="mgcal-grid" id="mgCalGrid" role="grid"></div>
-          <div class="mgcal-legend muted small"><span class="mgcal-n late">2</span> เลยกำหนด <span class="mgcal-n soon">2</span> ภายใน 14 วัน <span class="mgcal-n later">2</span> หลังจากนั้น</div>
-        </div>
-        <div class="mgcal-detail" id="mgCalDetail"></div>
-      </div>
-    </div>
     <div class="kanban mgkanban" id="mgKanban">
       <section class="kcol mgcol" data-status="todo" aria-label="ต้องทำ"><h2 class="section-title">ต้องทำ <span class="count" id="mgCount_todo"></span></h2><div id="mgList_todo" class="reqlist"></div></section>
       <section class="kcol mgcol" data-status="doing" aria-label="กำลังทำ"><h2 class="section-title">กำลังทำ <span class="count" id="mgCount_doing"></span></h2><div id="mgList_doing" class="reqlist"></div></section>
@@ -928,6 +915,28 @@
     <div class="edit-banner" id="mgrRecNeedsV12" hidden>ยังใช้ไม่ได้ — ต้องรันไฟล์ <strong>schema_v12.sql</strong> ใน Supabase ก่อน</div>
     <div class="mchead"><h3 class="section-title">งานประจำทั้งหมด</h3><button id="mgRecAdd" class="btn small primary" type="button">+ เพิ่มงานประจำ</button></div>
     <div id="mgrRecList" class="reqlist"></div>
+  </section>
+
+  <!-- ============ The manager's calendar (mgcal.js) ============ -->
+  <section id="mgrCalView" hidden>
+    <div class="mcl-bar">
+      <div class="mcl-nav">
+        <button type="button" class="btn small" id="mclToday">วันนี้</button>
+        <button type="button" class="btn small" id="mclPrev" aria-label="ก่อนหน้า">‹</button>
+        <button type="button" class="btn small" id="mclNext" aria-label="ถัดไป">›</button>
+        <h2 class="mcl-title" id="mclTitle"></h2>
+      </div>
+      <div class="mcl-tools">
+        <div class="seg" role="group" aria-label="มุมมอง" id="mclViews"></div>
+        <div class="mcl-filters" id="mclFilters" role="group" aria-label="แสดง"></div>
+        <select id="mclBranch" aria-label="สาขา"><option value="">ทุกสาขา</option></select>
+      </div>
+    </div>
+    <p class="error" id="mclError" hidden></p>
+    <div class="mcl-main">
+      <div class="mcl-cal" id="mclCal"></div>
+      <aside class="card mcl-side" id="mclSide"></aside>
+    </div>
   </section>
 
   <!-- ============ The manager's settings ============ -->
@@ -1473,6 +1482,7 @@
 <script src="/static/plan.js"></script>
 <script src="/static/tyres.js"></script>
 <script src="/static/mgr.js"></script>
+<script src="/static/mgcal.js"></script>
 <script src="/static/today.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/buy.js"></script>

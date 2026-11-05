@@ -57,7 +57,8 @@ def truck_visit(row: dict, today: date) -> Optional[dict]:
     num, plate = str(row.get("vehicle_number") or "").strip(), str(row.get("plate_number") or "").strip()
     label = " · ".join(x for x in (f"#{num}" if num and num != plate else "", plate) if x) or "รถ"
     return {"kind": "truck", "id": row["id"], "label": label, "branch": row.get("branch"), "date": day, "days_left": left, "tone": tone(left),
-            "main": oil["label"], "together": together if day else [], "maybe": maybe if day else [], "at_shop": bool(row.get("at_shop"))}
+            "main": oil["label"], "together": together if day else [], "maybe": maybe if day else [], "at_shop": bool(row.get("at_shop")),
+            "green_tick": bool(row.get("history_current_on"))}
 
 
 def machine_entries(machine: dict, today: date) -> list[dict]:
@@ -68,7 +69,7 @@ def machine_entries(machine: dict, today: date) -> list[dict]:
     v = plan.get("visit")
     if v:
         out.append({"kind": "machine", "id": machine["id"], "label": machine["name"], "branch": machine.get("branch"), "date": v["date"], "days_left": v["days_left"],
-                    "tone": tone(v["days_left"]), "main": names.get("oil", "ถ่ายน้ำมันคอมเพรสเซอร์"),
+                    "tone": tone(v["days_left"]), "main": names.get("oil", "ถ่ายน้ำมันคอมเพรสเซอร์"), "green_tick": True,
                     "together": [names[k] for k in v["together"] if k in names] if v["date"] else [], "maybe": [names[k] for k in v["maybe"] if k in names] if v["date"] else []})
     for j in plan.get("jobs") or []:
         if j["key"] != "oil" and not j.get("with_oil") and j.get("due_date"):
@@ -83,7 +84,8 @@ def build(truck_rows: list[dict], machines: list[dict], today: date) -> dict:
         entries += machine_entries(m, today)
     dated = sorted((e for e in entries if e["date"]), key=lambda e: (e["date"], e["kind"], e["label"]))
     return {"today": today.isoformat(), "soon_days": SOON_DAYS, "entries": dated,
-            "no_date": [{"kind": e["kind"], "id": e["id"], "label": e["label"], "main": e["main"]} for e in entries if not e["date"]]}
+            "no_date": [{"kind": e["kind"], "id": e["id"], "label": e["label"], "branch": e.get("branch"), "main": e["main"], "green_tick": e.get("green_tick", False)}
+                        for e in entries if not e["date"]]}
 
 
 def calendar(today: Optional[date] = None) -> dict:
