@@ -1,0 +1,7 @@
+-- v41: accounting (บัญชี). Applied 5 Nov 2026 via MCP (migration schema_v41_accounting); the full text, including the 33 seeded
+-- accounts (English + Thai), is in that migration. Tables:
+--   acc_accounts (chart of accounts: code, name_en, name_th, kind asset/liability/equity/income/cogs/expense, section, sort_order)
+--   acc_entries  (one per bill / document: entry_date = the ACCRUAL date, branch that used it, source + source_id -- truck_bill and
+--                 purchase entries are rebuilt from the app's bills; others are typed / imported)
+--   acc_lines    (double entry: account, debit, credit, branch, vehicle_id, machine_id)
+--   acc_feed_marks (the checklist: "nothing this period" / "done" per feed, period YYYY-MM-half, branch)

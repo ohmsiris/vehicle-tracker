@@ -1540,3 +1540,30 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .odo-hint.bad { color: var(--bad); font-weight: 600; }
 .ok-text { color: var(--ok); font-weight: 600; }
 @media (max-width: 760px) { .odo-row { grid-template-columns: 1fr 140px; } .odo-row > :nth-child(2), .odo-row > :nth-child(4) { grid-column: 1 / -1; } }
+
+/* ---- บัญชี › งบกำไรขาดทุน (accounts.js) */
+.acx-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px; }
+.acx-bar select { font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+.acx-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.acx-feeds, .acx-tree { padding: 14px 18px; margin-bottom: 14px; }
+.acx-feeds h3, .acx-tree h3 { margin: 0 0 8px; font-size: 15px; }
+.acx-feed { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.acx-feed-icon { font-weight: 700; text-align: center; }
+.acx-feed.auto .acx-feed-icon, .acx-feed.done .acx-feed-icon { color: var(--ok); }
+.acx-feed.missing .acx-feed-icon { color: var(--warn); }
+.acx-feed.none { opacity: .6; }
+.acx-feed-actions { display: flex; gap: 6px; }
+.acx-line { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 6px; align-items: center; width: 100%; text-align: left; background: none; border: 0;
+  border-bottom: 1px solid var(--line); padding: 8px 4px; font: inherit; color: var(--text); cursor: pointer; }
+.acx-line:hover { background: var(--surface-2); }
+.acx-l0 { font-weight: 650; font-size: 15px; }
+.acx-l1 { padding-left: 22px; }
+.acx-l2 { padding-left: 42px; font-size: 14px; }
+.acx-kids { }
+.acx-caret { color: var(--muted); }
+.acx-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.acx-entry { display: grid; grid-template-columns: 100px minmax(0, 1fr) 70px auto auto 110px; gap: 8px; align-items: center; padding: 5px 4px 5px 64px; border-bottom: 1px dashed var(--line); }
+.acx-entry strong { text-align: right; }
+.acx-total { cursor: default; font-size: 16px; grid-template-columns: minmax(0, 1fr) auto; border-top: 2px solid var(--line-strong); }
+.acx-vat { display: flex; gap: 6px; align-items: center; }
+@media (max-width: 760px) { .acx-entry { grid-template-columns: 80px minmax(0, 1fr) auto; padding-left: 20px; } .acx-entry > :nth-child(3), .acx-entry > :nth-child(4), .acx-entry > :nth-child(5) { display: none; } }

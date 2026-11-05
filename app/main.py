@@ -28,7 +28,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import attendance, calendar_plan, dashboard, machine_reports, tyre_store, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
+from app import accounting, attendance, calendar_plan, dashboard, machine_reports, tyre_store, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -866,6 +866,44 @@ def api_tyre_job(vehicle_id: str, body: dict = Body(...), x_app_token: str = Hea
     """"งานยาง": per wheel keep / move / new / spare; every tyre that ends up on no wheel says why and where it went."""
     _check_token(x_app_token, token)
     return _tyre_call(tyre_store.tyre_job, vehicle_id, body)
+
+
+def _acc_call(fn, *args, **kwargs):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        return fn(*args, **kwargs)
+    except accounting.InvalidEntry as exc:
+        raise HTTPException(422, str(exc))
+    except supabase.SupabaseError:
+        logger.exception("accounting call failed")
+        raise HTTPException(502, "ทำรายการไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.get("/api/accounts/report")
+def api_accounts_report(month: str, half: str = "", branch: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """บัญชี: the checklist of what should come in and the P&L (drill-down) for a company month or one half."""
+    _check_token(x_app_token, token)
+    return _acc_call(accounting.report, month, int(half) if half in ("1", "2") else None, branch)
+
+
+@app.post("/api/accounts/entries")
+def api_accounts_add(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _acc_call(accounting.add_entry, body)
+
+
+@app.delete("/api/accounts/entries/{entry_id}")
+def api_accounts_delete(entry_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    _acc_call(accounting.delete_entry, entry_id)
+    return {"ok": True}
+
+
+@app.post("/api/accounts/feed-mark")
+def api_accounts_feed_mark(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _acc_call(accounting.mark_feed, body)
 
 
 @app.get("/api/tyre-stock")

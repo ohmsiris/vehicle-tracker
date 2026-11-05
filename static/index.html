@@ -35,6 +35,16 @@
     <button id="navHome" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span>หน้าแรก</span></button>
   </nav>
 
+  <!-- Accounting -->
+  <div class="side-group" id="groupAcc">
+    <button class="side-head" type="button" aria-expanded="true" aria-controls="sideAcc">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg><span>บัญชี</span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <nav class="side-items" id="sideAcc">
+      <button id="navAccounts" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span>งบกำไรขาดทุน</span></button>
+    </nav>
+  </div>
+
   <!-- The manager's own board -->
   <div class="side-group" id="groupMgr">
     <button class="side-head" type="button" aria-expanded="true" aria-controls="sideMgr">
@@ -919,6 +929,23 @@
     <div id="mgrRecList" class="reqlist"></div>
   </section>
 
+  <!-- ============ Accounting: P&L and the checklist (accounts.js) ============ -->
+  <section id="accountsView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">Profit &amp; loss · งบกำไรขาดทุน</h2>
+      <p class="muted small">เดือนของบริษัท 26 – 25 · งวด 26–10 และ 11–25 · บันทึกตามวันที่ของมาถึง (accrual) · สาขาที่ใช้เป็นผู้รับต้นทุน · ไม่รวม VAT</p>
+    </div>
+    <div class="card acx-bar">
+      <select id="acxMonth" aria-label="เดือน"></select>
+      <select id="acxHalf" aria-label="งวด"><option value="">ทั้งเดือน</option><option value="1">งวด 1 (26–10)</option><option value="2">งวด 2 (11–25)</option></select>
+      <select id="acxBranch" aria-label="สาขา"><option value="สระบุรี">สระบุรี</option><option value="แก่งคอย">แก่งคอย</option><option value="">รวมสองสาขา</option></select>
+      <span class="grow"></span>
+      <button id="acxAdd" class="btn primary" type="button">+ บันทึกรายการ</button>
+    </div>
+    <p class="error" id="acxError" hidden></p>
+    <div id="acxBody"></div>
+  </section>
+
   <!-- ============ Odometers of every truck at once (odometers.js) ============ -->
   <section id="odometersView" hidden>
     <div class="page-head">
@@ -1524,6 +1551,7 @@
 <script src="/static/mgcal.js"></script>
 <script src="/static/tyrestock.js"></script>
 <script src="/static/odometers.js"></script>
+<script src="/static/accounts.js"></script>
 <script src="/static/today.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/buy.js"></script>
