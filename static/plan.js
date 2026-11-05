@@ -391,6 +391,7 @@ function truckPlanNodes(d) {
       el("span", { text: beDate(h.done_date) }), el("strong", { text: h.label }),
       el("span", { class: "muted small", text: [h.odometer_km ? plKm(h.odometer_km) : null, plSourceText(h.source), h.notes].filter(Boolean).join(" · ") }),
       h.event_id ? el("a", { class: "btn small", href: `#event=${h.event_id}`, text: "ดู / แก้ไข" })
+        : h.kind === "tyre" ? el("span", { class: "muted small", text: "แก้ที่ส่วน ยาง" })
         : h.id ? el("button", { class: "btn small danger", type: "button", text: "ลบ", onclick: () => deleteRecord(h) }) : null))) : null;
   const readings = d.readings.length ? el("details", { class: "card pl-hist" }, el("summary", { text: `ข้อมูลระยะทาง (${d.readings.length})` }),
     ...d.readings.map((r) => el("div", { class: "pl-hrow" },

@@ -1011,7 +1011,14 @@ def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
     hits = bill_hits(events, {vehicle_id: rule_set})
     plan = vehicle_plan(v, group=groups.get(code), records=records + hits, readings=readings + bill_odometers(events), overrides=overrides, today=today, with_chart=True,
                         soon_days=_plan_settings()["soon_days"], snoozes=_snoozes().get(vehicle_id))
-    history = sorted([{**r, "label": item_label(r["item_key"], rule_set)} for r in records + hits], key=lambda r: (r["done_date"], r["item_key"]), reverse=True)
+    history = [{**r, "label": item_label(r["item_key"], rule_set)} for r in records + hits]
+    try:                                               # the tyre changes too (ยาง section), so the history shows everything done to the truck
+        from app import tyres
+        if tyres.has_v36():
+            history += tyres.history_rows(supabase.select_all("tyres", {"select": "*", "vehicle_id": f"eq.{vehicle_id}", "order": "id.asc"}))
+    except supabase.SupabaseError:
+        pass
+    history = sorted(history, key=lambda r: (str(r["done_date"]), r["item_key"]), reverse=True)
     choices = [{**g, "months": group_months(g)} for g in sorted(groups.values(), key=lambda g: g.get("sort_order", 99))]
     return {"as_of": today.isoformat(), "simulated": today != real_today, "ready": ready, "vehicle": {k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "odometer_broken")},
             **plan, "group_code": code, "groups": choices, "history": history, "readings": readings}

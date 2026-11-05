@@ -376,3 +376,21 @@ def delete_tyre(tyre_id: str) -> dict:
         raise NotFound()
     supabase.delete("tyres", {"id": f"eq.{tid}"})
     return vehicle_tyres(rows[0]["vehicle_id"])
+
+
+def history_rows(rows: list[dict]) -> list[dict]:
+    """The tyre changes as lines for the truck's history (ประวัติที่ทำแล้ว): one per day + bill, the wheels together.
+    `rows` = the truck's tyres rows. Rotations are not changes and are not listed."""
+    groups: dict = {}
+    for r in rows:
+        if not r.get("fitted_on"):
+            continue
+        key = (str(r["fitted_on"])[:10], r.get("event_id") or "", r.get("size") or "", r.get("brand") or "")
+        groups.setdefault(key, []).append(r)
+    out = []
+    for (day, event_id, size, brand), rs in groups.items():
+        wheels = [LABELS.get(r["position"], r["position"]) for r in sorted(rs, key=lambda r: list(LABELS).index(r["position"]) if r["position"] in LABELS else 99)]
+        out.append({"done_date": day, "item_key": "tyres", "label": f"เปลี่ยนยาง {len(rs)} เส้น ({' · '.join(wheels)})",
+                    "odometer_km": next((r["fitted_km"] for r in rs if r.get("fitted_km")), None), "source": "bill" if event_id else "manual",
+                    "event_id": event_id or None, "notes": " ".join(x for x in (brand, size) if x) or None, "kind": "tyre"})
+    return out

@@ -77,3 +77,13 @@ def test_bill_tyres_lists_unplaced_tyre_lines():
               {"id": "e3", "event_date": "2026-10-16", "bill_line_items": [{"description": "ยางเรเดียล 205/70R15 BRIDGESTONE", "quantity": 2, "line_total": 6400}]}]
     out = ty.bill_tyres(events, placed_events={"e3"})
     assert len(out) == 1 and out[0]["size"] == "225/75R14" and out[0]["brand"] == "Michelin" and out[0]["qty"] == 2 and out[0]["mileage"] == 424683
+
+
+
+def test_tyre_changes_show_in_the_history_one_line_per_change():
+    rows = [{"position": "RL", "fitted_on": "2026-10-27", "fitted_km": 424683, "size": "225/75R14", "brand": "Michelin", "event_id": "e1"},
+            {"position": "RR", "fitted_on": "2026-10-27", "fitted_km": 424683, "size": "225/75R14", "brand": "Michelin", "event_id": "e1"},
+            {"position": "FL", "fitted_on": "2025-01-05", "size": "205/70R15", "brand": None, "event_id": None}]
+    h = sorted(ty.history_rows(rows), key=lambda r: r["done_date"])
+    assert h[1]["label"] == "เปลี่ยนยาง 2 เส้น (หลังซ้าย · หลังขวา)" and h[1]["event_id"] == "e1" and h[1]["odometer_km"] == 424683 and h[1]["notes"] == "Michelin 225/75R14"
+    assert h[0]["label"] == "เปลี่ยนยาง 1 เส้น (หน้าซ้าย)" and h[0]["source"] == "manual"
