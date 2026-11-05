@@ -542,3 +542,15 @@ def test_the_many_spellings_of_one_shop_are_one_suggestion(monkeypatch):
     out = rr.known_fixers()
     assert out.count("อิซูซุจึงกงเฮงแก่งคอย") == 1 and not [n for n in out if "บริษัท จึงกงเฮง" in n]          # folded into the shop's own name
     assert "ช่างเอ๋" in out and "ร้านใหม่ที่ไม่รู้จัก" in out                                                     # a person and an unknown shop stay as they are
+
+
+def test_a_job_can_be_closed_with_a_bill_that_is_already_saved():
+    from app.repair_requests import link_values
+    req = {"id": "r1", "status": "awaiting_bill", "vehicle_id": "v1", "shop": "อู่ช่างเก่ง เจริญยนต์", "fixed_date": None, "fixed_by": None}
+    ev = {"id": "e1", "vehicle_id": "v1", "event_date": "2026-10-02", "vendor": "อู่ช่างเก่ง", "status": "confirmed"}
+    v = link_values(req, ev)
+    assert v["status"] == "completed" and v["fixed_event_id"] == "e1" and v["fixed_date"] == "2026-10-02" and v["fixed_by"] == "อู่ช่างเก่ง เจริญยนต์" and v["no_bill"] is False
+    with pytest.raises(rr.InvalidRequest):
+        link_values({**req, "status": "completed"}, ev)                  # already closed
+    with pytest.raises(rr.InvalidRequest):
+        link_values(req, {**ev, "vehicle_id": "v2"})                     # another truck's bill

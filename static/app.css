@@ -1473,3 +1473,17 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .mpp-export { padding: 12px 16px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
 .mpp-export-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .mpp-export select { font: inherit; font-size: 14px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+
+/* ---- repair board: "ผูกกับบิลที่บันทึกแล้ว" */
+.linkbill { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 8px; }
+.linkbill-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.linkbill-head .btn { margin-left: auto; }
+.linkbill p { margin: 4px 0 0; }
+
+/* ---- a saved bill's files: add / remove */
+.evfiles-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.evfiles-head h2 { margin: 0; }
+.evfiles-head select { font: inherit; font-size: 14px; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+.filewrap { position: relative; }
+.filedel { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(27, 31, 39, .72); color: #fff; font-size: 13px; cursor: pointer; line-height: 1; }
+.filedel:hover { background: var(--bad); }

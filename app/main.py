@@ -381,6 +381,24 @@ def request_action(request_id: str, body: RequestAction, x_app_token: str = Head
     )
 
 
+@app.get("/api/requests/{request_id}/bill-choices")
+def request_bill_choices(request_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The truck's saved bills, for "ผูกกับบิลที่บันทึกแล้ว"."""
+    _check_token(x_app_token, token)
+    return {"bills": _board_call(repair_requests.bill_choices, request_id)}
+
+
+class LinkBill(BaseModel):
+    event_id: str = Field(max_length=40)
+
+
+@app.post("/api/requests/{request_id}/link-bill")
+def request_link_bill(request_id: str, body: LinkBill, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Close a job with a bill that is already saved."""
+    _check_token(x_app_token, token)
+    return _board_call(repair_requests.link_bill, request_id, body.event_id)
+
+
 class CheckAnswer(BaseModel):
     result: str
     note: str = Field(default="", max_length=600)
@@ -1580,6 +1598,38 @@ def api_delete_event(event_id: str, x_app_token: str = Header(default=""), token
     except supabase.SupabaseError:
         logger.exception("deleting event failed")
         raise HTTPException(502, "ลบไม่สำเร็จ ลองอีกครั้ง")
+    return {"ok": True}
+
+
+def _file_call(fn, *args):
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    try:
+        result = fn(*args)
+        logsource.invalidate()
+        return result
+    except events.InvalidEvent as exc:
+        raise HTTPException(422, str(exc))
+    except events.EventNotFound:
+        raise HTTPException(404, "ไม่พบรายการนี้")
+    except supabase.SupabaseError:
+        logger.exception("bill file change failed")
+        raise HTTPException(502, "บันทึกไฟล์ไม่สำเร็จ ลองอีกครั้ง")
+
+
+@app.post("/api/events/{event_id}/files")
+def api_event_add_files(event_id: str, files: list[UploadFile] = File(...), kind: str = Form(default="reference_photo"),
+                        x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Adds photos / PDFs to a saved bill (kept with it; nothing is read from them)."""
+    _check_token(x_app_token, token)
+    return {"files": _file_call(events.add_files, event_id, _read_uploads(files, 10), kind)}
+
+
+@app.delete("/api/events/{event_id}/files/{attachment_id}")
+def api_event_remove_file(event_id: str, attachment_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Takes one photo / PDF off a saved bill."""
+    _check_token(x_app_token, token)
+    _file_call(events.remove_file, event_id, attachment_id)
     return {"ok": True}
 
 

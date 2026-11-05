@@ -352,3 +352,70 @@ def delete_event(event_id: str) -> None:
             supabase.storage_delete(paths)
         except supabase.SupabaseError:
             logger.exception("could not remove the photos of the deleted event %s", eid)
+
+
+# ------------------------------------------------- photos added to / removed from a saved bill (no AI reading)
+FILE_KINDS = ("bill", "reference_photo")          # รูปบิล (another page of the bill) / รูปอื่นๆ (the part, the work, a note)
+
+
+def _event_id(event_id: str) -> str:
+    try:
+        eid = str(uuid.UUID(str(event_id)))
+    except ValueError:
+        raise EventNotFound()
+    if not supabase.select("maintenance_events", {"select": "id", "id": f"eq.{eid}", "limit": "1"}):
+        raise EventNotFound()
+    return eid
+
+
+def add_files(event_id: str, files: list[tuple[str, bytes]], kind: str = "reference_photo") -> list[dict]:
+    """Adds photos / PDFs to a bill that is already saved -- kept with it, nothing is read from them. Returns the new files."""
+    eid = _event_id(event_id)
+    if kind not in FILE_KINDS:
+        raise InvalidEvent("ชนิดไฟล์ไม่ถูกต้อง")
+    if not files:
+        raise InvalidEvent("เลือกไฟล์อย่างน้อยหนึ่งไฟล์")
+    have = supabase.select("event_attachments", {"select": "sha256,sort_order", "event_id": f"eq.{eid}"})
+    known = {a["sha256"] for a in have}
+    order = max((a.get("sort_order") or 0 for a in have), default=-1) + 1
+    prepared = []
+    for name, raw in files:
+        try:
+            data, media_type = prepare_file(raw)
+        except UnsupportedFile as exc:
+            raise InvalidEvent(f"{name}: {exc}")
+        sha = hashlib.sha256(data).hexdigest()
+        if sha in known:
+            raise InvalidEvent(f"{name}: ไฟล์นี้อยู่ในบิลนี้แล้ว")
+        known.add(sha)
+        att_id = str(uuid.uuid4())
+        prepared.append({"id": att_id, "event_id": eid, "type": kind, "storage_path": f"{eid}/{att_id}.{EXTENSIONS[media_type]}", "mime_type": media_type,
+                         "byte_size": len(data), "sha256": sha, "sort_order": order + len(prepared), "_data": data})
+    uploaded: list[str] = []
+    try:
+        for p in prepared:
+            supabase.storage_upload(p["storage_path"], p["_data"], p["mime_type"])
+            uploaded.append(p["storage_path"])
+        supabase.insert("event_attachments", [{k: v for k, v in p.items() if k != "_data"} for p in prepared])
+    except Exception:
+        if uploaded:
+            try:
+                supabase.storage_delete(uploaded)
+            except supabase.SupabaseError:
+                logger.exception("could not remove the uploads of a failed add")
+        raise
+    return [{"id": p["id"], "type": p["type"], "mime_type": p["mime_type"], "url": supabase.public_url(p["storage_path"])} for p in prepared]
+
+
+def remove_file(event_id: str, attachment_id: str) -> None:
+    """Takes one photo / PDF off a saved bill (and out of storage). Bill lines that pointed at it keep their text."""
+    eid = _event_id(event_id)
+    rows = supabase.select("event_attachments", {"select": "id,storage_path", "id": f"eq.{attachment_id}", "event_id": f"eq.{eid}", "limit": "1"})
+    if not rows:
+        raise EventNotFound()
+    supabase.update("bill_line_items", {"attachment_id": f"eq.{rows[0]['id']}"}, {"attachment_id": None})
+    supabase.delete("event_attachments", {"id": f"eq.{rows[0]['id']}"})
+    try:
+        supabase.storage_delete([rows[0]["storage_path"]])
+    except supabase.SupabaseError:
+        logger.exception("could not remove the photo %s from storage", rows[0]["storage_path"])

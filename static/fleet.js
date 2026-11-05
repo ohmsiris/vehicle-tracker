@@ -113,6 +113,43 @@ const SORTS = {
 };
 
 // ------------------------------------------------------------- event "bill"
+// The bill's files, with "+ เพิ่มรูป" (another page of the bill, or any photo worth keeping -- nothing is read by AI) and ✕ to take one off.
+function evFilesCard(d, files) {
+  const e = d.event;
+  const wrapped = files.map((node, i) => {
+    const a = d.attachments[i];
+    const del = el("button", { class: "filedel", type: "button", title: "เอาไฟล์นี้ออก", text: "✕", onclick: async (ev) => {
+      ev.preventDefault();
+      if (!confirm("เอาไฟล์นี้ออกจากบิลใช่ไหม? (ลบถาวร)")) return;
+      try { await api(`/api/events/${e.id}/files/${a.id}`, { method: "DELETE" }); openEvent(e.id); } catch (err) { showErr("eventError", `เอาไฟล์ออกไม่สำเร็จ: ${err.message}`); }
+    } });
+    return el("div", { class: "filewrap" }, node, del);
+  });
+  const kind = el("select", { "aria-label": "ชนิดไฟล์" }, el("option", { value: "reference_photo", text: "รูปอื่นๆ" }), el("option", { value: "bill", text: "รูปบิล (อีกหน้า)" }));
+  const pick = el("input", { type: "file", accept: "image/*,application/pdf", multiple: true, hidden: true });
+  const add = el("button", { class: "btn small", type: "button", text: "+ เพิ่มรูป", onclick: () => pick.click() });
+  pick.onchange = async () => {
+    if (!pick.files.length) return;
+    const fd = new FormData();
+    for (const f of pick.files) fd.append("files", f);
+    fd.append("kind", kind.value);
+    add.disabled = true;
+    add.textContent = "กำลังอัปโหลด…";
+    try {
+      const res = await fetch(`/api/events/${e.id}/files`, { method: "POST", body: fd, headers: { "X-App-Token": state.token } });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.detail || `HTTP ${res.status}`); }
+      openEvent(e.id);
+    } catch (err) {
+      showErr("eventError", `เพิ่มรูปไม่สำเร็จ: ${err.message}`);
+      add.disabled = false;
+      add.textContent = "+ เพิ่มรูป";
+    }
+  };
+  return el("div", { class: "card" },
+    el("div", { class: "evfiles-head" }, el("h2", { text: `ไฟล์แนบ (${files.length})` }), el("span", { class: "grow" }), kind, add, pick),
+    files.length ? el("div", { class: "files" }, ...wrapped) : el("p", { class: "muted small", text: "ยังไม่มีไฟล์" }));
+}
+
 async function openEvent(id) {
   showView("event");
   $("evBack").textContent = "← สมุดงานซ่อม";
@@ -186,7 +223,7 @@ function renderPaper(d) {
     d.requests.length ? el("div", { class: "card" },
       el("h2", { text: "งานซ่อมที่บิลนี้ปิด" }),
       ...d.requests.map((r) => el("div", { class: "small", text: `#${r.seq} ${r.problem}${r.reported_by ? ` · ผู้แจ้ง ${r.reported_by}` : ""}` }))) : null,
-    files.length ? el("div", { class: "card" }, el("h2", { text: `ไฟล์แนบ (${files.length})` }), el("div", { class: "files" }, ...files)) : null,
+    evFilesCard(d, files),
     el("p", { class: "muted small", text: `บันทึกเมื่อ ${beDateOf(new Date(e.confirmed_at || e.created_at))}${e.extraction_model ? " · อ่านบิลโดย AI แล้วตรวจสอบโดยคน" : ""}` }));
 }
 

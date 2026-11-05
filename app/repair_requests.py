@@ -318,6 +318,61 @@ def act(request_id: str, action: str, **fields) -> dict:
     return rows[0]
 
 
+# ---------------------------------------------------- "ผูกกับบิลที่บันทึกแล้ว"
+LINK_LOOKBACK_DAYS = 180                 # the saved bills offered for a job: this truck's, from about the last half year
+
+
+def link_values(request: dict, event: dict) -> dict:
+    """Closing a job with a bill that is ALREADY saved (it was entered before, or without ticking the job): the same values
+    save_maintenance_event() writes when a bill is saved with the job ticked. Pure, so it is unit-tested."""
+    if request.get("status") not in ("open", "at_shop", "awaiting_bill"):
+        raise InvalidRequest("งานนี้ปิดไปแล้ว")
+    if request.get("vehicle_id") and event.get("vehicle_id") and request["vehicle_id"] != event["vehicle_id"]:
+        raise InvalidRequest("บิลนี้เป็นของรถคันอื่น")
+    if event.get("status") not in (None, "confirmed"):
+        raise InvalidRequest("บิลนี้ยังไม่ได้บันทึก")
+    return {"status": "completed", "no_bill": False, "no_bill_reason": None, "fixed_event_id": event["id"],
+            "fixed_date": request.get("fixed_date") or event.get("event_date"),
+            "fixed_by": request.get("fixed_by") or request.get("shop") or event.get("performed_by") or event.get("vendor")}
+
+
+def bill_choices(request_id: str) -> list[dict]:
+    """The truck's saved bills to pick from, newest first, each with its first lines and the jobs it already closed."""
+    request = get(request_id)
+    if request is None:
+        raise InvalidRequest("ไม่พบงานนี้")
+    if not request.get("vehicle_id"):
+        raise InvalidRequest("งานนี้ยังไม่ได้เลือกรถ — แก้ไขงานแล้วเลือกรถก่อน")
+    since = (today_bangkok() - timedelta(days=LINK_LOOKBACK_DAYS)).isoformat()
+    events = supabase.select("maintenance_events", {"select": "id,event_date,vendor,performed_by,total_cost,notes,status", "vehicle_id": f"eq.{request['vehicle_id']}",
+                                                    "status": "eq.confirmed", "event_date": f"gte.{since}", "order": "event_date.desc,created_at.desc", "limit": "40"})
+    if not events:
+        return []
+    ids = ",".join(e["id"] for e in events)
+    lines = supabase.select_all("bill_line_items", {"select": "event_id,line_number,description", "event_id": f"in.({ids})", "order": "event_id.asc,line_number.asc"})
+    closed = supabase.select_all("repair_requests", {"select": "id,problem,fixed_event_id", "fixed_event_id": f"in.({ids})", "order": "id.asc"})
+    out = []
+    for e in events:
+        mine = [ln["description"] for ln in lines if ln["event_id"] == e["id"]]
+        out.append({**e, "lines": mine[:6], "line_count": len(mine), "closes": [c["problem"] for c in closed if c["fixed_event_id"] == e["id"]]})
+    return out
+
+
+def link_bill(request_id: str, event_id: str) -> dict:
+    current = get(request_id)
+    if current is None:
+        raise InvalidRequest("ไม่พบงานนี้")
+    rows = supabase.select("maintenance_events", {"select": "id,vehicle_id,event_date,vendor,performed_by,status", "id": f"eq.{event_id}", "limit": "1"})
+    if not rows:
+        raise InvalidRequest("ไม่พบบิลนี้")
+    values = link_values(current, rows[0])
+    done = supabase.update("repair_requests", {"id": f"eq.{request_id}", "status": f"eq.{current['status']}"}, values)
+    if not done:
+        raise StaleRequest()
+    repair_followup.on_bill_saved([request_id])                   # closes the "ตามบิล" ticket on the manager's board (best effort)
+    return done[0]
+
+
 def known_fixers() -> list[str]:
     """Names/shops seen before, most recent first -- suggestions for the
     'who fixed it' box. Includes bill vendors so a shop you've already

@@ -395,6 +395,7 @@ function requestCard(r, kind) {
       : [
           el("button", { class: "btn primary", type: "button", text: "เพิ่มบิล →", onclick: () => startBillFor(r) }),
           el("button", { class: "btn", type: "button", text: "ไม่มีบิล", onclick: () => openNoBillDialog(r) }),
+          small("ผูกกับบิลที่บันทึกแล้ว", "บิลของงานนี้บันทึกไว้แล้ว — เลือกบิลนั้นแล้วปิดงาน", () => openLinkBill(r)),
           small("← ย้อนกลับ", r.sent_date ? "กลับไปเป็นอยู่ที่อู่" : "กลับไปเป็นรอซ่อม", () => stepBack(r)),
           small("แก้ไข", "แก้ไขงาน เช่น เปลี่ยนรถ", () => openEditRequest(r)),
           small("ยกเลิก", "ยกเลิกงานนี้", () => cancelRequest(r), "danger"),
@@ -581,6 +582,50 @@ async function reopenRecent(r) {
 async function stepBack(r) {
   const err = await runAction(r.request_id, { action: "reopen" });
   if (err) showBoardError(err);
+}
+
+// ---- "ผูกกับบิลที่บันทึกแล้ว": the job's bill was saved before (or without ticking this job) -- pick it and the job is done
+async function openLinkBill(r) {
+  let dlg = $("linkBillDialog");
+  if (!dlg) { dlg = el("dialog", { id: "linkBillDialog", class: "wide" }); document.body.append(dlg); }
+  const close = el("button", { class: "btn", type: "button", text: "ปิด", onclick: () => dlg.close() });
+  const err = el("p", { class: "error", hidden: true });
+  fill(dlg, el("h3", { text: `ผูกกับบิลที่บันทึกแล้ว · ${truckLabel(r)}` }), el("p", { class: "muted small", text: r.problem }),
+    el("p", { class: "muted", text: "กำลังโหลดบิลของรถคันนี้…" }), err, el("div", { class: "dialog-actions" }, el("span", { class: "grow" }), close));
+  dlg.showModal();
+  let bills;
+  try {
+    bills = (await api(`/api/requests/${r.request_id}/bill-choices`)).bills;
+  } catch (e) {
+    err.textContent = e.message;
+    err.hidden = false;
+    return;
+  }
+  const pick = async (b, btn) => {
+    btn.disabled = true;
+    err.hidden = true;
+    try {
+      await api(`/api/requests/${r.request_id}/link-bill`, jsonOpts("POST", { event_id: b.id }));
+      dlg.close();
+      await loadBoard();
+    } catch (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+      btn.disabled = false;
+    }
+  };
+  const rows = bills.map((b) => {
+    const btn = el("button", { class: "btn small primary", type: "button", text: "เลือกบิลนี้" });
+    btn.onclick = () => pick(b, btn);
+    return el("div", { class: "linkbill" },
+      el("div", { class: "linkbill-head" }, el("strong", { text: beDate(b.event_date) }),
+        el("span", { class: "muted small", text: [b.vendor || b.performed_by, b.total_cost ? `${baht(b.total_cost)} บาท` : null].filter(Boolean).join(" · ") }), btn),
+      el("p", { class: "small", text: b.lines.length ? b.lines.join(" · ") + (b.line_count > b.lines.length ? ` · อีก ${b.line_count - b.lines.length} รายการ` : "") : (b.notes || "ไม่มีรายการ") }),
+      b.closes.length ? el("p", { class: "muted small", text: `ปิดงานไปแล้ว: ${b.closes.join(" · ")}` }) : null);
+  });
+  fill(dlg, el("h3", { text: `ผูกกับบิลที่บันทึกแล้ว · ${truckLabel(r)}` }), el("p", { class: "muted small", text: `งาน: ${r.problem}` }),
+    ...(rows.length ? rows : [el("p", { class: "muted", text: "ไม่มีบิลที่บันทึกของรถคันนี้ใน 6 เดือนที่ผ่านมา — ใช้ “เพิ่มบิล →” แทน" })]),
+    err, el("div", { class: "dialog-actions" }, el("span", { class: "grow" }), close));
 }
 
 // "we haven't actually sent it" / the shop sent it back unfixed
