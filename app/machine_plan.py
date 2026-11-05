@@ -30,36 +30,41 @@ DEFAULT_RUN = {"เครื่อง": (24.0, 7.0), "บ่อซอง": (24.0
 STATE_RANK = {"never": 0, "late": 1, "soon": 2, "none": 3, "ok": 4}
 DAYS_PER_MONTH = 30.4375
 CHART_ROUNDS = 8
+ALONG_SLACK_DAYS = 7                 # a job due within a week of the NEXT oil change waits for that one (it was done with the last one)
 NEEDS_V34 = "ต้องรัน schema_v34.sql ใน Supabase ก่อน จึงจะตั้งโปรแกรมของเครื่องจักรได้"
 
 TUBE, SONG = "T", "B"
+# Everything counts in running hours, so every machine is held to the same standard. The compressor oil change sets the date
+# (with_oil = "oil"); the jobs marked with_oil=True ride along with it: at an oil change, each one that would come due before
+# the NEXT oil change is done then too (so 4,000 = every time, 8,000 = every 2nd, 12,000 = every 3rd, 24,000 = every 6th).
+# The jobs with with_oil=False keep their own date. Condenser: a year, counted from its first record (no record = not due yet).
 # key, name, the built-in programs that include it, months, hours, level, event kind, other jobs that restart it, is it a guess, note
 JOBS: list[dict] = [
-    dict(key="overhaul", name="โอเวอร์ฮอลคอมเพรสเซอร์", programs=(TUBE, SONG), months=None, hours=24000, level="ทำเอง", event_kind="เปลี่ยนอะไหล่", reset_by=(), guess=False,
-         note="เปลี่ยนลิ้น สปริง แหวน ปะเก็น แบริ่งก้านสูบ · ตรวจลูกสูบ/แบริ่ง · ครบ 24,000 ชม. นับใหม่ (Patkol)"),
-    dict(key="check12k", name="เช็ควาล์ว/แหวน (กึ่งทาง)", programs=(TUBE, SONG), months=None, hours=12000, level="ควรทำ", event_kind="ตรวจเช็ค", reset_by=("overhaul",), guess=True,
-         note="เปิดฝาดูแผ่นวาล์ว สปริง แหวน เปลี่ยนเฉพาะที่สึก"),
-    dict(key="oil", name="ถ่ายน้ำมันคอมเพรสเซอร์", programs=(TUBE, SONG), months=6, hours=4000, level="ทำเอง", event_kind="หล่อลื่น / จาระบี", reset_by=("overhaul",), guess=False,
-         note="ล้างอ่างน้ำมัน ล้างตะแกรงน้ำมัน และกรองทางดูดไปพร้อมกัน"),
+    dict(key="oil", name="ถ่ายน้ำมันคอมเพรสเซอร์", programs=(TUBE, SONG), months=None, hours=4000, level="ทำเอง", event_kind="หล่อลื่น / จาระบี", reset_by=("overhaul",), guess=False,
+         with_oil=False, note="ล้างอ่างน้ำมัน ล้างตะแกรงน้ำมัน และกรองทางดูดไปพร้อมกัน · เป็นตัวกำหนดวัน งานอื่นทำพร้อมรอบนี้"),
     dict(key="grease", name="จาระบีมอเตอร์คอมเพรสเซอร์", programs=(TUBE, SONG), months=None, hours=4000, level="ทำเอง", event_kind="หล่อลื่น / จาระบี", reset_by=(), guess=False,
-         note="ประมาณ 40 g ต่อตลับลูกปืน (2Sg315M4B: 6318 C3 ทั้งสองข้าง) — เครื่อง 3 / 4 และมอเตอร์ซองยังไม่ทราบเบอร์ลูกปืน"),
-    dict(key="belts", name="เปลี่ยนสายพานคอมเพรสเซอร์ (ทั้งชุด)", programs=(TUBE, SONG), months=None, hours=24000, level="ทำเอง", event_kind="เปลี่ยนอะไหล่", reset_by=(), guess=False,
-         note="เปลี่ยนทั้งชุดพร้อมกัน ตึงใหม่หลัง 4–8 ชม."),
-    dict(key="safety", name="ทดสอบสวิตช์ความปลอดภัย (HP / LP / แรงดันน้ำมัน)", programs=(TUBE, SONG), months=12, hours=None, level="ควรทำ", event_kind="ตรวจเช็ค", reset_by=(), guess=True,
-         note="สวิตช์ตัดเครื่องเมื่อความดันสูง/ต่ำ/น้ำมันต่ำ — ทดสอบให้ตัดจริงปีละครั้ง"),
-    dict(key="cooling", name="ล้างคูลลิ่งทาวเวอร์", programs=(TUBE, SONG), months=3, hours=None, level="ทำเอง", event_kind="ทำความสะอาด", reset_by=(), guess=False, note=""),
-    dict(key="condenser", name="ล้างคอนเดนเซอร์", programs=(TUBE, SONG), months=6, hours=None, level="ทำเอง", event_kind="ทำความสะอาด", reset_by=(), guess=False, note=""),
-    dict(key="headwash", name="ล้างฝาสูบ", programs=(TUBE, SONG), months=12, hours=None, level="ควรทำ", event_kind="ทำความสะอาด", reset_by=("overhaul",), guess=True,
-         note="รอบยังไม่ได้กำหนด — ตั้งไว้ 12 เดือน · ทำพร้อมโอเวอร์ฮอลนับด้วย"),
-    dict(key="freezer_wash", name="ล้างฟรีซเซอร์ (วนน้ำยา)", programs=(TUBE,), months=3, hours=None, level="ทำเอง", event_kind="ทำความสะอาด", reset_by=(), guess=False,
-         note="เช็คตะกรันก่อน — ถ้าไม่มีตะกรัน เลื่อนได้"),
-    dict(key="freezer_vac", name="แวคคั่มฟรีซเซอร์", programs=(TUBE,), months=6, hours=None, level="ทำเอง", event_kind="ทำความสะอาด", reset_by=(), guess=False,
-         note="ทำเมื่อน้ำแข็งต่อรอบน้อยลง ไม่เช่นนั้นตรวจทุก 6 เดือน"),
-    dict(key="screw_grease", name="จาระบีมอเตอร์ / ลูกปืนสกรูและเครื่องบด", programs=(TUBE,), months=3, hours=None, level="ทำเอง", event_kind="หล่อลื่น / จาระบี", reset_by=(), guess=True,
-         note="เปิด-ปิดบ่อย ไม่มีมิเตอร์ จึงนับเป็นเดือน · เครื่องบดใช้ร่วมกัน (1-2, 3-4, 5): ทำแล้วบันทึกทุกเครื่องที่ใช้ร่วม"),
-    dict(key="screw_overhaul", name="โอเวอร์ฮอลสกรูและเครื่องบด (ลูกปืน ซีล เกียร์)", programs=(TUBE,), months=24, hours=None, level="ควรทำ", event_kind="เปลี่ยนอะไหล่", reset_by=(), guess=True,
-         note="เปลี่ยนลูกปืนและซีล ตรวจเกียร์/ใบมีด · เร็วกว่านี้ถ้าเสียงดังหรือร้อน"),
+         with_oil=True, note="ประมาณ 40 g ต่อตลับลูกปืน (2Sg315M4B: 6318 C3 ทั้งสองข้าง) — เครื่อง 3 / 4 และมอเตอร์ซองยังไม่ทราบเบอร์ลูกปืน"),
+    dict(key="belts", name="เช็คและตั้งสายพานคอมเพรสเซอร์", programs=(TUBE, SONG), months=None, hours=4000, level="ทำเอง", event_kind="ตรวจเช็ค", reset_by=(), guess=False,
+         with_oil=True, note="ตั้งความตึงใหม่ · เปลี่ยนเฉพาะเมื่อสึก/แตก (แจ้งซ่อม) — ถ้าเปลี่ยน เปลี่ยนทั้งชุดพร้อมกัน"),
+    dict(key="cooling", name="ล้างคูลลิ่งทาวเวอร์", programs=(TUBE, SONG), months=None, hours=4000, level="ทำเอง", event_kind="ทำความสะอาด", reset_by=(), guess=False,
+         with_oil=True, note=""),
+    dict(key="freezer_wash", name="ล้างฟรีซเซอร์ (วนน้ำยา)", programs=(TUBE,), months=None, hours=4000, level="ทำเอง", event_kind="ทำความสะอาด", reset_by=(), guess=False,
+         with_oil=True, note="เช็คตะกรันก่อน — ถ้าไม่มีตะกรัน เลื่อนได้"),
+    dict(key="headwash", name="ล้างฝาสูบ", programs=(TUBE, SONG), months=None, hours=8000, level="ควรทำ", event_kind="ทำความสะอาด", reset_by=("overhaul",), guess=False,
+         with_oil=True, note="ทุก 2 รอบถ่ายน้ำมัน · ทำพร้อมโอเวอร์ฮอลนับด้วย"),
+    dict(key="check12k", name="เช็ควาล์ว/แหวน (กึ่งทาง)", programs=(TUBE, SONG), months=None, hours=12000, level="ควรทำ", event_kind="ตรวจเช็ค", reset_by=("overhaul",), guess=True,
+         with_oil=True, note="ทุก 3 รอบถ่ายน้ำมัน · เปิดฝาดูแผ่นวาล์ว สปริง แหวน เปลี่ยนเฉพาะที่สึก"),
+    dict(key="overhaul", name="โอเวอร์ฮอลคอมเพรสเซอร์", programs=(TUBE, SONG), months=None, hours=24000, level="ทำเอง", event_kind="เปลี่ยนอะไหล่", reset_by=(), guess=False,
+         with_oil=True, note="ทุก 6 รอบถ่ายน้ำมัน · เปลี่ยนลิ้น สปริง แหวน ปะเก็น แบริ่งก้านสูบ · ตรวจลูกสูบ/แบริ่ง (Patkol)"),
+    dict(key="condenser", name="ล้างคอนเดนเซอร์", programs=(TUBE, SONG), months=12, hours=None, level="ทำเอง", event_kind="ทำความสะอาด", reset_by=(), guess=False,
+         with_oil=False, note="ปีละครั้ง นับจากครั้งแรกที่บันทึก"),
+    dict(key="screw_overhaul", name="โอเวอร์ฮอลสกรูและเครื่องบด (จาระบี ลูกปืน ซีล เกียร์)", programs=(TUBE,), months=12, hours=None, level="ควรทำ", event_kind="เปลี่ยนอะไหล่", reset_by=(), guess=True,
+         with_oil=False, note="ไม่มีมิเตอร์ จึงนับเป็นเดือน · อัดจาระบี เปลี่ยนลูกปืนและซีล ตรวจเกียร์/ใบมีด · ถ้าลูกปืนยังดี ค่อยยืดเป็น 18–24 เดือน"),
 ]
+# Jobs taken out of the plan; their past reports keep their name. แวคคั่มฟรีซเซอร์ is done when the ice is thin, will not come
+# out or the freezer leaks (a repair); the safety-switch test is off for now; the screw grease is part of the screw overhaul.
+RETIRED = {"freezer_vac": "แวคคั่มฟรีซเซอร์", "safety": "ทดสอบสวิตช์ความปลอดภัย (HP / LP / แรงดันน้ำมัน)",
+           "screw_grease": "จาระบีมอเตอร์ / ลูกปืนสกรูและเครื่องบด"}
 JOB_BY_KEY = {j["key"]: j for j in JOBS}
 
 DEFAULT_PROGRAMS = [
@@ -175,7 +180,7 @@ def job_status(job: dict, machine: dict, events: list[dict], rate_per_day: float
     mine = [e for e in events if e.get("job_key") in keys and e.get("event_date")]
     last = max(mine, key=lambda e: (e["event_date"], e.get("created_at") or "")) if mine else None
     out = {"key": job["key"], "name": job["name"], "level": job["level"], "months": job["months"], "hours": job["hours"], "guess": job["guess"],
-           "note": job["note"], "event_kind": job["event_kind"], "last_date": None, "last_job": None, "due_date": None, "days_left": None,
+           "with_oil": job.get("with_oil", False), "note": job["note"], "event_kind": job["event_kind"], "last_date": None, "last_job": None, "due_date": None, "days_left": None,
            "hours_since": None, "hours_estimated": False, "hours_left": None, "hours_months": None, "state": "none"}
     if job["hours"] and rate_per_day > 0:
         out["hours_months"] = round(job["hours"] / (rate_per_day * DAYS_PER_MONTH), 1)          # what the hours interval is worth in months at this running rate
@@ -204,6 +209,28 @@ def job_status(job: dict, machine: dict, events: list[dict], rate_per_day: float
     left = (d - today).days
     out.update(due_date=d.isoformat(), days_left=left, state="late" if left < 0 else "soon" if left <= SOON_DAYS else "ok")
     return out
+
+
+def oil_visit(statuses: list[dict], jobs: list[dict], rate_per_day: float) -> Optional[dict]:
+    """The machine's next visit: the compressor oil change, and what to do in the same stop -- every with_oil job that is
+    late or would come due before the NEXT oil change ("together"), and the ones with no record ("maybe": if there is time).
+    None when the machine has no oil-change job; date None when its oil change has no record yet (it shows grey, undated)."""
+    oil = next((s for s in statuses if s["key"] == "oil"), None)
+    if oil is None:
+        return None
+    by_key = {j["key"]: j for j in jobs}
+    every = interval_days(by_key["oil"], rate_per_day) if "oil" in by_key else None
+    together, maybe = [], []
+    for s in statuses:
+        if s["key"] == "oil" or not s.get("with_oil"):
+            continue
+        if s["state"] in ("late", "never"):
+            together.append(s["key"])
+        elif s["state"] == "none":
+            maybe.append(s["key"])
+        elif oil["days_left"] is not None and every and s["days_left"] is not None and s["days_left"] < oil["days_left"] + every - ALONG_SLACK_DAYS:
+            together.append(s["key"])
+    return {"date": oil["due_date"], "days_left": oil["days_left"], "state": oil["state"], "together": together, "maybe": maybe}
 
 
 def build_chart(statuses: list[dict], jobs: list[dict], rate_per_day: float, step_months: float, today: date, rounds: int = CHART_ROUNDS) -> dict:
@@ -254,7 +281,8 @@ def plan_for_machine(machine: dict, program: dict, events: list[dict], readings:
     out = {"jobs": ordered, "counts": {"late": late, "soon": sum(1 for j in statuses if j["state"] == "soon"),
                                        "none": sum(1 for j in statuses if j["state"] == "none"), "ok": sum(1 for j in statuses if j["state"] == "ok")},
            "next": next((j for j in ordered if j["state"] in ("never", "late", "soon")), None), "rate": rate, "hours_now": now,
-           "program": {"code": program["code"], "label": program["label"], "step_months": program["step_months"]}}
+           "program": {"code": program["code"], "label": program["label"], "step_months": program["step_months"]},
+           "visit": oil_visit(statuses, jobs, rate["per_day"])}
     if with_chart:
         out["chart"] = build_chart(statuses, jobs, rate["per_day"], program["step_months"], today)
     return out
@@ -372,7 +400,8 @@ def overview(today: Optional[date] = None) -> dict:
         program = programs[program_code_for(m, programs)]
         plan = plan_for_machine(m, program, [e for e in events if e.get("machine_id") == m["id"]], [r for r in readings if r["machine_id"] == m["id"]], today)
         rows.append({**m, "plan": plan})
-    return {"ready": True, "machines": rows, "jobs": [{"key": j["key"], "name": j["name"]} for j in JOBS], "today": today.isoformat()}
+    return {"ready": True, "machines": rows, "jobs": [{"key": j["key"], "name": j["name"]} for j in JOBS] + [{"key": k, "name": n, "retired": True} for k, n in RETIRED.items()],
+            "today": today.isoformat()}
 
 
 def machine_plan(machine_id: str, today: Optional[date] = None) -> dict:

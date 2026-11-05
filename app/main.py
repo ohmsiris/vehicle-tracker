@@ -28,7 +28,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import attendance, dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
+from app import attendance, calendar_plan, dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -1290,6 +1290,16 @@ def _mgr_call(fn, *args, **kwargs):
 def api_mgr_board(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
     return _mgr_call(mgr.board)
+
+
+@app.get("/api/mgr/calendar")
+def api_mgr_calendar(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The small calendar: one visit per truck / machine on its oil-change day, with what to do in the same visit."""
+    _check_token(x_app_token, token)
+    try:
+        return calendar_plan.calendar()
+    except supabase.SupabaseError as err:
+        raise HTTPException(status_code=502, detail=f"ฐานข้อมูลตอบกลับผิดพลาด: {err}")
 
 
 @app.post("/api/mgr/tickets")

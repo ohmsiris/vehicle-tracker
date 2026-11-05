@@ -896,6 +896,20 @@
       <div id="mgTypes" class="mgplaces" role="group" aria-label="กรองตามประเภท"></div>
       <div id="mgPlaces" class="mgplaces" role="group" aria-label="กรองตามสถานที่"></div>
     </div>
+    <div class="card mgcal" id="mgCal">
+      <div class="mgcal-head">
+        <button type="button" class="mgcal-toggle" id="mgCalToggle" aria-expanded="true">ปฏิทินซ่อมบำรุง <span class="muted small">(วันถ่ายน้ำมัน รถ · เครื่องจักร · งานที่มีกำหนด)</span></button>
+        <div class="mgcal-flags" id="mgCalFlags"></div>
+      </div>
+      <div class="mgcal-body" id="mgCalBody">
+        <div class="mgcal-month">
+          <div class="mgcal-nav"><button type="button" class="btn small" id="mgCalPrev" aria-label="เดือนก่อน">‹</button><strong id="mgCalTitle"></strong><button type="button" class="btn small" id="mgCalNext" aria-label="เดือนถัดไป">›</button></div>
+          <div class="mgcal-grid" id="mgCalGrid" role="grid"></div>
+          <div class="mgcal-legend muted small"><span class="mgcal-n late">2</span> เลยกำหนด <span class="mgcal-n soon">2</span> ภายใน 14 วัน <span class="mgcal-n later">2</span> หลังจากนั้น</div>
+        </div>
+        <div class="mgcal-detail" id="mgCalDetail"></div>
+      </div>
+    </div>
     <div class="kanban mgkanban" id="mgKanban">
       <section class="kcol mgcol" data-status="todo" aria-label="ต้องทำ"><h2 class="section-title">ต้องทำ <span class="count" id="mgCount_todo"></span></h2><div id="mgList_todo" class="reqlist"></div></section>
       <section class="kcol mgcol" data-status="doing" aria-label="กำลังทำ"><h2 class="section-title">กำลังทำ <span class="count" id="mgCount_doing"></span></h2><div id="mgList_doing" class="reqlist"></div></section>

@@ -56,10 +56,10 @@ def test_hours_now_is_the_last_reading_plus_the_running_since():
 
 # ------------------------------------------------------------------- job states
 def test_a_month_job_is_ok_soon_or_late():
-    assert status("cooling", [ev("cooling", "2026-09-30")])[0]["state"] == "ok"
-    soon = status("cooling", [ev("cooling", "2026-08-05")])[0]
+    assert status("condenser", [ev("condenser", "2026-09-30")])[0]["state"] == "ok"            # a year
+    soon = status("condenser", [ev("condenser", "2025-11-05")])[0]
     assert soon["state"] == "soon" and soon["due_date"] == "2026-11-05" and soon["days_left"] == 6
-    late = status("cooling", [ev("cooling", "2026-03-04")])[0]
+    late = status("condenser", [ev("condenser", "2025-06-04")])[0]
     assert late["state"] == "late" and late["due_date"] == "2026-06-04" and late["days_left"] == -148
 
 
@@ -79,7 +79,7 @@ def test_the_latest_report_wins_and_an_overhaul_restarts_the_oil_clock():
 
 
 def test_an_hours_job_runs_off_the_assumed_pattern_without_a_meter():
-    # oil: 4000 h or 6 months. Done 2026-06-17 at 24 h x 7 days: 4000 h last 166 days (2026-11-30), before the 6 months (2026-12-17)
+    # oil: 4000 h. Done 2026-06-17 at 24 h x 7 days: 4000 h last 166 days (2026-11-30)
     j = status("oil", [ev("oil", "2026-06-17")])[0]
     assert j["hours_estimated"] and j["hours_since"] == (TODAY - date(2026, 6, 17)).days * 24
     assert j["due_date"] == "2026-11-30" and j["state"] == "ok"
@@ -97,13 +97,15 @@ def test_the_brine_pond_machines_run_six_days_a_week():
     assert j["hours_since"] == round(365 * 24 * 6 / 7) and j["state"] == "ok"
 
 
-def test_whichever_comes_first_months_or_hours():
-    j = status("oil", [ev("oil", "2026-04-30")], machine={**M, "hours_per_day": 12})[0]      # 12 h a day: the 6 months come first
-    assert j["due_date"] == "2026-10-30" and j["state"] == "soon" and j["days_left"] == 0
+def test_the_compressor_jobs_count_in_hours_only():
+    # 12 h a day: 4000 h is 333 days, so the oil change comes well after 6 months (there is no months limit any more)
+    j = status("oil", [ev("oil", "2026-04-30")], machine={**M, "hours_per_day": 12})[0]
+    assert j["state"] == "ok" and j["days_left"] == 150 and j["months"] is None
+    assert all(not job["months"] for job in mp.JOBS if job["key"] not in ("condenser", "screw_overhaul"))
 
 
 def test_worst_first_and_counted():
-    p = plan({**M, "never_overhauled": True}, [ev("cooling", "2026-03-04"), ev("oil", "2026-10-01"), ev("condenser", "2026-03-31")])
+    p = plan({**M, "never_overhauled": True}, [ev("cooling", "2026-03-04"), ev("oil", "2026-10-01"), ev("condenser", "2025-03-31")])
     assert p["jobs"][0]["key"] == "overhaul" and p["jobs"][0]["state"] == "never"
     assert p["counts"]["late"] == 3 and p["next"]["key"] == "overhaul"
     assert [j["state"] for j in p["jobs"]] == sorted((j["state"] for j in p["jobs"]), key=lambda s: mp.STATE_RANK[s])
@@ -114,21 +116,22 @@ def test_each_kind_of_machine_gets_its_built_in_program():
     assert mp.program_code_for(M, PROGRAMS) == "T" and mp.program_code_for(SONG, PROGRAMS) == "B"
     tube = {j["key"] for j in mp.jobs_for(PROGRAMS["T"])}
     song = {j["key"] for j in mp.jobs_for(PROGRAMS["B"])}
-    assert {"freezer_wash", "freezer_vac", "screw_grease", "screw_overhaul"} <= tube
-    assert not ({"freezer_wash", "freezer_vac", "screw_grease", "screw_overhaul"} & song)          # no freezer on a brine pond
+    assert {"freezer_wash", "screw_overhaul"} <= tube
+    assert not ({"freezer_wash", "screw_overhaul"} & song)                         # no freezer on a brine pond
+    assert not ({"freezer_vac", "safety", "screw_grease"} & (tube | song))            # taken out of the plan
     assert {"overhaul", "oil", "cooling", "condenser"} <= song
     assert mp.program_code_for({**SONG, "program_code": "P9"}, PROGRAMS) == "B"      # a program that is gone: back to the kind's
 
 
 def test_a_saved_program_is_laid_over_the_defaults():
     rows = [{"code": "T", "label": "หลอด (ของเรา)", "step_months": 2,
-             "jobs": {"cooling": {"months": 2}, "safety": {"on": False}, "headwash": {"level": "ไม่ต้องทำ"}}},
+             "jobs": {"cooling": {"months": 2}, "belts": {"on": False}, "headwash": {"level": "ไม่ต้องทำ"}}},
             {"code": "P1", "label": "แก่งคอย", "step_months": 3, "jobs": {"oil": {"on": True, "months": 6, "hours": 4000, "level": "ทำเอง"}}}]
     progs = mp.merge_programs(rows)
     tube = {j["key"]: j for j in mp.jobs_for(progs["T"])}
     assert progs["T"]["label"] == "หลอด (ของเรา)" and progs["T"]["step_months"] == 2 and progs["T"]["customised"]
-    assert tube["cooling"]["months"] == 2 and tube["oil"]["months"] == 6
-    assert "safety" not in tube and "headwash" not in tube                    # switched off / ไม่ต้องทำ
+    assert tube["cooling"]["months"] == 2 and tube["oil"]["months"] is None
+    assert "belts" not in tube and "headwash" not in tube                    # switched off / ไม่ต้องทำ
     assert [j["key"] for j in mp.jobs_for(progs["P1"])] == ["oil"]               # an added program has only what was switched on
     assert not progs["P1"]["builtin"] and progs["B"]["builtin"] and not progs["B"]["customised"]
     assert [j["key"] for j in plan({**M, "program_code": "P1"}, programs=progs)["jobs"]] == ["oil"]
@@ -149,17 +152,33 @@ def test_a_program_is_checked_before_it_is_saved():
         mp.clean_program({}, None)                                              # a new program needs a name
 
 
+# ------------------------------------------------------------ the oil-change visit
+def test_the_oil_change_sets_the_visit_and_the_rest_rides_along():
+    # 24 h a day: the oil change (4000 h) lasts ~167 days. Oil done 2026-06-17 -> due 2026-11-30 (31 days).
+    events = [ev("oil", "2026-06-17"), ev("grease", "2026-06-17"), ev("cooling", "2026-03-01"),
+              ev("headwash", "2026-06-17"), ev("check12k", "2026-01-10"), ev("overhaul", "2025-01-10"), ev("condenser", "2025-01-10")]
+    v = plan(events=events)["visit"]
+    assert v["date"] == "2026-11-30" and v["state"] == "ok"
+    assert set(v["together"]) == {"grease", "cooling"}                     # grease due with it; cooling late
+    assert not ({"headwash", "check12k", "overhaul"} & set(v["together"]))     # done with the last oil change: 8,000 h = the NEXT one, not this one
+    v2 = plan(events=[e for e in events if e["job_key"] != "headwash"] + [ev("headwash", "2025-12-01")])["visit"]
+    assert "headwash" in v2["together"]                                    # would come due before the next oil change: do it now
+    assert "condenser" not in v["together"] + v["maybe"]                   # keeps its own date
+    assert set(v["maybe"]) == {"belts", "freezer_wash"}                    # no record: if there is time
+    assert plan(events=[])["visit"]["date"] is None                          # no oil change on record: no date (grey)
+
+
 # ------------------------------------------------------------------------ chart
 def test_the_chart_marks_today_and_the_rounds_each_job_falls_due():
-    p = plan(events=[ev("cooling", "2026-09-30"), ev("condenser", "2026-03-31"), ev("oil", "2026-10-20")], chart=True)
+    p = plan(events=[ev("cooling", "2026-09-30"), ev("condenser", "2025-03-31"), ev("oil", "2026-10-20")], chart=True)
     c = p["chart"]
     assert len(c["columns"]) == mp.CHART_ROUNDS + 1 and c["columns"][0]["label"] == "ตอนนี้"
     assert c["columns"][1]["date"] == "2027-01-29"                               # 3 months on (rounded days)
     rows = {r["key"]: r for r in c["rows"]}
-    cooling = rows["cooling"]["cells"]                                          # done 30 Sep, every 3 months: due 30 Dec, 30 Mar, ...
-    assert cooling[0] == "done" and cooling[1] == "due" and cooling[2] == "due"
-    condenser = rows["condenser"]["cells"]                                      # overdue: red now, then every 6 months from today
-    assert condenser[0] == "overdue" and condenser[1] is None and condenser[2] == "due" and condenser[4] == "due"
+    cooling = rows["cooling"]["cells"]                                          # done 30 Sep, 4000 h at 24 h a day: due mid-March, then every ~167 days
+    assert cooling[0] == "done" and cooling[1] is None and cooling[2] == "due"
+    condenser = rows["condenser"]["cells"]                                      # overdue: red now, then a year from today
+    assert condenser[0] == "overdue" and condenser[1:4] == [None, None, None] and condenser[4] == "due"
     assert rows["freezer_wash"]["cells"][0] == "unknown"                        # no record
     assert rows["oil"]["cells"][0] == "done"
 
@@ -223,8 +242,8 @@ def test_the_rate_uses_the_last_half_year_of_meter_readings_and_hours_become_mon
     assert r["source"] == "มิเตอร์" and r["span_days"] == 90 and r["per_day"] == pytest.approx(1500 / 90) and r["readings"] == 2
     j = status("oil", [ev("oil", "2026-10-01", hours_at=3000)], readings=readings)[0]
     assert j["hours_months"] == round(4000 / (1500 / 90 * mp.DAYS_PER_MONTH), 1) and j["hours_left"] == 3500
-    # 3500 h left at 16.7 h a day = 210 days: the 6 months (to 2027-04-01) come first (153 days)
-    assert j["due_date"] == "2027-04-01"
+    # 3500 h left at 16.7 h a day = about 210 days (hours only: no 6-month limit)
+    assert 209 <= j["days_left"] <= 210
     # a one-reading machine has no measured rate
     assert mp.machine_rate(M, readings[:1])["source"] == "สมมติ"
 
