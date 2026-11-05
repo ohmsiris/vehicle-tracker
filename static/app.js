@@ -695,12 +695,14 @@ async function renderTyrePick() {
   const age = (m) => (m == null ? "" : m < 12 ? `${m} ด.` : `${Math.floor(m / 12)} ปี`);
   const boxes = d.positions.map((w) => {
     const b = el("input", { type: "checkbox", value: w.position, checked: tp.picked.has(w.position) });
-    b.addEventListener("change", () => { tp.touched = true; b.checked ? tp.picked.add(w.position) : tp.picked.delete(w.position); count.textContent = countText(); });
+    b.addEventListener("change", () => { tp.touched = true; b.checked ? tp.picked.add(w.position) : tp.picked.delete(w.position); count.textContent = countText(); limit(); });
     const auto = !tp.touched && hint.picks.includes(w.position);
     return el("label", { class: `check ty-pick${auto ? " ty-suggest" : ""}`, title: auto ? "ระบบเลือกให้จากขนาดยาง — แก้ได้" : "" }, b, ` ${w.label}`, w.tyre ? el("span", { class: "muted small", text: ` (เดิม ${[w.tyre.brand, age(w.months)].filter(Boolean).join(" · ") || "มีข้อมูล"})` }) : null);
   });
   const countText = () => `เลือกแล้ว ${tp.picked.size} / ${qty} ล้อ`;
   const count = el("span", { class: "muted small", text: countText() });
+  const limit = () => boxes.forEach((l) => { const i = l.querySelector("input"); i.disabled = !i.checked && tp.picked.size >= qty; });       // no more wheels than tyres
+  limit();
   fill(card, el("h2", {}, "ยางในบิลนี้ ", el("span", { class: "muted small", text: `${lines.map((l) => `${tpSize(l.description) || l.description} × ${l.quantity || 1}`).join(", ")} — เลือกล้อที่เปลี่ยน (ไม่เลือกก็ได้ ใส่ทีหลังที่หน้ารถ)` })),
     el("div", { class: "ty-picks" }, ...boxes), count,
     tp.suggested && !tp.touched ? el("p", { class: "muted small", text: `💡 ${tp.suggested}` }) : !hint.picks.length && hint.why ? el("p", { class: "muted small", text: hint.why }) : null);

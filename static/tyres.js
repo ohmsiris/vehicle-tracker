@@ -181,18 +181,40 @@ function openTyreChange({ positions = [], bill = null }) {
   const unknown = tyInput("", { inputmode: "numeric", placeholder: "0" });
   const notes = tyInput("", { maxlength: "300" });
   const billNote = bill ? el("p", { class: "muted small", text: `จากบิล ${beDate(bill.date)} · ${bill.description}${bill.qty ? ` × ${bill.qty} เส้น — เลือกล้อให้ครบ ${bill.qty} ล้อ` : ""}` }) : null;
+  // a bill of N tyres: no more than N wheels can be ticked; fewer is fine when the rest go in "ไม่ทราบว่าล้อไหน"
+  const need = bill && Number(bill.qty) > 0 ? Number(bill.qty) : 0;
+  const boxes = picks.map((p) => p.querySelector("input"));
+  const counter = need ? el("span", { class: "muted small" }) : null;
+  const recount = () => {
+    if (!need) return;
+    const n = boxes.filter((b) => b.checked).length, u = Number(unknown.value) || 0;
+    for (const b of boxes) b.disabled = !b.checked && n + u >= need;
+    counter.textContent = `เลือกแล้ว ${n}${u ? ` + ไม่ทราบล้อ ${u}` : ""} / ${need} เส้น${n + u < need ? ` — ขาดอีก ${need - n - u}` : " ✓"}`;
+    counter.className = `small ${n + u === need ? "muted" : "warn-text"}`;
+  };
+  boxes.forEach((b) => b.addEventListener("change", recount));
+  unknown.addEventListener("input", recount);
+  recount();
   tyreDialog("บันทึกเปลี่ยนยาง", el("div", {},
     billNote,
-    el("div", { class: "muted small", text: "ล้อที่เปลี่ยน" }), el("div", { class: "ty-picks" }, ...picks), hintNote,
+    el("div", { class: "muted small", text: "ล้อที่เปลี่ยน" }), el("div", { class: "ty-picks" }, ...picks), counter, hintNote,
     el("div", { class: "ty-fields" },
       tyField("วันที่เปลี่ยน", date, cap), tyField("เลขไมล์", km), tyField("ขนาด", size), tyField("ยี่ห้อ / รุ่น", brand),
       tyField("ราคาต่อเส้น (฿)", price), tyField("ร้าน", vendor),
       tyField("ไม่ทราบว่าล้อไหน (เส้น)", unknown), tyField("หมายเหตุ", notes))),
-    (err) => tyreCall(`/api/vehicles/${ty.v.vehicle_id}/tyres`, jsonOpts("POST", {
+    (err) => {
+      const n = boxes.filter((b) => b.checked).length + (Number(unknown.value) || 0);
+      if (need && n !== need) {
+        err.hidden = false;
+        err.textContent = `บิลนี้มี ${need} เส้น — เลือกล้อ ${need} ล้อ (ถ้าไม่รู้ว่าล้อไหน ใส่จำนวนในช่อง “ไม่ทราบว่าล้อไหน”)`;
+        return false;
+      }
+      return tyreCall(`/api/vehicles/${ty.v.vehicle_id}/tyres`, jsonOpts("POST", {
       positions: picks.map((p) => p.querySelector("input")).filter((b) => b.checked).map((b) => b.value), unknown_count: unknown.value,
       fitted_on: date.value, fitted_km: km.value, size: size.value, brand: brand.value, price: price.value, vendor: vendor.value, notes: notes.value,
       event_id: bill ? bill.event_id : null,
-    }), err));
+    }), err);
+    });
 }
 
 function openTyreRotate() {
