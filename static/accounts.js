@@ -86,7 +86,60 @@ function renderAccounts() {
         () => a.parties.map((pt) => acxNode(`a:${a.code}:${pt.party}`, pt.party, pt.total, "acx-l2",
           () => pt.entries.map((e) => acxEntry(e)))))))),
     el("div", { class: "acx-line acx-total" }, el("span", { text: "Net profit · กำไรสุทธิ" }), el("strong", { text: acxMoney(p.net_profit) })));
-  fill($("acxBody"), summary, feeds, tree);
+  fill($("acxBody"), summary, feeds, acxDocs(d.docs || []), acxFuel(d.fuel), tree);
+}
+
+// เอกสารเบิกกลาง / สิ้นเดือน: each page read, its lines checked against the total written on it; memos with a one-line summary.
+const ACX_KIND = { cover: "ปก", expense: "ค่าใช้จ่าย", fuel: "น้ำมัน", fuel_table: "ตารางน้ำมัน (พิมพ์)", advance: "เบิกล่วงหน้า", memo: "บันทึก", other: "อื่นๆ" };
+function acxDocs(docs) {
+  if (!docs.length) return null;
+  const money = docs.filter((x) => !["memo", "other"].includes(x.kind));
+  const memos = docs.filter((x) => ["memo", "other"].includes(x.kind));
+  const bad = money.filter((x) => x.status === "mismatch").length;
+  const row = (x) => {
+    const diff = (x.read_total ?? 0) - (x.written_total ?? 0);
+    const state = x.status === "ok" ? ["✓", "ok", "ตรงยอด"] : x.status === "checked" ? ["✓", "ok", "ตรวจแล้ว"] : ["!", "warn", `ต่าง ${baht(Math.abs(diff))} ฿`];
+    return el("div", { class: `acx-doc ${state[1]}` },
+      el("span", { class: "acx-doc-icon", text: state[0] }),
+      el("div", {}, el("strong", { text: x.title || `หน้า ${x.page}` }),
+        el("div", { class: "small muted", text: [ACX_KIND[x.kind], x.file_name, x.note].filter(Boolean).join(" · ") })),
+      el("div", { class: "acx-doc-num" }, el("strong", { text: x.written_total != null ? `${baht(x.written_total)} ฿` : "" }),
+        el("div", { class: "small muted", text: x.status === "mismatch" ? `อ่านได้ ${baht(x.read_total)} · ${state[2]}` : state[2] }),
+        x.status === "mismatch" ? el("button", { class: "linkbtn small", type: "button", text: "ดูต้นฉบับแล้ว ✓", onclick: () => acxDocChecked(x) }) : null));
+  };
+  return el("div", { class: "card acx-feeds" },
+    el("h3", { text: `Expense documents · เอกสารเบิก${bad ? ` — ${bad} หน้าไม่ตรงยอด` : " — ทุกหน้าตรงยอด"}` }),
+    el("p", { class: "muted small", text: "อ่านทีละหน้าแล้วบวกเทียบยอดที่เขียนท้ายหน้า · หน้าที่ตรงยอดไม่ต้องตรวจ · ทุกบรรทัดอยู่ในงบด้านล่าง (เงินเบิกกลางเดือนไม่ใช่ค่าใช้จ่าย — ไปหักตอนจ่ายเงินเดือน)" }),
+    ...money.map(row),
+    memos.length ? el("h3", { class: "acx-sub", text: `Memos · บันทึก / เอกสารบุคคล (${memos.length}) — สำหรับพี่แมว` }) : null,
+    ...memos.map((x) => el("div", { class: "acx-doc memo" }, el("span", { class: "acx-doc-icon", text: "•" }),
+      el("div", {}, el("strong", { text: x.title }), x.person ? el("span", { class: "muted small", text: ` · ${x.person}` }) : null,
+        el("div", { class: "small", text: x.summary || "" })))));
+}
+
+async function acxDocChecked(x) {
+  try { await api(`/api/accounts/docs/${x.id}/checked`, { method: "POST" }); } catch (err) { alert(err.message); return; }
+  await loadAccounts();
+}
+
+// Cash fuel per truck against the km it drove: a truck that burns much more per km than the others stands out.
+function acxFuel(f) {
+  if (!f || !f.trucks || !f.trucks.length) return null;
+  const sum = f.trucks.reduce((a, t) => a + t.cash, 0);
+  const typedSum = f.table ? f.trucks.reduce((a, t) => a + (t.typed || 0), 0) : 0;
+  return el("div", { class: "card acx-feeds" },
+    el("h3", { text: "Fuel by truck · น้ำมันรายคัน" }),
+    el("p", { class: "muted small", text: `เงินสด ${baht(sum)} ฿ ใน ${f.days} วัน · กม. ประมาณจาก GPS หรือเลขไมล์`
+      + (f.has_card ? ` · สีแดง = บาท/กม. เกิน 2 เท่าของคันทั่วไป (${f.median_baht_per_km ?? "–"} ฿/กม.)` : " · ยังไม่มีน้ำมันบัตร (บางจาก / PT) — บาท/กม. จะมีความหมายเมื่อใส่บัตรแล้ว")
+      + (f.no_truck ? ` · ไม่ระบุรถ ${baht(f.no_truck)} ฿` : "") + (f.table ? ` · ใบพิมพ์ของออฟฟิศ ${baht(f.table.total)} ฿ (ลายมือ ${baht(sum)} ฿ — ต่าง ${baht(sum - typedSum)} ฿ คือคันที่ไม่อยู่ในใบพิมพ์)` : "") }),
+    el("div", { class: "acx-fuel" },
+      el("div", { class: "acx-fuel-row head small muted" }, ...["รถ", "เงินสด (ครั้ง)", "บัตร", "ใบพิมพ์", "กม.", "฿/กม."].map((t) => el("span", { text: t }))),
+      ...f.trucks.map((t) => el("div", { class: `acx-fuel-row${t.high ? " bad" : ""}` },
+        el("span", { text: `#${t.number}${t.branch && t.branch !== $("acxBranch").value && $("acxBranch").value ? ` (${t.branch})` : ""}` }),
+        el("strong", { text: `${baht(t.cash)} (${t.fills})` }), el("span", { class: "muted", text: t.card ? baht(t.card) : "–" }),
+        el("span", { class: t.typed != null && t.typed !== t.cash ? "warn-text" : "muted", text: f.table ? (t.typed != null ? baht(t.typed) : "ไม่มี") : "" }),
+        el("span", { class: "muted", text: t.km ? `${baht(t.km)} (${t.km_source})` : "ไม่มีข้อมูล" }),
+        el("span", { text: t.baht_per_km ?? "–" })))));
 }
 
 function acxKpi(label, value, strong = false) {

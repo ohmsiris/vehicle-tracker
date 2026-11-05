@@ -1567,3 +1567,15 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .acx-total { cursor: default; font-size: 16px; grid-template-columns: minmax(0, 1fr) auto; border-top: 2px solid var(--line-strong); }
 .acx-vat { display: flex; gap: 6px; align-items: center; }
 @media (max-width: 760px) { .acx-entry { grid-template-columns: 80px minmax(0, 1fr) auto; padding-left: 20px; } .acx-entry > :nth-child(3), .acx-entry > :nth-child(4), .acx-entry > :nth-child(5) { display: none; } }
+
+/* บัญชี › เอกสารเบิก + น้ำมันรายคัน */
+.acx-doc { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.acx-doc-icon { font-weight: 700; text-align: center; }
+.acx-doc.ok .acx-doc-icon { color: var(--ok); }
+.acx-doc.warn .acx-doc-icon, .warn-text { color: var(--warn); font-weight: 650; }
+.acx-doc-num { text-align: right; }
+.acx-sub { margin-top: 16px !important; }
+.acx-fuel-row { display: grid; grid-template-columns: minmax(70px, 1fr) 110px 70px 80px minmax(110px, 1fr) 60px; gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.acx-fuel-row > :nth-child(n+2) { text-align: right; }
+.acx-fuel-row.bad { background: color-mix(in srgb, var(--bad, #b91c1c) 10%, transparent); }
+@media (max-width: 760px) { .acx-fuel-row { grid-template-columns: 1fr 40px 70px 70px; } .acx-fuel-row > :nth-child(5), .acx-fuel-row > :nth-child(6) { display: none; } }

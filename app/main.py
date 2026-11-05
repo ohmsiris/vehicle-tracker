@@ -900,6 +900,15 @@ def api_accounts_delete(entry_id: str, x_app_token: str = Header(default=""), to
     return {"ok": True}
 
 
+@app.post("/api/accounts/docs/{doc_id}/checked")
+def api_accounts_doc_checked(doc_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """A page whose lines did not add up was looked at against the paper: mark it checked."""
+    from app import acc_docs
+    _check_token(x_app_token, token)
+    _acc_call(acc_docs.mark_checked, doc_id)
+    return {"ok": True}
+
+
 @app.post("/api/accounts/feed-mark")
 def api_accounts_feed_mark(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

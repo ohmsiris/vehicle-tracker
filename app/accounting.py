@@ -260,7 +260,8 @@ def _insert_entries(entries: list[dict]) -> None:
     heads, lines = [], []
     for e in entries:
         eid = str(uuid.uuid4())
-        heads.append({k: e.get(k) for k in ("entry_date", "branch", "source", "source_id", "party", "description", "doc_type", "doc_no")} | {"id": eid})
+        heads.append({k: e.get(k) for k in ("entry_date", "branch", "source", "source_id", "party", "description", "doc_type", "doc_no")} | {"id": eid}
+                     | ({"doc_id": e["doc_id"]} if e.get("doc_id") else {}))
         for ln in e["lines"]:
             lines.append({"entry_id": eid, "account": ln["account"], "debit": ln["debit"], "credit": ln["credit"], "branch": ln.get("branch"),
                           "vehicle_id": ln.get("vehicle_id"), "machine_id": ln.get("machine_id"), "memo": ln.get("memo")})
@@ -330,7 +331,14 @@ def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
         counts[e["source"]] = (n + 1, t + total)
     period_key = f"{month}-{half or 0}"
     marks = {m["feed"]: m["status"] for m in supabase.select_all("acc_feed_marks", {"select": "feed,status", "period": f"eq.{period_key}", "branch": f"eq.{branch or 'all'}", "order": "feed.asc"})}
-    return {"month": month, "half": half, "branch": branch, "start": start.isoformat(), "end": end.isoformat(),
+    docs, fuel = [], None
+    try:
+        from app import acc_docs
+        docs = acc_docs.docs_for(start, end, branch)
+        fuel = acc_docs.fuel_check(start, end, branch)
+    except supabase.SupabaseError:          # schema_v42 not applied yet: the page works without the documents
+        pass
+    return {"month": month, "half": half, "branch": branch, "start": start.isoformat(), "end": end.isoformat(), "docs": docs, "fuel": fuel,
             "pnl": pnl_tree(rows, accounts), "feeds": feed_status(half, counts, marks, _missing_amount(start, end)),
             "accounts": [{"code": a["code"], "en": a["name_en"], "th": a["name_th"], "kind": a["kind"], "section": a["section"]} for a in accounts.values() if a["active"]],
             "branches": list(BRANCHES)}
