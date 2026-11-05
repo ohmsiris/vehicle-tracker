@@ -262,7 +262,7 @@ function editTotalsBar() {
   }
 }
 
-const editHooks = { changed: () => editTotalsChanged(), renumber: () => editRows().forEach((tr, i) => { tr.querySelector(".n").textContent = String(i + 1); }) };
+const editHooks = { changed: () => { editTotalsChanged(); if ($("edNext") && $("edNext")._suggest) $("edNext")._suggest(); }, renumber: () => editRows().forEach((tr, i) => { tr.querySelector(".n").textContent = String(i + 1); }) };
 
 function startEdit() {
   const d = fleet.event;
@@ -319,7 +319,8 @@ function startEdit() {
   fleet.paperCard.replaceWith(form);
   fleet.paperCard = form;
   bindDateField($("edDate"), $("edDateCap"));
-  bindVehicleAutofill({ vehicleSel: $("edVehicle"), branchEl: $("edBranch"), mileageEl: $("edMileage"), nextEl: $("edNext"), hintEl: $("edNextHint") });
+  bindVehicleAutofill({ vehicleSel: $("edVehicle"), branchEl: $("edBranch"), mileageEl: $("edMileage"), nextEl: $("edNext"), hintEl: $("edNextHint"),
+    hasOil: () => hasOilLine("#editLines") });
   bindMileageHistory({ vehicleSel: $("edVehicle"), dateEl: $("edDate"), mileageEl: $("edMileage"), hintEl: $("edMileHint"), excludeId: (d.event && (d.event.id || d.event.event_id)) || "" });
   $("edTotal").addEventListener("input", () => { fleet.totalManual = true; editTotalsChanged(); });
   editHooks.renumber();

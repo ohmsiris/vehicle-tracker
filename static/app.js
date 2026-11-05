@@ -216,18 +216,24 @@ function flagInput(node, flagged) {
 }
 
 // Picking a truck fills in its branch; and once there is a mileage, "the mileage of the next time" is that + the truck's oil-change distance
-// (10,000 small / 20,000 big, from the plan: roster.oil_km). A next-mileage the bill itself gave, or one you typed, is never overwritten;
-// one this filled in follows the mileage as you change it.
-function bindVehicleAutofill({ vehicleSel, branchEl, mileageEl, nextEl, hintEl, fillBranchNow = false }) {
+// (10,000 small / 20,000 big, from the plan: roster.oil_km) -- ONLY when the bill has an engine-oil line: a tyre or repair bill also carries
+// the mileage (a good odometer reading) but is not an oil change, and its next-mileage would become the truck's "ครบกำหนดที่".
+// A next-mileage the bill itself gave, or one you typed, is never overwritten; one this filled in follows the mileage and the lines.
+const OIL_LINE = /^\s*(?:ถ่าย|เปลี่ยน|ค่า)?\s*น้ำมันเครื่อง/;
+const hasOilLine = (container) => [...document.querySelectorAll(`${container} [data-f=description]`)].some((i) => OIL_LINE.test(i.value));
+
+function bindVehicleAutofill({ vehicleSel, branchEl, mileageEl, nextEl, hintEl, fillBranchNow = false, hasOil = null }) {
   const veh = () => selectedVehicle(vehicleSel);
   const hint = (text) => { if (hintEl) hintEl.textContent = text; };
   nextEl.dataset.auto = nextEl.value === "" ? "1" : "";
   const suggest = () => {
     if (nextEl.dataset.auto !== "1") return;
     const v = veh(), km = v && v.oil_km, mileage = num(mileageEl.value);
+    if (hasOil && !hasOil()) { nextEl.value = ""; hint(mileage > 0 ? "ไม่มีรายการน้ำมันเครื่องในบิลนี้ — ไม่ต้องใส่ (เลขไมล์ยังใช้เป็นเลขไมล์ล่าสุดของรถ)" : ""); return; }
     if (km && mileage > 0) { nextEl.value = String(Math.round(mileage + km)); hint(`= เลขไมล์ + ${baht(km)} (รอบน้ำมันเครื่องของรถคันนี้) — แก้ได้`); }
     else { nextEl.value = ""; hint(""); }
   };
+  nextEl._suggest = suggest;                      // the bill lines call it again when they change
   nextEl.addEventListener("input", () => { nextEl.dataset.auto = nextEl.value === "" ? "1" : ""; hint(""); });
   mileageEl.addEventListener("input", suggest);
   vehicleSel.addEventListener("change", () => {
@@ -315,7 +321,8 @@ function render(draft, pickedVehicle) {
   bindDateField($("evDate"), $("evDateCap"));
   vSel.addEventListener("change", renderFixes);   // the "which repairs does this close" list follows the truck
   vSel.addEventListener("change", renderTyrePick);  // so do the wheels of a tyre bill
-  bindVehicleAutofill({ vehicleSel: vSel, branchEl: $("evBranch"), mileageEl: $("evMileage"), nextEl: $("evNext"), hintEl: $("evNextHint"), fillBranchNow: true });
+  bindVehicleAutofill({ vehicleSel: vSel, branchEl: $("evBranch"), mileageEl: $("evMileage"), nextEl: $("evNext"), hintEl: $("evNextHint"), fillBranchNow: true,
+    hasOil: () => hasOilLine("#billBlocks") });
   bindMileageHistory({ vehicleSel: vSel, dateEl: $("evDate"), mileageEl: $("evMileage"), hintEl: $("evMileHint") });
   renderFixes();
 
@@ -523,6 +530,7 @@ const lineSum = () => readLines().reduce((s, l) => s + (l.line_total || 0), 0);
 function linesChanged() {
   syncVat();
   renderTyrePick();
+  if ($("evNext") && $("evNext")._suggest) $("evNext")._suggest();
   if (!state.totalManual) {
     const t = $("evTotal");
     t.value = String(round2(lineSum()));

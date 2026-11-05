@@ -1,0 +1,3 @@
+-- v39: a truck's "ครบกำหนดที่" (v_vehicle_status.next_service_mileage) only comes from a bill with an ENGINE-OIL line.
+-- A tyre or repair bill carries the mileage (still the truck's latest odometer) but is not an oil change.
+-- (Applied 5 Nov 2026 via MCP: the full view text is in the migration schema_v39_next_service_from_oil_bills.)
