@@ -1530,6 +1530,20 @@ def api_plan_add_reading(body: dict = Body(...), x_app_token: str = Header(defau
     return _plan_call(service_plan.add_reading, body)
 
 
+@app.get("/api/plan/odometer-sheet")
+def api_plan_odometer_sheet(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """จดเลขไมล์: every truck with its latest odometer and the figure it should read about now."""
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.odometer_sheet)
+
+
+@app.post("/api/plan/readings/bulk")
+def api_plan_readings_bulk(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Many odometer readings at once (all or nothing; a figure lower than the truck's last one is refused)."""
+    _check_token(x_app_token, token)
+    return _plan_call(service_plan.add_readings, body)
+
+
 @app.delete("/api/plan/readings/{reading_id}")
 def api_plan_delete_reading(reading_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)

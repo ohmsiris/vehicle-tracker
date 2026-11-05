@@ -511,7 +511,19 @@ def _blank_status(item: dict) -> dict:
             "progress": None, "est_km_since": None, "est_km_left": None, "due_km": None, "read_km_left": None}
 
 
-def odometer_anomaly(points: list[dict], kmpd: Optional[float]) -> Optional[dict]:
+def gps_rate(readings: list[dict], today: date) -> Optional[float]:
+    """km per day from the GPS periods of the last GPS_WINDOW_DAYS (None when there are none)."""
+    since = today - timedelta(days=GPS_WINDOW_DAYS)
+    km = days = 0
+    for r in readings:
+        s, e = parse_date(r.get("start_date")), parse_date(r.get("end_date"))
+        if r.get("kind") == "gps" and s and e and e >= since:
+            km += r["km"]
+            days += (e - s).days + 1
+    return km / days if days else None
+
+
+def odometer_anomaly(points: list[dict], kmpd: Optional[float], gps: Optional[float] = None) -> Optional[dict]:
     """Does the latest odometer figure fit the truck's usual driving? A reading LOWER than the one before, or one that ran far more
     than usual since the previous (often: the truck was away a long time and nothing was recorded in between) means the km data is
     incomplete -- the estimates should not be trusted until someone checks. `points` = odometer_points(); `kmpd` = the usual rate."""
@@ -534,6 +546,8 @@ def odometer_anomaly(points: list[dict], kmpd: Optional[float]) -> Optional[dict
         if span > 0 and prev["km"] >= first["km"]:
             base = (prev["km"] - first["km"]) / span
     base = base or kmpd
+    if gps and abs(rate - gps) <= gps * 0.35:          # the GPS says the truck really drives this much now: its use changed, the data is fine
+        return None
     if base and rate > base * ANOMALY_FACTOR and run - base * gap >= ANOMALY_MIN_KM:
         return {"kind": "jump", "text": f"ช่วง {gap} วันล่าสุดวิ่ง {run:,} กม. ({rate:.0f} กม./วัน) มากกว่าปกติ (~{base:.0f} กม./วัน) — ข้อมูลไมล์อาจไม่ครบ"}
     return None
@@ -644,7 +658,7 @@ def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], r
     odo = latest_odometer(readings, records)
     measured = est["value"] if est["source"] in ("gps", "odometer") else None
     km_first = not vehicle.get("odometer_broken")
-    anomaly = odometer_anomaly(odometer_points(readings, records), measured) if km_first else None
+    anomaly = odometer_anomaly(odometer_points(readings, records), measured, gps_rate(readings, today)) if km_first else None
     statuses = [item_status(it, last_done(it["key"], records), measured, odo, today, soon_days, default_kmpd, km_first=km_first, km_trusted=not anomaly)
                 for it in plan]
     for s in statuses:                                  # a snooze counts only for the due date it was made for
@@ -1099,6 +1113,59 @@ def add_reading(data: dict) -> dict:
     if not _vehicles(only=row["vehicle_id"]):
         raise InvalidPlan("ไม่พบรถคันนี้")
     return supabase.insert("km_readings", [row])[0]
+
+
+# ------------------------------------------- "จดเลขไมล์": every truck's odometer typed in one go (monthly, around the 16th)
+def check_bulk_readings(rows: list[dict], last: dict, day: date) -> list[str]:
+    """The readings typed for many trucks at once, checked against each truck's latest figure {vehicle_id: {date, km, label}}:
+    a figure LOWER than the last one is refused (a typo, or the wrong truck). Pure."""
+    errors = []
+    for r in rows:
+        prev = last.get(r["vehicle_id"])
+        if prev and prev["date"] <= day and r["km"] < prev["km"]:
+            errors.append(f"{prev['label']}: {r['km']:,} น้อยกว่าเลขไมล์ล่าสุด {prev['km']:,} ({prev['date'].isoformat()})")
+    return errors
+
+
+def odometer_sheet() -> dict:
+    """Every active truck with its latest odometer figure and what it should read about now (for the page that takes them all)."""
+    today = today_th()
+    rows = overview(today=today)["vehicles"]
+    out = []
+    for r in rows:
+        odo, kmpd = r.get("odometer"), (r.get("km_per_day") or {}).get("value")
+        expected = None
+        if odo and kmpd:
+            expected = round(odo["km"] + kmpd * max((today - date.fromisoformat(odo["date"])).days, 0))
+        out.append({"id": r["id"], "label": _truck_label(r), "branch": r.get("branch"), "vehicle_class": r.get("vehicle_class"), "usage": r.get("usage"),
+                    "odometer": odo, "km_per_day": kmpd, "expected": expected, "odometer_broken": bool(r.get("odometer_broken")), "number": r.get("vehicle_number")})
+    out.sort(key=lambda x: (str(x["branch"] or ""), _numkey(x["number"])))
+    return {"today": today.isoformat(), "trucks": out}
+
+
+def add_readings(data: dict) -> dict:
+    """Save many odometer readings at once (all or nothing): {date, readings: [{vehicle_id, km}]}."""
+    _require()
+    today = today_th()
+    day = _date(data.get("date"), "วันที่อ่านเลขไมล์", today=today)
+    rows = []
+    for r in data.get("readings") or []:
+        if r.get("km") in (None, ""):
+            continue
+        rows.append({"vehicle_id": _uuid(r.get("vehicle_id"), "รถ"), "km": _int(r.get("km"), "เลขไมล์", allow_blank=False)})
+    if not rows:
+        raise InvalidPlan("ยังไม่ได้ใส่เลขไมล์ของรถคันไหนเลย")
+    sheet = {t["id"]: t for t in odometer_sheet()["trucks"]}
+    unknown = [r for r in rows if r["vehicle_id"] not in sheet]
+    if unknown:
+        raise InvalidPlan("มีรถที่ไม่พบในระบบ")
+    last = {vid: {"date": date.fromisoformat(t["odometer"]["date"]), "km": t["odometer"]["km"], "label": t["label"]} for vid, t in sheet.items() if t.get("odometer")}
+    errors = check_bulk_readings(rows, last, day)
+    if errors:
+        raise InvalidPlan(" · ".join(errors))
+    supabase.insert("km_readings", [{"vehicle_id": r["vehicle_id"], "kind": "odometer", "end_date": day.isoformat(), "km": r["km"], "notes": "จดเลขไมล์ประจำเดือน", "start_date": None}
+                                    for r in rows])
+    return {"saved": len(rows), **odometer_sheet()}
 
 
 def delete_reading(reading_id: str) -> None:

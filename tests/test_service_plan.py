@@ -688,3 +688,19 @@ def test_an_impossible_reading_is_flagged_and_does_not_turn_red():
                         overrides=[], today=date(2026, 11, 5))
     oil = next(i for i in p["items"] if i["key"] == "engine_oil")
     assert p["odometer_anomaly"]["kind"] == "impossible" and oil["state"] == "check" and oil["check_reason"] == "anomaly"
+
+
+
+def test_a_jump_the_gps_agrees_with_is_a_change_of_use_not_bad_data():
+    # truck #20: 75 km a day for months, then 158 a day -- and the GPS (Oct) says ~180 a day: it simply drives more now
+    pts = [{"end_date": "2025-12-08", "km": 567_541}, {"end_date": "2026-09-09", "km": 588_276}, {"end_date": "2026-11-05", "km": 597_274}]
+    assert sp.odometer_anomaly(pts, 90)["kind"] == "jump"
+    assert sp.odometer_anomaly(pts, 90, gps=179.5) is None
+
+
+
+def test_bulk_readings_refuse_a_figure_lower_than_the_last_one():
+    last = {"v1": {"date": date(2026, 11, 5), "km": 413_044, "label": "#13"}, "v2": {"date": date(2026, 10, 1), "km": 100_000, "label": "#2"}}
+    rows = [{"vehicle_id": "v1", "km": 414_000}, {"vehicle_id": "v2", "km": 99_000}, {"vehicle_id": "v3", "km": 5}]
+    errs = sp.check_bulk_readings(rows, last, date(2026, 11, 16))
+    assert len(errs) == 1 and errs[0].startswith("#2:")
