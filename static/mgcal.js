@@ -17,6 +17,7 @@ const MCL_VIEWS = [["month", "เดือน"], ["week", "สัปดาห์
 const MCL_KINDS = [["truck", "รถ"], ["machine", "เครื่องจักร"], ["job", "งานบอร์ด"], ["routine", "งานประจำ"]];
 const MCL_WD = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
 const MCL_MONTH_CHIPS = 3;                       // groups a day shows in the month view before "+N เพิ่มเติม" (today shows all)
+const MCL_SPREAD = { month: 3, week: 6 };         // a day with this many items or fewer shows each item instead of its groups
 
 const mclISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const mclDate = (iso) => new Date(`${iso}T00:00:00`);
@@ -138,6 +139,16 @@ function mclGroupsByDay(items) {
   return out;
 }
 
+// The chips one day shows: its groups -- or, when the day holds only a few items, every item on its own (room for them anyway).
+// Either way a chip opens the same place in the panel (an item still sits in its group there: "‹" goes back to it).
+function mclDayChips(groups, view) {
+  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  if (total <= (MCL_SPREAD[view] || 0) && groups.some((g) => g.items.length > 1)) {
+    return groups.flatMap((g) => g.items.map((it) => ({ ...g, items: [it], color: it.color, late: it.late, routineOnly: it.kind === "routine", text: it.text, single: g })));
+  }
+  return groups;
+}
+
 // ------------------------------------------------------------------ drawing
 function renderMcl() {
   if (!mcl.plan) return;
@@ -162,7 +173,7 @@ function mclOpen(day, group, item) {
 }
 
 function mclChip(g) {
-  const on = mcl.pick && mcl.pick.day === g.day && mcl.pick.group === g.key;
+  const on = mcl.pick && mcl.pick.day === g.day && mcl.pick.group === g.key && (!g.single || mcl.pick.item === g.items[0].key);
   const atShop = g.items.length === 1 && g.items[0].at_shop;
   return el("button", { type: "button", class: `mcl-chip${g.late ? " late" : ""}${on ? " on" : ""}${g.items.length > 1 ? " group" : ""}${atShop ? " shop" : ""}${g.routineOnly ? " routine" : ""}`,
     style: `--c:${g.color}`, title: g.text,
@@ -179,7 +190,7 @@ function mclMonth(byDay) {
   for (let i = 0; i < 42; i++) {
     const iso = mclAdd(start, i);
     if (i === 35 && iso.slice(0, 7) !== first.slice(0, 7)) break;          // a 5-week month needs no 6th row
-    const groups = byDay.get(iso) || [];
+    const groups = mclDayChips(byDay.get(iso) || [], "month");
     const cap = iso === today ? Infinity : MCL_MONTH_CHIPS;
     const shown = groups.slice(0, groups.length > cap + 1 ? cap : cap + 1);
     const more = groups.length - shown.length;
@@ -200,7 +211,7 @@ function mclWeek(byDay) {
   const cols = [];
   for (let i = 0; i < 7; i++) {
     const iso = mclAdd(start, i);
-    const groups = byDay.get(iso) || [];
+    const groups = mclDayChips(byDay.get(iso) || [], "week");
     cols.push(el("div", { class: `mcl-wcol${iso === today ? " today" : ""}${mcl.pick && mcl.pick.day === iso ? " on" : ""}`, onclick: () => mclOpen(iso) },
       el("div", { class: "mcl-whead" }, el("span", { class: "muted small", text: MCL_WD[i] }), el("strong", { text: String(Number(iso.slice(8))) })),
       ...(groups.length ? groups.map(mclChip) : [el("p", { class: "muted small mcl-empty", text: "—" })])));
