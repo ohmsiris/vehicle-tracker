@@ -8,7 +8,7 @@
 // Loaded BEFORE app.js: nothing here runs at load time.
 
 const mg = {
-  data: null, q: "", filterType: "", filterPlace: "", showOlder: false,
+  data: null, q: "", filterType: "", filterPlace: "", showOlder: false, showLater: false,
   dragId: null,
   edit: null, draft: {}, waiting: null,
   rec: [], recEdit: null, recDraft: {},
@@ -21,6 +21,8 @@ const MG_MONTHS = ["มกราคม", "กุมภาพันธ์", "ม�
 const mgTrim = (t) => (t ? String(t).slice(0, 5) : "");
 const mgTypeOf = (key) => (mg.data ? mg.data.types.find((t) => t.key === key) : null) || null;
 const mgClosedDay = (t) => (t.done_at ? new Date(new Date(t.done_at).getTime() + 7 * 3600000).toISOString().slice(0, 10) : "");   // the Thai calendar day it was closed
+const MG_LATER_DAYS = 14;                // a to-do due further off than this waits behind the "ล่วงหน้า" button until it gets close
+const mgLater = (t) => t.status === "todo" && !t.urgent && t.due_date && mgDaysTo(t.due_date) > MG_LATER_DAYS;
 const mgDaysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${mg.data.today}T00:00:00`)) / 86400000);
 
 // ============================================================ the board (#mgr)
@@ -77,11 +79,14 @@ function renderMgBoard() {
   const closed = d.recent.filter(keep);
   const older = closed.filter((t) => mgClosedDay(t) !== d.today);          // the closed column starts empty each day: yesterday's are one click away
   const by = { todo: [], doing: [], waiting: [], done: mg.showOlder ? closed : closed.filter((t) => mgClosedDay(t) === d.today) };
-  for (const t of d.tickets.filter(keep)) by[t.status].push(t);
+  const later = d.tickets.filter(keep).filter(mgLater).sort(mgSortKey);
+  for (const t of d.tickets.filter(keep)) if (q || mg.showLater || !mgLater(t)) by[t.status].push(t);     // a search finds the far-off ones too
   for (const k of ["todo", "doing", "waiting"]) by[k].sort(mgSortKey);
   for (const [key] of MG_COLS) {
     $(`mgCount_${key}`).textContent = key === "done" ? String(by.done.length) : String(by[key].length);
     fill($(`mgList_${key}`), ...(by[key].length ? by[key].map(mgCard) : [el("p", { class: "muted empty small", text: key === "done" ? "ยังไม่มีงานที่เสร็จวันนี้" : "ว่าง" })]),
+      key === "todo" && later.length && !q ? el("button", { class: "btn small", type: "button", text: mg.showLater ? "ซ่อนงานล่วงหน้า" : `ล่วงหน้า (${later.length}) · ถัดไป ${beDate(later[0].due_date)}`,
+        title: `งานที่กำหนดเกิน ${MG_LATER_DAYS} วันจะซ่อนไว้ และขึ้นมาเองเมื่อเหลือ ${MG_LATER_DAYS} วัน`, onclick: () => { mg.showLater = !mg.showLater; renderMgBoard(); } }) : null,
       key === "done" && older.length ? el("button", { class: "btn small", type: "button", text: mg.showOlder ? "ซ่อนของวันก่อนๆ" : `ดูที่ปิดไปก่อนหน้านี้ (${older.length})`, onclick: () => { mg.showOlder = !mg.showOlder; renderMgBoard(); } }) : null);
   }
   renderMgTypes();
