@@ -1498,3 +1498,31 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 /* ---- tyres: the wheels the app picked from the bill's tyre size */
 .ty-pick.ty-suggest { background: var(--flag-bg); box-shadow: 0 0 0 1px var(--flag-line); border-radius: var(--radius-sm); padding: 2px 8px; }
 .ty-suggest-note { margin: 6px 0 0; padding: 4px 10px; background: var(--flag-bg); border-left: 3px solid var(--flag-line); border-radius: var(--radius-sm); }
+
+/* ---- งานยาง and the tyres that come off */
+.ty-job { display: grid; gap: 6px; margin: 8px 0 10px; }
+.ty-job-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) 210px; gap: 4px 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.ty-job-row select, .ty-removal select { font: inherit; font-size: 14px; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+.ty-job-extra { grid-column: 2 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ty-job-extra[hidden] { display: none; }
+.ty-removed { display: grid; gap: 6px; margin: 6px 0 12px; }
+.ty-removed:empty { display: none; }
+.ty-removal { display: grid; grid-template-columns: minmax(0, 1fr) 150px 170px; gap: 6px; align-items: center; padding: 6px 10px; background: var(--flag-bg); border-radius: var(--radius-sm); }
+@media (max-width: 720px) { .ty-job-row, .ty-removal { grid-template-columns: 1fr; } .ty-job-extra { grid-column: 1; } }
+
+/* ---- รถ › ยางสำรอง (tyrestock.js) */
+.tst-card { padding: 14px 18px; }
+.tst-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.tst-head h3 { margin: 0; }
+.tst-table { width: 100%; border-collapse: collapse; }
+.tst-table th, .tst-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.tst-table th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.tst-table .num { text-align: right; }
+.tst-table tr.low td { background: var(--bad-soft); }
+.tst-moves { display: grid; gap: 2px; }
+.tst-move { display: grid; grid-template-columns: 110px 44px 110px minmax(0, 1fr); gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.tst-move .plus { color: var(--ok); }
+.tst-move .minus { color: var(--bad); }
+.tst-count { display: grid; gap: 6px; margin-top: 8px; }
+.tst-count-row { display: grid; grid-template-columns: 140px 90px 120px; gap: 8px; align-items: center; }
+@media (max-width: 600px) { .tst-move { grid-template-columns: 90px 40px minmax(0, 1fr); } .tst-move > :last-child { grid-column: 1 / -1; } .tst-count-row { grid-template-columns: 1fr 70px 90px; } }

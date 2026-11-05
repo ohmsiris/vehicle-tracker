@@ -47,7 +47,7 @@ function drawTyres() {
       el("h3", { text: "ยาง" }),
       el("button", { class: "linkbtn small", type: "button", title: "แก้ขนาดยาง / จำนวนล้อ", text: tySpecText(d.spec), onclick: openTyreSpec }),
       el("span", { class: "grow" }),
-      hasTyres ? btn("สลับยาง", openTyreRotate) : null,
+      hasTyres ? btn("งานยาง (ย้าย / เปลี่ยน / ยางสำรอง)", openTyreJob) : null,
       btn("+ บันทึกเปลี่ยนยาง", () => openTyreChange({}), "primary")),
     el("div", { class: "ty-body" }, tyreChassis(d), tyrePanel(d, v)),
     el("div", { class: "ty-legend small muted" },
@@ -111,6 +111,7 @@ function tyrePanel(d, v) {
       kv("ไมล์ตอนใส่", t.fitted_km != null ? `${baht(t.fitted_km)} กม.` : ""),
       kv("ใช้ไปแล้ว", w.km_used != null ? `~${baht(w.km_used)} กม.` : ""),
       kv("ราคา / ร้าน", [t.price != null ? `${baht(t.price)} ฿/เส้น` : null, t.vendor].filter(Boolean).join(" · ")),
+      kv("ที่มา", t.source === "spare" ? "ยางสำรองจากสต็อก" : ""),
       kv("หมายเหตุ", t.notes))
       : el("p", { class: "muted small", text: "ยังไม่มีข้อมูลยางล้อนี้" }),
     el("div", { class: "ty-actions" },
@@ -118,7 +119,80 @@ function tyrePanel(d, v) {
       t ? el("button", { class: "btn small", type: "button", text: "แก้ไข", onclick: () => openTyreEdit(t) }) : null),
     w.history.length ? el("div", { class: "ty-hist small" }, el("strong", { text: "ยางเส้นก่อน ๆ" }),
       ...w.history.map((h) => el("div", { class: "muted", text: [`${h.fitted_on ? beDate(h.fitted_on) : "?"} → ${h.removed_on ? beDate(h.removed_on) : "?"}`, h.brand, h.size,
-        h.fitted_km != null && h.removed_km != null ? `${baht(h.removed_km - h.fitted_km)} กม.` : null].filter(Boolean).join(" · ") }))) : null);
+        h.fitted_km != null && h.removed_km != null ? `${baht(h.removed_km - h.fitted_km)} กม.` : null,
+        h.removed_reason ? `ถอดเพราะ${TY_REASONS[h.removed_reason] || h.removed_reason}` : null, h.removed_to ? TY_DEST[h.removed_to] : null].filter(Boolean).join(" · ") }))) : null);
+}
+
+const TY_REASONS = { worn: "ดอกหมด", burst: "แตก / บวม", puncture: "ตะปู / ฉีก", age: "ครบอายุ", other: "อื่นๆ" };
+const TY_DEST = { spare: "เก็บเป็นยางสำรอง", scrap: "ทิ้ง" };
+
+// one tyre coming off: why, and where it goes (ช่างเอ๋ decides fix-and-keep or throw away)
+function tyRemovalRow(t, label, store) {
+  const cur = store[t.id] || (store[t.id] = { reason: "", to: "" });
+  const reason = el("select", { "aria-label": "เปลี่ยนเพราะ" }, el("option", { value: "", text: "เปลี่ยนเพราะ…" }), ...Object.entries(TY_REASONS).map(([k, x]) => el("option", { value: k, text: x })));
+  const to = el("select", { "aria-label": "ยางเดิมไปไหน" }, el("option", { value: "", text: "ยางเดิมไปไหน…" }), ...Object.entries(TY_DEST).map(([k, x]) => el("option", { value: k, text: x })));
+  reason.value = cur.reason;
+  to.value = cur.to;
+  reason.onchange = () => { cur.reason = reason.value; };
+  to.onchange = () => { cur.to = to.value; };
+  return el("div", { class: "ty-removal" }, el("span", { class: "small", text: `${label}: ${[t.brand, t.size, t.fitted_on ? `ใส่ ${beDate(t.fitted_on)}` : null].filter(Boolean).join(" · ") || "ยางเดิม"}` }), reason, to);
+}
+
+// ---- "งานยาง": what really happens in one visit -- per wheel keep / move from another wheel / new / a spare from the store.
+// Every tyre that ends up on no wheel must say why it came off and where it went, so nothing is overwritten.
+function openTyreJob() {
+  const d = ty.d, s = d.spec || {};
+  const f = (s.front_size || "").toUpperCase(), r = (s.rear_size || "").toUpperCase();
+  const isFront = (p) => p === "FL" || p === "FR";
+  const fits = (size, p) => { const z = (size || "").toUpperCase(); return !(z && f && r && f !== r && ((isFront(p) && z === r) || (!isFront(p) && z === f))); };
+  const byPos = Object.fromEntries(d.positions.map((w) => [w.position, w]));
+  const removal = {};
+  const rows = d.positions.map((w) => {
+    const sel = el("select", { "aria-label": `${w.label}: ทำอะไร` },
+      el("option", { value: "keep", text: w.tyre ? "คงเดิม" : "ว่าง (ไม่ใส่)" }),
+      ...d.positions.filter((x) => x.position !== w.position && x.tyre && fits(x.tyre.size, w.position))
+        .map((x) => el("option", { value: `move:${x.position}`, text: `ย้ายยางจาก${x.label}` })),
+      el("option", { value: "new", text: "ยางใหม่" }), el("option", { value: "spare", text: "ยางสำรองจากสต็อก" }));
+    const size = tyInput(isFront(w.position) ? s.front_size : s.rear_size || s.front_size, { placeholder: "ขนาด" });
+    const brand = tyInput("", { placeholder: "ยี่ห้อ" });
+    const price = tyInput("", { inputmode: "decimal", placeholder: "ราคา/เส้น" });
+    const extra = el("div", { class: "ty-job-extra", hidden: true }, size, brand, price);
+    sel.onchange = () => { extra.hidden = !["new", "spare"].includes(sel.value); price.hidden = sel.value !== "new"; redraw(); };
+    const now = w.tyre ? [w.tyre.brand, w.tyre.size, tyAge(w.months)].filter(Boolean).join(" · ") : "ว่าง";
+    return { w, sel, size, brand, price, node: el("div", { class: "ty-job-row" }, el("strong", { class: "small", text: w.label }), el("span", { class: "muted small", text: now }), sel, extra) };
+  });
+  const removedBox = el("div", { class: "ty-removed" });
+  const redraw = () => {
+    const onWheels = new Set();
+    for (const x of rows) {
+      if (x.sel.value === "keep" && x.w.tyre) onWheels.add(x.w.tyre.id);
+      if (x.sel.value.startsWith("move:")) onWheels.add(byPos[x.sel.value.slice(5)].tyre.id);
+    }
+    const off = d.positions.filter((w) => w.tyre && !onWheels.has(w.tyre.id));
+    fill(removedBox, off.length ? el("div", { class: "muted small", text: "ยางที่ถอดออก — ต้องบอกว่าเปลี่ยนเพราะอะไร และไปไหน" }) : null,
+      ...off.map((w) => tyRemovalRow(w.tyre, `ยางเดิม${w.label}`, removal)));
+  };
+  redraw();
+  const date = tyInput(todayISO(), { type: "date" });
+  const cap = el("div", { class: "datecap" });
+  bindDateField(date, cap);
+  const km = tyInput(d.km_now || "", { inputmode: "numeric", placeholder: "เลขไมล์" });
+  const vendor = tyInput("", { placeholder: "ร้าน (ถ้าซื้อยางใหม่)" });
+  const notes = tyInput("", { maxlength: "300" });
+  tyreDialog("งานยาง", el("div", {},
+    el("p", { class: "muted small", text: "เลือกว่าแต่ละล้อทำอะไร — เช่น รถ 6 ล้อ: ย้ายยางหน้าไปหลังใน แล้วใส่ยางใหม่ที่หน้า · อายุและไมล์ของยางติดไปกับเส้นนั้น" }),
+    el("div", { class: "ty-job" }, ...rows.map((x) => x.node)), removedBox,
+    el("div", { class: "ty-fields" }, tyField("วันที่ทำ", date, cap), tyField("เลขไมล์", km), tyField("ร้าน", vendor), tyField("หมายเหตุ", notes))),
+    (err) => {
+      const wheels = {};
+      for (const x of rows) {
+        const v = x.sel.value;
+        if (v === "keep") continue;
+        wheels[x.w.position] = v.startsWith("move:") ? { action: "move", from: v.slice(5) }
+          : { action: v, size: x.size.value, brand: x.brand.value, price: v === "new" ? x.price.value : "" };
+      }
+      return tyreCall(`/api/vehicles/${ty.v.vehicle_id}/tyres/job`, jsonOpts("POST", { done_on: date.value, km: km.value, vendor: vendor.value, notes: notes.value, wheels, removed: removal }), err);
+    }, "บันทึกงานยาง");
 }
 
 // a tyre whose wheel isn't known: pick the wheel straight from the list
@@ -167,6 +241,14 @@ function openTyreChange({ positions = [], bill = null }) {
     return el("label", { class: `check ty-pick${suggested.has(w.position) ? " ty-suggest" : ""}`, title: suggested.has(w.position) ? "ระบบเลือกให้จากขนาดยาง — แก้ได้" : "" },
       box, ` ${w.label}${w.tyre ? "" : " (ว่าง)"}`);
   });
+  const removal = {};
+  const removedBox = el("div", { class: "ty-removed" });
+  const drawRemoved = () => {
+    const off = d.positions.filter((w) => w.tyre && picks.some((p) => p.querySelector("input").value === w.position && p.querySelector("input").checked));
+    fill(removedBox, off.length ? el("div", { class: "muted small", text: "ยางเดิมที่ถูกเปลี่ยน — ต้องบอกว่าเปลี่ยนเพราะอะไร และไปไหน" }) : null,
+      ...off.map((w) => tyRemovalRow(w.tyre, `ยางเดิม${w.label}`, removal)));
+  };
+  picks.forEach((p) => p.querySelector("input").addEventListener("change", drawRemoved));
   const hintNote = hint && (hint.picks.length || hint.why)
     ? el("p", { class: `small ${hint.picks.length ? "ty-suggest-note" : "muted"}`, text: hint.picks.length ? `💡 ระบบเลือกให้ (ไฮไลต์เหลือง): ${hint.why} — แก้ได้` : hint.why }) : null;
   const date = tyInput(bill ? bill.date : todayISO(), { type: "date" });
@@ -209,9 +291,10 @@ function openTyreChange({ positions = [], bill = null }) {
   unknown.addEventListener("input", recount);
   size.addEventListener("input", recount);
   recount();
+  drawRemoved();
   tyreDialog("บันทึกเปลี่ยนยาง", el("div", {},
     billNote,
-    el("div", { class: "muted small", text: "ล้อที่เปลี่ยน" }), el("div", { class: "ty-picks" }, ...picks), counter, axleNote, hintNote,
+    el("div", { class: "muted small", text: "ล้อที่เปลี่ยน" }), el("div", { class: "ty-picks" }, ...picks), counter, axleNote, hintNote, removedBox,
     el("div", { class: "ty-fields" },
       tyField("วันที่เปลี่ยน", date, cap), tyField("เลขไมล์", km), tyField("ขนาด", size), tyField("ยี่ห้อ / รุ่น", brand),
       tyField("ราคาต่อเส้น (฿)", price), tyField("ร้าน", vendor),
@@ -226,7 +309,7 @@ function openTyreChange({ positions = [], bill = null }) {
       return tyreCall(`/api/vehicles/${ty.v.vehicle_id}/tyres`, jsonOpts("POST", {
       positions: picks.map((p) => p.querySelector("input")).filter((b) => b.checked).map((b) => b.value), unknown_count: unknown.value,
       fitted_on: date.value, fitted_km: km.value, size: size.value, brand: brand.value, price: price.value, vendor: vendor.value, notes: notes.value,
-      event_id: bill ? bill.event_id : null,
+      event_id: bill ? bill.event_id : null, removed: removal,
     }), err);
     });
 }

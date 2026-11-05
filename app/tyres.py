@@ -323,8 +323,15 @@ def record_change(vehicle_id: str, data: dict) -> dict:
     wheels = (spec or {}).get("wheels") or default_wheels(v)
     picked, tyre = clean_change(data, wheels, today_th(), spec)
     rows = _rows(v["id"])
-    for p in {p for p in picked if p != UNKNOWN}:
-        for old in [r for r in rows if r["position"] == p and not r.get("removed_on")]:
+    from app import tyre_store                          # (lazy: tyre_store uses this module)
+    replaced = [r for p in {p for p in picked if p != UNKNOWN} for r in rows if r["position"] == p and not r.get("removed_on")]
+    removal = data.get("removed") if isinstance(data.get("removed"), dict) else None
+    for old in replaced:
+        if tyre_store.has_v40() and (removal or {}).get(old["id"]):
+            tyre_store.remove_into(old, tyre_store.clean_removal(removal[old["id"]], old.get("size"), LABELS.get(old["position"], "")), tyre["fitted_on"], tyre["fitted_km"], v["id"])
+        elif tyre_store.has_v40():
+            raise InvalidTyre(f"ยางเดิมที่{LABELS.get(old['position'], '')}: เลือกว่าเปลี่ยนเพราะอะไร และเก็บเป็นยางสำรองหรือทิ้ง")
+        else:
             supabase.update("tyres", {"id": f"eq.{old['id']}"}, {"removed_on": tyre["fitted_on"], "removed_km": tyre["fitted_km"]})
     size_of = lambda p: tyre["size"] or ((spec or {}).get("front_size") if p in ("FL", "FR") else (spec or {}).get("rear_size"))   # noqa: E731
     supabase.insert("tyres", [{"vehicle_id": v["id"], "position": p, **tyre, "size": size_of(p)} for p in picked])

@@ -49,6 +49,8 @@ TABLES: dict[str, str] = {
     "machine_mechanics": "id.asc",
     "vehicle_tyre_specs": "vehicle_id.asc",
     "tyres": "id.asc",
+    "tyre_stock_moves": "id.asc",
+    "tyre_stock_sizes": "size.asc",
     "service_groups": "code.asc",
     "vehicle_plans": "vehicle_id.asc",
     "service_records": "id.asc",

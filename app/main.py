@@ -28,7 +28,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import attendance, calendar_plan, dashboard, machine_reports, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
+from app import attendance, calendar_plan, dashboard, machine_reports, tyre_store, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -859,6 +859,39 @@ def api_vehicle_tyre_change(vehicle_id: str, body: dict = Body(...), x_app_token
 def api_vehicle_tyre_rotate(vehicle_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_token(x_app_token, token)
     return _tyre_call(tyres.rotate, vehicle_id, body)
+
+
+@app.post("/api/vehicles/{vehicle_id}/tyres/job")
+def api_tyre_job(vehicle_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """"งานยาง": per wheel keep / move / new / spare; every tyre that ends up on no wheel says why and where it went."""
+    _check_token(x_app_token, token)
+    return _tyre_call(tyre_store.tyre_job, vehicle_id, body)
+
+
+@app.get("/api/tyre-stock")
+def api_tyre_stock(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """ยางสำรอง: on hand per size, minimums, the latest moves."""
+    _check_token(x_app_token, token)
+    return _tyre_call(tyre_store.stock_view)
+
+
+@app.post("/api/tyre-stock/moves")
+def api_tyre_stock_move(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _tyre_call(tyre_store.add_moves, body)
+
+
+@app.post("/api/tyre-stock/count")
+def api_tyre_stock_count(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The real count per size: what differs from the ledger is corrected and returned ("หายไป 1 เส้น")."""
+    _check_token(x_app_token, token)
+    return _tyre_call(tyre_store.count_stock, body)
+
+
+@app.post("/api/tyre-stock/min")
+def api_tyre_stock_min(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _tyre_call(tyre_store.set_min, body)
 
 
 @app.patch("/api/tyres/{tyre_id}")
