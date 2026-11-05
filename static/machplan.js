@@ -279,7 +279,38 @@ async function saveReading() {
 async function openMachinePrograms() {
   showView("machinePlan");
   showErr("mppError", "");
+  mppExportWire();
   await loadMachinePrograms();
+}
+
+// The two downloads: the yearly report for officials and the one-page PM plan (app/machine_reports.py).
+function mppExportWire() {
+  const sel = $("mppYear");
+  if (sel.options.length) return;
+  const y = new Date().getFullYear();
+  for (let x = y; x >= y - 3; x--) sel.append(el("option", { value: String(x), text: String(x + 543) }));
+  $("mppReport").onclick = () => mppDownload("report", $("mppReport"), `รายงานซ่อมบำรุงเครื่องจักร ${Number(sel.value) + 543}.xlsx`);
+  $("mppPm").onclick = () => mppDownload("pm-list", $("mppPm"), `แผน PM เครื่องจักร ${Number(sel.value) + 543}.xlsx`);
+}
+
+async function mppDownload(kind, btn, filename) {
+  btn.disabled = true;
+  $("mppExportError").hidden = true;
+  try {
+    const res = await fetch(`/api/machine-files/${kind}.xlsx?year=${encodeURIComponent($("mppYear").value)}`, { headers: { "X-App-Token": state.token } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const url = URL.createObjectURL(await res.blob());
+    const a = el("a", { href: url, download: filename });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (err) {
+    $("mppExportError").textContent = `ดาวน์โหลดไม่สำเร็จ: ${err.message}`;
+    $("mppExportError").hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function loadMachinePrograms() {

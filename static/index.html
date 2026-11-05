@@ -1025,6 +1025,16 @@
       <h2 class="page-title">แผนซ่อมบำรุงเครื่องจักร</h2>
       <p class="muted small">โปรแกรม = เครื่องได้งานอะไรบ้าง ทำทุกกี่เดือน / กี่ชั่วโมง (อย่างไหนถึงก่อน) และระดับของงาน — เครื่องแต่ละเครื่องใช้หนึ่งโปรแกรม (เลือกได้ด้านล่าง) เหมือนกลุ่มของรถ</p>
     </div>
+    <div class="card mpp-export">
+      <div><strong>ดาวน์โหลดเอกสาร</strong> <span class="muted small">ไฟล์ Excel ขาวดำ พิมพ์ลง A4 ได้เลย</span></div>
+      <div class="mpp-export-row">
+        <label class="muted small" for="mppYear">ปี พ.ศ.</label>
+        <select id="mppYear"></select>
+        <button type="button" class="btn small primary" id="mppReport">รายงานประจำปี (สำหรับหน่วยงาน)</button>
+        <button type="button" class="btn small" id="mppPm">แผน PM (1 หน้า)</button>
+      </div>
+      <p class="error small" id="mppExportError" hidden></p>
+    </div>
     <p class="error" id="mppError" hidden></p>
     <div class="edit-banner" id="mppNeedsV34" hidden>ยังตั้งโปรแกรมไม่ได้ — ต้องรันไฟล์ <strong>schema_v34.sql</strong> ใน Supabase ก่อน</div>
     <div id="mppList"></div>

@@ -28,7 +28,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import attendance, calendar_plan, dashboard, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
+from app import attendance, calendar_plan, dashboard, machine_reports, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
 from app.categorize import MAX_ITEMS, categorize
@@ -1659,6 +1659,47 @@ def api_log(
                         sort=sort, limit=limit, offset=offset)
     res["facets"] = logbook.facets(rows)
     return res
+
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _report_year(year: str) -> int:
+    """The year asked for: ค.ศ. (2026) or พ.ศ. (2569) both work; blank = this year."""
+    if not year.strip():
+        return repair_requests.today_bangkok().year
+    try:
+        y = int(year)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ปีไม่ถูกต้อง")
+    y = y - 543 if y > 2400 else y
+    if not 2000 <= y <= 2100:
+        raise HTTPException(status_code=400, detail="ปีไม่ถูกต้อง")
+    return y
+
+
+@app.get("/api/machine-files/report.xlsx")
+def api_machine_report(year: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")):
+    """รายงานซ่อมบำรุงเครื่องจักรประจำปี (for officials): status page, month-by-month sheets, every report of the year."""
+    _check_token(x_app_token, token)
+    y = _report_year(year)
+    try:
+        body = machine_reports.yearly_report(y, today=repair_requests.today_bangkok())
+    except supabase.SupabaseError as err:
+        raise HTTPException(status_code=502, detail=f"ฐานข้อมูลตอบกลับผิดพลาด: {err}")
+    return Response(content=body, media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="machine-report-{y + 543}.xlsx"'})
+
+
+@app.get("/api/machine-files/pm-list.xlsx")
+def api_machine_pm_list(year: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")):
+    """แผน PM: one A4 page of the plan (what, how often, which machine) to show outside parties; no done / not-done marks."""
+    _check_token(x_app_token, token)
+    y = _report_year(year)
+    try:
+        body = machine_reports.pm_list(y)
+    except supabase.SupabaseError as err:
+        raise HTTPException(status_code=502, detail=f"ฐานข้อมูลตอบกลับผิดพลาด: {err}")
+    return Response(content=body, media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="pm-plan-{y + 543}.xlsx"'})
 
 
 @app.get("/api/log.csv")
