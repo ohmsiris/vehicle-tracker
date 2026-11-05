@@ -21,6 +21,7 @@ LABELS = {"FL": "หน้าซ้าย", "FR": "หน้าขวา", "RL":
           "RRI": "หลังขวาใน", "RRO": "หลังขวานอก", UNKNOWN: "ไม่ทราบตำแหน่ง"}
 NEEDS_V36 = "ต้องรัน schema_v36.sql ใน Supabase ก่อน จึงจะบันทึกยางได้"
 SIZE_RE = re.compile(r"\b(\d{3})\s*/\s*(\d{2})\s*(?:Z?R|-)?\s*(\d{2}(?:\.\d)?)\b", re.I)
+RADIAL_SIZE = re.compile(r"(?<!\d)\d{3}\s*/\s*\d{2}\s*Z?R\s*\d{2}", re.I)
 TYRE_LINE = re.compile(r"ยาง(?:เรเดียล|เรเดีย|นอก|ใหม่|รถ)?|tire|tyre", re.I)
 NOT_A_TYRE = re.compile(r"ยางใน|จุ๊บ|ปะ|ยางกันฝุ่น|ยางแท่น|ยางรอง|ยางหูโช้ค|ยางกันกระแทก|ยางปัด|ท่อยาง|ลูกยาง|ยางฝา|ยางเบ้า|ยางกัน|ยางโอริง|ยางหิ้ว|ยางรัด|ซีลยาง")
 BRANDS = ("MICHELIN", "BRIDGESTONE", "DUNLOP", "YOKOHAMA", "GOODYEAR", "MAXXIS", "DEESTONE", "OTANI", "TOYO", "HANKOOK", "FALKEN", "CONTINENTAL", "KUMHO", "NITTO", "PIRELLI", "LENSO")
@@ -68,7 +69,9 @@ def is_tyre_line(description) -> bool:
     text = str(description or "")
     if NOT_A_TYRE.search(text):
         return False
-    return bool(TYRE_LINE.search(text) and (SIZE_RE.search(text) or re.search(r"ยางเรเดียล|ยางนอก", text)))
+    if RADIAL_SIZE.search(text):                      # "225/75R14": only ever a tyre -- even when the reading got the word wrong ("ขางเรเดียล")
+        return True
+    return bool((TYRE_LINE.search(text) or "เรเดียล" in text) and (SIZE_RE.search(text) or re.search(r"เรเดียล|ยางนอก", text)))
 
 
 def brand_of(description) -> str:

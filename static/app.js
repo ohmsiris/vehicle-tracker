@@ -645,7 +645,9 @@ async function confirmSave() {
 const TP_SIZE = /(\d{3})\s*\/\s*(\d{2})\s*(?:Z?R|-)?\s*(\d{2}(?:\.\d)?)/i;
 const TP_NOT = /ยางใน|จุ๊บ|ปะ|ยางกันฝุ่น|ยางแท่น|ยางรอง|ยางหูโช้ค|ยางกันกระแทก|ยางปัด|ท่อยาง|ลูกยาง|ยางฝา|ยางเบ้า|ยางกัน|ยางโอริง|ยางหิ้ว|ยางรัด|ซีลยาง/;
 const TP_BRANDS = ["MICHELIN", "BRIDGESTONE", "DUNLOP", "YOKOHAMA", "GOODYEAR", "MAXXIS", "DEESTONE", "OTANI", "TOYO", "HANKOOK", "FALKEN", "CONTINENTAL", "KUMHO", "NITTO", "PIRELLI"];
-const tpIsTyre = (d) => !TP_NOT.test(d || "") && /ยาง|tire|tyre/i.test(d || "") && (TP_SIZE.test(d || "") || /ยางเรเดียล|ยางนอก/.test(d || ""));
+// a tyre: "225/75R14" alone is enough (the reading sometimes gets the word wrong: "ขางเรเดียล"); else the word and a size / เรเดียล
+const tpIsTyre = (d) => !TP_NOT.test(d || "") && (/\d{3}\s*\/\s*\d{2}\s*Z?R\s*\d{2}/i.test(d || "")
+  || (/ยาง|เรเดียล|tire|tyre/i.test(d || "") && (TP_SIZE.test(d || "") || /เรเดียล|ยางนอก/.test(d || ""))));
 const tpSize = (d) => { const m = TP_SIZE.exec(d || ""); return m ? `${m[1]}/${m[2]}R${m[3]}` : ""; };
 const tpBrand = (d) => { const up = String(d || "").toUpperCase(); const b = TP_BRANDS.find((x) => up.includes(x)); return b ? b[0] + b.slice(1).toLowerCase() : ""; };
 const tp = { vehicleId: null, data: null, picked: new Set(), seq: 0, touched: false, suggested: "" };

@@ -21,6 +21,8 @@ def test_sizes_are_written_one_way():
 def test_tyre_lines_are_told_apart_from_rubber_parts():
     assert ty.is_tyre_line("ยางเรเดียล 225/75R14 MICHELIN XCD2")
     assert ty.is_tyre_line("ยางเรเดียล 205/70R15 BRIDGESTONE DURAVIS R611")
+    assert ty.is_tyre_line("ขางเรเดียล 225/75R14 MICHELIN XCD2")             # misread word: the size still says tyre
+    assert ty.is_tyre_line("MICHELIN 225/75 R14 XCD2") and ty.is_tyre_line("เรเดียล 7.50-16")
     for not_tyre in ("ยางกันฝุ่นเบรคหน้า L", "ยางแท่นเครื่อง L-R", "ลูกยางเบรคหน้า L", "ท่อยางหม้อน้ำบน-ล่าง", "ยางฝาครอบวาล์ว", "ยางใน 7.50-16", "ปะยาง"):
         assert not ty.is_tyre_line(not_tyre), not_tyre
     assert ty.brand_of("ยางเรเดียล 205/70R15 BRIDGESTONE DURAVIS R611") == "Bridgestone"
