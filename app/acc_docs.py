@@ -119,12 +119,21 @@ def build(batch: dict, vehicles: list[dict]) -> dict:
     return {"docs": docs, "entries": entries, "problems": problems}
 
 
-def import_batch(batch: dict) -> dict:
-    """Write one batch, replacing what an earlier import of the same batch wrote (its docs cascade to their entries)."""
+def image_path(batch: str, page: int) -> str:
+    return f"accdocs/{batch}/p{page}.jpg"
+
+
+def import_batch(batch: dict, force: bool = False) -> dict:
+    """Write one batch, replacing what an earlier import of the same batch wrote (its docs cascade to their entries). Refuses when
+    someone already fixed lines on the review screen (they would be lost) unless force."""
     from app.accounting import _insert_entries, _require
     _require()
+    if not force and supabase.select("acc_docs", {"select": "page", "batch": f"eq.{batch['batch']}", "edited_at": "not.is.null", "limit": "1"}):
+        raise BadBatch("มีหน้าที่แก้บนหน้าตรวจแล้ว — นำเข้าใหม่จะทับที่แก้ (ใช้ --force ถ้าตั้งใจ)")
     vehicles = supabase.select_all("vehicles", {"select": "id,vehicle_number,plate_number,branch", "order": "id.asc"})
     out = build(batch, vehicles)
+    for d in out["docs"]:
+        d["image_path"] = image_path(batch["batch"], d["page"])
     supabase.delete("acc_docs", {"batch": f"eq.{batch['batch']}"})
     supabase.delete("acc_entries", {"source_id": f"like.{batch['batch']}:*"})
     cols = sorted({k for d in out["docs"] for k in d})
@@ -217,3 +226,123 @@ def docs_for(start: date, end: date, branch: str = "") -> list[dict]:
 
 def mark_checked(doc_id: str) -> None:
     supabase.update("acc_docs", {"id": f"eq.{doc_id}"}, {"status": "checked"})
+
+
+# ------------------------------------------------------------------ the review screen: scan beside the lines read from it
+def upload_images(batch: dict, pdfs: dict, dpi: int = 140) -> int:
+    """Render every page the batch uses from its PDFs ({file key: path}) and store it (JPEG) where the review screen finds it."""
+    import pymupdf
+    opened = {k: pymupdf.open(p) for k, p in pdfs.items()}
+    items = list(batch.get("covers", [])) + list(batch["pages"]) + list(batch.get("memos", [])) + ([batch["fuel_table"]] if batch.get("fuel_table") else [])
+    n = 0
+    for it in items:
+        doc = opened.get(it.get("file"))
+        if not doc or not it.get("file_page"):
+            continue
+        pix = doc[it["file_page"] - 1].get_pixmap(dpi=dpi)
+        supabase.storage_upload(image_path(batch["batch"], it["page"]), pix.tobytes("jpeg", jpg_quality=72), "image/jpeg", upsert=True)
+        n += 1
+    return n
+
+
+def _doc(doc_id: str) -> dict:
+    rows = supabase.select("acc_docs", {"select": "*", "id": f"eq.{doc_id}", "limit": "1"})
+    if not rows:
+        raise BadBatch("ไม่พบเอกสารนี้")
+    return rows[0]
+
+
+def doc_image(doc_id: str) -> bytes:
+    d = _doc(doc_id)
+    if not d.get("image_path"):
+        raise BadBatch("เอกสารนี้ไม่มีรูป")
+    return supabase.storage_download(d["image_path"])
+
+
+def _line_no(source_id: str) -> int:
+    m = re.search(r":l(\d+)$", source_id or "")
+    return int(m.group(1)) if m else 10_000
+
+
+def doc_detail(doc_id: str) -> dict:
+    """One page for the review screen: what it says on paper, the lines read from it (editable), the accounts and trucks to pick."""
+    d = _doc(doc_id)
+    entries = supabase.select_all("acc_entries", {"select": "id,entry_date,branch,party,description,source_id", "doc_id": f"eq.{doc_id}", "order": "id.asc"})
+    by_entry: dict = {}
+    if entries:
+        for ln in supabase.select_all("acc_lines", {"select": "entry_id,account,debit,vehicle_id", "entry_id": f"in.({','.join(e['id'] for e in entries)})", "order": "id.asc"}):
+            if float(ln["debit"] or 0) > 0:
+                by_entry[ln["entry_id"]] = ln
+    out = []
+    for e in sorted(entries, key=lambda e: (_line_no(e.get("source_id")), e.get("source_id") or "")):
+        c = by_entry.get(e["id"], {})
+        out.append({"id": e["id"], "date": e["entry_date"], "description": e["description"], "party": e["party"], "branch": e["branch"],
+                    "account": c.get("account"), "amount": float(c.get("debit") or 0), "vehicle_id": c.get("vehicle_id")})
+    accounts = supabase.select_all("acc_accounts", {"select": "code,name_th,kind", "active": "eq.true", "order": "sort_order.asc"})
+    vehicles = supabase.select_all("vehicles", {"select": "id,vehicle_number,plate_number,branch", "order": "vehicle_number.asc"})
+    keep = ("id", "batch", "page", "kind", "title", "file_name", "written_total", "read_total", "status", "note", "summary", "person")
+    return {"doc": {k: d.get(k) for k in keep} | {"has_image": bool(d.get("image_path"))},
+            "lines": out, "accounts": [a for a in accounts if a["kind"] in ("cogs", "expense", "income") or a["code"] == "1500"],
+            "vehicles": vehicles}
+
+
+def _recount(doc_id: str) -> dict:
+    d = _doc(doc_id)
+    entries = supabase.select_all("acc_entries", {"select": "id", "doc_id": f"eq.{doc_id}", "order": "id.asc"})
+    total = 0.0
+    if entries:
+        for ln in supabase.select_all("acc_lines", {"select": "debit", "entry_id": f"in.({','.join(e['id'] for e in entries)})", "order": "id.asc"}):
+            total += float(ln["debit"] or 0)
+    total = round(total, 2)
+    ok = d.get("written_total") is None or abs(total - float(d["written_total"])) < 0.5
+    values = {"read_total": total, "status": "ok" if ok else "mismatch", "edited_at": date.today().isoformat()}
+    supabase.update("acc_docs", {"id": f"eq.{doc_id}"}, values)
+    return values
+
+
+def clean_change(ch: dict, accounts: dict, vehicles: dict, doc_branch: str) -> dict:
+    """One fixed / new line from the review screen -> {date, description, amount, account, vehicle_id, branch, lines}."""
+    try:
+        amount = round(float(str(ch.get("amount") or "").replace(",", "")), 2)
+        when = date.fromisoformat(str(ch.get("date") or "")[:10])
+    except ValueError:
+        raise BadBatch("ใส่วันที่และจำนวนเงินให้ถูก")
+    if amount <= 0:
+        raise BadBatch("จำนวนเงินต้องมากกว่า 0")
+    acc = str(ch.get("account") or "")
+    if acc not in accounts or (accounts[acc]["kind"] not in ("cogs", "expense", "income") and acc != "1500"):
+        raise BadBatch("เลือกหมวดบัญชี")
+    vid = ch.get("vehicle_id") or None
+    if vid and vid not in vehicles:
+        raise BadBatch("ไม่พบรถ")
+    branch = (vehicles.get(vid) or {}).get("branch") or ch.get("branch") or doc_branch
+    return {"date": when.isoformat(), "description": (str(ch.get("description") or "").strip() or "—")[:300], "branch": branch,
+            "lines": [{"account": acc, "debit": amount, "credit": 0.0, "branch": branch, "vehicle_id": vid, "memo": None},
+                      {"account": "1100", "debit": 0.0, "credit": amount, "branch": branch, "vehicle_id": None, "memo": None}]}
+
+
+def save_lines(doc_id: str, changes: list) -> dict:
+    """The owner's fixes from the review screen: each {id?, date, description, amount, account, vehicle_id, delete?}. A line without
+    id is new. Lines are rewritten as cash-paid entries like the import; the page total is re-checked."""
+    import uuid
+    from app.accounting import _insert_entries
+    d = _doc(doc_id)
+    accounts = {a["code"]: a for a in supabase.select_all("acc_accounts", {"select": "code,kind", "order": "code.asc"})}
+    vehicles = {v["id"]: v for v in supabase.select_all("vehicles", {"select": "id,branch", "order": "id.asc"})}
+    for ch in changes:
+        if ch.get("delete"):
+            if ch.get("id"):
+                supabase.delete("acc_entries", {"id": f"eq.{ch['id']}", "doc_id": f"eq.{doc_id}"})
+            continue
+        c = clean_change(ch, accounts, vehicles, d.get("branch"))
+        if ch.get("id"):
+            if not supabase.select("acc_entries", {"select": "id", "id": f"eq.{ch['id']}", "doc_id": f"eq.{doc_id}", "limit": "1"}):
+                raise BadBatch("ไม่พบบรรทัดนี้")
+            supabase.update("acc_entries", {"id": f"eq.{ch['id']}"}, {"entry_date": c["date"], "branch": c["branch"], "description": c["description"]})
+            supabase.delete("acc_lines", {"entry_id": f"eq.{ch['id']}"})
+            supabase.insert("acc_lines", [{**ln, "entry_id": ch["id"], "machine_id": None} for ln in c["lines"]])
+        else:
+            _insert_entries([{"entry_date": c["date"], "branch": c["branch"], "source": d.get("feed") or "manual",
+                              "source_id": f"{d['batch']}:p{d['page']}:x{uuid.uuid4().hex[:8]}", "party": "เพิ่มตอนตรวจ",
+                              "description": c["description"], "doc_type": "petty_cash", "doc_no": None, "doc_id": doc_id, "lines": c["lines"]}])
+    return _recount(doc_id)

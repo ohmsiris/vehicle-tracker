@@ -1,7 +1,10 @@
 """Load a transcribed batch of mid / end-of-month documents into the books.
 
-    python scripts/import_acc_docs.py data/acc_docs/2026_10_saraburi.py          # dry run: page checks only
-    python scripts/import_acc_docs.py data/acc_docs/2026_10_saraburi.py --write  # replace the batch in the database
+    python scripts/import_acc_docs.py data/acc_docs/2026_10_saraburi.py                 # dry run: page checks only
+    python scripts/import_acc_docs.py data/acc_docs/2026_10_saraburi.py --write         # replace the batch in the database
+    python scripts/import_acc_docs.py data/acc_docs/2026_10_saraburi.py --images "mid=<pdf>" "end=<pdf>"
+                                                                                       # store the page scans for the review screen
+--write refuses when lines were already fixed on the review screen; add --force to overwrite them anyway.
 """
 import importlib.util
 import os
@@ -21,8 +24,12 @@ def load(path: str) -> dict:
 
 def main() -> None:
     batch = load(sys.argv[1])
+    if "--images" in sys.argv:
+        pdfs = dict(a.split("=", 1) for a in sys.argv[sys.argv.index("--images") + 1:] if "=" in a)
+        print(acc_docs.upload_images(batch, pdfs), "page images stored")
+        return
     if "--write" in sys.argv:
-        print(acc_docs.import_batch(batch))
+        print(acc_docs.import_batch(batch, force="--force" in sys.argv))
         return
     vehicles = supabase.select_all("vehicles", {"select": "id,vehicle_number,plate_number,branch", "order": "id.asc"})
     out = acc_docs.build(batch, vehicles)

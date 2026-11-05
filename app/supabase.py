@@ -174,11 +174,11 @@ def rpc(function: str, args: dict) -> Any:
         _forget()
 
 
-def storage_upload(path: str, data: bytes, content_type: str) -> None:
+def storage_upload(path: str, data: bytes, content_type: str, upsert: bool = False) -> None:
     resp = _client().post(
         f"/storage/v1/object/{STORAGE_BUCKET}/{quote(path)}",
         content=data,
-        headers={"Content-Type": content_type, "x-upsert": "false"},
+        headers={"Content-Type": content_type, "x-upsert": "true" if upsert else "false"},
     )
     _check(resp, f"storage upload {path}")
 

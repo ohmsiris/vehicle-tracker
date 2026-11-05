@@ -1579,3 +1579,24 @@ input[type=date]::-webkit-calendar-picker-indicator:hover, input[type=month]::-w
 .acx-fuel-row > :nth-child(n+2) { text-align: right; }
 .acx-fuel-row.bad { background: color-mix(in srgb, var(--bad, #b91c1c) 10%, transparent); }
 @media (max-width: 760px) { .acx-fuel-row { grid-template-columns: 1fr 40px 70px 70px; } .acx-fuel-row > :nth-child(5), .acx-fuel-row > :nth-child(6) { display: none; } }
+
+/* บัญชี › ตรวจเอกสาร: scan beside the lines */
+.acx-doc-open { font-weight: 650; text-align: left; padding: 0; }
+dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; padding: 14px 18px; }
+.acx-rv-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.acx-rv-head h3 { margin: 0; }
+.acx-rv-head .btn { margin-left: auto; }
+.acx-rv { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: 16px; height: calc(100% - 44px); margin-top: 8px; }
+.acx-rv-scan { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
+.acx-rv-img { width: 100%; display: block; cursor: zoom-in; }
+.acx-rv-img.zoom { width: 200%; cursor: zoom-out; }
+.acx-rv-side { overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.acx-rv-line { display: grid; grid-template-columns: 118px minmax(160px, 1fr) 80px 150px 130px 40px; gap: 6px; align-items: center; }
+.acx-rv-line input, .acx-rv-line select { font: inherit; font-size: 13px; padding: 5px 6px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--text); min-width: 0; }
+.acx-rv-line input[inputmode=decimal] { text-align: right; }
+.acx-rv-line select[hidden] { display: block; visibility: hidden; }
+.acx-rv-line.deleted input, .acx-rv-line.deleted select { text-decoration: line-through; opacity: .45; }
+.acx-rv-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-top: 6px; border-top: 2px solid var(--line-strong); }
+.ok-text { color: var(--ok); font-weight: 650; }
+@media (max-width: 900px) { .acx-rv { grid-template-columns: 1fr; height: auto; } .acx-rv-scan { max-height: 45vh; }
+  .acx-rv-line { grid-template-columns: 110px minmax(0, 1fr) 80px; } .acx-rv-line > :nth-child(4), .acx-rv-line > :nth-child(5) { grid-column: span 1; } }

@@ -900,6 +900,39 @@ def api_accounts_delete(entry_id: str, x_app_token: str = Header(default=""), to
     return {"ok": True}
 
 
+@app.get("/api/accounts/docs/{doc_id}")
+def api_accounts_doc(doc_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The review screen: one page of a mid / end-of-month document and the lines read from it."""
+    from app import acc_docs
+    _check_token(x_app_token, token)
+    try:
+        return _acc_call(acc_docs.doc_detail, doc_id)
+    except acc_docs.BadBatch as exc:
+        raise HTTPException(422, str(exc))
+
+
+@app.get("/api/accounts/docs/{doc_id}/image")
+def api_accounts_doc_image(doc_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    """The scan of the page (served through the app: payroll papers are not put on a public link)."""
+    from app import acc_docs
+    _check_token(x_app_token, token)
+    try:
+        data = _acc_call(acc_docs.doc_image, doc_id)
+    except acc_docs.BadBatch as exc:
+        raise HTTPException(404, str(exc))
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.post("/api/accounts/docs/{doc_id}/lines")
+def api_accounts_doc_lines(doc_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import acc_docs
+    _check_token(x_app_token, token)
+    try:
+        return _acc_call(acc_docs.save_lines, doc_id, list(body.get("changes") or []))
+    except acc_docs.BadBatch as exc:
+        raise HTTPException(422, str(exc))
+
+
 @app.post("/api/accounts/docs/{doc_id}/checked")
 def api_accounts_doc_checked(doc_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """A page whose lines did not add up was looked at against the paper: mark it checked."""

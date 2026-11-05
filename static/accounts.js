@@ -101,7 +101,7 @@ function acxDocs(docs) {
     const state = x.status === "ok" ? ["✓", "ok", "ตรงยอด"] : x.status === "checked" ? ["✓", "ok", "ตรวจแล้ว"] : ["!", "warn", `ต่าง ${baht(Math.abs(diff))} ฿`];
     return el("div", { class: `acx-doc ${state[1]}` },
       el("span", { class: "acx-doc-icon", text: state[0] }),
-      el("div", {}, el("strong", { text: x.title || `หน้า ${x.page}` }),
+      el("div", {}, el("button", { class: "linkbtn acx-doc-open", type: "button", text: x.title || `หน้า ${x.page}`, onclick: () => acxReview(x.id) }),
         el("div", { class: "small muted", text: [ACX_KIND[x.kind], x.file_name, x.note].filter(Boolean).join(" · ") })),
       el("div", { class: "acx-doc-num" }, el("strong", { text: x.written_total != null ? `${baht(x.written_total)} ฿` : "" }),
         el("div", { class: "small muted", text: x.status === "mismatch" ? `อ่านได้ ${baht(x.read_total)} · ${state[2]}` : state[2] }),
@@ -109,11 +109,12 @@ function acxDocs(docs) {
   };
   return el("div", { class: "card acx-feeds" },
     el("h3", { text: `Expense documents · เอกสารเบิก${bad ? ` — ${bad} หน้าไม่ตรงยอด` : " — ทุกหน้าตรงยอด"}` }),
-    el("p", { class: "muted small", text: "อ่านทีละหน้าแล้วบวกเทียบยอดที่เขียนท้ายหน้า · หน้าที่ตรงยอดไม่ต้องตรวจ · ทุกบรรทัดอยู่ในงบด้านล่าง (เงินเบิกกลางเดือนไม่ใช่ค่าใช้จ่าย — ไปหักตอนจ่ายเงินเดือน)" }),
+    el("p", { class: "muted small", text: "กดชื่อหน้าเพื่อเปิดรูปเทียบกับบรรทัดที่อ่าน (แก้ได้) · อ่านทีละหน้าแล้วบวกเทียบยอดที่เขียนท้ายหน้า · หน้าที่ตรงยอดไม่ต้องตรวจ · ทุกบรรทัดอยู่ในงบด้านล่าง (เงินเบิกกลางเดือนไม่ใช่ค่าใช้จ่าย — ไปหักตอนจ่ายเงินเดือน)" }),
     ...money.map(row),
     memos.length ? el("h3", { class: "acx-sub", text: `Memos · บันทึก / เอกสารบุคคล (${memos.length}) — สำหรับพี่แมว` }) : null,
     ...memos.map((x) => el("div", { class: "acx-doc memo" }, el("span", { class: "acx-doc-icon", text: "•" }),
-      el("div", {}, el("strong", { text: x.title }), x.person ? el("span", { class: "muted small", text: ` · ${x.person}` }) : null,
+      el("div", {}, el("button", { class: "linkbtn acx-doc-open", type: "button", text: x.title, onclick: () => acxReview(x.id) }),
+        x.person ? el("span", { class: "muted small", text: ` · ${x.person}` }) : null,
         el("div", { class: "small", text: x.summary || "" })))));
 }
 
@@ -213,4 +214,84 @@ function acxAddDialog(preset) {
       field("ร้าน / ผู้รับเงิน", party), field("เลขที่เอกสาร", docNo), field("รายละเอียด", desc)),
     err, el("div", { class: "dialog-actions" }, el("span", { class: "grow" }), el("button", { class: "btn", type: "button", text: "ยกเลิก", onclick: () => dlg.close() }), save));
   dlg.showModal();
+}
+
+
+// ตรวจเอกสาร: the scan on one side, the lines read from it on the other. Fix an amount / account / truck, add or remove a line;
+// the page total re-checks against what is written on the paper. app/acc_docs.py doc_detail / save_lines.
+async function acxReview(docId) {
+  let dlg = $("acxReview");
+  if (!dlg) { dlg = el("dialog", { id: "acxReview", class: "acx-review" }); document.body.append(dlg); }
+  fill(dlg, el("p", { class: "muted", text: "กำลังโหลด…" }));
+  if (!dlg.open) dlg.showModal();
+  let d;
+  try { d = await api(`/api/accounts/docs/${docId}`); } catch (err) { fill(dlg, el("p", { class: "error", text: err.message }), el("button", { class: "btn", type: "button", text: "ปิด", onclick: () => dlg.close() })); return; }
+  const doc = d.doc;
+  const money = !["memo", "other", "cover", "fuel_table"].includes(doc.kind);
+  const rows = d.lines.map((ln) => ({ ...ln, _orig: JSON.stringify(ln) }));
+  const truckAcc = new Set(["6100", "6110", "6120", "6130"]);
+  const vehLabel = (v) => `#${v.vehicle_number} ${v.plate_number || ""}${v.branch === "แก่งคอย" ? " (แก่งคอย)" : ""}`;
+  const err = el("p", { class: "error", hidden: true });
+  const totalBox = el("div", { class: "acx-rv-total" });
+  const body = el("div", { class: "acx-rv-lines" });
+
+  const sum = () => rows.filter((r) => !r._delete).reduce((a, r) => a + (Number(String(r.amount).replace(/,/g, "")) || 0), 0);
+  const paintTotal = () => {
+    if (!money) { fill(totalBox, null); return; }
+    const s = Math.round(sum() * 100) / 100, w = doc.written_total;
+    const ok = w == null || Math.abs(s - w) < 0.5;
+    fill(totalBox, el("span", { class: ok ? "ok-text" : "warn-text", text: ok ? `✓ ตรงยอด ${baht(s)} ฿` : `รวมบรรทัด ${baht(s)} ฿ · บนกระดาษ ${baht(w)} ฿ · ต่าง ${baht(Math.abs(s - w))} ฿` }));
+  };
+  const rowEl = (r) => {
+    const date = el("input", { type: "date", value: r.date || "" });
+    const desc = el("input", { type: "text", value: r.description || "" });
+    const amt = el("input", { type: "text", inputmode: "decimal", value: r.amount != null ? String(r.amount) : "" });
+    const acc = el("select", {}, ...d.accounts.map((a) => el("option", { value: a.code, text: `${a.code} ${a.name_th}` })));
+    acc.value = r.account || "7900";
+    const veh = el("select", {}, el("option", { value: "", text: "— ไม่ระบุรถ —" }), ...d.vehicles.map((v) => el("option", { value: v.id, text: vehLabel(v) })));
+    veh.value = r.vehicle_id || "";
+    veh.hidden = !truckAcc.has(acc.value) && !r.vehicle_id;
+    const del = el("button", { class: "linkbtn small", type: "button", text: "ลบ" });
+    const line = el("div", { class: "acx-rv-line" }, date, desc, amt, acc, veh, del);
+    const sync = () => {
+      Object.assign(r, { date: date.value, description: desc.value, amount: amt.value, account: acc.value, vehicle_id: veh.value || null });
+      veh.hidden = !truckAcc.has(acc.value) && !veh.value;
+      paintTotal();
+    };
+    for (const x of [date, desc, amt, acc, veh]) x.oninput = x.onchange = sync;
+    del.onclick = () => { r._delete = !r._delete; line.classList.toggle("deleted", r._delete); del.textContent = r._delete ? "เอาคืน" : "ลบ"; paintTotal(); };
+    return line;
+  };
+  const paintRows = () => fill(body, ...rows.map(rowEl));
+  const add = el("button", { class: "btn small", type: "button", text: "+ เพิ่มบรรทัด", onclick: () => {
+    const last = rows[rows.length - 1];
+    rows.push({ id: null, date: last ? last.date : todayISO(), description: "", amount: "", account: last ? last.account : "7900", vehicle_id: null, _orig: "" });
+    paintRows(); paintTotal();
+  } });
+  const save = el("button", { class: "btn primary", type: "button", text: "บันทึก" });
+  save.onclick = async () => {
+    const changes = rows.filter((r) => r._delete ? r.id : (!r.id || JSON.stringify({ ...r, _orig: undefined, _delete: undefined }) !== JSON.stringify({ ...JSON.parse(r._orig || "{}"), _orig: undefined })))
+      .map((r) => r._delete ? { id: r.id, delete: true } : { id: r.id, date: r.date, description: r.description, amount: r.amount, account: r.account, vehicle_id: r.vehicle_id, branch: r.branch });
+    if (!changes.length) { dlg.close(); return; }
+    save.disabled = true; err.hidden = true;
+    try { await api(`/api/accounts/docs/${docId}/lines`, jsonOpts("POST", { changes })); dlg.close(); await loadAccounts(); }
+    catch (e) { err.textContent = e.message; err.hidden = false; }
+    save.disabled = false;
+  };
+  const checked = doc.status === "mismatch" ? el("button", { class: "btn", type: "button", text: "ดูต้นฉบับแล้ว ✓", onclick: async () => { await acxDocChecked(doc); dlg.close(); } }) : null;
+  const img = doc.has_image ? el("img", { class: "acx-rv-img", alt: doc.title || "", src: `/api/accounts/docs/${docId}/image?token=${encodeURIComponent(state.token)}` }) : el("p", { class: "muted", text: "ไม่มีรูปของหน้านี้" });
+  img.onclick = () => img.classList.toggle("zoom");
+  fill(dlg,
+    el("div", { class: "acx-rv-head" }, el("h3", { text: doc.title || `หน้า ${doc.page}` }),
+      el("span", { class: "muted small", text: [doc.file_name, doc.person, doc.note].filter(Boolean).join(" · ") }),
+      el("button", { class: "btn small", type: "button", text: "ปิด", onclick: () => dlg.close() })),
+    el("div", { class: "acx-rv" },
+      el("div", { class: "acx-rv-scan" }, img, el("p", { class: "muted small", text: "กดที่รูปเพื่อขยาย" })),
+      el("div", { class: "acx-rv-side" },
+        money ? el("div", { class: "acx-rv-line head small muted" }, ...["วันที่", "รายการ", "บาท", "หมวด", "รถ", ""].map((t) => el("span", { text: t }))) : null,
+        money ? body : el("p", { class: "small", text: doc.summary && !doc.summary.startsWith("{") ? doc.summary : "" }),
+        money ? el("div", { class: "acx-rv-foot" }, add, totalBox) : null,
+        err,
+        el("div", { class: "dialog-actions" }, el("span", { class: "grow" }), checked, money ? save : null))));
+  if (money) { paintRows(); paintTotal(); }
 }

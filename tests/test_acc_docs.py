@@ -60,3 +60,18 @@ def test_km_rate_prefers_gps_then_odometer():
     rate, src = ad.km_rate(odo, date(2026, 9, 26), date(2026, 10, 25))
     assert src == "เลขไมล์" and round(rate) == 100
     assert ad.km_rate([], date(2026, 9, 26), date(2026, 10, 25)) == (None, None)
+
+
+def test_a_fixed_line_is_rebooked_as_cash_with_the_trucks_branch():
+    accounts = {"6130": {"kind": "expense"}, "1500": {"kind": "asset"}, "1100": {"kind": "asset"}}
+    vehicles = {"k14": {"branch": "แก่งคอย"}}
+    c = ad.clean_change({"date": "2026-10-03", "description": "เติม", "amount": "1,000", "account": "6130", "vehicle_id": "k14"}, accounts, vehicles, "สระบุรี")
+    assert c["branch"] == "แก่งคอย" and c["lines"][0]["debit"] == 1000.0 and c["lines"][1]["account"] == "1100"
+    assert ad.clean_change({"date": "2026-10-16", "amount": 3000, "account": "1500"}, accounts, vehicles, "สระบุรี")["lines"][0]["account"] == "1500"
+    for bad in ({"date": "x", "amount": 1, "account": "6130"}, {"date": "2026-10-01", "amount": 0, "account": "6130"},
+                {"date": "2026-10-01", "amount": 5, "account": "1100"}, {"date": "2026-10-01", "amount": 5, "account": "6130", "vehicle_id": "nope"}):
+        try:
+            ad.clean_change(bad, accounts, vehicles, "สระบุรี")
+            assert False, bad
+        except ad.BadBatch:
+            pass
