@@ -185,19 +185,33 @@ function openTyreChange({ positions = [], bill = null }) {
   const need = bill && Number(bill.qty) > 0 ? Number(bill.qty) : 0;
   const boxes = picks.map((p) => p.querySelector("input"));
   const counter = need ? el("span", { class: "muted small" }) : null;
+  // a size that is one axle's cannot go on the other (same rule as the server: tyres.wrong_axle)
+  const axleNote = el("p", { class: "warn-text small", hidden: true });
+  const wrongAxle = (pos) => {
+    const sz = tpSize(size.value) || size.value.replace(/\s+/g, "").toUpperCase(), f = (s.front_size || "").toUpperCase(), r = (s.rear_size || "").toUpperCase();
+    if (!sz || !f || !r || f === r) return "";
+    if ((pos === "FL" || pos === "FR") && sz === r) return `${sz} เป็นขนาดยางหลังของรถคันนี้ — ใส่ล้อหน้าไม่ได้`;
+    if (pos !== "FL" && pos !== "FR" && sz === f) return `${sz} เป็นขนาดยางหน้าของรถคันนี้ — ใส่ล้อหลังไม่ได้`;
+    return "";
+  };
   const recount = () => {
-    if (!need) return;
+    const why = boxes.map((b) => wrongAxle(b.value)).find(Boolean) || "";
+    for (const b of boxes) if (wrongAxle(b.value)) b.checked = false;
+    axleNote.hidden = !why;
+    axleNote.textContent = why ? `⛔ ${why}` : "";
     const n = boxes.filter((b) => b.checked).length, u = Number(unknown.value) || 0;
-    for (const b of boxes) b.disabled = !b.checked && n + u >= need;
+    for (const b of boxes) b.disabled = !!wrongAxle(b.value) || (need && !b.checked && n + u >= need);
+    if (!need) return;
     counter.textContent = `เลือกแล้ว ${n}${u ? ` + ไม่ทราบล้อ ${u}` : ""} / ${need} เส้น${n + u < need ? ` — ขาดอีก ${need - n - u}` : " ✓"}`;
     counter.className = `small ${n + u === need ? "muted" : "warn-text"}`;
   };
   boxes.forEach((b) => b.addEventListener("change", recount));
   unknown.addEventListener("input", recount);
+  size.addEventListener("input", recount);
   recount();
   tyreDialog("บันทึกเปลี่ยนยาง", el("div", {},
     billNote,
-    el("div", { class: "muted small", text: "ล้อที่เปลี่ยน" }), el("div", { class: "ty-picks" }, ...picks), counter, hintNote,
+    el("div", { class: "muted small", text: "ล้อที่เปลี่ยน" }), el("div", { class: "ty-picks" }, ...picks), counter, axleNote, hintNote,
     el("div", { class: "ty-fields" },
       tyField("วันที่เปลี่ยน", date, cap), tyField("เลขไมล์", km), tyField("ขนาด", size), tyField("ยี่ห้อ / รุ่น", brand),
       tyField("ราคาต่อเส้น (฿)", price), tyField("ร้าน", vendor),

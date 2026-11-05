@@ -701,7 +701,9 @@ async function renderTyrePick() {
   });
   const countText = () => `เลือกแล้ว ${tp.picked.size} / ${qty} ล้อ`;
   const count = el("span", { class: "muted small", text: countText() });
-  const limit = () => boxes.forEach((l) => { const i = l.querySelector("input"); i.disabled = !i.checked && tp.picked.size >= qty; });       // no more wheels than tyres
+  const sz = sizes.length === 1 ? sizes[0] : "", fs = (d.spec || {}).front_size || "", rs = (d.spec || {}).rear_size || "";
+  const wrongAxle = (pos) => !!(sz && fs && rs && fs !== rs && ((["FL", "FR"].includes(pos) && sz === rs) || (!["FL", "FR"].includes(pos) && sz === fs)));
+  const limit = () => boxes.forEach((l) => { const i = l.querySelector("input"); i.disabled = wrongAxle(i.value) || (!i.checked && tp.picked.size >= qty); });   // no more wheels than tyres; never the wrong axle
   limit();
   fill(card, el("h2", {}, "ยางในบิลนี้ ", el("span", { class: "muted small", text: `${lines.map((l) => `${tpSize(l.description) || l.description} × ${l.quantity || 1}`).join(", ")} — เลือกล้อที่เปลี่ยน (ไม่เลือกก็ได้ ใส่ทีหลังที่หน้ารถ)` })),
     el("div", { class: "ty-picks" }, ...boxes), count,

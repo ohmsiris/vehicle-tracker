@@ -141,7 +141,24 @@ def clean_spec(data: dict) -> dict:
     return out
 
 
-def clean_change(data: dict, wheels: int, today: date) -> tuple[list[str], dict]:
+FRONT = ("FL", "FR")
+
+
+def wrong_axle(size: Optional[str], position: str, spec: Optional[dict]) -> Optional[str]:
+    """Why `size` cannot go on `position`, or None. Only when the truck's front and rear sizes are recorded and differ: the rear size
+    never goes on a front wheel and the other way round (225/75R14 at the front of a D-Max is a mistake, not a choice)."""
+    s = norm_size(size or "")
+    front, rear = norm_size((spec or {}).get("front_size") or ""), norm_size((spec or {}).get("rear_size") or "")
+    if not s or not front or not rear or front == rear or position == UNKNOWN:
+        return None
+    if position in FRONT and s == rear:
+        return f"{s} เป็นขนาดยางหลังของรถคันนี้ — ใส่ล้อหน้าไม่ได้"
+    if position not in FRONT and s == front:
+        return f"{s} เป็นขนาดยางหน้าของรถคันนี้ — ใส่ล้อหลังไม่ได้"
+    return None
+
+
+def clean_change(data: dict, wheels: int, today: date, spec: Optional[dict] = None) -> tuple[list[str], dict]:
     """"บันทึกเปลี่ยนยาง": the wheels changed (+ how many tyres whose wheel isn't known) and the new tyres' details."""
     allowed = positions(wheels)
     picked = [p for p in (data.get("positions") or []) if p]
@@ -168,6 +185,10 @@ def clean_change(data: dict, wheels: int, today: date) -> tuple[list[str], dict]
     tyre = {"brand": _text(data.get("brand"), 60), "size": (norm_size(size) or size) if size else None, "fitted_on": fitted_on,
             "fitted_km": _int(data.get("fitted_km"), "เลขไมล์"), "price": _money(data.get("price")), "vendor": _text(data.get("vendor"), 100),
             "event_id": event_id, "notes": _text(data.get("notes"), 300)}
+    for p in picked:
+        why = wrong_axle(tyre["size"], p, spec)
+        if why:
+            raise InvalidTyre(f"{why} (ถ้าขนาดยางที่บันทึกไว้ของรถผิด แก้ได้ที่ “ขนาดยาง”)")
     return picked + [UNKNOWN] * unknown, tyre
 
 
@@ -297,7 +318,7 @@ def record_change(vehicle_id: str, data: dict) -> dict:
     v = _vehicle(vehicle_id)
     spec = _spec(v["id"])
     wheels = (spec or {}).get("wheels") or default_wheels(v)
-    picked, tyre = clean_change(data, wheels, today_th())
+    picked, tyre = clean_change(data, wheels, today_th(), spec)
     rows = _rows(v["id"])
     for p in {p for p in picked if p != UNKNOWN}:
         for old in [r for r in rows if r["position"] == p and not r.get("removed_on")]:

@@ -87,3 +87,16 @@ def test_tyre_changes_show_in_the_history_one_line_per_change():
     h = sorted(ty.history_rows(rows), key=lambda r: r["done_date"])
     assert h[1]["label"] == "เปลี่ยนยาง 2 เส้น (หลังซ้าย · หลังขวา)" and h[1]["event_id"] == "e1" and h[1]["odometer_km"] == 424683 and h[1]["notes"] == "Michelin 225/75R14"
     assert h[0]["label"] == "เปลี่ยนยาง 1 เส้น (หน้าซ้าย)" and h[0]["source"] == "manual"
+
+
+
+def test_a_rear_size_cannot_go_on_the_front_and_the_other_way_round():
+    spec = {"front_size": "205/70R15", "rear_size": "225/75R14"}
+    ok = {"positions": ["RL", "RR"], "fitted_on": "2026-10-27", "size": "225/75R14"}
+    assert ty.clean_change(ok, 4, TODAY, spec)[0] == ["RL", "RR"]
+    with pytest.raises(ty.InvalidTyre):
+        ty.clean_change({**ok, "positions": ["FL", "RL"]}, 4, TODAY, spec)            # rear size on a front wheel
+    with pytest.raises(ty.InvalidTyre):
+        ty.clean_change({**ok, "positions": ["RR"], "size": "205/70 R15"}, 4, TODAY, spec)
+    assert ty.clean_change({**ok, "positions": ["FL"]}, 4, TODAY, {"front_size": "225/75R15", "rear_size": "225/75R15"})     # same size all round: anywhere
+    assert ty.clean_change({**ok, "positions": ["FL"], "size": "215/70R15"}, 4, TODAY, spec)                               # another size: allowed (just unusual)
