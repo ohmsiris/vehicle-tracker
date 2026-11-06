@@ -330,6 +330,7 @@ function render(draft, pickedVehicle) {
   const blocks = $("billBlocks");
   blocks.replaceChildren(...draft.bills.map((b) => billBlock(b, draft.line_items.filter((li) => li.file_index === b.file_index))));
   updateTotals();
+  $("evNext")._suggest();                          // now that the bill's lines are on the page, look again for an oil-change line
   tp.vehicleId = null; tp.picked = new Set(); tp.touched = false;      // a new bill: no wheels picked yet
   renderTyrePick();
 }
