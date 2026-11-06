@@ -201,6 +201,7 @@ async function saveManual() {
     resetAfterSave();
     resetManualForm();
     rqSaved(null);
+    doneTruck(veh);
     showView("done");
   } catch (err) {
     showErrorIn("manualError", "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ข้อมูลที่กรอกยังอยู่ ลองอีกครั้ง");

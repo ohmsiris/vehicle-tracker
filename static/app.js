@@ -219,7 +219,15 @@ function flagInput(node, flagged) {
 // (10,000 small / 20,000 big, from the plan: roster.oil_km) -- ONLY when the bill has an engine-oil line: a tyre or repair bill also carries
 // the mileage (a good odometer reading) but is not an oil change, and its next-mileage would become the truck's "ครบกำหนดที่".
 // A next-mileage the bill itself gave, or one you typed, is never overwritten; one this filled in follows the mileage and the lines.
-const OIL_LINE = /^\s*(?:ถ่าย|เปลี่ยน|ค่า)?\s*น้ำมันเครื่อง/;
+// The saved screen: a button to that truck's page (its plan, latest repairs, history) to check the bill landed right.
+function doneTruck(veh) {
+  const b = $("doneTruckBtn");
+  const id = veh && (veh.vehicle_id || veh.id);
+  b.hidden = !id;
+  b.onclick = id ? () => goHash(`#truck=${id}`) : null;
+}
+
+const OIL_LINE =/^\s*(?:ถ่าย|เปลี่ยน|ค่า)?\s*น้ำมันเครื่อง/;
 const hasOilLine = (container) => [...document.querySelectorAll(`${container} [data-f=description]`)].some((i) => OIL_LINE.test(i.value));
 
 function bindVehicleAutofill({ vehicleSel, branchEl, mileageEl, nextEl, hintEl, fillBranchNow = false, hasOil = null }) {
@@ -632,6 +640,7 @@ async function confirmSave() {
     $("doneClosed").textContent = [closed ? `ปิดงานซ่อมให้แล้ว ${closed} งาน` : "", tyresNote].filter(Boolean).join(" · ");
     resetAfterSave();
     rqSaved(veh ? veh.id : null);                          // off the queue of bills waiting to be checked
+    doneTruck(veh);
     showView("done");
   } catch (err) {
     showReviewError("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ข้อมูลที่กรอกยังอยู่ ลองอีกครั้ง");
