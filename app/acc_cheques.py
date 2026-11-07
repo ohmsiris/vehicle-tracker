@@ -117,6 +117,8 @@ def classify(row: dict) -> dict:
         return {"kind": "funding", "account": "1100", "vat": 0.0}
     if OWNER.search(what):
         return {"kind": "owner", "account": "3200", "vat": 0.0}
+    if "ตัดธนาคาร" in what:     # Kaeng Khoi paying back Saraburi's account for its staff paid by bank transfer: the wages are in payroll
+        return {"kind": "transfer", "account": "1600", "vat": 0.0}
     if TRANSFER.search(what) and "เงินเดือน" not in what:
         return {"kind": "transfer", "account": "1600", "vat": 0.0}
     if "ค่าทำบัญชี" in what:

@@ -72,3 +72,8 @@ def test_near_bill_match_needs_the_same_month():
     assert out["entries"][0]["kind"] == "cost"                                  # March's cheque is not August's bill
     e = out["entries"][1]
     assert e["kind"] == "pays_bill" and {ln["account"]: ln["debit"] for ln in e["lines"] if ln["debit"]} == {"2100": 1938139.34, "7900": 1000.0}
+
+
+def test_bank_paid_salaries_are_a_transfer_not_wages():
+    assert ac.classify(_row("เงินเดือนตัดธนาคาร เข้าบจ.สระบุรี 08 -69", "บจ.สระบุรีวารีเทพ"))["kind"] == "transfer"
+    assert ac.classify(_row("เงินเดือนผู้บริหาร 08/2569(แก่งคอยจ่าย)", "เงินสด"))["account"] == "7100"
