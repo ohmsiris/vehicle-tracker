@@ -2,7 +2,7 @@
 
 // บัญชี › ค่าไฟฟ้า (#electricity): every PEA bill read from its PDF (app/pea_bill.py, app/electricity.py), drawn so trends show.
 //   * headline tiles for the latest month (both meters together), each with the change from the month before
-//   * one panel per meter (small multiples -- the meters are told apart by panel, never by color):
+//   * one meter at a time, picked from a dropdown (more meters come with more branches), its four charts in a 2x2 grid:
 //       kWh by tariff period (stacked) · peak-period demand kW (what the demand charge is set by) · kVAR against PEA's limit ·
 //       cost per month by part
 //   * the full table underneath
@@ -10,7 +10,7 @@
 // (reference palette slots 2 / 1 / 3, validated all-pairs in light and dark). Over-limit kVAR uses the warning status color + a label.
 // Charts are plain SVG with a hover tooltip; numbers in the tooltip and the table, never painted on every bar.
 
-const el_ = { data: null, wired: false };
+const el_ = { data: null, wired: false, meter: "" };
 const ELEC_TH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 const elMon = (p) => { const [y, m] = p.split("-").map(Number); return `${ELEC_TH[m - 1]} ${String(y + 543).slice(2)}`; };
 const elN = (x, d = 0) => (x == null || Number.isNaN(x) ? "–" : Number(x).toLocaleString("th-TH", { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -23,6 +23,8 @@ async function openElectricity() {
   if (!el_.wired) {
     el_.wired = true;
     $("elBranch").onchange = loadElectricity;
+    $("elMeter").onchange = () => { el_.meter = $("elMeter").value; try { localStorage.setItem("vt_el_meter", el_.meter); } catch (e) { /* blocked */ } renderElectricity(); };
+    try { el_.meter = localStorage.getItem("vt_el_meter") || ""; } catch (e) { /* blocked */ }
   }
   await loadElectricity();
 }
@@ -37,11 +39,19 @@ async function loadElectricity() {
 function renderElectricity() {
   EL_W = window.innerWidth < 700 ? 360 : 520;               // a narrow screen draws narrower charts, so the labels stay readable
   const meters = (el_.data.meters || []).map((m) => ({ ...m, months: [...m.months].reverse() }));       // oldest -> newest, left to right
+  const pick = $("elMeter");
+  pick.hidden = !meters.length;
   if (!meters.length) {
     fill($("elBody"), el("div", { class: "card" }, el("p", { class: "muted", text: "ยังไม่มีใบแจ้งค่าไฟ — แนบ PDF ของ PEA ที่ " }, el("a", { href: "#accounts-in", text: "บัญชี › ลงข้อมูล / แนบไฟล์" }), " แถวค่าไฟฟ้า แล้วระบบอ่านให้เอง")));
     return;
   }
-  fill($("elBody"), elKpis(meters), el("div", { class: "el-grid" }, ...meters.map(elMeterPanel)), elTable(meters));
+  const key = (m) => `${m.ca_no}`;
+  if (!meters.some((m) => key(m) === el_.meter)) el_.meter = key(meters[0]);
+  const many = new Set(meters.map((m) => m.branch)).size > 1;
+  fill(pick, ...meters.map((m) => el("option", { value: key(m), text: `มิเตอร์ ${m.meter}${many ? ` · ${m.branch}` : ""}` })));
+  pick.value = el_.meter;
+  const m = meters.find((x) => key(x) === el_.meter);
+  fill($("elBody"), elKpis(meters), elMeterPanel(m), elTable([m]));
 }
 
 // ---- headline tiles: the latest month that every meter has, both meters added up
@@ -77,7 +87,7 @@ function elMeterPanel(m) {
   return el("div", { class: "card el-panel" },
     el("div", { class: "el-panel-head" }, el("h3", { text: `มิเตอร์ ${m.meter}` }), el("span", { class: "muted small", text: `${m.branch} · CA ${m.ca_no}` }),
       pfYear ? el("span", { class: "badge warn", text: `⚠ เสียค่า power factor ${elN(pfYear)} ฿ ใน ${ms.filter((x) => x.pf_charge).length} เดือน` }) : null),
-    elChart("หน่วยไฟ (kWh) แยกช่วงเวลา", "ส้ม = Peak จ–ศ 09:00–22:00 (แพง) · ฟ้า = Off-peak · เขียวน้ำทะเล = วันหยุด",
+    el("div", { class: "el-grid" }, elChart("หน่วยไฟ (kWh) แยกช่วงเวลา", "ส้ม = Peak จ–ศ 09:00–22:00 (แพง) · ฟ้า = Off-peak · เขียวน้ำทะเล = วันหยุด",
       elStack(ms, [["kwh_peak", "Peak", "var(--el-peak)"], ["kwh_offpeak", "Off-peak", "var(--el-off)"], ["kwh_holiday", "วันหยุด", "var(--el-hol)"]], (v) => `${elN(v)} kWh`),
       elLegend([["Peak", "var(--el-peak)"], ["Off-peak", "var(--el-off)"], ["วันหยุด", "var(--el-hol)"]])),
     elChart("Demand สูงสุดช่วง Peak (kW)", "ตัวนี้ตัวเดียวกำหนดค่า demand ทั้งเดือน — 15 นาทีที่สูงที่สุดของช่วง Peak",
@@ -87,7 +97,7 @@ function elMeterPanel(m) {
     elChart("ค่าไฟต่อเดือน (บาท)", "แยกส่วน: ค่าพลังงาน Peak / Off-peak · ค่า demand · Ft · ค่า PF · VAT",
       elStack(ms, [["energy_peak", "พลังงาน Peak", "var(--el-peak)"], ["energy_offpeak", "พลังงาน Off-peak", "var(--el-off)"], ["demand_charge", "ค่า demand", "var(--el-dem)"],
         ["ft_amount", "Ft", "var(--el-ft)"], ["pf_charge", "ค่า PF", "var(--warn)"], ["vat", "VAT", "var(--el-vat)"]], (v) => `${elN(v)} ฿`),
-      elLegend([["พลังงาน Peak", "var(--el-peak)"], ["พลังงาน Off-peak", "var(--el-off)"], ["Demand", "var(--el-dem)"], ["Ft", "var(--el-ft)"], ["ค่า PF", "var(--warn)"], ["VAT", "var(--el-vat)"]])));
+      elLegend([["พลังงาน Peak", "var(--el-peak)"], ["พลังงาน Off-peak", "var(--el-off)"], ["Demand", "var(--el-dem)"], ["Ft", "var(--el-ft)"], ["ค่า PF", "var(--warn)"], ["VAT", "var(--el-vat)"]]))));
 }
 
 function elChart(title, sub, svg, legend = null) {
@@ -214,9 +224,8 @@ function elTip(g, rows) {
 // ---- the numbers, for anyone who wants them
 function elTable(meters) {
   const head = ["เดือน", "หน่วย (kWh)", "Peak %", "Demand kW", "ค่า demand", "kVAR / เพดาน", "ค่า PF", "Ft", "รวม (บาท)", "บาท/หน่วย"];
-  return el("div", { class: "card acx-feeds" }, el("h3", { text: "ตัวเลขทั้งหมด" }),
+  return el("div", { class: "card acx-feeds" }, el("h3", { text: `ตัวเลขทั้งหมด · มิเตอร์ ${meters.map((m) => m.meter).join(", ")}` }),
     ...meters.map((m) => el("div", { class: "acx-elec" },
-      el("strong", { text: `มิเตอร์ ${m.meter}` }),
       el("div", { class: "acx-elec-row el-table-row head small muted" }, ...head.map((t) => el("span", { text: t }))),
       ...[...m.months].reverse().map((x) => el("div", { class: "acx-elec-row el-table-row" },
         el("span", { text: elMon(x.bill_period) }), el("span", { text: elN(x.kwh_total) }),

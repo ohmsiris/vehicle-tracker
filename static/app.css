@@ -1617,8 +1617,8 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 /* บัญชี › ค่าไฟฟ้า (elec.js). One color job: the tariff period. Reference palette slots (light / dark selected, not flipped). */
 :root { --el-peak: #eb6834; --el-off: #2a78d6; --el-hol: #1baf7a; --el-dem: #6250d6; --el-ft: #a9a79f; --el-vat: #d6d4cc; }
 :root[data-theme="dark"] { --el-peak: #d95926; --el-off: #3987e5; --el-hol: #199e70; --el-dem: #9085e9; --el-ft: #6f6d66; --el-vat: #4a4944; }
-.el-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 14px; margin-bottom: 14px; }
-.el-panel { padding: 14px 18px; }
+.el-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 4px 28px; }
+.el-panel { padding: 14px 18px; margin-bottom: 14px; }
 .el-panel-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-bottom: 4px; }
 .el-panel-head h3 { margin: 0; }
 .badge.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
@@ -1651,3 +1651,4 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 @media (max-width: 760px) { .el-grid { grid-template-columns: 1fr; } .el-table-row { grid-template-columns: 60px repeat(4, minmax(0, 1fr)); }
   .el-table-row > :nth-child(n+6):not(:nth-child(9)) { display: none; } }
 .el-kpi .kpi-value { font-size: 22px; white-space: nowrap; }
+#electricityView .acx-bar select { width: auto; min-width: 150px; flex: 0 1 auto; }
