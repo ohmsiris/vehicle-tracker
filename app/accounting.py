@@ -399,3 +399,56 @@ def mark_feed(data: dict) -> dict:
     else:
         raise InvalidEntry("สถานะไม่ถูกต้อง")
     return {"ok": True}
+
+
+# ------------------------------------------------------------------ the year at a glance (pure + reader)
+def year_rows(lines: list[dict], accounts: dict, months: list[str], branch: str = "") -> dict:
+    """Big lines only, month by month: revenue, cogs, gross profit, selling, admin, other income, net profit -- and the year's top
+    accounts. lines = [{account, debit, credit, date}] (date = entry date, ISO)."""
+    def cm(d: str) -> str:
+        y, m, dd = int(d[:4]), int(d[5:7]), int(d[8:10])
+        if dd >= 26:
+            y, m = _add_month(y, m, 1)
+        return f"{y}-{m:02d}"
+    per = {m: {k: 0.0 for k, _, _ in SECTIONS} for m in months}
+    acc_tot: dict = {}
+    for ln in lines:
+        if not branch and ln["account"] in INTERNAL:
+            continue
+        a = accounts.get(ln["account"])
+        m = cm(ln["date"])
+        if not a or a["kind"] not in ("income", "cogs", "expense") or m not in per:
+            continue
+        amt = (_money(ln["credit"]) - _money(ln["debit"])) if a["kind"] == "income" else (_money(ln["debit"]) - _money(ln["credit"]))
+        per[m][a["section"]] += amt
+        acc_tot[a["code"]] = acc_tot.get(a["code"], 0.0) + amt
+    out = []
+    for m in months:
+        s = {k: round(v, 2) for k, v in per[m].items()}
+        gross = round(s["revenue"] - s["cogs"], 2)
+        out.append({"month": m, **s, "gross_profit": gross, "expenses": round(s["selling"] + s["admin"], 2),
+                    "net_profit": round(gross - s["selling"] - s["admin"] + s["other"], 2)})
+    top = sorted(({"code": c, "en": accounts[c]["name_en"], "th": accounts[c]["name_th"], "section": accounts[c]["section"], "total": round(t, 2)}
+                  for c, t in acc_tot.items() if abs(t) >= 1), key=lambda x: -abs(x["total"]))
+    return {"months": out, "accounts": top}
+
+
+def year(branch: str = "", count: int = 12) -> dict:
+    """The last `count` company months up to this one (only months that have anything booked)."""
+    _require()
+    t = date.today()
+    y, m = (t.year, t.month) if t.day <= 25 else _add_month(t.year, t.month, 1)
+    months = []
+    for _ in range(count):
+        months.insert(0, f"{y}-{m:02d}")
+        y, m = _add_month(y, m, -1)
+    start, end = period_bounds(months[0])[0], period_bounds(months[-1])[1]
+    entries = {e["id"]: e["entry_date"] for e in supabase.select_all("acc_entries", {"select": "id,entry_date", "entry_date": f"gte.{start.isoformat()}",
+                                                                                    "and": f"(entry_date.lte.{end.isoformat()})", "order": "id.asc"})}
+    params = {"select": "entry_id,account,debit,credit", "order": "id.asc"}
+    if branch:
+        params["branch"] = f"eq.{branch}"
+    lines = [{**ln, "date": entries[ln["entry_id"]]} for ln in supabase.select_all("acc_lines", params) if ln["entry_id"] in entries]
+    out = year_rows(lines, _accounts(), months, branch)
+    out["months"] = [x for x in out["months"] if x["revenue"]]      # a month with costs but no sales booked yet would read as a loss
+    return out

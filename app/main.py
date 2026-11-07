@@ -963,6 +963,14 @@ def api_electricity(branch: str = "", x_app_token: str = Header(default=""), tok
     return {"meters": _acc_call(electricity.summary, branch, 24)}
 
 
+@app.get("/api/accounts/year")
+def api_accounts_year(branch: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """งบกำไรขาดทุน › ทั้งปี: the big P&L lines month by month (app/accounting.year)."""
+    from app import accounting
+    _check_token(x_app_token, token)
+    return _acc_call(accounting.year, branch)
+
+
 @app.get("/api/routes")
 def api_routes(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """สายรถ page: each Saraburi route truck month by month -- sales, fuel, driver pay, repairs, profit (app/routes_report.py)."""

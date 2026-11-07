@@ -39,10 +39,13 @@ async function openAccounts(mode = "out") {
   $("navAccountsIn").classList.toggle("active", mode === "in");
   $("acxTitle").textContent = mode === "in" ? "Inputs · ลงข้อมูล / แนบไฟล์" : "Profit & loss · งบกำไรขาดทุน";
   $("acxAdd").hidden = mode !== "in";
+  $("acxMonth").querySelector('option[value="year"]')?.toggleAttribute("hidden", mode === "in");
+  if (mode === "in" && $("acxMonth").value === "year") $("acxMonth").value = acxMonths()[0];
   showErr("acxError", "");
   if (!acx.wired) {
     acx.wired = true;
-    $("acxMonth").replaceChildren(...acxMonths().map((k) => el("option", { value: k, text: acxMonthLabel(k) })));
+    $("acxMonth").replaceChildren(el("option", { value: "year", text: "ทั้งปี · 12 เดือนล่าสุด (ภาพรวม)" }), ...acxMonths().map((k) => el("option", { value: k, text: acxMonthLabel(k) })));
+    $("acxMonth").value = acxMonths()[0];
     for (const id of ["acxMonth", "acxHalf", "acxBranch"]) $(id).onchange = loadAccounts;
     $("acxAdd").onclick = () => acxAddDialog({});
   }
@@ -50,10 +53,17 @@ async function openAccounts(mode = "out") {
 }
 
 async function loadAccounts() {
+  const yearView = $("acxMonth").value === "year";
+  $("acxHalf").hidden = yearView;
   const q = new URLSearchParams({ month: $("acxMonth").value, half: $("acxHalf").value, branch: $("acxBranch").value });
   fill($("acxBody"), el("p", { class: "muted", text: "กำลังคำนวณ…" }));
   try {
-    acx.data = await api(`/api/accounts/report?${q}`);
+    const yq = `/api/accounts/year?branch=${encodeURIComponent($("acxBranch").value)}`;
+    if (yearView) { acx.year = await api(yq); acx.yearBranch = $("acxBranch").value; renderYear(); return; }
+    const [rep, yr] = await Promise.all([api(`/api/accounts/report?${q}`),
+      acx.mode === "out" && acx.yearBranch !== $("acxBranch").value ? api(yq).catch(() => null) : Promise.resolve(acx.year)]);
+    acx.data = rep;
+    if (yr) { acx.year = yr; acx.yearBranch = $("acxBranch").value; }
   } catch (err) {
     fill($("acxBody"), null);
     showErr("acxError", `โหลดไม่สำเร็จ: ${err.message}`);
@@ -86,23 +96,30 @@ function renderAccounts() {
           el("button", { class: "btn small", type: "button", text: f.state === "none" ? "ยกเลิก" : "ไม่มีงวดนี้",
             onclick: () => acxMark(f.key, periodKey, f.state === "none" ? "" : "none") })) : null);
     }));
+  const prev = !half && acx.year ? acx.year.months.find((x) => x.month === acxPrevMonth(d.month)) : null;
   const summary = el("div", { class: "acx-kpis" },
-    acxKpi("Revenue · รายได้", p.revenue), acxKpi("Cost of goods sold · ต้นทุนขาย", p.cogs), acxKpi("Gross profit · กำไรขั้นต้น", p.gross_profit),
-    acxKpi("Expenses · ค่าใช้จ่าย", p.expenses), acxKpi("Net profit · กำไรสุทธิ", p.net_profit, true));
+    acxTile("Revenue · รายได้", p.revenue, p.revenue, prev && prev.revenue, "up", prev),
+    acxTile("Cost of goods sold · ต้นทุนขาย", p.cogs, p.revenue, prev && prev.cogs, "down", prev),
+    acxTile("Gross profit · กำไรขั้นต้น", p.gross_profit, p.revenue, prev && prev.gross_profit, "up", prev, true),
+    acxTile("Expenses · ค่าใช้จ่าย", p.expenses, p.revenue, prev && prev.expenses, "down", prev),
+    acxTile("Net profit · กำไรสุทธิ", p.net_profit, p.revenue, prev && prev.net_profit, "up", prev, true));
   const tree = el("div", { class: "card acx-tree" },
     el("h3", { text: "Profit & loss · งบกำไรขาดทุน" }),
-    el("p", { class: "muted small", text: "กดที่บรรทัดเพื่อเปิดดูละเอียดขึ้น: หมวด → บัญชี → ร้าน → แต่ละบิล · ไม่รวม VAT (VAT ไปที่บัญชีภาษีซื้อ) · รายได้ (ยอดขาย) ยังไม่ได้ลง — รายได้อื่นแยกไว้ล่างสุด" }),
+    el("p", { class: "muted small", text: "กดที่บรรทัดเพื่อเปิดดูละเอียดขึ้น: หมวด → บัญชี → ร้าน → แต่ละบิล · ไม่รวม VAT (VAT ไปที่บัญชีภาษีซื้อ) · % = ส่วนของรายได้ · รายได้อื่นแยกไว้ล่างสุด" }),
     ...p.sections.map((s) => acxNode(`s:${s.key}`, `${s.en} · ${s.th}`, s.total, "acx-l0",
       () => s.accounts.map((a) => acxNode(`a:${a.code}`, `${a.en} · ${a.th}`, a.total, "acx-l1",
         () => a.parties.map((pt) => acxNode(`a:${a.code}:${pt.party}`, pt.party, pt.total, "acx-l2",
           () => pt.entries.map((e) => acxEntry(e)))))))),
-    el("div", { class: "acx-line acx-total" }, el("span", { text: "Net profit · กำไรสุทธิ" }), el("strong", { text: acxMoney(p.net_profit) })));
+    el("div", { class: `acx-line acx-total ${p.net_profit < 0 ? "neg" : "pos"}` }, el("span", { text: "Net profit · กำไรสุทธิ" }),
+      el("span", { class: "acx-pct", text: acxPct(p.net_profit, p.revenue) }), el("strong", { text: acxMoney(p.net_profit) })));
   const toIn = el("p", { class: "muted small" }, "ยังขาดอะไรอยู่ ดูและแนบไฟล์ได้ที่ ", el("a", { href: "#accounts-in", text: "ลงข้อมูล / แนบไฟล์" }),
     ` (${d.feeds.filter((f) => f.state === "missing" || f.state === "received").length} รายการยังไม่ครบ)`);
   const toOut = el("p", { class: "muted small" }, "ดูผลที่ ", el("a", { href: "#accounts", text: "งบกำไรขาดทุน" }));
   const toElec = (d.electricity || []).length ? el("p", { class: "muted small" }, "ค่าไฟแยกมิเตอร์ กราฟ demand / Peak / power factor: ", el("a", { href: "#electricity", text: "หน้าค่าไฟฟ้า" })) : null;
-  if (acx.mode === "in") fill($("acxBody"), toOut, feeds, acxDocs(d.docs || []));
-  else fill($("acxBody"), summary, toIn, toElec, tree, acxFuel(d.fuel));
+  const toRoutes = el("p", { class: "muted small" }, "กำไรต่อคัน / น้ำมันต่อคัน: ", el("a", { href: "#routes", text: "หน้าสายรถ" }), " · ภาพรวมทั้งปี: เลือก \"ทั้งปี\" ที่ช่องเดือน");
+  acx.rev = p.revenue;
+  if (acx.mode === "in") fill($("acxBody"), toOut, feeds, acxDocs(d.docs || []), acxFuel(d.fuel));
+  else fill($("acxBody"), summary, toIn, toElec, toRoutes, tree);
 }
 
 // เอกสารเบิกกลาง / สิ้นเดือน: each page read, its lines checked against the total written on it; memos with a one-line summary.
@@ -167,7 +184,8 @@ function acxNode(key, label, total, cls, children) {
   const open = acx.open.has(key);
   const head = el("button", { type: "button", class: `acx-line ${cls}`, "aria-expanded": String(open),
     onclick: () => { open ? acx.open.delete(key) : acx.open.add(key); renderAccounts(); } },
-    el("span", { class: "acx-caret", text: open ? "▾" : "▸" }), el("span", { class: "acx-label", text: label }), el("strong", { text: acxMoney(total) }));
+    el("span", { class: "acx-caret", text: open ? "▾" : "▸" }), el("span", { class: "acx-label", text: label }),
+    cls === "acx-l2" ? el("span") : el("span", { class: "acx-pct", text: acxPct(total, acx.rev) }), el("strong", { text: acxMoney(total) }));
   return el("div", {}, head, open ? el("div", { class: "acx-kids" }, ...children()) : null);
 }
 
@@ -369,4 +387,135 @@ function acxElectricity(meters) {
         el("span", { class: x.pf_charge ? "warn-text" : "muted", text: x.pf_charge ? n(x.pf_charge, 2) : "–" }),
         el("strong", { text: n(x.total, 2) }),
         el("span", { text: n(x.baht_per_kwh, 2) }))))));
+}
+
+
+// ---- % of revenue, change from last month, coloring (green = better, red = worse)
+const acxPct = (v, rev) => (rev ? `${elN((v / rev) * 100, 1)}%` : "");
+function acxPrevMonth(m) { const [y, mm] = m.split("-").map(Number); return mm === 1 ? `${y - 1}-12` : `${y}-${String(mm - 1).padStart(2, "0")}`; }
+// good = "up" (more is better: revenue, profit) or "down" (less is better: costs). A profit line is red / green by its sign too.
+function acxTile(label, value, revenue, before, good, prev, signed = false) {
+  const ch = before ? (value - before) / Math.abs(before) : null;
+  const better = ch == null || Math.abs(ch) < 0.005 ? null : (ch > 0) === (good === "up");
+  const share = label.startsWith("Revenue") ? null : acxPct(value, revenue);
+  return el("div", { class: `kpi el-kpi${signed ? (value < 0 ? " bad" : " ok") : ""}` },
+    el("div", { class: "kpi-label", text: label }), el("div", { class: "kpi-value", text: `${acxMoney(value)} ฿` }),
+    share ? el("div", { class: "el-delta", text: `${share} ของรายได้` }) : null,
+    ch == null ? null : el("div", { class: `el-delta ${better == null ? "" : better ? "up-good" : "up-bad"}`, text: `${ch > 0 ? "▲" : "▼"} ${elN(Math.abs(ch) * 100, 1)}% จาก ${elMon(prev.month)}` }));
+}
+
+// ---- ทั้งปี: the big lines only, month by month
+const ACX_BIG = [["revenue", "Revenue · รายได้", "up"], ["cogs", "Cost of goods sold · ต้นทุนขาย", "down"], ["gross_profit", "Gross profit · กำไรขั้นต้น", "up"],
+  ["selling", "Selling & delivery · ขายและขนส่ง", "down"], ["admin", "Administrative · บริหาร", "down"], ["other", "Other income · รายได้อื่น", "up"],
+  ["net_profit", "Net profit · กำไรสุทธิ", "up"]];
+function renderYear() {
+  const y = acx.year, ms = y.months;
+  if (!ms.length) { fill($("acxBody"), el("div", { class: "card" }, el("p", { class: "muted", text: "ยังไม่มีเดือนที่ลงรายได้" }))); return; }
+  const tot = Object.fromEntries(ACX_BIG.map(([k]) => [k, ms.reduce((a, m) => a + (m[k] || 0), 0)]));
+  const best = ms.reduce((a, m) => (m.net_profit > a.net_profit ? m : a)), worst = ms.reduce((a, m) => (m.net_profit < a.net_profit ? m : a));
+  const tile = (k, label, signed) => el("div", { class: `kpi el-kpi${signed ? (tot[k] < 0 ? " bad" : " ok") : ""}` }, el("div", { class: "kpi-label", text: label }),
+    el("div", { class: "kpi-value", text: `${elShort(tot[k])} ฿` }), k === "revenue" ? el("div", { class: "el-delta", text: `${ms.length} เดือน · เฉลี่ย ${elShort(tot.revenue / ms.length)}/เดือน` })
+      : el("div", { class: "el-delta", text: `${acxPct(tot[k], tot.revenue)} ของรายได้` }));
+  const tiles = el("div", { class: "acx-kpis" }, tile("revenue", "Revenue · รายได้"), tile("cogs", "Cost of goods sold · ต้นทุนขาย"),
+    tile("gross_profit", "Gross profit · กำไรขั้นต้น", true), el("div", { class: "kpi el-kpi" }, el("div", { class: "kpi-label", text: "Expenses · ค่าใช้จ่าย" }),
+      el("div", { class: "kpi-value", text: `${elShort(tot.selling + tot.admin)} ฿` }), el("div", { class: "el-delta", text: `${acxPct(tot.selling + tot.admin, tot.revenue)} ของรายได้` })),
+    tile("net_profit", "Net profit · กำไรสุทธิ", true),
+    el("div", { class: "kpi el-kpi" }, el("div", { class: "kpi-label", text: "เดือนดีสุด / แย่สุด" }),
+      el("div", { class: "el-delta up-good", text: `▲ ${elMon(best.month)} · ${elShort(best.net_profit)} (${acxPct(best.net_profit, best.revenue)})` }),
+      el("div", { class: `el-delta ${worst.net_profit < 0 ? "up-bad" : ""}`, text: `▼ ${elMon(worst.month)} · ${elShort(worst.net_profit)} (${acxPct(worst.net_profit, worst.revenue)})` })));
+  const branchNote = $("acxBranch").value ? "" : " · รวมทุกสาขา (ไม่นับน้ำแข็งที่ส่งกันเองระหว่างสาขา)";
+  fill($("acxBody"),
+    el("p", { class: "muted small", text: `เฉพาะหัวข้อใหญ่ ไม่มีรายละเอียด — ดูรายละเอียดทีละเดือนได้โดยเลือกเดือนที่ช่องด้านบน${branchNote} · ม.ค.–เม.ย. น้ำมันยังไม่ครบบางส่วน` }),
+    tiles,
+    el("div", { class: "el-grid" },
+      el("div", { class: "card el-panel" }, elChart("กำไรสุทธิรายเดือน", "เขียว = กำไร · แดง = ขาดทุน · ตัวเลข = % ของรายได้", acxProfitBars(ms))),
+      el("div", { class: "card el-panel" }, elChart("รายได้ เทียบ ต้นทุน + ค่าใช้จ่าย", "ช่องว่างระหว่างสองเส้น = กำไร",
+        acxTwoLines(ms), elLegend([["รายได้", "var(--el-off)"], ["ต้นทุน + ค่าใช้จ่าย", "var(--el-peak)"]]))),
+      el("div", { class: "card el-panel" }, elChart("ต้นทุนและค่าใช้จ่าย เป็น % ของรายได้", "ยิ่งสูงยิ่งเหลือกำไรน้อย",
+        elStack(ms.map((m) => ({ bill_period: m.month, cogs: m.revenue ? (m.cogs / m.revenue) * 100 : 0, selling: m.revenue ? (m.selling / m.revenue) * 100 : 0, admin: m.revenue ? (m.admin / m.revenue) * 100 : 0 })),
+          [["cogs", "ต้นทุนขาย", "var(--el-peak)"], ["selling", "ขายและขนส่ง", "var(--el-off)"], ["admin", "บริหาร", "var(--el-dem)"]], (v) => `${elN(v, 1)}%`),
+        elLegend([["ต้นทุนขาย", "var(--el-peak)"], ["ขายและขนส่ง", "var(--el-off)"], ["บริหาร", "var(--el-dem)"]]))),
+      el("div", { class: "card el-panel" }, elChart("ค่าใช้จ่ายก้อนใหญ่ของปี", "10 อันดับแรก · % ของรายได้ทั้งปี", acxTopCosts(y.accounts, tot.revenue)))),
+    acxYearTable(ms, tot));
+}
+
+function acxProfitBars(ms) {
+  const W = EL_W, H = EL_H, P = EL_P;
+  const max = Math.max(...ms.map((m) => m.net_profit), 0), min = Math.min(...ms.map((m) => m.net_profit), 0);
+  const step = elNiceStep((max - min || 1) / 4), top = Math.ceil(max / step) * step, bot = Math.floor(min / step) * step;
+  const y = (v) => P.t + (H - P.t - P.b) * ((top - v) / (top - bot || 1));
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: "el-svg", role: "img" });
+  for (let v = bot; v <= top + step / 2; v += step) svg.append(sv("line", { x1: P.l, x2: W - P.r, y1: y(v), y2: y(v), class: Math.abs(v) < 1e-6 ? "el-base" : "el-gl" }),
+    sv("text", { x: P.l - 6, y: y(v) + 4, "text-anchor": "end", class: "el-tick" }, document.createTextNode(v < 0 ? `-${elShort(-v)}` : elShort(v))));
+  const s = elSlots(ms.length);
+  ms.forEach((m, i) => {
+    const v = m.net_profit, bx = s.x(i) + (s.w - s.bar) / 2, g = sv("g", { class: "el-hit" });
+    g.append(sv("rect", { x: bx, y: Math.min(y(v), y(0)), width: s.bar, height: Math.abs(y(v) - y(0)), rx: 4, fill: v < 0 ? "var(--bad)" : "var(--ok)" }),
+      sv("text", { x: bx + s.bar / 2, y: v < 0 ? y(v) + 13 : y(v) - 5, "text-anchor": "middle", class: "el-tick" }, document.createTextNode(acxPct(v, m.revenue))),
+      sv("rect", { x: s.x(i), y: P.t, width: s.w, height: H - P.t - P.b, fill: "transparent" }));
+    elTip(g, () => [elMon(m.month), ["รายได้", `${elN(m.revenue)} ฿`], ["ต้นทุน + ค่าใช้จ่าย", `${elN(m.cogs + m.selling + m.admin)} ฿`],
+      ["กำไรสุทธิ", `${elN(v)} ฿ · ${acxPct(v, m.revenue)}`, v < 0 ? "var(--bad)" : "var(--ok)"]]);
+    svg.append(g);
+  });
+  elXLabels(svg, ms.map((m) => ({ bill_period: m.month })), s);
+  return svg;
+}
+
+function acxTwoLines(ms) {
+  const cost = ms.map((m) => m.cogs + m.selling + m.admin);
+  const { svg, y } = elFrame(Math.max(...ms.map((m) => m.revenue), ...cost) * 1.05, elShort);
+  const s = elSlots(ms.length);
+  const pts = (vals) => vals.map((v, i) => [s.x(i) + s.w / 2, y(v)]);
+  const a = pts(ms.map((m) => m.revenue)), b = pts(cost);
+  svg.append(sv("polyline", { points: a.map((p) => p.join(",")).join(" "), class: "el-line" }),
+    sv("polyline", { points: b.map((p) => p.join(",")).join(" "), class: "el-line", style: "stroke: var(--el-peak)" }));
+  ms.forEach((m, i) => {
+    const g = sv("g", { class: "el-hit" });
+    g.append(sv("circle", { cx: a[i][0], cy: a[i][1], r: 4.5, class: "el-dot" }), sv("circle", { cx: b[i][0], cy: b[i][1], r: 4.5, class: "el-dot", style: "fill: var(--el-peak)" }),
+      sv("rect", { x: s.x(i), y: EL_P.t, width: s.w, height: EL_H - EL_P.t - EL_P.b, fill: "transparent" }));
+    elTip(g, () => [elMon(m.month), ["รายได้", `${elN(m.revenue)} ฿`, "var(--el-off)"], ["ต้นทุน + ค่าใช้จ่าย", `${elN(cost[i])} ฿`, "var(--el-peak)"],
+      ["ส่วนต่าง", `${elN(m.revenue - cost[i])} ฿`]]);
+    svg.append(g);
+  });
+  elXLabels(svg, ms.map((m) => ({ bill_period: m.month })), s);
+  return svg;
+}
+
+function acxTopCosts(accounts, revenue) {
+  const rows = accounts.filter((a) => ["cogs", "selling", "admin"].includes(a.section) && a.total > 0).slice(0, 10);
+  const W = EL_W, lab = W < 400 ? 120 : 190, H = 20, gap = 6, max = Math.max(...rows.map((r) => r.total), 1);
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${rows.length * (H + gap) + 6}`, class: "el-svg", role: "img" });
+  const col = { cogs: "var(--el-peak)", selling: "var(--el-off)", admin: "var(--el-dem)" };
+  rows.forEach((r, i) => {
+    const yy = i * (H + gap) + 3, w = (W - lab - 60) * (r.total / max), g = sv("g", { class: "el-hit" });
+    g.append(sv("text", { x: 0, y: yy + H / 2 + 4, class: "el-tick rt-lab" }, document.createTextNode(r.th.slice(0, W < 400 ? 16 : 26))),
+      sv("rect", { x: lab, y: yy, width: Math.max(1, w), height: H, rx: 4, fill: col[r.section] }),
+      sv("text", { x: lab + w + 6, y: yy + H / 2 + 4, class: "el-tick" }, document.createTextNode(acxPct(r.total, revenue))),
+      sv("rect", { x: 0, y: yy - gap / 2, width: W, height: H + gap, fill: "transparent" }));
+    elTip(g, () => [`${r.en} · ${r.th}`, ["ทั้งปี", `${elN(r.total)} ฿`], ["% ของรายได้", acxPct(r.total, revenue)]]);
+    svg.append(g);
+  });
+  return svg;
+}
+
+// the table: big lines x months; each cell the amount (thousands) and its % of revenue, colored against the year's own average
+function acxYearTable(ms, tot) {
+  const cols = `190px repeat(${ms.length + 1}, 76px)`;             // fixed widths: every row lines up
+  const head = el("div", { class: "acx-yr-row head small muted", style: `grid-template-columns:${cols}` }, el("span", { text: "พันบาท" }),
+    ...ms.map((m) => el("span", { text: elMon(m.month) })), el("strong", { text: "ทั้งปี" }));
+  const rows = ACX_BIG.map(([k, label, good]) => {
+    const avg = tot.revenue ? tot[k] / tot.revenue : 0;
+    const cell = (v, rev, isTotal) => {
+      const share = rev ? v / rev : 0;
+      let tone = "";
+      if (k === "net_profit" || k === "gross_profit") tone = v < 0 ? "bad" : "ok";
+      else if (k !== "revenue" && !isTotal && rev && Math.abs(share - avg) >= 0.03) tone = (share > avg) === (good === "down") ? "bad" : "ok";
+      return el("span", { class: `acx-yr-cell ${tone}` }, el("b", { text: elN(v / 1000) }), k === "revenue" ? null : el("small", { text: acxPct(v, rev) }));
+    };
+    return el("div", { class: `acx-yr-row${k === "net_profit" ? " total" : ""}${k === "gross_profit" ? " sub" : ""}`, style: `grid-template-columns:${cols}` },
+      el("span", { class: "acx-yr-label", text: label }), ...ms.map((m) => cell(m[k], m.revenue, false)), cell(tot[k], tot.revenue, true));
+  });
+  return el("div", { class: "card acx-feeds" }, el("h3", { text: "รายเดือน · หัวข้อใหญ่" }),
+    el("p", { class: "muted small", text: "ตัวเลขเป็นพันบาท · ตัวเล็ก = % ของรายได้เดือนนั้น · ต้นทุน/ค่าใช้จ่าย: แดง = สูงกว่าค่าเฉลี่ยทั้งปีเกิน 3 จุด, เขียว = ต่ำกว่า · กำไร: เขียว = กำไร, แดง = ขาดทุน" }),
+    el("div", { class: "acx-yr" }, head, ...rows));
 }

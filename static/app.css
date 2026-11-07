@@ -256,6 +256,8 @@ dialog label { margin: 14px 0 5px; }
 .kpi-label { color: var(--muted); font-size: 13px; font-weight: 500; }
 .kpi-value { font-size: 28px; font-weight: 700; margin: 3px 0 2px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .kpi.bad .kpi-value { color: var(--bad); }
+.kpi.ok { border-top-color: var(--ok); background: linear-gradient(180deg, var(--ok-soft), var(--surface) 70%); }
+.kpi.ok .kpi-value { color: var(--ok); }
 .kpi-sub { color: var(--muted); font-size: 13px; }
 .nowrap { white-space: nowrap; }
 /* Bar rows: the plate/name is one unbreakable unit, and so is the detail after it. When the card is too
@@ -1686,3 +1688,21 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
   .rt-mrow { grid-template-columns: 56px repeat(3, minmax(0, 1fr)); }
   .rt-mrow > :nth-child(2), .rt-mrow > :nth-child(3), .rt-mrow > :nth-child(6), .rt-mrow > :nth-child(7), .rt-mrow > :nth-child(9) { display: none; }
 }
+
+/* ---- งบกำไรขาดทุน: % of revenue, red / green, the year view (accounts.js) ---- */
+.acx-line { grid-template-columns: 18px minmax(0, 1fr) 64px auto; }
+.acx-total { grid-template-columns: minmax(0, 1fr) 64px auto; }
+.acx-pct { color: var(--muted); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.acx-total.pos strong { color: var(--ok); }
+.acx-total.neg strong { color: var(--bad); }
+.acx-yr { overflow-x: auto; }
+.acx-yr-row { display: grid; gap: 4px; align-items: center; padding: 7px 4px; border-bottom: 1px solid var(--line); min-width: max-content; font-variant-numeric: tabular-nums; }
+.acx-yr-row.head { font-weight: 600; }
+.acx-yr-row.sub { background: var(--surface-2); }
+.acx-yr-row.total { border-top: 2px solid var(--line-strong); font-size: 15px; }
+.acx-yr-label { font-weight: 600; position: sticky; left: 0; background: var(--surface); }
+.acx-yr-row.sub .acx-yr-label { background: var(--surface-2); }
+.acx-yr-cell { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
+.acx-yr-cell small { color: var(--muted); font-size: 11px; }
+.acx-yr-cell.ok b, .acx-yr-cell.ok small { color: var(--ok); }
+.acx-yr-cell.bad b, .acx-yr-cell.bad small { color: var(--bad); }
