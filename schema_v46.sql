@@ -1,0 +1,6 @@
+-- v46: PEA electricity bills with every detail (read exactly from the PEA Smart Invoice PDF, app/pea_bill.py).
+-- Applied 7 Nov 2026 via MCP (migration schema_v46_elec_bills). One row per bill; invoice_no is unique.
+-- Columns: branch, ca_no (one per meter), meter_no, address, invoice_no, bill_period (YYYY-MM used), read_date, due_date, tariff, multiplier,
+-- demand_peak_kw / offpeak / holiday, kwh_peak / offpeak / holiday / total, kvar_max, demand_rate, demand_charge, rate_peak, rate_offpeak,
+-- energy_peak, energy_offpeak, service_charge, pf_charge, base_amount, ft_rate, ft_amount, discount, subtotal, vat, total,
+-- file_id (acc_files, the PDF), created_at.  RLS on.

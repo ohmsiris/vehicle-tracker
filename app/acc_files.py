@@ -66,7 +66,12 @@ def upload(feed: str, period: str, branch: str, files: list[tuple[str, bytes]]) 
     except Exception:
         supabase.storage_delete(done)
         raise
-    return [{k: r[k] for k in ("id", "feed", "period", "branch", "file_name", "mime_type", "byte_size")} for r in rows]
+    out = [{k: r[k] for k in ("id", "feed", "period", "branch", "file_name", "mime_type", "byte_size")} for r in rows]
+    if feed == "electricity" and branch != "all":         # PEA bills are read exactly from the PDF (no AI) and booked
+        from app import electricity
+        for r, o in zip(rows, out):
+            o["read"] = electricity.read_upload(r["file_name"], r["_data"], branch, r["id"])
+    return out
 
 
 def for_month(month: str, branch: str = "") -> list[dict]:

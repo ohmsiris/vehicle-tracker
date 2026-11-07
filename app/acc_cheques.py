@@ -109,13 +109,21 @@ def classify(row: dict) -> dict:
     return {"kind": "unknown", "account": "7900", "vat": 0.0}
 
 
-def build(rows: list[dict], *, branch: str, file_month: date, batch: str) -> dict:
+def build(rows: list[dict], *, branch: str, file_month: date, batch: str, bills: Optional[dict] = None) -> dict:
+    """bills = {total: invoice no.} of PEA bills already stored: a cheque for exactly that amount pays the bill (Dr 2100) instead of
+    being the cost again."""
     entries, flags = [], []
+    bills = bills or {}
     for r in rows:
         c = classify(r)
         when, est = accrual_date(r, file_month)
         amt = r["amount"]
-        if c["kind"] == "funding":
+        inv = bills.get(round(amt, 2)) if c["account"] == "5100" else None
+        if inv:
+            c = {"kind": "pays_bill", "account": "2100", "vat": 0.0}
+            when, est = r["cheque_date"] or when, False
+            lines = [("2100", amt, 0.0), ("1130", 0.0, amt)]
+        elif c["kind"] == "funding":
             when, est = r["cheque_date"] or file_month.replace(day=15), False
             lines = [("1100", amt, 0.0), ("1130", 0.0, amt)]
         elif c["kind"] == "accounting":
@@ -130,7 +138,7 @@ def build(rows: list[dict], *, branch: str, file_month: date, batch: str) -> dic
             lines = [(c["account"], round(amt - vat, 2), 0.0)] + ([("1400", vat, 0.0)] if vat else []) + [("1130", 0.0, amt)]
             if c["kind"] == "unknown":
                 flags.append(f"แถว {r['no']}: {r['what']} ({amt:,.2f}) — ไม่รู้หมวด ใส่ 'อื่นๆ' ไว้ก่อน")
-        desc = " · ".join(x for x in (r["what"], f"เช็ค {r['cheque_no']}" if r["cheque_no"] else "", r["note"],
+        desc = " · ".join(x for x in (r["what"], f"จ่ายใบแจ้ง PEA {inv}" if inv else "", f"เช็ค {r['cheque_no']}" if r["cheque_no"] else "", r["note"],
                                        "วันที่ประมาณ (บิลเดือนก่อน)" if est else "") if x)
         entries.append({"entry_date": when.isoformat(), "branch": branch, "source": "hq_cheques", "source_id": f"{batch}:r{r['no']}",
                         "party": (r["payee"] or "HQ")[:100], "description": desc[:300], "doc_type": "tax_invoice" if c.get("vat") else "cheque",
@@ -159,7 +167,12 @@ def import_file(path: str, file_month: date, branch: str = "สระบุร�
     if not name:
         raise ValueError("ไม่พบชีทของสาขานี้")
     batch = f"cheque-{file_month:%Y-%m}-{branch}"
-    out = build(parse_sheet(sheets[name]), branch=branch, file_month=file_month, batch=batch)
+    bills = {}
+    try:
+        bills = {round(float(x["total"]), 2): x["invoice_no"] for x in supabase.select_all("elec_bills", {"select": "total,invoice_no", "order": "invoice_no.asc"})}
+    except supabase.SupabaseError:
+        pass
+    out = build(parse_sheet(sheets[name]), branch=branch, file_month=file_month, batch=batch, bills=bills)
     out["sheet"] = name
     if write:
         _require()

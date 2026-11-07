@@ -1606,3 +1606,10 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .acx-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .acx-file { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); max-width: 100%; }
 .acx-file a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+
+/* บัญชี › ค่าไฟฟ้า */
+.acx-elec { margin: 10px 0 16px; }
+.acx-elec-row { display: grid; grid-template-columns: 70px repeat(8, minmax(0, 1fr)); gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.acx-elec-row > :nth-child(n+2) { text-align: right; }
+@media (max-width: 760px) { .acx-elec-row { grid-template-columns: 60px repeat(4, minmax(0, 1fr)); }
+  .acx-elec-row > :nth-child(4), .acx-elec-row > :nth-child(5), .acx-elec-row > :nth-child(6), .acx-elec-row > :nth-child(9) { display: none; } }

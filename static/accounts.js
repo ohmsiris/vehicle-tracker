@@ -30,8 +30,15 @@ function acxMonthLabel(key) {
   void py;
 }
 
-async function openAccounts() {
+// Two pages on one screen: "in" = what has to come in (checklist, files, documents to review, typing a cost) and "out" = the
+// statement (totals, P&L, fuel by truck, electricity). Same month / half / branch for both.
+async function openAccounts(mode = "out") {
+  acx.mode = mode;
   showView("accounts");
+  $("navAccounts").classList.toggle("active", mode === "out");
+  $("navAccountsIn").classList.toggle("active", mode === "in");
+  $("acxTitle").textContent = mode === "in" ? "Inputs · ลงข้อมูล / แนบไฟล์" : "Profit & loss · งบกำไรขาดทุน";
+  $("acxAdd").hidden = mode !== "in";
   showErr("acxError", "");
   if (!acx.wired) {
     acx.wired = true;
@@ -90,7 +97,11 @@ function renderAccounts() {
         () => a.parties.map((pt) => acxNode(`a:${a.code}:${pt.party}`, pt.party, pt.total, "acx-l2",
           () => pt.entries.map((e) => acxEntry(e)))))))),
     el("div", { class: "acx-line acx-total" }, el("span", { text: "Net profit · กำไรสุทธิ" }), el("strong", { text: acxMoney(p.net_profit) })));
-  fill($("acxBody"), summary, feeds, acxDocs(d.docs || []), acxFuel(d.fuel), tree);
+  const toIn = el("p", { class: "muted small" }, "ยังขาดอะไรอยู่ ดูและแนบไฟล์ได้ที่ ", el("a", { href: "#accounts-in", text: "ลงข้อมูล / แนบไฟล์" }),
+    ` (${d.feeds.filter((f) => f.state === "missing" || f.state === "received").length} รายการยังไม่ครบ)`);
+  const toOut = el("p", { class: "muted small" }, "ดูผลที่ ", el("a", { href: "#accounts", text: "งบกำไรขาดทุน" }));
+  if (acx.mode === "in") fill($("acxBody"), toOut, feeds, acxDocs(d.docs || []));
+  else fill($("acxBody"), summary, toIn, tree, acxElectricity(d.electricity || []), acxFuel(d.fuel));
 }
 
 // เอกสารเบิกกลาง / สิ้นเดือน: each page read, its lines checked against the total written on it; memos with a one-line summary.
@@ -331,4 +342,30 @@ function acxFileChip(x) {
       try { await api(`/api/accounts/files/${x.id}`, { method: "DELETE" }); } catch (err) { alert(err.message); return; }
       await loadAccounts();
     } }));
+}
+
+
+// ไฟฟ้า: every PEA bill read from its PDF, per meter, newest month first -- what it cost and why.
+function acxElectricity(meters) {
+  if (!meters.length) return null;
+  const n = (x, d = 0) => (x == null ? "–" : Number(x).toLocaleString("th-TH", { minimumFractionDigits: d, maximumFractionDigits: d }));
+  const TH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  const mon = (p) => { const [y, m] = p.split("-").map(Number); return `${TH[m - 1]} ${String(y + 543).slice(2)}`; };
+  const head = ["เดือน", "หน่วย (kWh)", "Peak %", "Demand peak kW", "ค่า demand", "kVAR / เพดาน", "ค่า PF", "รวม (บาท)", "บาท/หน่วย"];
+  return el("div", { class: "card acx-feeds" },
+    el("h3", { text: "Electricity · ค่าไฟฟ้า (อ่านจากใบแจ้ง PEA)" }),
+    el("p", { class: "muted small", text: "ค่า demand คิดจาก kW สูงสุดช่วง Peak (จ–ศ 09:00–22:00) เท่านั้น · Peak % = สัดส่วนหน่วยที่ใช้ช่วงแพง (ค่าหน่วย Peak แพงกว่า Off-peak ~60%) · ค่า PF = kVAR เกิน 61.97% ของ kW สูงสุด (คาปาซิเตอร์ไม่พอ)" }),
+    ...meters.map((m) => el("div", { class: "acx-elec" },
+      el("strong", { text: `มิเตอร์ ${m.meter} · ${m.branch}` }), el("span", { class: "muted small", text: ` CA ${m.ca_no}` }),
+      el("div", { class: "acx-elec-row head small muted" }, ...head.map((t) => el("span", { text: t }))),
+      ...m.months.map((x) => el("div", { class: "acx-elec-row" },
+        el("span", { text: mon(x.bill_period) }),
+        el("span", { text: n(x.kwh_total) }),
+        el("span", { class: x.peak_share > 0.3 ? "warn-text" : "", text: `${n(x.peak_share * 100)}%` }),
+        el("span", { text: n(x.demand_peak_kw, 1) }),
+        el("span", { text: n(x.demand_charge) }),
+        el("span", { class: x.kvar_over > 0 ? "warn-text" : "muted", text: `${n(x.kvar_max, 1)} / ${n(x.kvar_limit, 1)}` }),
+        el("span", { class: x.pf_charge ? "warn-text" : "muted", text: x.pf_charge ? n(x.pf_charge, 2) : "–" }),
+        el("strong", { text: n(x.total, 2) }),
+        el("span", { text: n(x.baht_per_kwh, 2) }))))));
 }

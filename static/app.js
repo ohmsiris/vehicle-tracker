@@ -795,6 +795,7 @@ async function init() {
   $("navTyreStock").addEventListener("click", () => goHash("#tyre-stock"));
   $("navOdometers").addEventListener("click", () => goHash("#odometers"));
   $("navAccounts").addEventListener("click", () => goHash("#accounts"));
+  $("navAccountsIn").addEventListener("click", () => goHash("#accounts-in"));
   $("navSettings").addEventListener("click", () => goHash("#settings"));
   $("navMgr").addEventListener("click", () => goHash("#mgr"));
   $("navEmployees").addEventListener("click", () => goHash("#employees"));

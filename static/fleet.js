@@ -30,7 +30,8 @@ function route() {
   if (h === "plan") return openPlan();
   if (h === "tyre-stock") return openTyreStock();
   if (h === "odometers") return openOdometers();
-  if (h === "accounts") return openAccounts();
+  if (h === "accounts") return openAccounts("out");
+  if (h === "accounts-in") return openAccounts("in");
   if (h === "plan-settings") { pl.tab = "set"; return openPlan(); }
   if (h === "settings") return openAppSettings();
   if (h === "mgr") return openMgr();

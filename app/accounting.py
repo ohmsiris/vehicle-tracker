@@ -334,7 +334,12 @@ def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
         counts[e["source"]] = (n + 1, t + total)
     period_key = f"{month}-{half or 0}"
     marks = {m["feed"]: m["status"] for m in supabase.select_all("acc_feed_marks", {"select": "feed,status", "period": f"eq.{period_key}", "branch": f"eq.{branch or 'all'}", "order": "feed.asc"})}
-    docs, fuel, files = [], None, []
+    docs, fuel, files, elec = [], None, [], []
+    try:
+        from app import electricity
+        elec = electricity.summary(branch)
+    except supabase.SupabaseError:          # schema_v46 not applied yet
+        pass
     try:
         from app import acc_files
         files = acc_files.for_month(month, branch)
@@ -350,7 +355,7 @@ def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
         fuel = acc_docs.fuel_check(start, end, branch)
     except supabase.SupabaseError:          # schema_v42 not applied yet: the page works without the documents
         pass
-    return {"month": month, "half": half, "branch": branch, "start": start.isoformat(), "end": end.isoformat(), "docs": docs, "fuel": fuel, "files": files,
+    return {"month": month, "half": half, "branch": branch, "start": start.isoformat(), "end": end.isoformat(), "docs": docs, "fuel": fuel, "files": files, "electricity": elec,
             "pnl": pnl_tree(rows, accounts), "feeds": feed_status(half, counts, marks, _missing_amount(start, end), file_counts),
             "accounts": [{"code": a["code"], "en": a["name_en"], "th": a["name_th"], "kind": a["kind"], "section": a["section"]} for a in accounts.values() if a["active"]],
             "branches": list(BRANCHES)}
