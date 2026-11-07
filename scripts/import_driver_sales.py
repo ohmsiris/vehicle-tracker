@@ -19,19 +19,17 @@ from app import driver_sales as ds  # noqa: E402
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
 
-def cash_fuel(wb, year: int) -> dict:
-    """{(month, code): cash} from Fuel2's driver tables."""
-    ws = wb["Fuel2"]
-    starts = sorted((r, ws.cell(r, 7).value.strip()) for r in range(1, ws.max_row + 1)
-                    if isinstance(ws.cell(r, 7).value, str) and ws.cell(r, 7).value.strip() in MONTHS)
+def route_summary(wb) -> dict:
+    """{(month, truck no.): {"bangchak", "pt", "cash"}} from the sheet's "Route Summary" (one row per truck per month)."""
     out = {}
-    for i, (s, name) in enumerate(starts):
-        e = starts[i + 1][0] if i + 1 < len(starts) else ws.max_row + 1
-        month = f"{year}-{MONTHS.index(name) + 1:02d}"
-        for r in range(s, e):
-            code, cash = ws.cell(r, 2).value, ws.cell(r, 9).value
-            if isinstance(code, str) and code.startswith("SB-"):
-                out[(month, code)] = out.get((month, code), 0.0) + (float(cash) if isinstance(cash, (int, float)) else 0.0)
+    for r in wb["Route Summary"].iter_rows(values_only=True):
+        if not (isinstance(r[0], str) and r[0].split()[0] in MONTHS and len(r[0].split()) == 2 and isinstance(r[4], (int, float))):
+            continue
+        name, be = r[0].split()
+        month = f"{int(be) - 543}-{MONTHS.index(name) + 1:02d}"
+        truck = str(int(r[1])) if isinstance(r[1], float) else str(r[1]).strip()
+        cell = lambda v: float(v) if isinstance(v, (int, float)) else None
+        out[(month, truck)] = {"bangchak": cell(r[5]), "pt": cell(r[6]), "cash": cell(r[7])}
     return out
 
 
@@ -51,11 +49,12 @@ def main() -> None:
         for r in extra:
             r["truck"] = latest_truck.get(r["code"])
         rows = [r for r in rows if r["month"] != month] + extra
-    cash = cash_fuel(wb, year)
+    rs = route_summary(wb)
 
     from app import supabase
     vehicles = supabase.select_all("vehicles", {"select": "id,plate_number,vehicle_number,branch,main_driver_id", "order": "id.asc"})
-    by_no = {str(v["vehicle_number"]): v for v in vehicles if v.get("vehicle_number") is not None}
+    # truck numbers repeat between branches (Saraburi #1 and Kaeng Khoi #1): the routes are Saraburi's
+    by_no = {str(v["vehicle_number"]): v for v in vehicles if v.get("vehicle_number") is not None and v.get("branch") == "สระบุรี"}
     # the sheet's truck cell is sometimes not a truck ("หน้าโรง"): then the truck whose main driver he is in the app
     norm = lambda n: re.sub(r"\s+", "", n or "")
     own = {}
@@ -87,7 +86,8 @@ def main() -> None:
             group = share[(r["month"], v["id"])]
             tot = sum(x["sales"] for x in group) or len(group)
             fc = round(card.get((r["month"], v["id"]), 0.0) * ((r["sales"] or 1) / tot if len(group) > 1 else 1), 2)
-        cf = cash.get((r["month"], r["code"]))
+        cash_truck = (rs.get((r["month"], str(r["truck"]))) or {}).get("cash")
+        cf = None if cash_truck is None else round(cash_truck * (fc / card[(r["month"], v["id"])] if v and card.get((r["month"], v["id"])) else 1), 2)
         g = ds.gross(r, fc + (cf or 0.0))
         complete = stations.get(r["month"], set()) >= {"pt", "bangchak"}
         out_rows.append({"month": r["month"], "code": r["code"], "name": r["name"], "nick": r["nick"], "truck_no": r["truck"],

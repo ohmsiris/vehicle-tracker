@@ -24,8 +24,9 @@ def find_vehicle(key: str, by: dict, vehicles: list[dict]):
     """A plate as written; "#12" = truck number 12 (a driver row with no plate); a plate the sheet turned into a number ("-1025" for
     บพ-1025, "6159" for บฉ 6159) matches the one vehicle whose plate ends in those digits."""
     key = str(key).strip()
-    if key.startswith("#"):
-        return next((v for v in vehicles if str(v.get("vehicle_number")) == key[1:]), None)
+    if key.startswith("#"):      # truck numbers repeat between branches: the route trucks are Saraburi's
+        hits = [v for v in vehicles if str(v.get("vehicle_number")) == key[1:]]
+        return next((v for v in hits if v.get("branch") == "สระบุรี"), hits[0] if hits else None)
     v = by.get(norm_plate(key))
     if v:
         return v
