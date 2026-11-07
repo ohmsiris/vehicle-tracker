@@ -7,6 +7,7 @@ Each row becomes one entry paid from the HQ bank (1130), sorted by keyword rules
 * utilities, bags, chemicals, salt, machine parts ...: the cost, with 7% Input VAT split off when the payee is a company / PEA
   (they issue tax invoices; individuals usually do not);
 * the accountant's row is split by its note (บริการ=, ภงด.53=, vat=): fee / withholding tax remitted / VAT paid;
+* the owner's own payments (ผ่อนคอนโด): 3200 owner's drawings, not a cost;
 * money lent / returned between branches or companies (ยืม ...): 1600, not a cost;
 * a cheque that pays a stored PEA bill clears that bill (to the satang, or within 1,000 with the difference flagged);
 * anything the rules do not know goes to 7900 flagged.
@@ -21,6 +22,7 @@ from typing import Optional
 from app import supabase
 
 FUNDING = re.compile(r"เงินเดือนสด|ค่าใช้จ่ายสิ้นเดือน|คชจ\.?\s*\+?\s*เบิกกลางเดือน|ถอนสด|ถอนเงินสด|เบิกกลางเดือนไม่พอ|สำรอง")
+OWNER = re.compile(r"คอนโด")                                # the owner's own payments (คุณรัชนิดา's condo): drawings, not a company cost
 TRANSFER = re.compile(r"ยืม|คืนหัวหิน|คืนเงินเหรียญ")    # money moved between branches / companies: owed back, not a cost
 RULES = [  # (pattern on the lower-cased description, account) -- first match wins
     (r"ค่าไฟฟ้า|ไฟฟ้าแก่งคอย\s*\d", "5100"),       # the PEA bill (not "...รอกไฟฟ้า", "ตรวจระบบไฟฟ้า", a transformer repair)
@@ -113,6 +115,8 @@ def classify(row: dict) -> dict:
     what = row["what"]
     if FUNDING.search(what):
         return {"kind": "funding", "account": "1100", "vat": 0.0}
+    if OWNER.search(what):
+        return {"kind": "owner", "account": "3200", "vat": 0.0}
     if TRANSFER.search(what) and "เงินเดือน" not in what:
         return {"kind": "transfer", "account": "1600", "vat": 0.0}
     if "ค่าทำบัญชี" in what:

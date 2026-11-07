@@ -51,7 +51,7 @@ def test_rules_from_the_whole_year():
     assert c(_row("ต่อภาษี+พรบ รถ 14 คัน", "คงเกียรติ์"))["account"] == "6300"
     assert c(_row("CI พม่า 14 คน/ทำพาสปอร์ต", "ธนพร"))["account"] == "7120"
     assert c(_row("งาน PM เครื่อง80ตัน", "บริษัท พัฒน์กล"))["account"] == "5500"
-    assert c(_row("ผ่อนคอนโด 2/69", "เงินสด"))["kind"] == "unknown"
+    assert c(_row("ผ่อนคอนโด 2/69", "เงินสด"))["account"] == "3200"           # the owner's own, not a company cost
 
 
 def test_run_month_from_the_title():
