@@ -64,8 +64,9 @@ def main() -> None:
             own[norm(d["name"])] = mine[0]
     card, stations = {}, {}
     for e in supabase.select_all("acc_entries", {"select": "source_id,acc_lines(account,credit,vehicle_id)", "source": "eq.card_fuel", "order": "id.asc"}):
-        _, station, month, _ = e["source_id"].split(":", 3)
-        stations.setdefault(month, set()).add(station)
+        _, station, month, key = e["source_id"].split(":", 3)
+        if key != "total":                       # a month total with no truck does not make the month's per-truck fuel complete
+            stations.setdefault(month, set()).add(station)
         for ln in e["acc_lines"]:
             if ln["account"] == "2100" and ln.get("vehicle_id"):
                 card[(month, ln["vehicle_id"])] = card.get((month, ln["vehicle_id"]), 0.0) + float(ln["credit"])

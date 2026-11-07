@@ -963,6 +963,14 @@ def api_electricity(branch: str = "", x_app_token: str = Header(default=""), tok
     return {"meters": _acc_call(electricity.summary, branch, 24)}
 
 
+@app.get("/api/routes")
+def api_routes(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """สายรถ page: each Saraburi route truck month by month -- sales, fuel, driver pay, repairs, profit (app/routes_report.py)."""
+    from app import routes_report
+    _check_token(x_app_token, token)
+    return _acc_call(routes_report.report)
+
+
 @app.post("/api/accounts/files")
 def api_accounts_files_upload(files: list[UploadFile] = File(...), feed: str = Form(...), period: str = Form(...), branch: str = Form(...),
                               x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:

@@ -1662,3 +1662,27 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .hrs-kind.hrs-resign { background: var(--bad-soft, #fde8e8); color: var(--bad); }
 .hrs-kind.hrs-warning { background: var(--warn-soft); color: var(--warn); }
 @media (max-width: 640px) { .hrs-row { flex-direction: column; } .hrs-actions { justify-content: flex-start; } }
+
+/* ---- สายรถ กำไรต่อคัน (routes.js) ---- */
+.rt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rt-bar select { width: auto; min-width: 110px; }
+.rt-status { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.rt-split .rt-lab { font-size: 12px; fill: var(--text); }
+.rt-dot { stroke: var(--surface); stroke-width: 2; }
+.rt-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 8px; }
+.rt-group-head { display: flex; align-items: center; gap: 6px; }
+.rt-group-head i, .rt-gdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+.rt-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.rt-chip { border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 999px; padding: 2px 9px; font-size: 12px; cursor: pointer; }
+.rt-chip:hover { border-color: var(--line-strong); }
+.rt-row { grid-template-columns: 64px minmax(70px, 1.3fr) repeat(9, minmax(0, 1fr)); cursor: pointer; font-variant-numeric: tabular-nums; }
+.rt-row.open { background: var(--surface-2, rgba(127,127,127,.08)); }
+.rt-sort { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.rt-detail { padding: 10px 6px 16px; border-bottom: 1px solid var(--line); }
+.rt-mrow { grid-template-columns: 64px minmax(80px, 1.4fr) repeat(7, minmax(0, 1fr)); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .rt-row { grid-template-columns: 56px minmax(60px, 1fr) repeat(3, minmax(0, 1fr)); }
+  .rt-row > :nth-child(n+4):not(:nth-child(7)):not(:nth-child(9)) { display: none; }
+  .rt-mrow { grid-template-columns: 56px repeat(3, minmax(0, 1fr)); }
+  .rt-mrow > :nth-child(2), .rt-mrow > :nth-child(3), .rt-mrow > :nth-child(6), .rt-mrow > :nth-child(7), .rt-mrow > :nth-child(9) { display: none; }
+}

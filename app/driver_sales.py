@@ -107,7 +107,9 @@ def parse_payroll_text(text: str, month: str) -> list[dict]:
                 bag, total = rest[1], rest[2]
             else:
                 continue
-        out.append({"month": month, "code": m.group(1), "name": re.sub(r"^นาย|^นาง(สาว)?", "", name).strip(), "nick": "", "truck": None,
+        name = re.sub(r"\s+([\u0e31\u0e33-\u0e3a\u0e47-\u0e4e])", r"\1", name)      # the PDF text splits vowels / tone marks off: "ส ำรวย"
+        name = re.sub(r"\s+", " ", re.sub(r"^นาย|^นาง(สาว)?", "", name)).strip()
+        out.append({"month": month, "code": m.group(1), "name": name, "nick": "", "truck": None,
                     "days": days, "wage": wage, "rate": round(wage / days, 2) if days else 0.0, "sales": sales, "commission": comm,
                     "bag_pay": bag, "total_pay": total})
     return out

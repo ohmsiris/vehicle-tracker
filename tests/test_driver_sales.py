@@ -34,3 +34,8 @@ def test_payroll_pdf_rows_with_and_without_bag_cell():
     assert out["SB-PD008"] == (26, 3120, 102930, 5147, 0, 8267)
     assert out["SB-PD034"] == (30, 12900, 0, 0, 1000, 13900)
     assert out["SB-PD049"] == (0, 12000, 0, 0, 0, 12000)
+
+
+def test_payroll_pdf_joins_split_thai_vowels():
+    out = ds.parse_payroll_text("SB-PD030 นายส ำรวย  อสุรินทร์\nx\n28\n3,360\n120,373\n6,019\n9,379\n", "2026-10")
+    assert out[0]["name"] == "สำรวย อสุรินทร์"
