@@ -1613,3 +1613,41 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .acx-elec-row > :nth-child(n+2) { text-align: right; }
 @media (max-width: 760px) { .acx-elec-row { grid-template-columns: 60px repeat(4, minmax(0, 1fr)); }
   .acx-elec-row > :nth-child(4), .acx-elec-row > :nth-child(5), .acx-elec-row > :nth-child(6), .acx-elec-row > :nth-child(9) { display: none; } }
+
+/* บัญชี › ค่าไฟฟ้า (elec.js). One color job: the tariff period. Reference palette slots (light / dark selected, not flipped). */
+:root { --el-peak: #eb6834; --el-off: #2a78d6; --el-hol: #1baf7a; --el-dem: #6250d6; --el-ft: #a9a79f; --el-vat: #d6d4cc; }
+:root[data-theme="dark"] { --el-peak: #d95926; --el-off: #3987e5; --el-hol: #199e70; --el-dem: #9085e9; --el-ft: #6f6d66; --el-vat: #4a4944; }
+.el-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.el-panel { padding: 14px 18px; }
+.el-panel-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.el-panel-head h3 { margin: 0; }
+.badge.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+.el-chart { margin-top: 14px; }
+.el-chart-title { font-weight: 650; font-size: 14px; }
+.el-svg { width: 100%; height: auto; display: block; margin-top: 6px; overflow: visible; }
+.el-svg .el-gl { stroke: var(--line); stroke-width: 1; }
+.el-svg .el-base { stroke: var(--line-strong); stroke-width: 1; }
+.el-tick { fill: var(--muted); font-size: 11px; }
+.el-val { fill: var(--text); font-size: 12px; font-weight: 650; }
+.el-val.warn { fill: var(--warn); }
+.el-line { fill: none; stroke: var(--el-off); stroke-width: 2; stroke-linejoin: round; }
+.el-dot { fill: var(--el-off); stroke: var(--surface); stroke-width: 2; }
+.el-kvar { fill: var(--el-off); }
+.el-kvar.over { fill: var(--warn); }
+.el-limit { stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.el-hit { cursor: default; }
+.el-hit:hover rect:not([fill="transparent"]), .el-hit:hover circle { opacity: .85; }
+.el-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-2, var(--muted)); margin-top: 4px; }
+.el-legend i, .el-tip i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.el-tip { position: fixed; z-index: 50; pointer-events: none; background: var(--surface); color: var(--text); border: 1px solid var(--line-strong);
+  border-radius: 10px; box-shadow: var(--shadow-md); padding: 8px 10px; font-size: 13px; min-width: 170px; }
+.el-tip-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.el-tip-row b { margin-left: auto; font-variant-numeric: tabular-nums; }
+.el-kpi .kpi-value { font-variant-numeric: tabular-nums; }
+.el-delta { font-size: 12px; margin-top: 2px; color: var(--muted); }
+.el-delta.up-bad { color: var(--bad); }
+.el-delta.up-good { color: var(--ok); }
+.el-table-row { grid-template-columns: 70px repeat(9, minmax(0, 1fr)); }
+@media (max-width: 760px) { .el-grid { grid-template-columns: 1fr; } .el-table-row { grid-template-columns: 60px repeat(4, minmax(0, 1fr)); }
+  .el-table-row > :nth-child(n+6):not(:nth-child(9)) { display: none; } }
+.el-kpi .kpi-value { font-size: 22px; white-space: nowrap; }

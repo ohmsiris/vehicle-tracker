@@ -933,6 +933,14 @@ def api_accounts_doc_lines(doc_id: str, body: dict = Body(...), x_app_token: str
         raise HTTPException(422, str(exc))
 
 
+@app.get("/api/electricity")
+def api_electricity(branch: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """ค่าไฟฟ้า page: every PEA bill per meter (24 months), with what each month cost and why."""
+    from app import electricity
+    _check_token(x_app_token, token)
+    return {"meters": _acc_call(electricity.summary, branch, 24)}
+
+
 @app.post("/api/accounts/files")
 def api_accounts_files_upload(files: list[UploadFile] = File(...), feed: str = Form(...), period: str = Form(...), branch: str = Form(...),
                               x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:

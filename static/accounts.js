@@ -100,8 +100,9 @@ function renderAccounts() {
   const toIn = el("p", { class: "muted small" }, "ยังขาดอะไรอยู่ ดูและแนบไฟล์ได้ที่ ", el("a", { href: "#accounts-in", text: "ลงข้อมูล / แนบไฟล์" }),
     ` (${d.feeds.filter((f) => f.state === "missing" || f.state === "received").length} รายการยังไม่ครบ)`);
   const toOut = el("p", { class: "muted small" }, "ดูผลที่ ", el("a", { href: "#accounts", text: "งบกำไรขาดทุน" }));
+  const toElec = (d.electricity || []).length ? el("p", { class: "muted small" }, "ค่าไฟแยกมิเตอร์ กราฟ demand / Peak / power factor: ", el("a", { href: "#electricity", text: "หน้าค่าไฟฟ้า" })) : null;
   if (acx.mode === "in") fill($("acxBody"), toOut, feeds, acxDocs(d.docs || []));
-  else fill($("acxBody"), summary, toIn, tree, acxElectricity(d.electricity || []), acxFuel(d.fuel));
+  else fill($("acxBody"), summary, toIn, toElec, tree, acxFuel(d.fuel));
 }
 
 // เอกสารเบิกกลาง / สิ้นเดือน: each page read, its lines checked against the total written on it; memos with a one-line summary.
