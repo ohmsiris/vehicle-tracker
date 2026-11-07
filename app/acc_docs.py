@@ -142,7 +142,14 @@ def import_batch(batch: dict, force: bool = False) -> dict:
     for e in out["entries"]:
         e["doc_id"] = ids[e.pop("doc_page")]
     _insert_entries(out["entries"])
-    return {"docs": len(rows), "entries": len(out["entries"]), "problems": out["problems"]}
+    hr = 0
+    if batch.get("hr"):
+        from app import hr_suggest
+        try:
+            hr = hr_suggest.sync_batch(batch["batch"], batch["hr"])
+        except supabase.SupabaseError:          # schema_v52 not applied yet: the books still import
+            pass
+    return {"docs": len(rows), "entries": len(out["entries"]), "problems": out["problems"], "hr_suggestions": hr}
 
 
 # ------------------------------------------------------------------ fuel per truck against km

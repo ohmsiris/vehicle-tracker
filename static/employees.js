@@ -62,6 +62,40 @@ async function openEmployees() {
   fillEmpFilters();
   $("empNeedsV21").hidden = emp.ready;
   renderEmployees();
+  loadHrSuggestions();
+}
+
+// ------------------------------------------------------------------ from the end-of-month papers: confirm or skip each item
+// Resignations, warnings and factory loans read from the mid / end-of-month papers (app/hr_suggest.py). Nothing changes until ยืนยัน.
+async function loadHrSuggestions() {
+  try { renderHrSuggestions(await api("/api/hr/suggestions")); }
+  catch (err) { $("empSuggest").replaceChildren(); }        // table not there yet / locked: the list works without it
+}
+
+function renderHrSuggestions(d) {
+  const pending = (d.suggestions || []).filter((s) => s.status === "pending");
+  const done = (d.suggestions || []).filter((s) => s.status !== "pending").slice(0, 12);
+  if (!pending.length && !done.length) { $("empSuggest").replaceChildren(); return; }
+  const month = (b) => { const m = /^(\d{4})-(\d{2})/.exec(b || ""); return m ? `${["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."][+m[2] - 1]} ${String(+m[1] + 543).slice(2)}` : b; };
+  const act = async (s, what) => {
+    try { renderHrSuggestions(await api(`/api/hr/suggestions/${s.id}/${what}`, { method: "POST" })); if (what === "apply") empLoad().then((ok) => ok && renderEmployees()); }
+    catch (err) { alert(err.message); }
+  };
+  const row = (s) => el("div", { class: `hrs-row hrs-${s.status}` },
+    el("div", { class: "hrs-main" },
+      el("span", { class: `badge hrs-kind hrs-${s.kind}`, text: s.kind_label }), " ",
+      el("strong", { text: s.employee ? s.employee.name : s.employee_code }), el("span", { class: "muted small", text: ` ${s.employee_code} · ${month(s.batch)} หน้า ${s.page}` }),
+      el("div", { text: s.summary || "" }),
+      el("div", { class: "muted small", text: s.status === "pending" ? s.now : `${s.status === "applied" ? "✓ " : "— ไม่ใช้ · "}${s.result || ""}` })),
+    el("div", { class: "hrs-actions" },
+      s.doc_id ? el("a", { class: "btn small ghost", href: `/api/accounts/docs/${s.doc_id}/image?token=${encodeURIComponent(state.token)}`, target: "_blank", rel: "noopener", text: "ดูต้นฉบับ" }) : null,
+      s.status === "pending" ? el("button", { class: "btn small primary", type: "button", text: "ยืนยัน", disabled: !s.employee, onclick: () => act(s, "apply") }) : null,
+      s.status === "pending" ? el("button", { class: "btn small ghost", type: "button", text: "ไม่ใช้", onclick: () => act(s, "dismiss") }) : null));
+  $("empSuggest").replaceChildren(el("details", { class: "card hrs", open: pending.length > 0 },
+    el("summary", {}, el("strong", { text: `จากเอกสารสิ้นเดือน — รอยืนยัน ${pending.length} รายการ` }),
+      el("span", { class: "muted small", text: " · ลาออก / หนังสือเตือน / เงินกู้ ที่อ่านจากเอกสาร กด “ยืนยัน” เพื่อลงในระบบพนักงาน" })),
+    ...pending.map(row),
+    done.length ? el("p", { class: "muted small", text: "ตัดสินแล้วล่าสุด" }) : null, ...done.map(row)));
 }
 
 function fillEmpFilters() {

@@ -536,6 +536,28 @@ def api_employee_options(x_app_token: str = Header(default=""), token: str = Que
     return employees.options()
 
 
+@app.get("/api/hr/suggestions")
+def api_hr_suggestions(x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    """HR items found in the end-of-month papers, waiting for the owner to confirm."""
+    from app import hr_suggest
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, hr_suggest.list_suggestions)
+
+
+@app.post("/api/hr/suggestions/{sid}/apply")
+def api_hr_suggestion_apply(sid: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    from app import hr_suggest
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, hr_suggest.apply, sid)
+
+
+@app.post("/api/hr/suggestions/{sid}/dismiss")
+def api_hr_suggestion_dismiss(sid: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    from app import hr_suggest
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, hr_suggest.dismiss, sid)
+
+
 @app.get("/api/employees")
 def api_employees(x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
     _check_token(x_app_token, token)

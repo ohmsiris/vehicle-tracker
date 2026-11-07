@@ -1652,3 +1652,13 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
   .el-table-row > :nth-child(n+6):not(:nth-child(9)) { display: none; } }
 .el-kpi .kpi-value { font-size: 22px; white-space: nowrap; }
 #electricityView .acx-bar select { width: auto; min-width: 150px; flex: 0 1 auto; }
+
+/* พนักงาน › จากเอกสารสิ้นเดือน (employees.js renderHrSuggestions) */
+.hrs { padding: 10px 16px; margin-bottom: 12px; }
+.hrs summary { cursor: pointer; padding: 4px 0; }
+.hrs-row { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--line); }
+.hrs-row.hrs-applied, .hrs-row.hrs-dismissed { opacity: .65; }
+.hrs-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.hrs-kind.hrs-resign { background: var(--bad-soft, #fde8e8); color: var(--bad); }
+.hrs-kind.hrs-warning { background: var(--warn-soft); color: var(--warn); }
+@media (max-width: 640px) { .hrs-row { flex-direction: column; } .hrs-actions { justify-content: flex-start; } }
