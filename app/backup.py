@@ -57,6 +57,7 @@ TABLES: dict[str, str] = {
     "acc_docs": "batch.asc",
     "acc_files": "uploaded_at.asc",
     "hr_suggestions": "created_at.asc",
+    "sales_lines": "id.asc",
     "tyre_stock_sizes": "size.asc",
     "service_groups": "code.asc",
     "vehicle_plans": "vehicle_id.asc",

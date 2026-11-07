@@ -91,10 +91,11 @@ def test_a_cheque_paid_to_mum_is_still_from_hq():
     assert ac.paid_from(_row("คชจ.+เบิกกลางเดือน 9/2569", "แก่งคอยถอนจากเล่มชื่อ K.รัชนิดา")) == "1120"
 
 
-def test_ice_between_branches_counts_in_each_branch():
+def test_ice_between_branches_cheque_only_settles():
+    # the ice itself comes from the ice program's sales report; the cheque pays off what Saraburi owes Kaeng Khoi
     out = ac.build([_row("ค่าน้ำแข็งแก่งคอย#07/69หน้าโรง=344700", "รัชนิดา  วัฒนสาคร", 344700.0),
                     _row("ค่าน้ำแข็งบางปะอิน08-2569 ส่งCPหมู", "พัชรินทร์", 98435.94, no=2)], branch="สระบุรี", file_month=date(2026, 8, 1), batch="t")
     by = {(e["branch"], ln["account"]): (ln["debit"], ln["credit"]) for e in out["entries"] for ln in e["lines"]}
-    assert by[("สระบุรี", "5060")] == (344700.0, 0.0)            # Saraburi's cost
-    assert by[("แก่งคอย", "4150")] == (0.0, 344700.0)            # Kaeng Khoi's sale
+    assert by[("สระบุรี", "1600")] == (344700.0, 0.0)
+    assert not any(k[1] in ("5060", "4150") or k[0] == "แก่งคอย" for k in by)
     assert by[("สระบุรี", "5050")] == (98435.94, 0.0)            # bought from outside: an ordinary cost
