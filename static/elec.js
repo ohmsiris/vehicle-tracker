@@ -47,11 +47,14 @@ function renderElectricity() {
     return;
   }
   const key = (m) => `${m.ca_no}`;
-  if (!meters.some((m) => key(m) === el_.meter)) el_.meter = key(meters[0]);
+  // default = every meter of the branch added together; a single meter is picked from the dropdown
+  if (el_.meter && !meters.some((m) => key(m) === el_.meter)) el_.meter = "";
   const many = new Set(meters.map((m) => m.branch)).size > 1;
-  fill(pick, ...meters.map((m) => el("option", { value: key(m), text: `มิเตอร์ ${m.meter}${many ? ` · ${m.branch}` : ""}` })));
+  fill(pick, el("option", { value: "", text: "รวมทุกมิเตอร์" }),
+    ...meters.map((m) => el("option", { value: key(m), text: `มิเตอร์ ${m.meter}${many ? ` · ${m.branch}` : ""}` })));
   pick.value = el_.meter;
-  if (all && meters.length > 1) { const sum = elCombine(meters); fill($("elBody"), elKpis(meters), elMeterPanel(sum), elTable([sum])); return; }
+  if (meters.length > 1 && (all || !el_.meter)) { const sum = elCombine(meters); fill($("elBody"), elKpis(meters), elMeterPanel(sum), elTable([sum])); return; }
+  if (!el_.meter) el_.meter = key(meters[0]);
   const m = meters.find((x) => key(x) === el_.meter);
   fill($("elBody"), elKpis(meters), elMeterPanel(m), elTable([m]));
 }

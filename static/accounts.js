@@ -91,7 +91,7 @@ function renderAccounts() {
     acxKpi("Expenses · ค่าใช้จ่าย", p.expenses), acxKpi("Net profit · กำไรสุทธิ", p.net_profit, true));
   const tree = el("div", { class: "card acx-tree" },
     el("h3", { text: "Profit & loss · งบกำไรขาดทุน" }),
-    el("p", { class: "muted small", text: "กดที่บรรทัดเพื่อเปิดดูละเอียดขึ้น: หมวด → บัญชี → ร้าน → แต่ละบิล · ไม่รวม VAT (VAT ไปที่บัญชีภาษีซื้อ) · รายได้ยังไม่ได้เชื่อม" }),
+    el("p", { class: "muted small", text: "กดที่บรรทัดเพื่อเปิดดูละเอียดขึ้น: หมวด → บัญชี → ร้าน → แต่ละบิล · ไม่รวม VAT (VAT ไปที่บัญชีภาษีซื้อ) · รายได้ (ยอดขาย) ยังไม่ได้ลง — รายได้อื่นแยกไว้ล่างสุด" }),
     ...p.sections.map((s) => acxNode(`s:${s.key}`, `${s.en} · ${s.th}`, s.total, "acx-l0",
       () => s.accounts.map((a) => acxNode(`a:${a.code}`, `${a.en} · ${a.th}`, a.total, "acx-l1",
         () => a.parties.map((pt) => acxNode(`a:${a.code}:${pt.party}`, pt.party, pt.total, "acx-l2",

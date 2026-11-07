@@ -25,7 +25,8 @@ from app import supabase
 NEEDS_V41 = "ต้องรัน schema_v41.sql ใน Supabase ก่อน จึงจะใช้บัญชีได้"
 PROGRAM_SOURCES = ("truck_bill", "purchase")
 SECTIONS = [("revenue", "Revenue", "รายได้"), ("cogs", "Cost of goods sold", "ต้นทุนขาย"),
-            ("selling", "Selling & delivery expenses", "ค่าใช้จ่ายในการขายและขนส่ง"), ("admin", "Administrative expenses", "ค่าใช้จ่ายในการบริหาร")]
+            ("selling", "Selling & delivery expenses", "ค่าใช้จ่ายในการขายและขนส่ง"), ("admin", "Administrative expenses", "ค่าใช้จ่ายในการบริหาร"),
+            ("other", "Other income", "รายได้อื่น (ไม่ใช่ยอดขาย: ค่าปรับ / หักพนักงาน / ดอกเบี้ย)")]
 PAID_FROM = {"ap": "2100", "cash": "1100", "company": "1110", "mum": "1120", "hq": "1130"}
 BRANCHES = ("สระบุรี", "แก่งคอย")
 VAT_LINE = re.compile(r"^\s*(?:vat|ภาษีมูลค่าเพิ่ม)", re.I)
@@ -231,8 +232,9 @@ def pnl_tree(rows: list[dict], accounts: dict) -> dict:
         out.append({"key": key, "en": en, "th": th, "total": round(s["total"], 2), "accounts": accs})
     tot = {s["key"]: s["total"] for s in out}
     gross = round(tot["revenue"] - tot["cogs"], 2)
-    return {"sections": out, "revenue": tot["revenue"], "cogs": tot["cogs"], "gross_profit": gross,
-            "expenses": round(tot["selling"] + tot["admin"], 2), "net_profit": round(gross - tot["selling"] - tot["admin"], 2)}
+    # "other" (account 4900: fines / equipment charged to staff, deposit interest) is kept out of Revenue so the Revenue tile = sales only
+    return {"sections": out, "revenue": tot["revenue"], "cogs": tot["cogs"], "gross_profit": gross, "other_income": tot["other"],
+            "expenses": round(tot["selling"] + tot["admin"], 2), "net_profit": round(gross - tot["selling"] - tot["admin"] + tot["other"], 2)}
 
 
 def feed_status(half: Optional[int], counts: dict, marks: dict, missing_amount: int = 0, files: Optional[dict] = None) -> list[dict]:
