@@ -1,7 +1,8 @@
 """
 บัญชี › เช็คจาก HQ: the monthly cheque summary HQ sends ("ใบสรุปจ่ายเช็คประจำเดือนMM-69-สระบุรี+แก่งคอย.xls", one sheet per branch).
 
-Each row becomes one entry paid from the HQ bank (1130), sorted by keyword rules:
+Each row becomes one entry paid from the HQ bank (1130) -- or from คุณรัชนิดา's own account (1120) when the row says it was withdrawn
+from her book (the cash for petty cash, mid-month advances, cash wages) -- sorted by keyword rules:
 * money sent to the branch's petty cash (เงินเดือนสด + ค่าใช้จ่ายสิ้นเดือน, คชจ. + เบิกกลางเดือน, ถอนสด ...): not a cost -- cash 1100
   goes up; the costs themselves come from the mid / end-of-month documents, so nothing is counted twice;
 * utilities, bags, chemicals, salt, machine parts ...: the cost, with 7% Input VAT split off when the payee is a company / PEA
@@ -130,6 +131,12 @@ def classify(row: dict) -> dict:
     return {"kind": "unknown", "account": "7900", "vat": 0.0}
 
 
+def paid_from(row: dict) -> str:
+    """Which account the money left: a row withdrawn from คุณรัชนิดา's own book (เงินเดือนสด, คชจ. + เบิกกลางเดือน -- the cash side)
+    is her account 1120; everything else is the HQ account 1130 (company payments, VAT bills, bank-transfer salaries)."""
+    return "1120" if re.search(r"รัชนิดา|ถอนจากเล่ม", row.get("payee") or "") else "1130"
+
+
 def _rid(no: int, seen: dict) -> str:
     """Row id inside a batch: the sheet's own number, which HQ sometimes repeats -- then r16, r16b, r16c ..."""
     seen[no] = seen.get(no, 0) + 1
@@ -147,6 +154,7 @@ def build(rows: list[dict], *, branch: str, file_month: date, batch: str, bills:
     bills = bills or {}
     for r in rows:
         c = classify(r)
+        bank = paid_from(r)
         when, est = accrual_date(r, file_month)
         amt = r["amount"]
         inv, owed = None, amt
@@ -162,13 +170,13 @@ def build(rows: list[dict], *, branch: str, file_month: date, batch: str, bills:
             c = {"kind": "pays_bill", "account": "2100", "vat": 0.0}
             when, est = r["cheque_date"] or when, False
             diff = round(amt - owed, 2)
-            lines = [("2100", owed, 0.0)] + ([("7900", diff, 0.0)] if diff > 0 else [("7900", 0.0, -diff)] if diff < 0 else []) + [("1130", 0.0, amt)]
+            lines = [("2100", owed, 0.0)] + ([("7900", diff, 0.0)] if diff > 0 else [("7900", 0.0, -diff)] if diff < 0 else []) + [(bank, 0.0, amt)]
         elif c["kind"] == "transfer":
             when, est = r["cheque_date"] or file_month.replace(day=15), False
-            lines = [("1600", amt, 0.0), ("1130", 0.0, amt)]
+            lines = [("1600", amt, 0.0), (bank, 0.0, amt)]
         elif c["kind"] == "funding":
             when, est = r["cheque_date"] or file_month.replace(day=15), False
-            lines = [("1100", amt, 0.0), ("1130", 0.0, amt)]
+            lines = [("1100", amt, 0.0), (bank, 0.0, amt)]
         elif c["kind"] == "accounting":
             s = c["split"]
             fee, wht, vat = s.get("fee", 0.0), s.get("wht", 0.0), s.get("vat", 0.0)
@@ -176,12 +184,12 @@ def build(rows: list[dict], *, branch: str, file_month: date, batch: str, bills:
             if abs(rest) >= 1 and fee:     # the note's VAT is sometimes the cheque total copied in: VAT is what is left
                 flags.append(f"แถว {r['no']}: ค่าทำบัญชี — VAT ในหมายเหตุ ({vat:,.2f}) ไม่ลงตัว ใช้ส่วนที่เหลือ {amt - fee - wht:,.2f}")
                 vat, rest = round(amt - fee - wht, 2), 0.0
-            lines = [("7600", fee + rest, 0.0)] + ([("2200", wht, 0.0)] if wht else []) + ([("2300", vat, 0.0)] if vat else []) + [("1130", 0.0, amt)]
+            lines = [("7600", fee + rest, 0.0)] + ([("2200", wht, 0.0)] if wht else []) + ([("2300", vat, 0.0)] if vat else []) + [(bank, 0.0, amt)]
             if abs(rest) >= 1:
                 flags.append(f"แถว {r['no']}: ค่าทำบัญชี แยกได้ไม่ครบ (ส่วนที่เหลือ {rest:,.2f} รวมไว้ในค่าทำบัญชี)")
         else:
             vat = c["vat"]
-            lines = [(c["account"], round(amt - vat, 2), 0.0)] + ([("1400", vat, 0.0)] if vat else []) + [("1130", 0.0, amt)]
+            lines = [(c["account"], round(amt - vat, 2), 0.0)] + ([("1400", vat, 0.0)] if vat else []) + [(bank, 0.0, amt)]
             if c["kind"] == "unknown":
                 flags.append(f"แถว {r['no']}: {r['what']} ({amt:,.2f}) — ไม่รู้หมวด ใส่ 'อื่นๆ' ไว้ก่อน")
         desc = " · ".join(x for x in (r["what"], f"จ่ายใบแจ้ง PEA {inv}" if inv else "", f"เช็ค {r['cheque_no']}" if r["cheque_no"] else "", r["note"],

@@ -77,3 +77,10 @@ def test_near_bill_match_needs_the_same_month():
 def test_bank_paid_salaries_are_a_transfer_not_wages():
     assert ac.classify(_row("เงินเดือนตัดธนาคาร เข้าบจ.สระบุรี 08 -69", "บจ.สระบุรีวารีเทพ"))["kind"] == "transfer"
     assert ac.classify(_row("เงินเดือนผู้บริหาร 08/2569(แก่งคอยจ่าย)", "เงินสด"))["account"] == "7100"
+
+
+def test_cash_withdrawn_from_mums_book_leaves_her_account():
+    out = ac.build([_row("คชจ.+เบิกกลางเดือน 9/2569", "คุณรัชนิดาถอนจากเล่ม-โรบินสัน", 404701.0),
+                    _row("น้ำมันคอม 2 ถัง", "บริษัท พี เคมีคอล ลู้บ จำกัด", 45582.0, no=2)], branch="สระบุรี", file_month=date(2026, 9, 1), batch="t")
+    cr = [next(ln["account"] for ln in e["lines"] if ln["credit"]) for e in out["entries"]]
+    assert cr == ["1120", "1130"]
