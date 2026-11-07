@@ -34,3 +34,41 @@ def test_parse_and_build():
     assert any("ของแปลก" in f for f in out["flags"])
     for x in out["entries"]:
         assert round(sum(ln["debit"] for ln in x["lines"]), 2) == round(sum(ln["credit"] for ln in x["lines"]), 2)
+
+
+def _row(what, payee="", amount=1000.0, note="", no=1):
+    return {"no": no, "what": what, "payee": payee, "amount": amount, "cheque_date": None, "cheque_no": "1", "bank": "", "note": note}
+
+
+def test_rules_from_the_whole_year():
+    c = ac.classify
+    assert c(_row("แกนทุ่นมอร์เตอร์ ขึ้น-ลง /เอ็ม.ดี. เจริญผลรอกไฟฟ้า", "บริษัท เอ็ม.ดี."))["account"] == "5500"   # not electricity
+    assert c(_row("ตรวจระบบไฟฟ้า ประจำปี", "เงินสด"))["account"] == "5500"
+    assert c(_row("ไฟฟ้าแก่งคอย 08-69", "การไฟฟ้า"))["account"] == "5100"
+    assert c(_row("เงินเดือนผู้บริหาร 05/2569(ยืมปราจีน)", "เงินสด"))["account"] == "7100"     # a salary, though borrowed
+    assert c(_row("สระบุรียืมแก่งคอย", "บจก.สระบุรีวารีเทพ"))["kind"] == "transfer"
+    assert c(_row("ค่าน้ำแข็งบางปะอิน08-2569", "พัชรินทร์"))["account"] == "5050"
+    assert c(_row("ต่อภาษี+พรบ รถ 14 คัน", "คงเกียรติ์"))["account"] == "6300"
+    assert c(_row("CI พม่า 14 คน/ทำพาสปอร์ต", "ธนพร"))["account"] == "7120"
+    assert c(_row("งาน PM เครื่อง80ตัน", "บริษัท พัฒน์กล"))["account"] == "5500"
+    assert c(_row("ผ่อนคอนโด 2/69", "เงินสด"))["kind"] == "unknown"
+
+
+def test_run_month_from_the_title():
+    assert ac.run_month([["รายการจ่ายเช็ค บจ.สระบุรีวารีเทพ ประจำเดือน พฤษภาคม  2569"]]) == date(2026, 5, 1)
+
+
+def test_accountant_note_with_the_total_as_vat():
+    rows = [_row("ค่าทำบัญชี+ภาษี+02-69", "ธิดารัตน์", 104574.57, "บริการ=13000/ภงด.53=2505.57/vat=104574.57")]
+    out = ac.build(rows, branch="สระบุรี", file_month=date(2026, 3, 1), batch="t")
+    d = {ln["account"]: ln["debit"] for ln in out["entries"][0]["lines"] if ln["debit"]}
+    assert d == {"7600": 13000.0, "2200": 2505.57, "2300": 89069.0}
+
+
+def test_near_bill_match_needs_the_same_month():
+    bills = {774711.32: ("318011328154", "2026-08"), 1938139.34: ("312510999861", "2026-02")}
+    out = ac.build([_row("ค่าไฟฟ้า 72/9เดือน03/69", "", 774240.05),
+                    _row("ไฟฟ้าแก่งคอย 02-69", "การไฟฟ้า", 1939139.34, no=2)], branch="x", file_month=date(2026, 4, 1), batch="t", bills=bills)
+    assert out["entries"][0]["kind"] == "cost"                                  # March's cheque is not August's bill
+    e = out["entries"][1]
+    assert e["kind"] == "pays_bill" and {ln["account"]: ln["debit"] for ln in e["lines"] if ln["debit"]} == {"2100": 1938139.34, "7900": 1000.0}

@@ -5,7 +5,7 @@
 * It books the cost (accrual, the month used, dated the 25th): Dr 5100 electricity (sub total before VAT) + 1400 Input VAT, Cr 2100
   accounts payable -- the HQ cheque that pays it later clears 2100 (acc_cheques matches the cheque to the bill by amount).
 * summary(): per meter, month by month, with what each month cost and why (demand, peak share, power factor).
-Meters are named by their address on the bill (Saraburi: 72 and 72/9, ม.8 ต.ตลิ่งชัน).
+Meters are named by their address on the bill (Saraburi: 72 and 72/9, ม.8 ต.ตลิ่งชัน; Kaeng Khoi: 150, ม.8 ต.บ้านป่า).
 """
 from datetime import date
 from typing import Optional
@@ -15,7 +15,7 @@ from app import pea_bill, supabase
 FIELDS = ("ca_no", "meter_no", "address", "invoice_no", "bill_period", "read_date", "tariff", "multiplier", "demand_peak_kw", "demand_offpeak_kw",
           "demand_holiday_kw", "kwh_peak", "kwh_offpeak", "kwh_holiday", "kwh_total", "kvar_max", "demand_rate", "demand_charge", "rate_peak",
           "rate_offpeak", "energy_peak", "energy_offpeak", "service_charge", "pf_charge", "base_amount", "ft_rate", "ft_amount", "discount",
-          "subtotal", "vat", "total")
+          "subtotal", "vat", "total", "estimated", "deposit_interest")
 PF_LIMIT = 0.6197          # PEA: kVAR above 61.97% of the month's highest kW (power factor below 0.85) is charged
 
 
@@ -24,11 +24,16 @@ def entry_for(bill: dict, branch: str) -> dict:
     y, m = (int(x) for x in bill["bill_period"].split("-"))
     meter = f"มิเตอร์ {bill.get('address') or bill['ca_no']}"
     net = round(bill["subtotal"], 2)
+    interest = round(float(bill.get("deposit_interest") or 0), 2)
     lines = [{"account": "5100", "debit": net, "credit": 0.0, "branch": branch, "vehicle_id": None, "machine_id": None, "memo": None},
              {"account": "1400", "debit": round(bill["vat"], 2), "credit": 0.0, "branch": branch, "vehicle_id": None, "machine_id": None, "memo": None},
-             {"account": "2100", "debit": 0.0, "credit": round(bill["total"], 2), "branch": branch, "vehicle_id": None, "machine_id": None, "memo": None}]
+             {"account": "2100", "debit": 0.0, "credit": round(bill["total"] - interest, 2), "branch": branch, "vehicle_id": None, "machine_id": None, "memo": None}]
+    if interest:      # PEA paid interest on the deposit by taking it off this bill: other income, and less to pay
+        lines.append({"account": "4900", "debit": 0.0, "credit": interest, "branch": branch, "vehicle_id": None, "machine_id": None,
+                      "memo": "ผลประโยชน์เงินประกันการใช้ไฟ"})
     desc = (f"ค่าไฟ {meter} เดือน {m:02d}/{y + 543} · {bill['kwh_total']:,.0f} หน่วย · demand {bill['demand_peak_kw']:,.1f} kW"
-            + (f" · ค่า power factor {bill['pf_charge']:,.2f}" if bill.get("pf_charge") else ""))
+            + (f" · ค่า power factor {bill['pf_charge']:,.2f}" if bill.get("pf_charge") else "")
+            + (" · PEA ประมาณหน่วย (ไม่ได้อ่านมิเตอร์)" if bill.get("estimated") else ""))
     return {"entry_date": date(y, m, 25).isoformat(), "branch": branch, "source": "electricity", "source_id": f"pea:{bill['invoice_no']}",
             "party": f"PEA {meter}", "description": desc, "doc_type": "tax_invoice", "doc_no": bill["invoice_no"], "lines": lines}
 
@@ -63,7 +68,7 @@ def month_view(b: dict) -> dict:
     peak = float(b.get("kwh_peak") or 0)
     limit = round(kw_max * PF_LIMIT, 1) if kw_max else None
     shift_saving = round(peak * 0.1 * (float(b.get("rate_peak") or 0) - float(b.get("rate_offpeak") or 0)), 0)
-    text = {"ca_no", "meter_no", "address", "invoice_no", "bill_period", "read_date", "tariff", "branch", "id", "file_id", "created_at", "due_date"}
+    text = {"estimated", "ca_no", "meter_no", "address", "invoice_no", "bill_period", "read_date", "tariff", "branch", "id", "file_id", "created_at", "due_date"}
     return {**{k: (b[k] if k in text or b[k] is None else float(b[k])) for k in b},
             "baht_per_kwh": round(total / kwh, 3) if kwh else None,
             "peak_share": round(peak / kwh, 3) if kwh else None,

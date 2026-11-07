@@ -129,3 +129,28 @@ def test_a_cheque_for_a_stored_bill_pays_it_instead_of_costing_twice():
     out = ac.build(rows, branch="สระบุรี", file_month=date(2026, 11, 1), batch="t", bills={835380.28: "318011438503"})
     d = [{ln["account"]: ln["debit"] for ln in e["lines"] if ln["debit"]} for e in out["entries"]]
     assert d[0] == {"2100": 835380.28} and d[1] == {"5100": 100.0, "1400": 7.0}
+
+
+# Kaeng Khoi's bills (older layout, readable Thai, "Consumption Unit" also used by the usage-history box)
+def _kk(name):
+    import os
+    return open(os.path.join(os.path.dirname(__file__), "fixtures", name), encoding="utf-8").read()
+
+
+def test_older_layout_with_deposit_interest():
+    b = pea_bill.parse_text(_kk("pea_kk_2026_02.txt"))
+    assert (b["ca_no"], b["address"], b["bill_period"]) == ("020019229331", "150", "2026-02")
+    assert (b["kwh_peak"], b["kwh_offpeak"], b["kwh_holiday"], b["kwh_total"]) == (159780.0, 200550.0, 182520.0, 542850.0)
+    assert (b["demand_peak_kw"], b["kvar_max"], b["pf_charge"]) == (684.0, 852.0, 4429.53)
+    assert b["total"] == 1941337.18 and b["deposit_interest"] == 3197.84 and not b["estimated"]
+    e = el.entry_for(b, "แก่งคอย")
+    cr = {ln["account"]: ln["credit"] for ln in e["lines"] if ln["credit"]}
+    assert cr == {"2100": 1938139.34, "4900": 3197.84}
+    assert round(sum(ln["debit"] for ln in e["lines"]), 2) == round(sum(ln["credit"] for ln in e["lines"]), 2)
+
+
+def test_estimated_month():
+    b = pea_bill.parse_text(_kk("pea_kk_2026_07.txt"))
+    assert b["estimated"] is True
+    assert (b["kwh_peak"], b["kwh_offpeak"], b["kwh_holiday"], b["kwh_total"]) == (233730.0, 229500.0, 236490.0, 699720.0)
+    assert (b["demand_peak_kw"], b["kvar_max"], b["total"]) == (1056.0, 864.0, 2621193.24)

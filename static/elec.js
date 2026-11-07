@@ -40,7 +40,8 @@ function renderElectricity() {
   EL_W = window.innerWidth < 700 ? 360 : 520;               // a narrow screen draws narrower charts, so the labels stay readable
   const meters = (el_.data.meters || []).map((m) => ({ ...m, months: [...m.months].reverse() }));       // oldest -> newest, left to right
   const pick = $("elMeter");
-  pick.hidden = !meters.length;
+  const all = $("elBranch").value === "";                    // ทุกสาขา: no meter to pick -- every meter added together
+  pick.hidden = all || meters.length < 2;
   if (!meters.length) {
     fill($("elBody"), el("div", { class: "card" }, el("p", { class: "muted", text: "ยังไม่มีใบแจ้งค่าไฟ — แนบ PDF ของ PEA ที่ " }, el("a", { href: "#accounts-in", text: "บัญชี › ลงข้อมูล / แนบไฟล์" }), " แถวค่าไฟฟ้า แล้วระบบอ่านให้เอง")));
     return;
@@ -50,8 +51,29 @@ function renderElectricity() {
   const many = new Set(meters.map((m) => m.branch)).size > 1;
   fill(pick, ...meters.map((m) => el("option", { value: key(m), text: `มิเตอร์ ${m.meter}${many ? ` · ${m.branch}` : ""}` })));
   pick.value = el_.meter;
+  if (all && meters.length > 1) { const sum = elCombine(meters); fill($("elBody"), elKpis(meters), elMeterPanel(sum), elTable([sum])); return; }
   const m = meters.find((x) => key(x) === el_.meter);
   fill($("elBody"), elKpis(meters), elMeterPanel(m), elTable([m]));
+}
+
+// ---- every meter of every branch as one: the months where every meter has a bill, each number added up (peak kW too -- the meters
+// peak at different times, so this is the sum of their own peaks, not one shared peak). kVAR has no meaning added up: the power-factor
+// charge in baht is shown instead.
+const EL_SUM = ["kwh_peak", "kwh_offpeak", "kwh_holiday", "kwh_total", "demand_peak_kw", "demand_charge", "energy_peak", "energy_offpeak",
+  "ft_amount", "pf_charge", "vat", "subtotal", "total", "service_charge", "deposit_interest"];
+function elCombine(meters) {
+  const sets = meters.map((m) => new Set(m.months.map((x) => x.bill_period)));
+  const common = [...sets[0]].filter((p) => sets.every((st) => st.has(p))).sort();
+  const months = common.map((p) => {
+    const rows = meters.map((m) => m.months.find((x) => x.bill_period === p));
+    const o = { bill_period: p, estimated: rows.some((x) => x.estimated) };
+    EL_SUM.forEach((k) => { o[k] = rows.reduce((a, x) => a + (Number(x[k]) || 0), 0); });
+    o.peak_share = o.kwh_total ? o.kwh_peak / o.kwh_total : null;
+    o.baht_per_kwh = o.kwh_total ? o.total / o.kwh_total : null;
+    return o;
+  });
+  return { combined: true, meter: `รวม ${meters.length} มิเตอร์`, branch: [...new Set(meters.map((m) => m.branch))].join(" + "),
+    ca_no: meters.map((m) => m.meter).join(", "), months };
 }
 
 // ---- headline tiles: the latest month that every meter has, both meters added up
@@ -85,15 +107,19 @@ function elMeterPanel(m) {
   const ms = m.months;
   const pfYear = ms.reduce((a, x) => a + (x.pf_charge || 0), 0);
   return el("div", { class: "card el-panel" },
-    el("div", { class: "el-panel-head" }, el("h3", { text: `มิเตอร์ ${m.meter}` }), el("span", { class: "muted small", text: `${m.branch} · CA ${m.ca_no}` }),
+    el("div", { class: "el-panel-head" }, el("h3", { text: m.combined ? m.meter : `มิเตอร์ ${m.meter}` }),
+      el("span", { class: "muted small", text: m.combined ? `${m.branch} · มิเตอร์ ${m.ca_no} · เฉพาะเดือนที่มีบิลครบทุกมิเตอร์` : `${m.branch} · CA ${m.ca_no}` }),
       pfYear ? el("span", { class: "badge warn", text: `⚠ เสียค่า power factor ${elN(pfYear)} ฿ ใน ${ms.filter((x) => x.pf_charge).length} เดือน` }) : null),
     el("div", { class: "el-grid" }, elChart("หน่วยไฟ (kWh) แยกช่วงเวลา", "ส้ม = Peak จ–ศ 09:00–22:00 (แพง) · ฟ้า = Off-peak · เขียวน้ำทะเล = วันหยุด",
       elStack(ms, [["kwh_peak", "Peak", "var(--el-peak)"], ["kwh_offpeak", "Off-peak", "var(--el-off)"], ["kwh_holiday", "วันหยุด", "var(--el-hol)"]], (v) => `${elN(v)} kWh`),
       elLegend([["Peak", "var(--el-peak)"], ["Off-peak", "var(--el-off)"], ["วันหยุด", "var(--el-hol)"]])),
-    elChart("Demand สูงสุดช่วง Peak (kW)", "ตัวนี้ตัวเดียวกำหนดค่า demand ทั้งเดือน — 15 นาทีที่สูงที่สุดของช่วง Peak",
+    elChart("Demand สูงสุดช่วง Peak (kW)", m.combined ? "บวก demand สูงสุดของแต่ละมิเตอร์ (แต่ละตัวสูงสุดคนละเวลา)" : "ตัวนี้ตัวเดียวกำหนดค่า demand ทั้งเดือน — 15 นาทีที่สูงที่สุดของช่วง Peak",
       elLine(ms, "demand_peak_kw", (x) => `${elN(x.demand_peak_kw, 1)} kW · ค่า demand ${elN(x.demand_charge)} ฿`)),
-    elChart("kVAR สูงสุด เทียบเพดาน PEA", "เกินเส้นประ (61.97% ของ kW สูงสุด) = เสียค่า power factor → เช็คคาปาซิเตอร์",
-      elKvar(ms)),
+    m.combined
+      ? elChart("ค่า power factor ต่อเดือน (บาท)", "kVAR เกินเพดานของแต่ละมิเตอร์ — เลือกสาขาเพื่อดูทีละมิเตอร์",
+        elStack(ms, [["pf_charge", "ค่า PF", "var(--warn)"]], (v) => `${elN(v, 2)} ฿`))
+      : elChart("kVAR สูงสุด เทียบเพดาน PEA", "เกินเส้นประ (61.97% ของ kW สูงสุด) = เสียค่า power factor → เช็คคาปาซิเตอร์",
+        elKvar(ms)),
     elChart("ค่าไฟต่อเดือน (บาท)", "แยกส่วน: ค่าพลังงาน Peak / Off-peak · ค่า demand · Ft · ค่า PF · VAT",
       elStack(ms, [["energy_peak", "พลังงาน Peak", "var(--el-peak)"], ["energy_offpeak", "พลังงาน Off-peak", "var(--el-off)"], ["demand_charge", "ค่า demand", "var(--el-dem)"],
         ["ft_amount", "Ft", "var(--el-ft)"], ["pf_charge", "ค่า PF", "var(--warn)"], ["vat", "VAT", "var(--el-vat)"]], (v) => `${elN(v)} ฿`),
@@ -224,14 +250,17 @@ function elTip(g, rows) {
 // ---- the numbers, for anyone who wants them
 function elTable(meters) {
   const head = ["เดือน", "หน่วย (kWh)", "Peak %", "Demand kW", "ค่า demand", "kVAR / เพดาน", "ค่า PF", "Ft", "รวม (บาท)", "บาท/หน่วย"];
-  return el("div", { class: "card acx-feeds" }, el("h3", { text: `ตัวเลขทั้งหมด · มิเตอร์ ${meters.map((m) => m.meter).join(", ")}` }),
+  const est = meters.some((m) => m.months.some((x) => x.estimated));
+  return el("div", { class: "card acx-feeds" }, el("h3", { text: `ตัวเลขทั้งหมด · ${meters.map((m) => (m.combined ? m.meter : `มิเตอร์ ${m.meter}`)).join(", ")}` }),
+    est ? el("p", { class: "muted small", text: "* เดือนที่ PEA ประมาณหน่วย (ไม่ได้อ่านมิเตอร์) — ตัวเลขเดือนนั้นอาจไม่ตรงกับที่ใช้จริง" }) : null,
     ...meters.map((m) => el("div", { class: "acx-elec" },
       el("div", { class: "acx-elec-row el-table-row head small muted" }, ...head.map((t) => el("span", { text: t }))),
       ...[...m.months].reverse().map((x) => el("div", { class: "acx-elec-row el-table-row" },
-        el("span", { text: elMon(x.bill_period) }), el("span", { text: elN(x.kwh_total) }),
+        el("span", { text: elMon(x.bill_period) + (x.estimated ? " *" : ""), title: x.estimated ? "PEA ประมาณหน่วย (ไม่ได้อ่านมิเตอร์)" : "" }),
+        el("span", { text: elN(x.kwh_total) }),
         el("span", { class: x.peak_share > 0.3 ? "warn-text" : "", text: `${elN(x.peak_share * 100)}%` }),
         el("span", { text: elN(x.demand_peak_kw, 1) }), el("span", { text: elN(x.demand_charge) }),
-        el("span", { class: x.kvar_over > 0 ? "warn-text" : "muted", text: `${elN(x.kvar_max, 1)} / ${elN(x.kvar_limit, 1)}` }),
+        el("span", { class: x.kvar_over > 0 ? "warn-text" : "muted", text: x.kvar_max == null ? "–" : `${elN(x.kvar_max, 1)} / ${elN(x.kvar_limit, 1)}` }),
         el("span", { class: x.pf_charge ? "warn-text" : "muted", text: x.pf_charge ? elN(x.pf_charge, 2) : "–" }),
         el("span", { text: elN(x.ft_amount) }), el("strong", { text: elN(x.total, 2) }), el("span", { text: elN(x.baht_per_kwh, 2) }))))));
 }

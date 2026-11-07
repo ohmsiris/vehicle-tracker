@@ -35,12 +35,50 @@ def _after(lines: list[str], label: str, n: int = 1, numeric: bool = True) -> li
     raise NotPeaBill(f"ไม่พบ {label}")
 
 
+def _after_opt(lines: list[str], label: str) -> list[str]:
+    try:
+        return _after(lines, label)
+    except NotPeaBill:
+        return []
+
+
 def _be(d: str) -> Optional[date]:
     m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})$", d)
     if not m:
         return None
     y = int(m.group(3))
     return date(y - 543 if y > 2400 else y, int(m.group(2)), int(m.group(1)))
+
+
+def _usage(lines: list[str], label: str) -> dict:
+    """The usage table: 3 kW rows and 3 kWh rows (each starting with a P / OP / H line: recent reading, previous reading, units), the
+    total kWh, then max kVAR (recent, previous, units). A month PEA could not read shows "เฉลี่ย -" instead of the two readings (an
+    estimated bill), so each row's units are its LAST number, not a fixed position."""
+    try:
+        i = next(k for k, ln in enumerate(lines) if label in ln)
+    except StopIteration:
+        raise NotPeaBill(f"ไม่พบ {label}")
+    groups, cur, estimated = [], None, False
+    for ln in lines[i + 1:]:
+        if "Amount (Baht)" in ln or "(Based Amount)" in ln:
+            break
+        if "เฉลี่ย" in ln:
+            estimated = True
+        if re.search(r"(^|\s)(P|OP|H)$", ln):
+            cur = []
+            groups.append(cur)
+        elif NUM.match(ln) and cur is not None:
+            cur.append(_f(ln))
+    if len(groups) < 6 or any(not g for g in groups[:6]):
+        raise NotPeaBill("ไม่พบตารางหน่วยไฟ")
+    tail = groups[5]                  # the last kWh row runs on into: its units, the total kWh, kVAR recent / previous / units
+    six = [g[-1] for g in groups[:5]]
+    k = 2 if len(tail) >= 7 else 0    # an estimated H row has only its units
+    if len(tail) < k + 3:
+        raise NotPeaBill("ไม่พบตารางหน่วยไฟ")
+    h_units, total, kvar = tail[k], tail[k + 1], tail[-1]
+    six.append(h_units)
+    return {"kw": six[:3], "kwh": six[3:], "total": total, "kvar": kvar, "estimated": estimated}
 
 
 def parse_text(text: str) -> dict:
@@ -53,6 +91,12 @@ def parse_text(text: str) -> dict:
     if len(head) < 3:
         raise NotPeaBill("ไม่พบเลขที่ผู้ใช้ไฟ")
     out["ca_no"], out["invoice_no"], out["total"] = head[0], head[1], _f(head[2])
+    # the header shows the grand total; when PEA pays back interest on the deposit (ผลประโยชน์เงินประกัน) that is less than the
+    # month's bill -- keep the bill's own total, and the interest apart (other income)
+    month_total = next((x for x in _after_opt(lines, "(Total)")), None)
+    out["deposit_interest"] = round(_f(month_total) - out["total"], 2) if month_total and _f(month_total) > out["total"] else 0.0
+    if out["deposit_interest"]:
+        out["total"] = _f(month_total)
     if m and m.group(1) != out["invoice_no"]:
         raise NotPeaBill("เลขที่ใบแจ้งไม่ตรงกัน")
     i = lines.index("Multi")
@@ -86,11 +130,14 @@ def parse_text(text: str) -> dict:
     base_total = _f(_after(lines, "(Total Based Amount)")[0])
 
     # usage: demand P / OP / H, energy P / OP / H (recent, previous, units each), total kWh, max kVAR (recent, previous, units)
-    u = _after(lines, "Comsumption Unit", 22)
-    vals = [_f(x) for x in u]
-    out["demand_peak_kw"], out["demand_offpeak_kw"], out["demand_holiday_kw"] = vals[2], vals[5], vals[8]
-    out["kwh_peak"], out["kwh_offpeak"], out["kwh_holiday"] = vals[11], vals[14], vals[17]
-    out["kwh_total"], out["kvar_max"] = vals[18], vals[21]
+    # the label is "Comsumption Unit" on the newer bills, "Consumption Unit" on the older ones -- where the usage-history box above
+    # uses the same words, so look only after "Recent Reading" (the usage table's own header)
+    start = next((i for i, ln in enumerate(lines) if "Recent Reading" in ln), 0)
+    label = next((ln for ln in lines[start:] if re.search(r"Co[mn]sumption Unit", ln)), "Comsumption Unit")
+    usage = _usage(lines[start:], label)
+    out["demand_peak_kw"], out["demand_offpeak_kw"], out["demand_holiday_kw"] = usage["kw"]
+    out["kwh_peak"], out["kwh_offpeak"], out["kwh_holiday"] = usage["kwh"]
+    out["kwh_total"], out["kvar_max"], out["estimated"] = usage["total"], usage["kvar"], usage["estimated"]
 
     out["base_amount"] = _f(_after(lines, "(Based Amount)")[0])
     ft_line = next((ln for ln in lines if "Ft" in ln and "=" in ln), "")
