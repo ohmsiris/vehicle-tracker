@@ -84,3 +84,8 @@ def test_cash_withdrawn_from_mums_book_leaves_her_account():
                     _row("น้ำมันคอม 2 ถัง", "บริษัท พี เคมีคอล ลู้บ จำกัด", 45582.0, no=2)], branch="สระบุรี", file_month=date(2026, 9, 1), batch="t")
     cr = [next(ln["account"] for ln in e["lines"] if ln["credit"]) for e in out["entries"]]
     assert cr == ["1120", "1130"]
+
+
+def test_a_cheque_paid_to_mum_is_still_from_hq():
+    assert ac.paid_from(_row("ค่าน้ำแข็งแก่งคอย#07/69", "รัชนิดา  วัฒนสาคร")) == "1130"
+    assert ac.paid_from(_row("คชจ.+เบิกกลางเดือน 9/2569", "แก่งคอยถอนจากเล่มชื่อ K.รัชนิดา")) == "1120"

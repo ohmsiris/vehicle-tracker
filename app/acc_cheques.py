@@ -134,7 +134,8 @@ def classify(row: dict) -> dict:
 def paid_from(row: dict) -> str:
     """Which account the money left: a row withdrawn from คุณรัชนิดา's own book (เงินเดือนสด, คชจ. + เบิกกลางเดือน -- the cash side)
     is her account 1120; everything else is the HQ account 1130 (company payments, VAT bills, bank-transfer salaries)."""
-    return "1120" if re.search(r"รัชนิดา|ถอนจากเล่ม", row.get("payee") or "") else "1130"
+    # "ถอนจากเล่ม" only: a cheque paid TO คุณรัชนิดา (ice between branches) is still from the HQ account
+    return "1120" if re.search(r"ถอนจากเล่ม|เล่มชื่อ", row.get("payee") or "") else "1130"
 
 
 def _rid(no: int, seen: dict) -> str:
