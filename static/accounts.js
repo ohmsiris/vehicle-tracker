@@ -64,13 +64,17 @@ function renderAccounts() {
   const feeds = el("div", { class: "card acx-feeds" },
     el("h3", { text: `What's needed this period · สิ่งที่ต้องใส่งวดนี้ (${beDate(d.start)} – ${beDate(d.end)})` }),
     ...d.feeds.map((f) => {
-      const icon = f.state === "auto" ? "✓" : f.state === "done" ? "✓" : f.state === "none" ? "–" : "○";
+      const icon = f.state === "auto" ? "✓" : f.state === "done" ? "✓" : f.state === "none" ? "–" : f.state === "received" ? "📎" : "○";
+      const myFiles = f.from !== "program" ? (d.files || []).filter((x) => x.feed === f.key && (!half || Number(x.period.slice(-1)) === Number(half))) : [];
       return el("div", { class: `acx-feed ${f.state}` },
         el("span", { class: "acx-feed-icon", text: icon }),
         el("div", {}, el("strong", { text: f.en }), el("span", { class: "muted small", text: ` · ${f.th} · ${ACX_FROM[f.from]}` }),
           el("div", { class: "small muted", text: f.state === "auto" ? `อยู่ในโปรแกรมแล้ว · ${f.entries} รายการ · ${baht(f.total)} ฿${f.note ? ` · ${f.note}` : ""}`
-            : f.state === "done" ? `ใส่แล้ว${f.entries ? ` · ${f.entries} รายการ · ${baht(f.total)} ฿` : ""}` : f.state === "none" ? "ไม่มีในงวดนี้" : "ยังไม่ได้ใส่" })),
+            : f.state === "done" ? `ใส่แล้ว${f.entries ? ` · ${f.entries} รายการ · ${baht(f.total)} ฿` : ""}` : f.state === "none" ? "ไม่มีในงวดนี้"
+            : f.state === "received" ? "ได้รับไฟล์แล้ว · ยังไม่ได้ลงตัวเลข" : "ยังไม่ได้ใส่" }),
+          myFiles.length ? el("div", { class: "acx-files" }, ...myFiles.map(acxFileChip)) : null),
         f.from !== "program" ? el("div", { class: "acx-feed-actions" },
+          el("button", { class: "btn small", type: "button", text: "📎 แนบไฟล์", onclick: () => acxUpload(f) }),
           el("button", { class: "btn small", type: "button", text: "+ ใส่", onclick: () => acxAddDialog({ feed: f.key, account: f.account }) }),
           el("button", { class: "btn small", type: "button", text: f.state === "none" ? "ยกเลิก" : "ไม่มีงวดนี้",
             onclick: () => acxMark(f.key, periodKey, f.state === "none" ? "" : "none") })) : null);
@@ -294,4 +298,37 @@ async function acxReview(docId) {
         err,
         el("div", { class: "dialog-actions" }, el("span", { class: "grow" }), checked, money ? save : null))));
   if (money) { paintRows(); paintTotal(); }
+}
+
+
+// แนบไฟล์: keep the paper behind a checklist row (PDF / photo / Excel) for this period. Monthly rows are filed under their own half.
+function acxUpload(f) {
+  const month = $("acxMonth").value;
+  const half = $("acxHalf").value || String(f.half || 0);
+  const pick = el("input", { type: "file", multiple: true, accept: ".pdf,.jpg,.jpeg,.png,.webp,.heic,.xls,.xlsx,.csv" });
+  pick.onchange = async () => {
+    if (!pick.files.length) return;
+    const fd = new FormData();
+    for (const file of pick.files) fd.append("files", file);
+    fd.append("feed", f.key);
+    fd.append("period", `${month}-${half}`);
+    fd.append("branch", $("acxBranch").value || "all");
+    showErr("acxError", "");
+    try { await api("/api/accounts/files", { method: "POST", body: fd }); }
+    catch (err) { showErr("acxError", `แนบไฟล์ไม่สำเร็จ: ${err.message}`); return; }
+    await loadAccounts();
+  };
+  pick.click();
+}
+
+function acxFileChip(x) {
+  const kb = x.byte_size ? (x.byte_size > 1048576 ? `${(x.byte_size / 1048576).toFixed(1)} MB` : `${Math.round(x.byte_size / 1024)} KB`) : "";
+  return el("span", { class: "acx-file" },
+    el("a", { href: `/api/accounts/files/${x.id}?token=${encodeURIComponent(state.token)}`, target: "_blank", rel: "noopener", text: x.file_name }),
+    el("span", { class: "muted", text: ` ${kb}${x.branch === "all" ? " · ทั้งสองสาขา" : ""}` }),
+    el("button", { class: "linkbtn small", type: "button", title: "ลบไฟล์", text: "×", onclick: async () => {
+      if (!confirm(`ลบไฟล์ ${x.file_name}?`)) return;
+      try { await api(`/api/accounts/files/${x.id}`, { method: "DELETE" }); } catch (err) { alert(err.message); return; }
+      await loadAccounts();
+    } }));
 }

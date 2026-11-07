@@ -933,6 +933,43 @@ def api_accounts_doc_lines(doc_id: str, body: dict = Body(...), x_app_token: str
         raise HTTPException(422, str(exc))
 
 
+@app.post("/api/accounts/files")
+def api_accounts_files_upload(files: list[UploadFile] = File(...), feed: str = Form(...), period: str = Form(...), branch: str = Form(...),
+                              x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """แนบไฟล์ to a checklist row (feed) of a period: PDFs, photos, Excel. Kept; nothing is read from them here."""
+    from app import acc_files
+    _check_token(x_app_token, token)
+    raws = _read_uploads(files, acc_files.MAX_FILES)
+    try:
+        return {"files": _acc_call(acc_files.upload, feed, period, branch, raws)}
+    except acc_files.BadFile as exc:
+        raise HTTPException(422, str(exc))
+
+
+@app.get("/api/accounts/files/{file_id}")
+def api_accounts_file(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    from urllib.parse import quote as _q
+    from app import acc_files
+    _check_token(x_app_token, token)
+    try:
+        data, mime, name = _acc_call(acc_files.download, file_id)
+    except acc_files.BadFile as exc:
+        raise HTTPException(404, str(exc))
+    return Response(content=data, media_type=mime, headers={"Content-Disposition": f"inline; filename*=UTF-8''{_q(name)}",
+                                                            "Cache-Control": "private, max-age=3600"})
+
+
+@app.delete("/api/accounts/files/{file_id}")
+def api_accounts_file_delete(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import acc_files
+    _check_token(x_app_token, token)
+    try:
+        _acc_call(acc_files.remove, file_id)
+    except acc_files.BadFile as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
 @app.post("/api/accounts/docs/{doc_id}/checked")
 def api_accounts_doc_checked(doc_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """A page whose lines did not add up was looked at against the paper: mark it checked."""

@@ -235,16 +235,19 @@ def pnl_tree(rows: list[dict], accounts: dict) -> dict:
             "expenses": round(tot["selling"] + tot["admin"], 2), "net_profit": round(gross - tot["selling"] - tot["admin"], 2)}
 
 
-def feed_status(half: Optional[int], counts: dict, marks: dict, missing_amount: int = 0) -> list[dict]:
-    """The checklist: for each expected feed, whether this period has it. counts = {feed: (entries, total)}; marks = {feed: status}."""
+def feed_status(half: Optional[int], counts: dict, marks: dict, missing_amount: int = 0, files: Optional[dict] = None) -> list[dict]:
+    """The checklist: for each expected feed, whether this period has it. counts = {feed: (entries, total)}; marks = {feed: status};
+    files = {feed: number of files attached} -- files but no amounts yet = "received" (the paper is in, not yet entered)."""
+    files = files or {}
     out = []
     for f in FEEDS:
         if half and f["half"] and f["half"] != half:
             continue
         n, total = counts.get(f["key"], (0, 0.0))
         mark = marks.get(f["key"])
-        state = "auto" if f["from"] == "program" else "done" if n or mark == "done" else "none" if mark == "none" else "missing"
-        out.append({**f, "entries": n, "total": round(total, 2), "state": state, "mark": mark,
+        state = ("auto" if f["from"] == "program" else "done" if n or mark == "done" else "none" if mark == "none"
+                 else "received" if files.get(f["key"]) else "missing")
+        out.append({**f, "entries": n, "total": round(total, 2), "state": state, "mark": mark, "files": files.get(f["key"], 0),
                     "note": f"บิล {missing_amount} ใบไม่มียอดเงิน — ไม่ได้นับ" if f["key"] == "truck_bill" and missing_amount else None})
     return out
 
@@ -331,15 +334,24 @@ def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
         counts[e["source"]] = (n + 1, t + total)
     period_key = f"{month}-{half or 0}"
     marks = {m["feed"]: m["status"] for m in supabase.select_all("acc_feed_marks", {"select": "feed,status", "period": f"eq.{period_key}", "branch": f"eq.{branch or 'all'}", "order": "feed.asc"})}
-    docs, fuel = [], None
+    docs, fuel, files = [], None, []
+    try:
+        from app import acc_files
+        files = acc_files.for_month(month, branch)
+    except supabase.SupabaseError:          # schema_v45 not applied yet
+        pass
+    file_counts: dict = {}
+    for fl in files:
+        if not half or int(fl["period"][-1]) in (half, 0):
+            file_counts[fl["feed"]] = file_counts.get(fl["feed"], 0) + 1
     try:
         from app import acc_docs
         docs = acc_docs.docs_for(start, end, branch)
         fuel = acc_docs.fuel_check(start, end, branch)
     except supabase.SupabaseError:          # schema_v42 not applied yet: the page works without the documents
         pass
-    return {"month": month, "half": half, "branch": branch, "start": start.isoformat(), "end": end.isoformat(), "docs": docs, "fuel": fuel,
-            "pnl": pnl_tree(rows, accounts), "feeds": feed_status(half, counts, marks, _missing_amount(start, end)),
+    return {"month": month, "half": half, "branch": branch, "start": start.isoformat(), "end": end.isoformat(), "docs": docs, "fuel": fuel, "files": files,
+            "pnl": pnl_tree(rows, accounts), "feeds": feed_status(half, counts, marks, _missing_amount(start, end), file_counts),
             "accounts": [{"code": a["code"], "en": a["name_en"], "th": a["name_th"], "kind": a["kind"], "section": a["section"]} for a in accounts.values() if a["active"]],
             "branches": list(BRANCHES)}
 

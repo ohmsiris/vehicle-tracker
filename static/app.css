@@ -1600,3 +1600,9 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .ok-text { color: var(--ok); font-weight: 650; }
 @media (max-width: 900px) { .acx-rv { grid-template-columns: 1fr; height: auto; } .acx-rv-scan { max-height: 45vh; }
   .acx-rv-line { grid-template-columns: 110px minmax(0, 1fr) 80px; } .acx-rv-line > :nth-child(4), .acx-rv-line > :nth-child(5) { grid-column: span 1; } }
+
+/* บัญชี › แนบไฟล์ */
+.acx-feed.received .acx-feed-icon { color: var(--accent, #2563eb); }
+.acx-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.acx-file { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); max-width: 100%; }
+.acx-file a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
