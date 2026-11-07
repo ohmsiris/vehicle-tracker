@@ -131,6 +131,15 @@ def classify(row: dict) -> dict:
     return {"kind": "unknown", "account": "7900", "vat": 0.0}
 
 
+def other_branch(row: dict, branch: str) -> Optional[str]:
+    """Ice bought from the company's other branch ("ค่าน้ำแข็งแก่งคอย" on Saraburi's sheet, "ค่าน้ำแข็งสระบุรี" on Kaeng Khoi's): it counts
+    in each branch -- a cost where it was sold, income where it was made -- and drops out when both branches are looked at together
+    (5060 / 4150; ice from บางปะอิน stays 5050, bought from outside)."""
+    names = {"สระบุรี": "แก่งคอย", "แก่งคอย": "สระบุรี"}
+    other = names.get(branch)
+    return other if other and other in row["what"] else None
+
+
 def paid_from(row: dict) -> str:
     """Which account the money left: a row withdrawn from คุณรัชนิดา's own book (เงินเดือนสด, คชจ. + เบิกกลางเดือน -- the cash side)
     is her account 1120; everything else is the HQ account 1130 (company payments, VAT bills, bank-transfer salaries)."""
@@ -156,6 +165,9 @@ def build(rows: list[dict], *, branch: str, file_month: date, batch: str, bills:
     for r in rows:
         c = classify(r)
         bank = paid_from(r)
+        other = other_branch(r, branch) if c["account"] == "5050" else None
+        if other:
+            c = {**c, "account": "5060"}
         when, est = accrual_date(r, file_month)
         amt = r["amount"]
         inv, owed = None, amt
@@ -195,7 +207,14 @@ def build(rows: list[dict], *, branch: str, file_month: date, batch: str, bills:
                 flags.append(f"แถว {r['no']}: {r['what']} ({amt:,.2f}) — ไม่รู้หมวด ใส่ 'อื่นๆ' ไว้ก่อน")
         desc = " · ".join(x for x in (r["what"], f"จ่ายใบแจ้ง PEA {inv}" if inv else "", f"เช็ค {r['cheque_no']}" if r["cheque_no"] else "", r["note"],
                                        "วันที่ประมาณ (บิลเดือนก่อน)" if est else "") if x)
-        entries.append({"entry_date": when.isoformat(), "branch": branch, "source": "hq_cheques", "source_id": f"{batch}:{_rid(r['no'], seen)}",
+        rid = _rid(r["no"], seen)
+        if other:      # the supplying branch made the ice: its side, sold to the other branch (owed between branches, 1600)
+            entries.append({"entry_date": when.isoformat(), "branch": other, "source": "hq_cheques", "source_id": f"{batch}:{rid}:other",
+                            "party": f"สาขา{branch}", "description": f"ขายน้ำแข็งให้สาขา{branch} · {r['what']}"[:300], "doc_type": "cheque",
+                            "doc_no": r["cheque_no"], "kind": "ice_between_branches",
+                            "lines": [{"account": a, "debit": d, "credit": cr, "branch": other, "vehicle_id": None, "machine_id": None, "memo": None}
+                                      for a, d, cr in (("1600", amt, 0.0), ("4150", 0.0, amt))]})
+        entries.append({"entry_date": when.isoformat(), "branch": branch, "source": "hq_cheques", "source_id": f"{batch}:{rid}",
                         "party": (r["payee"] or "HQ")[:100], "description": desc[:300], "doc_type": "tax_invoice" if c.get("vat") else "cheque",
                         "doc_no": r["cheque_no"], "kind": c["kind"],
                         "lines": [{"account": a, "debit": round(d, 2), "credit": round(cr, 2), "branch": branch, "vehicle_id": None,

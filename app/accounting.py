@@ -303,6 +303,9 @@ def _missing_amount(start: date, end: date) -> int:
     return sum(1 for r in rows if not r.get("total_cost"))
 
 
+INTERNAL = ("4150", "5060")
+
+
 def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
     """The page: the checklist and the P&L for a company month (or one half), one branch or both."""
     _require()
@@ -322,6 +325,8 @@ def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
         if branch:
             params["branch"] = f"eq.{branch}"
         rows += [{**r, "entry": entries[r["entry_id"]]} for r in supabase.select_all("acc_lines", params)]
+    if not branch:      # both branches together: ice one branch sold the other is not a sale of the company (5060 / 4150)
+        rows = [r for r in rows if r["account"] not in INTERNAL]
     counts: dict = {}
     seen: set = set()
     for r in rows:
