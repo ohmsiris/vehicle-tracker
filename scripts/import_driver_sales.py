@@ -62,11 +62,13 @@ def main() -> None:
         mine = [v for v in vehicles if v.get("main_driver_id") == d["id"]]
         if len(mine) == 1:
             own[norm(d["name"])] = mine[0]
-    card, stations = {}, {}
+    card, stations, estimated = {}, {}, set()
     for e in supabase.select_all("acc_entries", {"select": "source_id,acc_lines(account,credit,vehicle_id)", "source": "eq.card_fuel", "order": "id.asc"}):
         _, station, month, key = e["source_id"].split(":", 3)
         if key != "total":                       # a month total with no truck does not make the month's per-truck fuel complete
             stations.setdefault(month, set()).add(station)
+        if key.startswith("est"):                # split from a total by weight (fill_fuel_estimates.py)
+            estimated.add(month)
         for ln in e["acc_lines"]:
             if ln["account"] == "2100" and ln.get("vehicle_id"):
                 card[(month, ln["vehicle_id"])] = card.get((month, ln["vehicle_id"]), 0.0) + float(ln["credit"])
@@ -94,7 +96,7 @@ def main() -> None:
         out_rows.append({"month": r["month"], "code": r["code"], "name": r["name"], "nick": r["nick"], "truck_no": r["truck"],
                          "vehicle_id": v["id"] if v else None, "days": r["days"], "wage": r["wage"], "rate": r["rate"], "sales_written": r["sales"],
                          "commission": r["commission"], "bag_pay": r["bag_pay"], "total_pay": r["total_pay"], "bags": g["bags"], "fuel_card": fc,
-                         "fuel_cash": cf, "gross_sales": g["gross"], "fuel_complete": complete, "source": "sheet" if r["month"] not in rest[1::2] else "payroll_pdf"})
+                         "fuel_cash": cf, "gross_sales": g["gross"], "fuel_complete": complete, "fuel_estimated": r["month"] in estimated, "source": "sheet" if r["month"] not in rest[1::2] else "payroll_pdf"})
         amt = g["gross"] or 0.0
         if amt > 0:
             y, m = (int(x) for x in r["month"].split("-"))

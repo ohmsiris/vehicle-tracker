@@ -9,7 +9,7 @@ Per truck per company month:
   profit   sales - fuel - pay - repairs: what the route brings in before the ice itself is paid for
   km       from GPS / odometer readings (acc_docs.km_rate), when the truck has them
 A month is "ครบ" when both stations' fuel is known truck by truck and the cash fuel too; "ไม่มีน้ำมันเงินสด" when only the cash is
-missing (small); otherwise the big trucks' sales and every truck's fuel are short, and the month is shown but not ranked.
+missing (small); "ประมาณ" when the fuel per truck was split from a month total by weight; otherwise the big trucks' sales and every truck's fuel are short, and the month is shown but not ranked.
 
 summarize() is pure and unit-tested; report() reads the database.
 """
@@ -31,8 +31,9 @@ def summarize(rows: list[dict], repairs: dict, km: dict, vehicles: dict, current
     trucks: dict = {}
     for r in rows:
         vid, m = r.get("vehicle_id"), r["month"]
-        ms = months.setdefault(m, {"month": m, "complete": True, "cash": False})
+        ms = months.setdefault(m, {"month": m, "complete": True, "cash": False, "estimated": False})
         ms["complete"] = ms["complete"] and bool(r.get("fuel_complete"))
+        ms["estimated"] = ms["estimated"] or bool(r.get("fuel_estimated"))
         ms["cash"] = ms["cash"] or r.get("fuel_cash") is not None
         if not vid:
             continue
@@ -49,7 +50,7 @@ def summarize(rows: list[dict], repairs: dict, km: dict, vehicles: dict, current
         if float(r.get("sales_written") or 0) or float(r.get("days") or 0):
             x["drivers"].append(r.get("name"))
     for ms in months.values():
-        ms["status"] = "ok" if ms["complete"] and ms["cash"] else "no_cash" if ms["complete"] else "short"
+        ms["status"] = ("est" if ms["estimated"] else "ok" if ms["cash"] else "no_cash") if ms["complete"] else "short"
     for vid, t in trucks.items():
         for m, x in t["months"].items():
             x["repairs"] = round(repairs.get((m, vid), 0.0), 2)

@@ -18,7 +18,7 @@ const RT_GROUPS = {
   lean: ["ประหยัดแต่ยอดน้อย", "คุ้มน้ำมัน ยังขยายยอดได้", "var(--el-off)"],
   watch: ["ต้องดู", "ยอดต่ำ + น้ำมันสูง", "var(--el-dem)"],
 };
-const RT_STATUS = { ok: ["ครบ", "ok"], no_cash: ["ไม่มีน้ำมันเงินสด", "warn"], short: ["น้ำมันไม่ครบ · ไม่จัดอันดับ", "bad"] };
+const RT_STATUS = { ok: ["ครบ", "ok"], no_cash: ["ไม่มีน้ำมันเงินสด", "warn"], est: ["น้ำมันประมาณ (แบ่งตามสัดส่วน)", "warn"], short: ["น้ำมันไม่ครบ · ไม่จัดอันดับ", "bad"] };
 
 async function openRoutes() {
   showView("routes");
@@ -40,7 +40,7 @@ async function openRoutes() {
 }
 
 function rtBestRange() {
-  const ok = rt_.data.months.filter((m) => m.status !== "short");
+  const ok = rt_.data.months.filter((m) => m.status === "ok" || m.status === "no_cash");     // the exact months; ประมาณ ones are chosen by hand
   const ms = ok.length ? ok : rt_.data.months;
   $("rtFrom").value = ms[0].month;
   $("rtTo").value = ms[ms.length - 1].month;
@@ -82,7 +82,8 @@ function renderRoutes() {
   const short = months.some((m) => m.status === "short");
   fill($("rtBody"),
     el("div", { class: "rt-status" }, ...months.map((m) => el("span", { class: `badge ${RT_STATUS[m.status][1]}`, title: RT_STATUS[m.status][0], text: `${elMon(m.month)} · ${RT_STATUS[m.status][0]}` }))),
-    short ? el("p", { class: "muted small", text: "เดือนที่ 'น้ำมันไม่ครบ' (ม.ค.–เม.ย.): ไม่มีน้ำมันแยกคัน — รถใหญ่ยอดขายเต็มต่ำไป (บวกน้ำมันคืนไม่ได้) และน้ำมันทุกคันเป็น 0 กำไรจึงสูงเกินจริง ใช้ดูแนวโน้มยอดขายได้ ไม่ควรใช้จัดอันดับ" }) : null,
+    short ? el("p", { class: "muted small", text: "เดือนที่ 'น้ำมันไม่ครบ': ไม่มีน้ำมันแยกคัน — รถใหญ่ยอดขายเต็มต่ำไป และน้ำมันเป็น 0 กำไรจึงสูงเกินจริง ไม่ควรใช้จัดอันดับ" }) : null,
+    months.some((m) => m.status === "est") ? el("p", { class: "muted small", text: "เดือนที่ 'น้ำมันประมาณ' (ม.ค.–เม.ย.): บางจากสถานีวารีเทพตรงตามบิลรายคัน · อีกสถานี และ PT แบ่งจากยอดรวมเดือนตามสัดส่วนของแต่ละคันในเดือนที่มีข้อมูล · PT เม.ย. ไม่มียอด ใช้ค่าเฉลี่ย — ดูแนวโน้มได้ ตัวเลขรายคันคลาดได้" }) : null,
     rtKpis(rows, ranked, medR, months.length),
     el("div", { class: "card el-panel" }, el("div", { class: "el-panel-head" }, el("h3", { text: "ยอดขายแต่ละคันไปไหน" }),
       el("span", { class: "muted small", text: `${elMon(from)}–${elMon(to)} · เรียงตามกำไร · ความยาวแท่ง = ยอดขาย` })),
