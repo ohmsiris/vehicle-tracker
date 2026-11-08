@@ -28,10 +28,11 @@ def fuel(rows: list[tuple]) -> list[tuple]:
     for r in rows:
         dm, no, amount = r[0], r[1], r[2]
         extra = r[3] if len(r) > 3 else None
-        v = no
-        if extra:
+        v = no or None                      # "" = a plate with no truck record: booked without a truck
+        if extra and no:
             for frag, plate in PLATE.items():
                 if frag in extra:
                     v = plate
-        out.append((dm, f"เติมน้ำมัน เบอร์ {no}" + (f" ({extra})" if extra else ""), amount, "6130", CASH_FUEL, {"v": v}))
+        label = f"เติมน้ำมัน เบอร์ {no}" if no else "เติมน้ำมัน"
+        out.append((dm, label + (f" ({extra})" if extra else ""), amount, "6130", CASH_FUEL, {"v": v} if v else {}))
     return out
