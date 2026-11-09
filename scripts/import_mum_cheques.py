@@ -7,7 +7,8 @@ total for one month; only what the app's bills for that shop and month do NOT al
 "ส่วนที่ยังไม่มีบิล"). Add more bills in the app, run this again, and the top-up shrinks to nothing. Re-running replaces every top-up.
 
 Also books:
-  * the truck hire-purchase instalment (งวดรถ) 431,108 a month, Saraburi, paid by the bank (source loan) -- owner, 9 Nov 2026
+  * the truck hire-purchase instalment (งวดรถ) 431,108, Saraburi, paid by the bank (source loan). The last one was January 2026
+    (owner, 9 Nov 2026). Split approximately: 7% of it interest (6400, a cost), the rest pays the hire purchase down (2510, not a cost)
   * an approximate monthly figure for workshops paid in cash (shops not on the cheque books: ชมรมย์, Isuzu, ...) for the months before
     their bills are in the app, from the average of the months that have them (source repair_estimate, "ประมาณ")
 """
@@ -59,8 +60,11 @@ SHEETS = [
 INSTALMENT = 431108
 BANK_LOAN = 1050000          # owner, 9 Nov 2026: the bank takes 1,050,000 a month; ends Mar 2027
 BANK_INTEREST = 50000        # of which interest (a cost); the 1,000,000 pays the loan down (2500, not a cost)
-INSTALMENT_MONTHS = [f"2026-{m:02d}" for m in range(1, 11)]
-ACC_INSTALMENT = ("6400", "งวดรถ (เช่าซื้อรถ)")
+INSTALMENT_MONTHS = [f"2026-{m:02d}" for m in range(1, 11)]     # bank loan months
+TRUCK_MONTHS = ["2026-01"]                                       # the truck hire purchase ended with the January instalment
+TRUCK_INTEREST = round(INSTALMENT * 0.07)                        # owner: assume 7% interest -- approximate (no leasing schedule)
+ACC_INSTALMENT = ("6400", "ดอกเบี้ยเช่าซื้อรถ (ประมาณ 7%)")
+ACC_HP = ("2510", "เจ้าหนี้เช่าซื้อรถ (เงินต้นคงเหลือ)")
 
 
 def ym(d: str) -> str:
@@ -112,12 +116,14 @@ def main() -> None:
                         "lines": lines})
 
     print("## truck instalment")
-    for month in INSTALMENT_MONTHS:
+    for month in TRUCK_MONTHS:
         y, m = (int(x) for x in month.split("-"))
         entries.append({"entry_date": date(y, m, 25).isoformat(), "branch": S, "source": "loan", "source_id": f"instalment:{month}",
                         "party": "งวดรถ (เช่าซื้อ)", "doc_type": "bank", "doc_no": None,
-                        "description": f"งวดรถ เช่าซื้อ {m:02d}/{y + 543} · ธนาคารหัก 431,108 (ทั้งก้อน ยังไม่แยกดอกเบี้ย/เงินต้น)",
-                        "lines": [{"account": ACC_INSTALMENT[0], "debit": INSTALMENT, "credit": 0.0, "branch": S},
+                        "description": (f"งวดรถ เช่าซื้อ {m:02d}/{y + 543} (งวดสุดท้าย) · ธนาคารหัก {INSTALMENT:,} = ดอกเบี้ยประมาณ 7% "
+                                        f"{TRUCK_INTEREST:,} + เงินต้น {INSTALMENT - TRUCK_INTEREST:,} (ประมาณ ไม่มีตารางผ่อน)"),
+                        "lines": [{"account": ACC_INSTALMENT[0], "debit": TRUCK_INTEREST, "credit": 0.0, "branch": S},
+                                  {"account": ACC_HP[0], "debit": INSTALMENT - TRUCK_INTEREST, "credit": 0.0, "branch": S},
                                   {"account": "1110", "debit": 0.0, "credit": INSTALMENT, "branch": S}]})
 
     print("## bank loan")
@@ -167,7 +173,11 @@ def main() -> None:
         _require()
         if not supabase.select("acc_accounts", {"select": "code", "code": f"eq.{ACC_INSTALMENT[0]}"}):
             supabase.insert("acc_accounts", [{"code": ACC_INSTALMENT[0], "name_th": ACC_INSTALMENT[1], "name_en": "Truck hire-purchase instalments",
-                                              "kind": "expense", "section": "admin", "sort_order": 640, "active": True}])
+                                              "kind": "expense", "section": "finance", "sort_order": 640, "active": True}])
+        if not supabase.select("acc_accounts", {"select": "code", "code": f"eq.{ACC_HP[0]}"}):
+            supabase.insert("acc_accounts", [{"code": ACC_HP[0], "name_th": ACC_HP[1], "name_en": "Truck hire purchase owed (principal)",
+                                              "kind": "liability", "section": "liabilities", "sort_order": 251, "active": True}])
+        supabase.update("acc_accounts", {"code": f"eq.{ACC_INSTALMENT[0]}"}, {"name_th": ACC_INSTALMENT[1], "name_en": "Truck hire-purchase interest (approx. 7%)"})
         for src in ("mum_cheques", "loan", "repair_estimate"):
             supabase.delete("acc_entries", {"source": f"eq.{src}"})
         _insert_entries(entries)
