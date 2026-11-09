@@ -102,14 +102,19 @@ function renderAccounts() {
     acxTile("Cost of goods sold · ต้นทุนขาย", p.cogs, p.revenue, prev && prev.cogs, "down", prev),
     acxTile("Gross profit · กำไรขั้นต้น", p.gross_profit, p.revenue, prev && prev.gross_profit, "up", prev, true),
     acxTile("Expenses · ค่าใช้จ่าย", p.expenses, p.revenue, prev && prev.expenses, "down", prev),
-    acxTile("Net profit · กำไรสุทธิ", p.net_profit, p.revenue, prev && prev.net_profit, "up", prev, true));
+    acxTile("Operating profit · กำไรจากการดำเนินงาน", p.operating_profit, p.revenue, prev && prev.operating_profit, "up", prev, true),
+    acxTile("Net profit · กำไรสุทธิ (หลังจ่ายหนี้)", p.net_profit, p.revenue, prev && prev.net_profit, "up", prev, true));
   const tree = el("div", { class: "card acx-tree" },
     el("h3", { text: "Profit & loss · งบกำไรขาดทุน" }),
     el("p", { class: "muted small", text: "กดที่บรรทัดเพื่อเปิดดูละเอียดขึ้น: หมวด → บัญชี → ร้าน → แต่ละบิล · ไม่รวม VAT (VAT ไปที่บัญชีภาษีซื้อ) · % = ส่วนของรายได้ · รายได้อื่นแยกไว้ล่างสุด" }),
-    ...p.sections.map((s) => acxNode(`s:${s.key}`, `${s.en} · ${s.th}`, s.total, "acx-l0",
+    ...p.sections.flatMap((s) => [
+      s.key === "finance" ? el("div", { class: `acx-line acx-total ${p.operating_profit < 0 ? "neg" : "pos"}` },
+        el("span", { text: "Operating profit · กำไรจากการดำเนินงาน (ก่อนจ่ายหนี้)" }),
+        el("span", { class: "acx-pct", text: acxPct(p.operating_profit, p.revenue) }), el("strong", { text: acxMoney(p.operating_profit) })) : null,
+      acxNode(`s:${s.key}`, `${s.en} · ${s.th}`, s.total, "acx-l0",
       () => s.accounts.map((a) => acxNode(`a:${a.code}`, `${a.en} · ${a.th}`, a.total, "acx-l1",
         () => a.parties.map((pt) => acxNode(`a:${a.code}:${pt.party}`, pt.party, pt.total, "acx-l2",
-          () => pt.entries.map((e) => acxEntry(e)))))))),
+          () => pt.entries.map((e) => acxEntry(e)))))))]).filter(Boolean),
     el("div", { class: `acx-line acx-total ${p.net_profit < 0 ? "neg" : "pos"}` }, el("span", { text: "Net profit · กำไรสุทธิ" }),
       el("span", { class: "acx-pct", text: acxPct(p.net_profit, p.revenue) }), el("strong", { text: acxMoney(p.net_profit) })));
   const toIn = el("p", { class: "muted small" }, "ยังขาดอะไรอยู่ ดูและแนบไฟล์ได้ที่ ", el("a", { href: "#accounts-in", text: "ลงข้อมูล / แนบไฟล์" }),
@@ -407,6 +412,7 @@ function acxTile(label, value, revenue, before, good, prev, signed = false) {
 // ---- ทั้งปี: the big lines only, month by month
 const ACX_BIG = [["revenue", "Revenue · รายได้", "up"], ["cogs", "Cost of goods sold · ต้นทุนขาย", "down"], ["gross_profit", "Gross profit · กำไรขั้นต้น", "up"],
   ["selling", "Selling & delivery · ขายและขนส่ง", "down"], ["admin", "Administrative · บริหาร", "down"], ["other", "Other income · รายได้อื่น", "up"],
+  ["operating_profit", "Operating profit · กำไรจากการดำเนินงาน", "up"], ["finance", "Debt payments · ภาระหนี้", "down"],
   ["net_profit", "Net profit · กำไรสุทธิ", "up"]];
 function renderYear() {
   const y = acx.year, ms = y.months;
@@ -508,11 +514,11 @@ function acxYearTable(ms, tot) {
     const cell = (v, rev, isTotal) => {
       const share = rev ? v / rev : 0;
       let tone = "";
-      if (k === "net_profit" || k === "gross_profit") tone = v < 0 ? "bad" : "ok";
+      if (k === "net_profit" || k === "gross_profit" || k === "operating_profit") tone = v < 0 ? "bad" : "ok";
       else if (k !== "revenue" && !isTotal && rev && Math.abs(share - avg) >= 0.03) tone = (share > avg) === (good === "down") ? "bad" : "ok";
       return el("span", { class: `acx-yr-cell ${tone}` }, el("b", { text: elN(v / 1000) }), k === "revenue" ? null : el("small", { text: acxPct(v, rev) }));
     };
-    return el("div", { class: `acx-yr-row${k === "net_profit" ? " total" : ""}${k === "gross_profit" ? " sub" : ""}`, style: `grid-template-columns:${cols}` },
+    return el("div", { class: `acx-yr-row${k === "net_profit" ? " total" : ""}${k === "gross_profit" || k === "operating_profit" ? " sub" : ""}`, style: `grid-template-columns:${cols}` },
       el("span", { class: "acx-yr-label", text: label }), ...ms.map((m) => cell(m[k], m.revenue, false)), cell(tot[k], tot.revenue, true));
   });
   return el("div", { class: "card acx-feeds" }, el("h3", { text: "รายเดือน · หัวข้อใหญ่" }),
