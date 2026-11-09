@@ -9,6 +9,7 @@ picking up when Saraburi ran short -- Saraburi pays it with the same cheque) and
 Dr 1600 / Cr 4150, the receiving branch Dr 5060 / Cr 1600; the cheque that pays it settles 1600 (app/acc_cheques).
 Lines worth 0 (tanks lent: ยืมถัง...) are kept in sales_lines only.
 """
+import re
 from datetime import date
 
 INTERNAL = {"แก่งคอย": ("สระบุรี", "ทวาย"), "สระบุรี": ("แก่งคอย",)}
@@ -29,6 +30,15 @@ def is_internal(branch: str, customer: str) -> bool:
     return "แก่งคอย" in c
 
 
+ROUTE = re.compile(r"^\s*\d+\s*\.")
+
+
+def is_route(branch: str, customer: str) -> bool:
+    """Saraburi May-Jul 2026: the route trucks' sales were also keyed into the program as "customers" named after the route
+    ("58.เมืองสระบุรี-เฉลิมพระเกียรติ"). Those sales are already in the books from the drivers' payroll (driver_sales) -- not booked twice."""
+    return branch == "สระบุรี" and bool(ROUTE.match(customer or ""))
+
+
 def lines(branch: str, rows: list[dict]) -> list[dict]:
     return [{"branch": branch, "sale_date": r["date"], "month": company_month(r["date"]), "product": r["product"], "customer": r["customer"],
              "qty": r["qty"], "unit": r["unit"], "weight_kg": r["weight"], "price": r["price"], "amount": r["amount"],
@@ -43,7 +53,7 @@ def build(branch: str, sales: list[dict], months: tuple[str, str]) -> list[dict]
     """sales = lines(); only company months first..last (inclusive) are booked."""
     agg: dict = {}
     for s in sales:
-        if s["amount"] and months[0] <= s["month"] <= months[1]:
+        if s["amount"] and months[0] <= s["month"] <= months[1] and not is_route(branch, s["customer"]):
             k = (s["month"], s["customer"], s["internal"])
             agg[k] = round(agg.get(k, 0.0) + s["amount"], 2)
     out = []

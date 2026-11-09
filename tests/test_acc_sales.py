@@ -20,3 +20,14 @@ def test_build_customer_month_and_between_branches():
     assert by["sales:แก่งคอย:2026-01:ทวาย"] == [("1600", 30.0, 0, "แก่งคอย"), ("4150", 0, 30.0, "แก่งคอย")]
     assert by["sales:แก่งคอย:2026-01:ทวาย:other"] == [("5060", 30.0, 0, "สระบุรี"), ("1600", 0, 30.0, "สระบุรี")]
     assert len(es) == 3                       # the 27 Jan sale is February's; a 0-baht tank loan books nothing
+
+
+def test_route_customers_are_not_booked():
+    from app import acc_sales
+    assert acc_sales.is_route("สระบุรี", "58.เมืองสระบุรี-เฉลิมพระเกียรติ")
+    assert not acc_sales.is_route("สระบุรี", "บริษัท ซีพี ออลล์ จํากัด (มหาช")
+    assert not acc_sales.is_route("แก่งคอย", "58.เมืองสระบุรี")
+    rows = [{"date": "2026-06-10", "product": "ซอง", "customer": c, "qty": 1, "unit": "กส", "weight": 20, "price": 100, "amount": 100}
+            for c in ("58.เมืองสระบุรี-เฉลิมพระเกียรติ", "ร้านหนึ่ง")]
+    out = acc_sales.build("สระบุรี", acc_sales.lines("สระบุรี", rows), ("2026-06", "2026-06"))
+    assert len(out) == 1 and "ร้านหนึ่ง" in out[0]["source_id"]
