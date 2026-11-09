@@ -21,10 +21,9 @@ def test_unknown_plate_is_flagged():
     assert out["flags"] and out["entries"][0]["branch"] == "สระบุรี"
 
 
-def test_card_fuel_on_the_other_branchs_sheet_is_booked_where_it_landed():
+def test_card_fuel_is_booked_to_who_paid_not_whose_truck():
     vs = [{"id": "a", "plate_number": "บฉ 6159", "vehicle_number": "42", "branch": "แก่งคอย"},
           {"id": "b", "plate_number": "1ฒบ 6257", "vehicle_number": "12", "branch": "แก่งคอย"}]
     out = cf.build("2026-05", "pt", {"บฉ 6159": 1070, "1ฒบ 6257": 535}, vs)["entries"]
-    by = {e["lines"][0]["vehicle_id"]: e for e in out}
-    assert by["a"]["branch"] == "สระบุรี" and {ln["branch"] for ln in by["a"]["lines"]} == {"สระบุรี"}
-    assert by["b"]["branch"] == "แก่งคอย"
+    assert {e["branch"] for e in out} == {"สระบุรี"} and {ln["branch"] for e in out for ln in e["lines"]} == {"สระบุรี"}
+    assert {e["lines"][0]["vehicle_id"] for e in out} == {"a", "b"}          # still the same trucks

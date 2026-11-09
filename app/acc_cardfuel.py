@@ -9,9 +9,9 @@ Source today: the owner's "Drivers" Google Sheet --
   * "Fuel": PT's transaction list for one month (plate, km, litres, amount), added up by plate.
 
 Each entry (dated the 25th, the end of the company month): Dr 6120 fuel (net of VAT) + 1400 input VAT (the stations' monthly bills are
-tax invoices in the company's name), Cr 2100 owed to the station. The truck decides the branch, except
-SHEET_BRANCH: a truck of one branch whose card fuel is on the other branch's sheet is booked where it landed (owner, 9 Nov 2026: บฉ 6159
-is Kaeng Khoi's but moved to Saraburi; its card fuel on Saraburi's sheet is Saraburi's, the cash fuel on Kaeng Khoi's papers stays there).
+tax invoices in the company's name), Cr 2100 owed to the station. The branch is WHO PAID, not whose truck it is (owner, 9 Nov 2026):
+every card-fuel line is on Saraburi's sheet and Saraburi pays it, so it is Saraburi's cost even for a truck the app files under
+Kaeng Khoi (trucks move between the plants; the truck keeps its branch in the app). Cash fuel on Kaeng Khoi's papers stays there.
 build is pure and unit-tested.
 """
 import re
@@ -20,7 +20,7 @@ from datetime import date
 from app.acc_docs import norm_plate
 
 STATIONS = {"bangchak": "บางจาก", "pt": "PT"}
-SHEET_BRANCH = {"บฉ6159": "สระบุรี"}          # norm_plate -> branch whose sheet its card fuel is on
+PAYER = "สระบุรี"                 # the sheet the card fuel is on, and who pays it
 
 
 def find_vehicle(key: str, by: dict, vehicles: list[dict]):
@@ -41,7 +41,7 @@ def find_vehicle(key: str, by: dict, vehicles: list[dict]):
     return None
 
 
-def build(month: str, station: str, by_plate: dict, vehicles: list[dict], source_note: str = "") -> dict:
+def build(month: str, station: str, by_plate: dict, vehicles: list[dict], source_note: str = "", payer: str = PAYER) -> dict:
     by = {norm_plate(v["plate_number"]): v for v in vehicles if v.get("plate_number")}
     y, m = (int(x) for x in month.split("-"))
     entries, flags = [], []
@@ -51,9 +51,8 @@ def build(month: str, station: str, by_plate: dict, vehicles: list[dict], source
             continue
         v = find_vehicle(plate, by, vehicles)
         if not v:
-            flags.append(f"{STATIONS[station]} {month}: ไม่พบรถทะเบียน {plate} ({amount:,.2f}) — ลงสาขาสระบุรีไว้")
-        branch = SHEET_BRANCH.get(norm_plate(v["plate_number"])) if v else None
-        branch = branch or (v or {}).get("branch") or "สระบุรี"
+            flags.append(f"{STATIONS[station]} {month}: ไม่พบรถทะเบียน {plate} ({amount:,.2f}) — ลงไว้ไม่ผูกกับรถ")
+        branch = payer
         vat = round(amount * 7 / 107, 2)
         lines = [("6120", round(amount - vat, 2), 0.0), ("1400", vat, 0.0), ("2100", 0.0, amount)]
         label = f"#{v['vehicle_number']} · {v['plate_number']}" if v else plate
