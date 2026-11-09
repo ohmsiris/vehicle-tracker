@@ -21,7 +21,15 @@ def main() -> None:
         print("\n".join(r["problems"][:20]))
         sys.exit(f"{len(r['problems'])} problems reading the report -- nothing written")
     sales = acc_sales.lines(branch, r["rows"])
-    entries = acc_sales.build(branch, sales, (first, last))
+    invoices = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--invoices=")), None)
+    entries = acc_sales.build(branch, sales, (first, last), skip_cp=bool(invoices))
+    if invoices:          # Kaeng Khoi: CP / CPF revenue from the tax-invoice book (app/acc_cp_invoice.py)
+        from app import acc_cp_invoice
+        book = acc_cp_invoice.read_book(invoices)
+        cp = acc_cp_invoice.build(book, sales, first, last)
+        for e in cp:
+            print(f"   {e['source_id']:<45} {e['lines'][0]['debit']:>14,.2f}")
+        entries += cp
     booked = sum(e["lines"][0]["debit"] for e in entries if not e["source_id"].endswith(":other"))
     print(f"{branch}: {len(sales)} lines, {sales[0]['sale_date']} .. {sales[-1]['sale_date']}; {len(entries)} entries, {booked:,.2f} booked {first}..{last}")
     if "--write" in sys.argv:

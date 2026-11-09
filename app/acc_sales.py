@@ -49,11 +49,17 @@ def _line(account, debit, credit, branch):
     return {"account": account, "debit": round(debit, 2), "credit": round(credit, 2), "branch": branch, "vehicle_id": None, "machine_id": None, "memo": None}
 
 
-def build(branch: str, sales: list[dict], months: tuple[str, str]) -> list[dict]:
+def _cp_channel(customer: str):
+    from app.acc_cp_invoice import channel
+    return channel(customer)
+
+
+def build(branch: str, sales: list[dict], months: tuple[str, str], skip_cp: bool = False) -> list[dict]:
     """sales = lines(); only company months first..last (inclusive) are booked."""
     agg: dict = {}
     for s in sales:
-        if s["amount"] and months[0] <= s["month"] <= months[1] and not is_route(branch, s["customer"]):
+        if (s["amount"] and months[0] <= s["month"] <= months[1] and not is_route(branch, s["customer"])
+                and not (skip_cp and branch == "แก่งคอย" and _cp_channel(s["customer"]))):
             k = (s["month"], s["customer"], s["internal"])
             agg[k] = round(agg.get(k, 0.0) + s["amount"], 2)
     out = []
