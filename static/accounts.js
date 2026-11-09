@@ -39,6 +39,8 @@ async function openAccounts(mode = "out") {
   $("navAccountsIn").classList.toggle("active", mode === "in");
   $("acxTitle").textContent = mode === "in" ? "Inputs · ลงข้อมูล / แนบไฟล์" : "Profit & loss · งบกำไรขาดทุน";
   $("acxAdd").hidden = mode !== "in";
+  $("acxViews").hidden = mode !== "out";                     // the ต้นทุนต่อหน่วย tab belongs to the P&L, not to ลงข้อมูล
+  if (mode !== "out") acx.view = "pnl";
   $("acxMonth").querySelector('option[value="year"]')?.toggleAttribute("hidden", mode === "in");
   if (mode === "in" && $("acxMonth").value === "year") $("acxMonth").value = acxMonths()[0];
   showErr("acxError", "");
@@ -48,23 +50,30 @@ async function openAccounts(mode = "out") {
     $("acxMonth").value = acxMonths()[0];
     for (const id of ["acxMonth", "acxHalf", "acxBranch"]) $(id).onchange = loadAccounts;
     $("acxAdd").onclick = () => acxAddDialog({});
+    const view = (v) => { acx.view = v; $("acxViewPnl").classList.toggle("active", v === "pnl"); $("acxViewUnit").classList.toggle("active", v === "unit"); showErr("acxError", ""); loadAccounts(); };
+    $("acxViewPnl").onclick = () => view("pnl");
+    $("acxViewUnit").onclick = () => view("unit");
   }
   await loadAccounts();
 }
 
 async function loadAccounts() {
+  const seq = acx.seq = (acx.seq || 0) + 1;                  // a slower, older load must not draw over a newer one
+  if (acx.mode === "out" && acx.view === "unit") { await loadUnitCost(seq); return; }    // unitcost.js
   const yearView = $("acxMonth").value === "year";
   $("acxHalf").hidden = yearView;
   const q = new URLSearchParams({ month: $("acxMonth").value, half: $("acxHalf").value, branch: $("acxBranch").value });
   fill($("acxBody"), el("p", { class: "muted", text: "กำลังคำนวณ…" }));
   try {
     const yq = `/api/accounts/year?branch=${encodeURIComponent($("acxBranch").value)}`;
-    if (yearView) { acx.year = await api(yq); acx.yearBranch = $("acxBranch").value; renderYear(); return; }
+    if (yearView) { const y = await api(yq); if (seq !== acx.seq) return; acx.year = y; acx.yearBranch = $("acxBranch").value; renderYear(); return; }
     const [rep, yr] = await Promise.all([api(`/api/accounts/report?${q}`),
       acx.mode === "out" && acx.yearBranch !== $("acxBranch").value ? api(yq).catch(() => null) : Promise.resolve(acx.year)]);
+    if (seq !== acx.seq) return;
     acx.data = rep;
     if (yr) { acx.year = yr; acx.yearBranch = $("acxBranch").value; }
   } catch (err) {
+    if (seq !== acx.seq) return;
     fill($("acxBody"), null);
     showErr("acxError", `โหลดไม่สำเร็จ: ${err.message}`);
     return;

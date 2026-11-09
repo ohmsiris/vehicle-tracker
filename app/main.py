@@ -982,6 +982,14 @@ def api_electricity_amr_day(day: str, branch: str = "สระบุรี", x_a
         raise HTTPException(422, "วันที่ไม่ถูกต้อง")
 
 
+@app.get("/api/accounts/unit-cost")
+def api_accounts_unit_cost(branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """งบกำไรขาดทุน › ต้นทุนต่อหน่วย: cost of one tube bag and one block, month by month (app/unit_cost.py)."""
+    from app import unit_cost
+    _check_token(x_app_token, token)
+    return _acc_call(unit_cost.summary, branch)
+
+
 @app.get("/api/accounts/year")
 def api_accounts_year(branch: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """งบกำไรขาดทุน › ทั้งปี: the big P&L lines month by month (app/accounting.year)."""

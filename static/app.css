@@ -1719,3 +1719,22 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .acx-yr-cell small { color: var(--muted); font-size: 11px; }
 .acx-yr-cell.ok b, .acx-yr-cell.ok small { color: var(--ok); }
 .acx-yr-cell.bad b, .acx-yr-cell.bad small { color: var(--bad); }
+
+/* บัญชี › งบกำไรขาดทุน › ต้นทุนต่อหน่วย (unitcost.js) */
+.acx-seg { margin: 0; }
+.uc-head { margin: 4px 0 8px; }
+.uc-warn { display: inline-block; margin: 0 0 10px; }
+.uc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.uc-card { display: grid; gap: 6px; margin: 0; }
+.uc-big span { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.uc-rows { display: grid; gap: 3px; font-size: 14px; }
+.uc-rows > div { display: flex; justify-content: space-between; gap: 10px; }
+.uc-rows b { font-variant-numeric: tabular-nums; }
+.uc-good b { color: var(--ok); } .uc-bad b { color: var(--bad); }
+.uc-good, .uc-bad { border-top: 1px solid var(--line); padding-top: 4px; font-weight: 600; }
+.uc-table { display: grid; font-size: 14px; }
+.uc-tr { display: grid; grid-template-columns: minmax(0, 2.4fr) 1fr 1fr 1.2fr; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); }
+.uc-tr > span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.uc-tr.total { font-weight: 700; border-top: 1.5px solid var(--text); }
+.uc-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.uc-assume { margin: 6px 0 0; padding-left: 1.2em; display: grid; gap: 4px; }
