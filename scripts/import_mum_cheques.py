@@ -57,6 +57,7 @@ SHEETS = [
     ("2026-10", S, "สระบุรีอะไหล่", 1200, CASH), ("2026-10", S, "วิศวภัณฑ์", 14920, MUM), ("2026-10", S, "วิบูลย์เจริญ", 21577, MUM),
 ]
 INSTALMENT = 431108
+BANK_LOAN = 1050000          # owner, 9 Nov 2026: the bank takes 1,050,000 a month (interest inside); ends Mar 2027
 INSTALMENT_MONTHS = [f"2026-{m:02d}" for m in range(1, 11)]
 ACC_INSTALMENT = ("6400", "งวดรถ (เช่าซื้อรถ)")
 
@@ -117,6 +118,15 @@ def main() -> None:
                         "description": f"งวดรถ เช่าซื้อ {m:02d}/{y + 543} · ธนาคารหัก 431,108 (ทั้งก้อน ยังไม่แยกดอกเบี้ย/เงินต้น)",
                         "lines": [{"account": ACC_INSTALMENT[0], "debit": INSTALMENT, "credit": 0.0, "branch": S},
                                   {"account": "1110", "debit": 0.0, "credit": INSTALMENT, "branch": S}]})
+
+    print("## bank loan")
+    for month in INSTALMENT_MONTHS:
+        y, m = (int(x) for x in month.split("-"))
+        entries.append({"entry_date": date(y, m, 25).isoformat(), "branch": S, "source": "loan", "source_id": f"bankloan:{month}",
+                        "party": "เงินกู้ธนาคาร", "doc_type": "bank", "doc_no": None,
+                        "description": f"ผ่อนเงินกู้ธนาคาร {m:02d}/{y + 543} · ธนาคารหัก 1,050,000 (รวมดอกเบี้ย ยังไม่แยก) · หมด มี.ค. 2570",
+                        "lines": [{"account": "6410", "debit": BANK_LOAN, "credit": 0.0, "branch": S},
+                                  {"account": "1110", "debit": 0.0, "credit": BANK_LOAN, "branch": S}]})
 
     print("## workshops paid in cash (not on the cheque books): estimate the months with no bills")
     other = defaultdict(float)
