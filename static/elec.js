@@ -33,7 +33,7 @@ async function loadElectricity() {
   fill($("elBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
   try { el_.data = await api(`/api/electricity?branch=${encodeURIComponent($("elBranch").value)}`); }
   catch (err) { fill($("elBody"), null); showErr("elError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
-  renderElectricity();
+  renderElectricity();  loadAmr();                                                   // the 15-minute meter section underneath (elec_amr.js)
 }
 
 function renderElectricity() {
@@ -161,7 +161,13 @@ function elSlots(n) {
   return { w, x: (i) => EL_P.l + w * i, bar: Math.min(56, w * 0.56) };
 }
 function elXLabels(svg, ms, s) {
-  ms.forEach((x, i) => svg.append(sv("text", { x: s.x(i) + s.w / 2, y: EL_H - 6, "text-anchor": "middle", class: "el-tick" }, document.createTextNode(elMon(x.bill_period)))));
+  // a narrow column shows the month without the year (the tooltip has the year); a very narrow one labels every other month
+  const short = s.w < 48, every = s.w < 26 ? 2 : 1;
+  ms.forEach((x, i) => {
+    if (i % every) return;
+    const t = short ? ELEC_TH[Number(x.bill_period.slice(5, 7)) - 1] : elMon(x.bill_period);
+    svg.append(sv("text", { x: s.x(i) + s.w / 2, y: EL_H - 6, "text-anchor": "middle", class: "el-tick" }, document.createTextNode(t)));
+  });
 }
 
 // stacked bars, 2px surface gap between segments, rounded top

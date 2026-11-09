@@ -50,7 +50,18 @@ def save_bill(bill: dict, branch: str, file_id: Optional[str] = None) -> dict:
 
 
 def read_upload(name: str, data: bytes, branch: str, file_id: str) -> Optional[dict]:
-    """Called for each file uploaded on the electricity row: a PEA PDF is read and saved; anything else is just kept."""
+    """Called for each file uploaded on the electricity row: a PEA PDF is read and saved; a PEA AMR report (.xls, 15-minute kWh) is saved
+    to the meter's readings (the branch comes from the meter's bills when there are any); anything else is just kept."""
+    if name.lower().endswith((".xls", ".htm", ".html")):
+        from app import amr
+        try:
+            rep = amr.parse(data.decode("utf-8", errors="replace"))
+        except amr.NotAmr:
+            return None
+        if not rep["month"]:
+            return None
+        known = supabase.select("elec_bills", {"select": "branch", "ca_no": f"eq.{rep['ca_no']}", "limit": "1"})
+        return amr.save(rep, known[0]["branch"] if known else branch)
     if not name.lower().endswith(".pdf"):
         return None
     try:

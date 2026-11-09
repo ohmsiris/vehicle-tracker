@@ -963,6 +963,25 @@ def api_electricity(branch: str = "", x_app_token: str = Header(default=""), tok
     return {"meters": _acc_call(electricity.summary, branch, 24)}
 
 
+@app.get("/api/electricity/amr")
+def api_electricity_amr(branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """ค่าไฟฟ้า › มิเตอร์ราย 15 นาที: a branch's AMR readings month by month (app/amr.py)."""
+    from app import amr
+    _check_token(x_app_token, token)
+    return _acc_call(amr.summary, branch)
+
+
+@app.get("/api/electricity/amr/day")
+def api_electricity_amr_day(day: str, branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """One day, every meter of the branch, 15 minutes at a time."""
+    from app import amr
+    _check_token(x_app_token, token)
+    try:
+        return _acc_call(amr.one_day, branch, day)
+    except ValueError:
+        raise HTTPException(422, "วันที่ไม่ถูกต้อง")
+
+
 @app.get("/api/accounts/year")
 def api_accounts_year(branch: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """งบกำไรขาดทุน › ทั้งปี: the big P&L lines month by month (app/accounting.year)."""

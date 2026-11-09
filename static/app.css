@@ -1648,6 +1648,18 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .el-kpi .kpi-value { font-variant-numeric: tabular-nums; }
 .el-delta { font-size: 12px; margin-top: 2px; color: var(--muted); }
 .el-delta.up-bad { color: var(--bad); }
+/* ค่าไฟฟ้า › มิเตอร์ราย 15 นาที (elec_amr.js): meters told apart by a slate pair (not a tariff color); orange band = peak hours */
+:root { --el-m1: #3f5b78; --el-m2: #93a9bf; --el-m3: #6f6d66; }
+:root[data-theme="dark"] { --el-m1: #a9c1d9; --el-m2: #5c7690; --el-m3: #a9a79f; }
+.am-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 4px; }
+.am-bar select, .am-bar input { width: auto; min-width: 0; }
+.am-band { fill: var(--el-peak); opacity: .09; }
+.am-line { fill: none; stroke: var(--el-off); stroke-width: 2; stroke-linejoin: round; }
+.am-line.cmp { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.am-line.thin { stroke-width: 1.5; }
+.am-list { margin: 6px 0 0; padding-left: 1.2em; display: grid; gap: 4px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.kpi.warn-tile { border-color: var(--warn-line); }
+.kpi.warn-tile .kpi-value { color: var(--warn); }
 .el-delta.up-good { color: var(--ok); }
 .el-table-row { grid-template-columns: 70px repeat(9, minmax(0, 1fr)); }
 @media (max-width: 760px) { .el-grid { grid-template-columns: 1fr; } .el-table-row { grid-template-columns: 60px repeat(4, minmax(0, 1fr)); }
