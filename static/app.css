@@ -1657,6 +1657,7 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .am-line { fill: none; stroke: var(--el-off); stroke-width: 2; stroke-linejoin: round; }
 .am-line.cmp { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .am-line.thin { stroke-width: 1.5; }
+.am-kpi-head { margin: 12px 0 6px; }
 .am-list { margin: 6px 0 0; padding-left: 1.2em; display: grid; gap: 4px; font-size: 13px; font-variant-numeric: tabular-nums; }
 .kpi.warn-tile { border-color: var(--warn-line); }
 .kpi.warn-tile .kpi-value { color: var(--warn); }

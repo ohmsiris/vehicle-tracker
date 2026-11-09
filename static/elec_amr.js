@@ -27,7 +27,7 @@ async function loadAmr() {
     am_.branch = branch;
     const full = ms.filter((m) => (am_.data.by_month[m].work_days || 0) >= 15);
     am_.month = full[full.length - 1] || ms[ms.length - 1] || "";
-    am_.cmp = ms[0] || "";
+    am_.cmp = "";                                  // no comparison unless the owner picks a month
     am_.day = "";
   }
   renderAmr();
@@ -43,7 +43,7 @@ function renderAmr() {
   const opt = (m) => el("option", { value: m, text: elMon(m) + (d.by_month[m].work_days < 15 ? " (ยังไม่ครบเดือน)" : "") });
   const pick = el("select", { id: "amMonth", "aria-label": "เดือน", onchange: (e) => { am_.month = e.target.value; renderAmr(); } }, ...d.months.map(opt));
   const cmp = el("select", { id: "amCmp", "aria-label": "เทียบกับเดือน", onchange: (e) => { am_.cmp = e.target.value; renderAmr(); } },
-    el("option", { value: "", text: "ไม่เทียบ" }), ...d.months.map(opt));
+    el("option", { value: "", text: "— ไม่เทียบ —" }), ...d.months.map(opt));
   pick.value = am_.month; cmp.value = am_.cmp;
   const meters = d.meters.map((m, i) => el("span", {}, el("i", { style: `background:${AM_METER[i % 3]}` }),
     `มิเตอร์ ${m.name}${m.machines ? ` · ${m.machines}` : ""}`));
@@ -52,7 +52,7 @@ function renderAmr() {
       el("span", { class: "muted small", text: `${am_.branch} · ${elMon(d.months[0])}–${elMon(d.months[d.months.length - 1])} · มิเตอร์บอกได้แค่ยอดรวมของทุกเครื่องที่ต่ออยู่ เครื่องไหนเดินเมื่อไรดูจากไลน์ดับ/เดินเครื่อง` })),
     el("div", { class: "el-legend" }, ...meters),
     el("div", { class: "am-bar" }, el("label", { class: "small muted", for: "amMonth", text: "เดือน" }), pick,
-      el("label", { class: "small muted", for: "amCmp", text: "เทียบกับ" }), cmp),
+      el("label", { class: "small muted", for: "amCmp", text: "เทียบกับเดือน (ถ้าต้องการ)" }), cmp),
     amKpis(), amShape(), el("div", { class: "el-grid" }, amDayLevel(), amPremium()), amList(), amDayBox()));
   amLoadDay();
 }
@@ -64,12 +64,14 @@ function amKpis() {
   const tile = (label, value, sub, tone = "") => el("div", { class: `kpi el-kpi ${tone}` }, el("div", { class: "kpi-label", text: label }),
     el("div", { class: "kpi-value", text: value }), sub ? el("div", { class: "el-delta muted", text: sub }) : null);
   const shift = m.early.baht + m.late.baht;
-  return el("div", { class: "acx-kpis" },
-    tile("เดินช่วงกลางวัน (วันทำงาน 12–17 น.)", `${elN(m.day_kw)} kW`, c ? `${elMon(am_.cmp)}: ${elN(c.day_kw)} kW` : "เครื่องที่ยังเดินช่วงราคาแพง"),
-    tile("สัดส่วนช่วง Peak", `${elN(m.peak_share * 100, 1)}%`, c ? `${elMon(am_.cmp)}: ${elN(c.peak_share * 100, 1)}%` : `${elN(m.kwh.A)} kWh`),
+  const head = el("p", { class: "am-kpi-head" }, el("strong", { text: `ตัวเลขของเดือน ${elMon(am_.month)}` }),
+    el("span", { class: "muted small", text: ` · วันทำงาน ${m.work_days} วัน${m.work_days < 15 ? " (ยังไม่ครบเดือน)" : ""}${c ? ` · ตัวเลขเล็กใต้แต่ละช่อง = ${elMon(am_.cmp)}` : ""}` }));
+  return el("div", {}, head, el("div", { class: "acx-kpis" },
+    tile("เดินช่วงกลางวัน (วันทำงาน 12–17 น.)", `${elN(m.day_kw)} kW`, c ? `เทียบ ${elMon(am_.cmp)}: ${elN(c.day_kw)} kW` : "เครื่องที่ยังเดินช่วงราคาแพง"),
+    tile("สัดส่วนช่วง Peak", `${elN(m.peak_share * 100, 1)}%`, c ? `เทียบ ${elMon(am_.cmp)}: ${elN(c.peak_share * 100, 1)}%` : `${elN(m.kwh.A)} kWh ช่วง Peak`),
     tile("จ่ายเพิ่มเพราะใช้ไฟช่วง Peak", `${elN(m.peak_premium)} ฿`, `เทียบราคา Off-peak (+${elN(d.rates.peak - d.rates.off, 2)} ฿/หน่วย) ก่อน VAT`),
     tile("เปิดก่อน 22:00 / ปิดหลัง 09:00", `${m.early.days + m.late.days} วัน`, shift ? `${elN(shift)} ฿` : "ไม่มี — ตรงเวลา", shift > 2000 ? "warn-tile" : ""),
-    tile("Demand: 15 นาทีที่สูงผิดปกติ", spike ? `${elN(spike)} ฿` : "ไม่มี", spike ? `${m.spikes.length} มิเตอร์ · ดูรายการด้านล่าง` : "ค่า demand ตามวันปกติ", spike ? "warn-tile" : ""));
+    tile("Demand: 15 นาทีที่สูงผิดปกติ", spike ? `${elN(spike)} ฿` : "ไม่มี", spike ? `${m.spikes.length} มิเตอร์ · ดูรายการด้านล่าง` : "ค่า demand ตามวันปกติ", spike ? "warn-tile" : "")));
 }
 
 // ---- shared frame for the wide charts: one y scale, round steps, the peak-price hours shaded
