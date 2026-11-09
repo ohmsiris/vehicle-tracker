@@ -121,7 +121,7 @@ def main() -> None:
     print("## workshops paid in cash (not on the cheque books): estimate the months with no bills")
     other = defaultdict(float)
     for b in bills:
-        if b["src"] != "truck_bill" or any(re.search(p, b["party"]) for p, _, _ in SHOPS.values()):
+        if b["src"] != "truck_bill" or "ร้านนัท" in b["party"] or any(re.search(p, b["party"]) for p, _, _ in SHOPS.values()):   # ร้านนัท: one-off engines / axles
             continue
         other[(cm(date.fromisoformat(b["date"])), b["branch"])] += b["gross"]
     full_from = {S: "2026-08", K: "2026-10"}      # bills are entered month after month from here on
