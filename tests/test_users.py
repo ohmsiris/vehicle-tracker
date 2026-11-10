@@ -60,3 +60,15 @@ def test_new_sales_route_endpoints_answer(monkeypatch):
     c = TestClient(main.app)
     assert c.get("/api/sales-routes-attention", headers={"X-App-Token": "secret"}).json()["walkins"] == 1
     assert c.post("/api/sales-routes/day/3/walkin", json={"key": "new:1"}, headers={"X-App-Token": "secret"}).json() == {"customer_id": 7}
+
+
+def test_an_owner_account_sees_everything(monkeypatch):
+    from app import main
+    object.__setattr__(main.settings, "app_token", "secret")
+    monkeypatch.setattr(users, "session_user", lambda t: {"id": 2, "name": "เจ้าของ", "username": "boss", "menus": [], "role": "owner"} if t == "u_boss" else None)
+    me = users.me_for({"name": "เจ้าของ", "username": "boss", "menus": [], "role": "owner"})
+    assert me["role"] == "owner" and me["nav"] is None and me["username"] == "boss"
+    main._check_owner("u_boss", "")                                             # may manage people
+    c = TestClient(main.app)
+    r = c.get("/api/employees", headers={"X-App-Token": "u_boss"})
+    assert "ไม่มีสิทธิ์" not in r.text                                           # the menu gate lets the owner through

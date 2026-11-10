@@ -74,10 +74,11 @@ def _check_token(header_token: str, query_token: str) -> None:
 
 
 def _check_owner(header_token: str, query_token: str) -> None:
-    """Only the owner's access code (the page of people and their menus)."""
+    """Only the owner: the access code, or a person signed in with the owner role (the page of people and their menus)."""
     if not settings.app_token:
         raise HTTPException(503, "APP_TOKEN is not configured on the server")
-    if not _is_owner(header_token or query_token):
+    supplied = header_token or query_token
+    if not (_is_owner(supplied) or (supplied.startswith("u_") and users.is_owner_user(users.session_user(supplied)))):
         raise HTTPException(403, "เฉพาะเจ้าของ")
 
 
@@ -93,7 +94,7 @@ async def role_gate(request, call_next):
         supplied = request.headers.get("x-app-token") or request.query_params.get("token") or ""
         if supplied.startswith("u_") and not _is_owner(supplied):
             user = await run_in_threadpool(users.session_user, supplied)
-            if user and not users.allowed(users.clean_menus(user.get("menus")), path):
+            if user and not users.is_owner_user(user) and not users.allowed(users.clean_menus(user.get("menus")), path):
                 return JSONResponse({"detail": "ไม่มีสิทธิ์ใช้เมนูนี้ — ขอเจ้าของเพิ่มเมนูให้"}, status_code=403)
     return await call_next(request)
 
@@ -215,7 +216,8 @@ def api_users(x_app_token: str = Header(default=""), token: str = Query(default=
 @app.post("/api/users")
 def api_users_create(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     _check_owner(x_app_token, token)
-    return _user_call(users.create_user, str(body.get("name") or ""), str(body.get("username") or ""), body.get("menus") or [])
+    return _user_call(users.create_user, str(body.get("name") or ""), str(body.get("username") or ""), body.get("menus") or [],
+                      bool(body.get("owner")))
 
 
 @app.patch("/api/users/{user_id}")

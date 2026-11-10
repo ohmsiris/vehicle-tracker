@@ -21,7 +21,7 @@ function applyMe() {
   if (!me) { box.hidden = true; return; }
   box.hidden = false;
   $("meName").textContent = me.name;
-  $("logoutBtn").hidden = me.role !== "staff";
+  $("logoutBtn").hidden = !me.username;                 // signed in with a name (not the access code)
   $("navUsers").hidden = me.role === "staff";
   if (me.role !== "staff") return;
   const keep = new Set(me.nav || []);
@@ -120,15 +120,16 @@ function renderUsers() {
     const card = el("div", { class: `card us-user${u.active ? "" : " off"}` },
       el("div", { class: "us-head" },
         el("strong", { text: u.name }), el("span", { class: "muted small", text: ` · ชื่อเข้าระบบ ${u.username}` }),
+        u.owner ? el("span", { class: "badge ok", text: "เจ้าของ · ทุกเมนู" }) : null,
         !u.active ? el("span", { class: "badge", text: "ปิดใช้งาน" })
           : u.password_set ? el("span", { class: "badge ok", text: "ตั้งรหัสผ่านแล้ว" })
             : el("span", { class: "badge warn", text: u.invite_open ? "รอเจ้าตัวตั้งรหัสผ่าน" : "ลิงก์หมดอายุ — สร้างใหม่" })),
-      el("p", { class: "small", text: "เห็นเมนู:" }),
-      usMenuBoxes(u.menus, `u${u.id}`),
+      u.owner ? null : el("p", { class: "small", text: "เห็นเมนู:" }),
+      u.owner ? null : usMenuBoxes(u.menus, `u${u.id}`),
       u.sessions.length ? el("p", { class: "muted small", text: `เข้าระบบอยู่ ${u.sessions.length} เครื่อง: ` +
         u.sessions.map((s) => `${s.agent || "?"} · ใช้ล่าสุด ${s.last_seen ? new Date(s.last_seen).toLocaleString("th-TH") : "—"}`).join(" · ") }) : null,
       el("div", { class: "us-actions" },
-        el("button", { class: "btn small primary", type: "button", text: "บันทึกเมนู", onclick: () => usSave(u.id, { menus: usPicked(card, `u${u.id}`) }) }),
+        u.owner ? null : el("button", { class: "btn small primary", type: "button", text: "บันทึกเมนู", onclick: () => usSave(u.id, { menus: usPicked(card, `u${u.id}`) }) }),
         el("button", { class: "btn small", type: "button", text: u.password_set ? "ลืมรหัส — สร้างลิงก์ใหม่" : "สร้างลิงก์ใหม่", onclick: () => usInvite(u) }),
         u.sessions.length ? el("button", { class: "btn small", type: "button", text: "ออกจากระบบทุกเครื่อง", onclick: () => usSignOut(u) }) : null,
         el("button", { class: "btn small", type: "button", text: u.active ? "ปิดใช้งาน" : "เปิดใช้งาน", onclick: () => usSave(u.id, { active: !u.active }) })));
@@ -139,18 +140,20 @@ function renderUsers() {
     el("label", { class: "small", for: "usName", text: "ชื่อ (แสดงในแอป)" }), el("input", { id: "usName", type: "text", maxlength: "60", placeholder: "เช่น พี่นุช (บัญชี)" }),
     el("label", { class: "small", for: "usUser", text: "ชื่อเข้าระบบ (ภาษาอังกฤษตัวเล็ก / ตัวเลข)" }),
     el("input", { id: "usUser", type: "text", maxlength: "30", autocomplete: "off", autocapitalize: "none", spellcheck: "false", placeholder: "เช่น account1" }),
+    el("label", { class: "us-menu" }, el("input", { type: "checkbox", id: "usOwner", onchange: (e) => { add.querySelector(".us-menus").hidden = e.target.checked; } }),
+      " เจ้าของ — เห็นทุกเมนู และจัดการผู้ใช้ได้ (เช่น บัญชีของคุณเอง)"),
     el("p", { class: "small", text: "เห็นเมนู:" }), usMenuBoxes(["sales_sheets"], "new"),
     el("button", { class: "btn primary", type: "submit", text: "เพิ่ม แล้วรับลิงก์ตั้งรหัสผ่าน" }));
   add.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const name = $("usName").value.trim();
     let r;
-    try { r = await api("/api/users", jsonOpts("POST", { name, username: $("usUser").value.trim(), menus: usPicked(add, "new") })); }
+    try { r = await api("/api/users", jsonOpts("POST", { name, username: $("usUser").value.trim(), menus: usPicked(add, "new"), owner: $("usOwner").checked })); }
     catch (err) { alert(err.message); return; }
     usShowLink(name, r.invite);
   });
   fill($("usBody"),
-    el("p", { class: "muted small", text: "คุณ (เจ้าของ) เข้าด้วยรหัสเข้าใช้งานเดิมและเห็นทุกเมนูเสมอ · คนอื่นเข้าด้วยชื่อของตัวเอง เห็นเฉพาะเมนูที่ติ๊กให้ — เซิร์ฟเวอร์ไม่ยอมให้เปิดเมนูอื่นแม้พิมพ์ลิงก์เอง" }),
+    el("p", { class: "muted small", text: "รหัสเข้าใช้งานเดิมยังใช้ได้เสมอ (เห็นทุกเมนู) · อยากเข้าด้วยชื่อ + รหัสผ่านของคุณเอง: เพิ่มผู้ใช้ ติ๊ก “เจ้าของ” แล้วเปิดลิงก์ตั้งรหัสผ่าน · คนอื่นเห็นเฉพาะเมนูที่ติ๊กให้ — เซิร์ฟเวอร์ไม่ยอมให้เปิดเมนูอื่นแม้พิมพ์ลิงก์เอง" }),
     ...cards, add);
 }
 

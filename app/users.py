@@ -1,7 +1,8 @@
 """
 Office logins (owner, 10 Nov 2026): the bookkeeper gets their own sign-in and sees only the menus the owner ticks for them.
 
-* The owner keeps signing in with the old access code (APP_TOKEN): that is everything, including this page of people.
+* The owner keeps signing in with the old access code (APP_TOKEN): that is everything, including this page of people. The owner can
+  also have their own name + password: a person with role "owner" sees everything too (owner, 10 Nov 2026).
 * The owner adds a person (name, sign-in name, which menus) and gets a one-time link. The person opens it on their own computer and
   chooses their own password, so nobody else ever knows it. A forgotten password = the owner makes a new link.
 * Signing in gives the browser a long random token (only its sha256 is kept, in app_sessions). It is sent exactly like the access code
@@ -60,6 +61,10 @@ def clean_menus(menus) -> list[str]:
     return [m for m in MENUS if m in (menus or [])]
 
 
+def is_owner_user(user: Optional[dict]) -> bool:
+    return bool(user) and user.get("role") == "owner"
+
+
 def allowed(menus: list[str], path: str) -> bool:
     """May someone with these menus call this /api/ path?"""
     if path.startswith(ALWAYS):
@@ -73,8 +78,9 @@ def menu_options() -> list[dict]:
 
 def me_for(user: Optional[dict]) -> dict:
     """What the page needs to know about who is signed in. None = the owner's access code."""
-    if user is None:
-        return {"role": "owner", "name": "เจ้าของ", "menus": list(MENUS), "nav": None, "hashes": None, "home": None}
+    if user is None or is_owner_user(user):
+        return {"role": "owner", "name": user["name"] if user else "เจ้าของ", "username": user.get("username") if user else None,
+                "menus": list(MENUS), "nav": None, "hashes": None, "home": None}
     menus = clean_menus(user.get("menus"))
     return {"role": "staff", "name": user["name"], "username": user.get("username"), "menus": menus,
             "nav": [n for m in menus for n in MENUS[m]["nav"]], "hashes": [MENUS[m]["hash"] for m in menus],
@@ -101,7 +107,7 @@ def session_user(token: str) -> Optional[dict]:
     user = None
     rows = supabase.select("app_sessions", {"select": "id,user_id,revoked,last_seen", "token_hash": f"eq.{h}", "limit": "1"})
     if rows and not rows[0]["revoked"]:
-        u = supabase.select("app_users", {"select": "id,name,username,menus,active", "id": f"eq.{rows[0]['user_id']}", "limit": "1"})
+        u = supabase.select("app_users", {"select": "id,name,username,menus,role,active", "id": f"eq.{rows[0]['user_id']}", "limit": "1"})
         if u and u[0]["active"]:
             user = u[0]
             seen = rows[0]["last_seen"]
@@ -198,7 +204,7 @@ def _invite(user_id: int) -> str:
 
 def list_users() -> dict:
     from app import supabase
-    users = supabase.select_all("app_users", {"select": "id,name,username,menus,active,pw_hash,invite_expires,created_at", "order": "id.asc"})
+    users = supabase.select_all("app_users", {"select": "id,name,username,menus,role,active,pw_hash,invite_expires,created_at", "order": "id.asc"})
     sess: dict = {}
     for s in supabase.select_all("app_sessions", {"select": "user_id,agent,created_at,last_seen", "revoked": "eq.false",
                                                   "order": "last_seen.desc.nullslast"}):
@@ -206,12 +212,13 @@ def list_users() -> dict:
     out = []
     for u in users:
         out.append({"id": u["id"], "name": u["name"], "username": u["username"], "menus": clean_menus(u["menus"]), "active": u["active"],
+                    "owner": u.get("role") == "owner",
                     "password_set": bool(u["pw_hash"]), "invite_open": bool(u["invite_expires"]) and
                     datetime.fromisoformat(u["invite_expires"]) > datetime.now(timezone.utc), "sessions": sess.get(u["id"], [])})
     return {"users": out, "menus": menu_options(), "invite_days": INVITE_DAYS}
 
 
-def create_user(name: str, username: str, menus) -> dict:
+def create_user(name: str, username: str, menus, owner: bool = False) -> dict:
     from app import supabase
     name = re.sub(r"\s+", " ", name or "").strip()[:60]
     u = clean_username(username)
@@ -221,7 +228,8 @@ def create_user(name: str, username: str, menus) -> dict:
         raise UserError("ชื่อเข้าระบบ: ภาษาอังกฤษตัวเล็ก / ตัวเลข 3-30 ตัว เช่น account1")
     if supabase.select("app_users", {"select": "id", "username": f"eq.{u}", "limit": "1"}):
         raise UserError("ชื่อเข้าระบบนี้มีคนใช้แล้ว")
-    row = supabase.insert("app_users", [{"name": name, "username": u, "menus": clean_menus(menus), "role": "staff"}])[0]
+    row = supabase.insert("app_users", [{"name": name, "username": u, "menus": clean_menus(menus),
+                                         "role": "owner" if owner else "staff"}])[0]
     return {"id": row["id"], "invite": _invite(row["id"])}
 
 
@@ -232,6 +240,8 @@ def update_user(user_id: int, body: dict) -> dict:
         values["menus"] = clean_menus(body["menus"])
     if "active" in body:
         values["active"] = bool(body["active"])
+    if "owner" in body:
+        values["role"] = "owner" if body["owner"] else "staff"
     if "name" in body:
         n = re.sub(r"\s+", " ", str(body["name"] or "")).strip()[:60]
         if not n:
