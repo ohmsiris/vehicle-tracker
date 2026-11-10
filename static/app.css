@@ -1802,3 +1802,4 @@ button.ss-day:hover { background: var(--surface-2); }
 .us-dialog { max-width: 520px; width: calc(100% - 32px); border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--text); }
 .us-link { width: 100%; font-size: 13px; }
 .us-dlg-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.ss-dlg-tools { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -2244,6 +2244,35 @@ def api_sales_route_returns(day_id: int, body: dict = Body(...), x_app_token: st
     return _route_call(route_sales.set_returns, day_id, body.get("returns") or {})
 
 
+def _sheet_day(day: str):
+    from datetime import date as _date
+    if not day:
+        return None
+    try:
+        return _date.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(400, "วันที่ไม่ถูกต้อง")
+
+
+@app.get("/api/sales-routes/{route_id}/sheet")
+def api_sales_route_sheet(route_id: int, day: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """ใบงานคนขับ for the print view (PDF from the browser): one day filled in, or blank without a day."""
+    from app import route_sheet
+    _check_token(x_app_token, token)
+    return _route_call(route_sheet.load, route_id, _sheet_day(day))
+
+
+@app.get("/api/sales-routes/{route_id}/sheet.xlsx")
+def api_sales_route_sheet_xlsx(route_id: int, day: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    from app import route_sheet
+    _check_token(x_app_token, token)
+    s = _route_call(route_sheet.load, route_id, _sheet_day(day))
+    name = f"ใบงานคนขับ รถ{s['truck_no']} {route_sheet.be_date(s['day']).replace('/', '-') or 'ใบเปล่า'}.xlsx"
+    from urllib.parse import quote
+    return Response(content=route_sheet.to_xlsx(s), media_type=XLSX,
+                    headers={"Content-Disposition": f"attachment; filename=sheet.xlsx; filename*=UTF-8''{quote(name)}"})
+
+
 @app.post("/api/sales-routes/day/{day_id}/walkin")
 def api_sales_route_walkin(day_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """A shop the driver added (เพิ่มลูกค้าเอง) becomes a customer on the route."""

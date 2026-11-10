@@ -41,7 +41,9 @@ function renderSalesSheets() {
       el("div", { class: "ss-actions" },
         el("button", { class: "btn small primary", type: "button", text: r.pin_set ? "ตั้งรหัสใหม่" : "ตั้งรหัส", onclick: () => ssSetPin(r) }),
         r.pin_set ? el("button", { class: "btn small", type: "button", text: "ออกจากระบบทุกเครื่อง", onclick: () => ssSignOut(r) }) : null,
-        el("button", { class: "btn small", type: "button", text: ss_.open === r.id ? "ซ่อนรายวัน" : "ดูรายวัน", onclick: () => ssToggle(r.id) })),
+        el("button", { class: "btn small", type: "button", text: ss_.open === r.id ? "ซ่อนรายวัน" : "ดูรายวัน", onclick: () => ssToggle(r.id) }),
+        el("button", { class: "btn small", type: "button", text: "ใบงานเปล่า (พิมพ์)", title: "ใบงานคนขับแบบกระดาษ ยังไม่กรอก — รายชื่อ ถัง ราคา ล่าสุด", onclick: () => ssPrintSheet(r.id, "") }),
+        el("button", { class: "btn small", type: "button", text: "ใบงานเปล่า (Excel)", onclick: () => ssSheetXlsx(r.id, "") })),
       ss_.open === r.id ? el("div", { id: "ssDays" }, el("p", { class: "muted small", text: "กำลังโหลด…" })) : null);
   });
   fill($("ssBody"), link, ...rows);
@@ -107,7 +109,11 @@ async function ssOpenDay(dayId) {
   const day = d.day, t = day.totals || {}, P = d.products;
   const used = P.filter((p) => (t.loaded || {})[p.key] || (t.sold || {})[p.key]);
   const dlg = el("dialog", { class: "ss-dialog" },
-    el("div", { class: "ss-dlg-head" }, el("h3", { text: `ใบขาย ${beDate(day.day)}` }), el("button", { class: "btn small", type: "button", text: "ปิด", onclick: () => { dlg.close(); dlg.remove(); } })),
+    el("div", { class: "ss-dlg-head" }, el("h3", { text: `ใบขาย ${beDate(day.day)}` }),
+      el("span", { class: "ss-dlg-tools" },
+        el("button", { class: "btn small", type: "button", text: "พิมพ์ใบงาน / PDF", onclick: () => ssPrintSheet(day.route_id, day.day) }),
+        el("button", { class: "btn small", type: "button", text: "Excel", onclick: () => ssSheetXlsx(day.route_id, day.day) }),
+        el("button", { class: "btn small", type: "button", text: "ปิด", onclick: () => { dlg.close(); dlg.remove(); } }))),
     (t.flags || []).length ? el("p", { class: "warn-text", text: `⚠ ${t.flags.join(" · ")}` }) : el("p", { class: "muted small", text: "ทุกอย่างตรง" }),
     el("div", { class: "ss-stock" },
       el("div", { class: "ss-srow head muted small" }, el("span", { text: "" }), ...["รับ", "ขาย", "เหลือ", "หน้าโรงนับ"].map((h) => el("span", { text: h }))),
@@ -177,4 +183,93 @@ async function ssSaveReturns(dayId, dlg) {
   dlg.close(); dlg.remove();
   ssOpenDay(dayId);
   if (ss_.open) ssLoadDays(ss_.open);
+}
+
+
+// ------------------------------------------------------------------ ใบงานคนขับ: the paper sheet, from IceBox (app/route_sheet.py)
+async function ssSheetXlsx(routeId, day) {
+  let res;
+  try {
+    res = await fetch(`/api/sales-routes/${routeId}/sheet.xlsx${day ? `?day=${day}` : ""}`, { headers: { "X-App-Token": state.token } });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+  } catch (err) { alert(`โหลดไม่สำเร็จ: ${err.message}`); return; }
+  const cd = res.headers.get("Content-Disposition") || "";
+  const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
+  const a = el("a", { href: URL.createObjectURL(await res.blob()), download: m ? decodeURIComponent(m[1]) : "sheet.xlsx" });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+// The print view: the same sheet as HTML in a new tab, A4, black and white; the browser's print dialog saves it as PDF.
+async function ssPrintSheet(routeId, day) {
+  const w = window.open("", "_blank");
+  if (!w) { alert("เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาตป๊อปอัปของเว็บนี้แล้วลองใหม่"); return; }
+  w.document.write("<p style='font-family:sans-serif'>กำลังโหลด…</p>");
+  let s;
+  try { s = await api(`/api/sales-routes/${routeId}/sheet${day ? `?day=${day}` : ""}`); }
+  catch (err) { w.document.body.textContent = `โหลดไม่สำเร็จ: ${err.message}`; return; }
+  w.document.open();
+  w.document.write(ssSheetHtml(s));
+  w.document.close();
+  w.onload = () => setTimeout(() => w.print(), 300);
+}
+
+function ssSheetHtml(s) {
+  const esc = (v) => String(v == null ? "" : v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const n = (v) => (v == null || v === "" || v === 0 ? "" : Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 }));
+  const d = s.day ? s.day.split("-").reverse().join("/") : "....................";
+  const P = s.products, sm = s.summary || {};
+  const cols = ["ลูกค้า", "ถัง", "ราคา", ...P.map((p) => p.label), "รวมเงิน", "เก่ายกมา", "จ่ายเก่า", "จ่ายสด", "รวมจ่าย", "ค้าง"];
+  const head = `<tr class="hd"><td colspan="${cols.length}"><div class="hdgrid">
+      <span>รถเบอร์ <b class="big">${esc(s.truck_no)}</b></span><span>พนักงานขับรถ <b class="big">${esc(s.driver)}</b></span><span>วันที่ <b class="big">${esc(d)}</b></span>
+      <span>สาย <b class="big">${esc(s.route)}</b></span><span>เบอร์โทรศัพท์ <b class="big">${esc(s.phone)}</b></span><span></span></div></td></tr>
+    <tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr>`;
+  const body = s.rows.map((r) => `<tr class="${r.sold ? "sold" : ""}"><td class="nm">${esc(r.name)}</td><td class="bins">${esc(r.bins).replace(/, /g, "<br>")}</td>
+      <td class="c">${esc(r.price)}</td>${P.map((p) => `<td class="c">${n(r.q[p.key])}</td>`).join("")}
+      <td class="r">${n(r.amount)}</td><td class="r">${n(r.owed_before)}</td><td class="r">${n(r.old_paid)}</td><td class="r">${n(r.paid)}</td>
+      <td class="r">${n(r.paid_all)}</td><td class="r">${r.invoice && r.amount ? "วางบิล" : n(r.owed_after)}</td></tr>`).join("");
+  const t = s.totals;
+  const foot = `<tr class="tot"><td colspan="3" class="c">รวมถุง</td>${P.map((p) => `<td class="c">${n(t.q[p.key])}</td>`).join("")}<td colspan="6"></td></tr>
+    <tr class="tot"><td colspan="3" class="c">รวมเงิน</td>${P.map(() => "<td></td>").join("")}<td class="r">${n(t.amount)}</td><td class="r">${n(t.owed_before)}</td>
+      <td class="r">${n(t.old_paid)}</td><td class="r">${n(t.paid)}</td><td class="r">${n(t.paid_all)}</td><td class="r">${n(t.owed_after)}</td></tr>`;
+  const loads = (sm.loads && sm.loads.length ? sm.loads.map((q, i) => [String(i + 1), q]) : [["1", {}], ["2", {}], ["3", {}]])
+    .concat([["รวม", sm.loaded || {}], ["คืน", sm.returned || {}], ["ขายได้", sm.sold || {}], ["ขาด(-) / เกิน(+)", sm.diff || {}]]);
+  const stock = `<table class="box"><tr><th>รับ</th>${P.map((p) => `<th>${p.label}</th>`).join("")}</tr>${loads.map(([l, q]) =>
+    `<tr><td class="c">${l}</td>${P.map((p) => `<td class="c">${n(q[p.key])}</td>`).join("")}</tr>`).join("")}</table>`;
+  const money = [["รวมขาย", sm.amount], ["วางบิล", sm.invoiced], ["ค้าง (ขายเชื่อ)", sm.credit], ["ขายสด", sm.cash_sales], ["จ่ายเก่า", sm.old_paid],
+    ["รวมรับเงิน", sm.expected_cash], ["ค้างยกมา", sm.owed_before], ["ค้างยกไป", sm.owed_after]];
+  const notes = [1000, 500, 100, 50, 20].map((v) => [`${v.toLocaleString()} =`, (sm.notes || {})[String(v)]]).concat([["เหรียญ =", sm.coins], ["รวมเงิน", sm.counted]]);
+  const kv = (list, cls) => `<table class="box ${cls}">${list.map(([l, v]) => `<tr><td>${l}</td><td class="r b">${n(v)}</td></tr>`).join("")}</table>`;
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบงานคนขับ รถ ${esc(s.truck_no)} ${esc(d)}</title>
+<link rel="stylesheet" href="/static/fonts/fonts.css"><style>
+@page { size: A4 portrait; margin: 8mm; }
+* { box-sizing: border-box; }
+body { font-family: "Noto Sans Thai", Tahoma, sans-serif; color: #000; background: #fff; margin: 0; font-size: 10.5px; }
+table { border-collapse: collapse; width: 100%; }
+.main { table-layout: fixed; }
+.main td { overflow-wrap: anywhere; }
+.main th, .main td, .box th, .box td { border: 1px solid #000; padding: 2px 3px; }
+.main th { font-size: 10px; font-weight: 700; }
+.main thead .hd td { border: none; padding: 0 0 4px; }
+.hdgrid { display: grid; grid-template-columns: 1.1fr 1.6fr 1fr; gap: 2px 10px; font-size: 11px; }
+.big { font-size: 14px; }
+.nm { font-size: 10.5px; } tr.sold .nm { font-weight: 700; }
+.bins { font-size: 8px; text-align: center; line-height: 1.15; }
+.c { text-align: center; } .r { text-align: right; } .b { font-weight: 700; }
+tr { page-break-inside: avoid; }
+.tot td { font-weight: 700; }
+.under { display: grid; grid-template-columns: 1.5fr 1fr .8fr; gap: 10px; margin-top: 10px; page-break-inside: avoid; }
+.km { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; margin-top: 10px; border: 1px solid #000; page-break-inside: avoid; }
+.km span { border-right: 1px solid #000; padding: 6px 4px; } .km span:last-child { border-right: 0; }
+.flags { margin-top: 6px; font-size: 9.5px; }
+.bar { position: sticky; top: 0; background: #f3f3f3; padding: 8px; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.bar button { font: inherit; padding: 4px 12px; }
+@media print { .bar { display: none; } }
+</style></head><body>
+<div class="bar"><button onclick="print()">พิมพ์ / บันทึกเป็น PDF</button><span>เลือกเครื่องพิมพ์ “Save as PDF” เพื่อบันทึกเป็นไฟล์ · กระดาษ A4 แนวตั้ง</span></div>
+<table class="main"><colgroup><col style="width:23%"><col style="width:9%"><col style="width:7%">${P.map(() => '<col style="width:4.6%">').join("")}<col style="width:7%"><col style="width:6.2%"><col style="width:6.2%"><col style="width:6.2%"><col style="width:6.2%"><col style="width:6.2%"></colgroup><thead>${head}</thead><tbody>${body}${foot}</tbody></table>
+<div class="under">${stock}${kv(money, "money")}${kv(notes, "notes")}</div>
+<div class="km"><span>ไมล์ใหม่ <b>${n(sm.km_end)}</b></span><span>ไมล์เก่า <b>${n(sm.km_start)}</b></span><span>รถวิ่ง <b>${n(sm.km)}</b> กม.</span><span>ตรวจ</span><span>ตรวจ</span></div>
+${(sm.flags || []).length ? `<div class="flags">ที่ไม่ตรง: ${sm.flags.map(esc).join(" · ")}</div>` : ""}
+</body></html>`;
 }
