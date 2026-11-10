@@ -32,7 +32,8 @@ function renderSalesSheets() {
       el("div", { class: "ss-head" },
         el("b", { class: "ss-no", text: r.truck_no.replace("KK-", "แก่งคอย ") }),
         el("div", { class: "ss-who" }, el("strong", { text: r.driver_name || "—" }), el("span", { class: "muted small", text: ` · ${r.name} · ลูกค้า ${r.customers}` }),
-          r.new_customers ? el("span", { class: "badge warn", text: `ลูกค้าใหม่รอตรวจ ${r.new_customers}` }) : null),
+          r.new_customers ? el("span", { class: "badge warn", text: `ลูกค้าใหม่รอตรวจ ${r.new_customers}` }) : null,
+          r.reopen_requests ? el("span", { class: "badge warn", text: `ขอแก้ใบขาย ${r.reopen_requests}` }) : null),
         el("span", { class: `badge ${r.pin_set ? "ok" : ""}`, text: r.pin_set ? "ตั้งรหัสแล้ว" : "ยังไม่ได้ตั้งรหัส" }),
         last ? el("span", { class: "muted small", text: `ล่าสุด ${beDate(last.day)} · ฿${elN((last.totals || {}).amount || 0)}${flags ? ` · ⚠ ${flags}` : ""}` }) : null),
       el("div", { class: "ss-actions" },
@@ -71,7 +72,8 @@ async function ssLoadDays(routeId) {
       const t = x.totals || {};
       const st = ST[x.status] || [x.status, ""];
       return el("button", { class: "ss-day", type: "button", onclick: () => ssOpenDay(x.id) },
-        el("span", { text: beDate(x.day) }), el("span", {}, el("span", { class: `badge ${st[1]}`, text: st[0] })),
+        el("span", { text: beDate(x.day) }), el("span", {}, el("span", { class: `badge ${st[1]}`, text: st[0] }),
+          x.reopen_requested_at ? el("span", { class: "badge warn", text: "ขอแก้" }) : null),
         el("span", { text: `฿${elN(t.amount || 0)}` }),
         el("span", { class: t.counted != null && Math.abs(t.counted - t.expected_cash) >= 1 ? "warn-text" : "", text: `฿${elN(t.expected_cash || 0)} / ${t.counted != null ? "฿" + elN(t.counted) : "—"}` }),
         el("span", { text: `฿${elN(t.credit || 0)}` }), el("span", { text: `฿${elN(t.invoiced || 0)}` }),
@@ -101,10 +103,13 @@ async function ssOpenDay(dayId) {
         el("span", { class: "small " + (ln.billing === "invoice" ? "muted" : ln.paid < ln.amount ? "warn-text" : ""), text: ln.billing === "invoice" ? "วางบิล" : ln.paid < ln.amount ? `ค้าง ฿${elN(ln.amount - ln.paid)}` : "สด" }),
         el("span", { class: "small muted", text: ln.old_paid ? `+หนี้เก่า ฿${elN(ln.old_paid)}` : "" })))),
     el("p", { class: "muted small", text: `ขาย ฿${elN(t.amount)} · เงินสด ฿${elN(t.cash_sales)} + หนี้เก่า ฿${elN(t.old_paid)} = ต้องมี ฿${elN(t.expected_cash)} · นับได้ ${t.counted != null ? "฿" + elN(t.counted) : "—"} · ค้าง ฿${elN(t.credit)} · วางบิล ฿${elN(t.invoiced)}${t.km != null ? ` · วิ่ง ${elN(t.km)} กม.` : ""}` }),
+    day.reopen_requested_at ? el("p", { class: "warn-text", text: `คนขับขอแก้ใบขายนี้ (${new Date(day.reopen_requested_at).toLocaleString("th-TH")})` }) : null,
+    (day.reopen_log || []).length ? el("p", { class: "muted small", text: "ประวัติ: " + day.reopen_log.map((x) => `${x.what === "reopened" ? "ออฟฟิศเปิดให้แก้" : "คนขับขอแก้"} ${new Date(x.at).toLocaleString("th-TH")}`).join(" · ") }) : null,
     el("div", { class: "ss-dlg-foot" },
+      day.status !== "open" ? el("button", { class: "btn", type: "button", text: "เปิดให้คนขับแก้", onclick: () => ssReopen(dayId, dlg) }) : el("span", { class: "muted small", text: "คนขับยังไม่ได้ส่ง" }),
       day.status === "checked"
-        ? el("button", { class: "btn", type: "button", text: "ยกเลิกการตรวจ (ให้คนขับแก้ได้)", onclick: () => ssCheck(dayId, false, dlg) })
-        : el("button", { class: "btn primary", type: "button", text: "ตรวจแล้ว ✓", onclick: () => ssCheck(dayId, true, dlg) })));
+        ? el("button", { class: "btn", type: "button", text: "ยกเลิกการตรวจ", onclick: () => ssCheck(dayId, false, dlg) })
+        : day.status === "closed" ? el("button", { class: "btn primary", type: "button", text: "ตรวจแล้ว ✓", onclick: () => ssCheck(dayId, true, dlg) }) : null));
   document.body.append(dlg);
   dlg.showModal();
 }
@@ -113,4 +118,11 @@ async function ssCheck(dayId, checked, dlg) {
   try { await api(`/api/sales-routes/day/${dayId}/check`, jsonOpts("POST", { checked })); } catch (err) { alert(err.message); return; }
   dlg.close(); dlg.remove();
   if (ss_.open) ssLoadDays(ss_.open);
+}
+
+async function ssReopen(dayId, dlg) {
+  if (!confirm("เปิดใบขายนี้ให้คนขับแก้? คนขับต้องแก้แล้วกดส่งใหม่")) return;
+  try { await api(`/api/sales-routes/day/${dayId}/reopen`, jsonOpts("POST", {})); } catch (err) { alert(err.message); return; }
+  dlg.close(); dlg.remove();
+  await openSalesSheets();
 }

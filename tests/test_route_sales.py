@@ -49,3 +49,14 @@ def test_paid_never_above_the_amount_and_pin_rules():
     assert rs.valid_pin("0427") and not rs.valid_pin("427") and not rs.valid_pin("04a7")
     salt = "00" * 16
     assert rs.hash_pin("1234", salt) == rs.hash_pin("1234", salt) != rs.hash_pin("1235", salt)
+
+
+def test_only_today_or_an_unsent_yesterday_before_noon_can_change_and_a_sent_day_is_locked():
+    from datetime import date, datetime
+    now = datetime(2026, 11, 10, 9, 30)
+    t, y = date(2026, 11, 10), date(2026, 11, 9)
+    assert rs.edit_refusal(t, None, now) is None and rs.edit_refusal(t, "open", now) is None
+    assert rs.edit_refusal(y, "open", now) is None                                   # finish yesterday before noon
+    assert "เที่ยง" in rs.edit_refusal(y, "open", datetime(2026, 11, 10, 12, 0))
+    assert rs.edit_refusal(date(2026, 11, 8), None, now) == "แก้ได้เฉพาะใบขายวันนี้"
+    assert "ล็อก" in rs.edit_refusal(t, "closed", now) and "ล็อก" in rs.edit_refusal(t, "checked", now)

@@ -11,6 +11,10 @@ and price, products ซอง กั๊ก หลอด เล็ก แพ็�
   only goes up, so an old save that arrives late never overwrites a newer one. The server works out the day's totals and checks
   (compute) and rebuilds one sale_lines row per customer for reports.
 * Chain stores (Lotus, Big C, 7-11, CJ ...) are วางบิล: the driver brings back a signed paper bill, no cash is taken.
+* Locking (owner, 10 Nov 2026): the phone can only change TODAY's sheet, plus YESTERDAY's if it was never sent, until noon. Sending
+  (ส่งใบขาย) locks the day. The driver can ask the office to reopen it; the office reopens it (the driver then fixes and sends
+  again) and every request / reopen is kept in reopen_log. The server enforces all of this, so an old phone or an old offline copy
+  cannot overwrite a sent day.
 """
 import hashlib
 import hmac
@@ -160,6 +164,22 @@ def compute(doc: dict, customers: dict) -> dict:
             "counted": round(counted, 2) if has_cash else None, "km": km, "customers": len(lines), "flags": flags, "lines": lines}
 
 
+# --------------------------------------------------------------------------------------------- which day the phone may change (pure)
+NOON = 12
+
+
+def edit_refusal(day: date, status: Optional[str], now: datetime) -> Optional[str]:
+    """None when the phone may save this day; otherwise the reason, shown to the driver as it is. now = Bangkok time."""
+    t = now.date()
+    if status in ("closed", "checked"):
+        return "ส่งใบขายวันนี้แล้ว — ล็อกแล้ว ถ้าต้องแก้ ให้กด ขอให้ออฟฟิศเปิดแก้"
+    if day == t:
+        return None
+    if day == t - timedelta(days=1):
+        return None if now.hour < NOON else "เลยเที่ยงแล้ว ใบขายเมื่อวานล็อก — ขอให้ออฟฟิศเปิดแก้"
+    return "แก้ได้เฉพาะใบขายวันนี้"
+
+
 # --------------------------------------------------------------------------------------------- sign in
 def hash_pin(pin: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", pin.encode(), bytes.fromhex(salt), 120_000).hex()
@@ -246,7 +266,8 @@ def _balances(route_id: int) -> dict:
 
 def _day(route_id: int, day: date) -> Optional[dict]:
     from app import supabase
-    rows = supabase.select("sale_days", {"select": "id,day,doc,rev,status,totals,updated_at", "route_id": f"eq.{route_id}",
+    rows = supabase.select("sale_days", {"select": "id,day,doc,rev,status,totals,updated_at,closed_at,reopen_requested_at,reopen_log",
+                                         "route_id": f"eq.{route_id}",
                                          "day": f"eq.{day.isoformat()}", "limit": "1"})
     return rows[0] if rows else None
 
@@ -261,15 +282,29 @@ def _last_km(route_id: int, before: date) -> Optional[float]:
     return None
 
 
+def _sheet(d: Optional[dict]) -> Optional[dict]:
+    if not d:
+        return None
+    return {"doc": d["doc"], "rev": d["rev"], "status": d["status"], "closed_at": d.get("closed_at"),
+            "reopen_requested_at": d.get("reopen_requested_at")}
+
+
 def bootstrap(driver: dict, day: Optional[date] = None) -> dict:
+    """The phone's start: the route, its customers and debts, and the sheet for `day` (today, unless the phone asks for an unsent
+    yesterday). `pending_yesterday` is offered only while yesterday can still be finished (never sent, before noon)."""
     from app import supabase
-    day = day or today()
+    now = datetime.now(BANGKOK)
+    t = now.date()
+    day = day if day in (t, t - timedelta(days=1)) else t
     r = supabase.select("sale_routes", {"select": "id,truck_no,name,branch", "id": f"eq.{driver['route_id']}", "limit": "1"})[0]
     d = _day(r["id"], day)
-    return {"driver": {"id": driver["id"], "name": driver["name"]}, "route": r, "today": today().isoformat(), "day": day.isoformat(),
+    y = _day(r["id"], t - timedelta(days=1)) if day == t else None
+    pending = y if y and y["status"] == "open" and now.hour < NOON else None
+    return {"driver": {"id": driver["id"], "name": driver["name"]}, "route": r, "today": t.isoformat(), "day": day.isoformat(),
             "products": [{"key": k, "label": l} for k, l in PRODUCTS], "notes": NOTES,
             "customers": _customers(r["id"]), "balances": _balances(r["id"]), "last_km": _last_km(r["id"], day),
-            "sheet": ({"doc": d["doc"], "rev": d["rev"], "status": d["status"]} if d else None)}
+            "sheet": _sheet(d), "pending_yesterday": pending["day"] if pending else None,
+            "editable": edit_refusal(day, d["status"] if d else None, now) is None}
 
 
 def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
@@ -280,16 +315,15 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
         day = date.fromisoformat(day_text)
     except (TypeError, ValueError):
         raise RouteSalesError("วันที่ไม่ถูกต้อง")
-    if day > today() + timedelta(days=1) or day < today() - timedelta(days=7):
-        raise RouteSalesError("แก้ได้เฉพาะ 7 วันล่าสุด")
     if not isinstance(doc, dict) or len(str(doc)) > 400_000:
         raise RouteSalesError("ข้อมูลไม่ถูกต้อง")
     route_id = driver["route_id"]
     current = _day(route_id, day)
-    if current and current["status"] == "checked":
-        raise RouteSalesError("ออฟฟิศตรวจวันนี้แล้ว แก้ไม่ได้ — ติดต่อออฟฟิศ")
-    if current and int(rev) <= int(current["rev"]):
+    if current and int(rev) <= int(current["rev"]):          # a late copy of a save the server already has: nothing to do
         return {"rev": current["rev"], "status": current["status"], "totals": _public(current["totals"]), "id_map": {}, "stale": True}
+    refusal = edit_refusal(day, current["status"] if current else None, datetime.now(BANGKOK))
+    if refusal:
+        raise RouteSalesError(refusal)
     customers = {str(c["id"]): c for c in _customers(route_id)}
     id_map = {}
     for nc in doc.get("new_customers") or []:
@@ -321,6 +355,21 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
     return {"rev": int(rev), "status": status, "totals": _public(row["totals"]), "id_map": id_map}
 
 
+def request_reopen(driver: dict, day_text: str) -> dict:
+    from app import supabase
+    try:
+        day = date.fromisoformat(day_text)
+    except (TypeError, ValueError):
+        raise RouteSalesError("วันที่ไม่ถูกต้อง")
+    d = _day(driver["route_id"], day)
+    if not d or d["status"] == "open":
+        raise RouteSalesError("วันนี้ยังไม่ได้ล็อก")
+    now = datetime.now(timezone.utc).isoformat()
+    log = (d.get("reopen_log") or []) + [{"at": now, "what": "requested"}]
+    supabase.update("sale_days", {"id": f"eq.{d['id']}"}, {"reopen_requested_at": now, "reopen_log": log})
+    return {"reopen_requested_at": now}
+
+
 def _public(totals: dict) -> dict:
     return {k: v for k, v in (totals or {}).items() if k != "lines"}
 
@@ -339,14 +388,18 @@ def routes_overview(branch: str = "สระบุรี") -> list[dict]:
         n[1] += 0 if c["approved"] else 1
     since = (today() - timedelta(days=14)).isoformat()
     last = {}
-    for dday in supabase.select_all("sale_days", {"select": "route_id,day,status,totals", "day": f"gte.{since}", "order": "day.asc"}):
+    requests: dict = {}
+    for dday in supabase.select_all("sale_days", {"select": "route_id,day,status,totals,reopen_requested_at", "day": f"gte.{since}",
+                                                  "order": "day.asc"}):
         last[dday["route_id"]] = dday
+        if dday["reopen_requested_at"]:
+            requests[dday["route_id"]] = requests.get(dday["route_id"], 0) + 1
     out = []
     for r in routes:
         d = drivers.get(r["id"])
         n = counts.get(r["id"], [0, 0])
         out.append({**r, "customers": n[0], "new_customers": n[1], "pin_set": bool(d and d["pin_hash"]),
-                    "driver_id": d["id"] if d else None, "last_day": last.get(r["id"])})
+                    "driver_id": d["id"] if d else None, "last_day": last.get(r["id"]), "reopen_requests": requests.get(r["id"], 0)})
     return sorted(out, key=lambda x: (len(x["truck_no"]), x["truck_no"]))
 
 
@@ -378,7 +431,8 @@ def sign_out_phones(route_id: int) -> int:
 def route_days(route_id: int, days: int = 31) -> dict:
     from app import supabase
     since = (today() - timedelta(days=days)).isoformat()
-    rows = supabase.select_all("sale_days", {"select": "id,day,status,totals,updated_at,closed_at,checked_at", "route_id": f"eq.{int(route_id)}",
+    rows = supabase.select_all("sale_days", {"select": "id,day,status,totals,updated_at,closed_at,checked_at,reopen_requested_at,reopen_log",
+                                             "route_id": f"eq.{int(route_id)}",
                                              "day": f"gte.{since}", "order": "day.desc"})
     return {"days": rows}
 
@@ -395,6 +449,23 @@ def day_detail(day_id: int) -> dict:
         ln["name"], ln["seq"], ln["approved"] = c.get("name"), c.get("seq"), c.get("approved", True)
     lines.sort(key=lambda x: x["seq"] or 0)
     return {"day": d[0], "lines": lines, "products": [{"key": k, "label": l} for k, l in PRODUCTS]}
+
+
+def reopen_day(day_id: int) -> dict:
+    """The office lets the driver change a sent day again. rev goes up, so the server's copy (now open) wins over what the phone
+    kept; the driver fixes it and has to send it again."""
+    from app import supabase
+    d = supabase.select("sale_days", {"select": "id,doc,rev,status,reopen_log", "id": f"eq.{int(day_id)}", "limit": "1"})
+    if not d:
+        raise RouteSalesError("ไม่พบวันนี้")
+    d = d[0]
+    if d["status"] == "open":
+        return {"status": "open"}
+    now = datetime.now(timezone.utc).isoformat()
+    supabase.update("sale_days", {"id": f"eq.{d['id']}"}, {
+        "status": "open", "rev": int(d["rev"]) + 1, "doc": {**(d["doc"] or {}), "closed": False}, "closed_at": None, "checked_at": None,
+        "reopen_requested_at": None, "reopen_log": (d.get("reopen_log") or []) + [{"at": now, "what": "reopened"}]})
+    return {"status": "open"}
 
 
 def check_day(day_id: int, checked: bool = True) -> dict:

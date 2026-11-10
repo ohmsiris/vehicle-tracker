@@ -2083,6 +2083,13 @@ def api_driver_day(body: dict = Body(...), x_driver_token: str = Header(default=
     return _route_call(route_sales.save_day, driver, str(body.get("day") or ""), rev, body.get("doc") or {})
 
 
+@app.post("/api/d/reopen-request")
+def api_driver_reopen_request(body: dict = Body(...), x_driver_token: str = Header(default="")) -> dict:
+    from app import route_sales
+    driver = _route_call(route_sales.driver_for_token, x_driver_token)
+    return _route_call(route_sales.request_reopen, driver, str(body.get("day") or ""))
+
+
 @app.post("/api/d/logout")
 def api_driver_logout(x_driver_token: str = Header(default="")) -> dict:
     from app import route_sales
@@ -2123,6 +2130,13 @@ def api_sales_route_day(day_id: int, x_app_token: str = Header(default=""), toke
     from app import route_sales
     _check_token(x_app_token, token)
     return _route_call(route_sales.day_detail, day_id)
+
+
+@app.post("/api/sales-routes/day/{day_id}/reopen")
+def api_sales_route_reopen(day_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.reopen_day, day_id)
 
 
 @app.post("/api/sales-routes/day/{day_id}/check")

@@ -1765,5 +1765,5 @@ button.ss-day:hover { background: var(--surface-2); }
 .ss-lines { display: grid; gap: 2px; max-height: 50vh; overflow-y: auto; border-top: 1px solid var(--line); margin: 8px 0; }
 .ss-line { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.4fr) 6em 7em 8em; gap: 6px; padding: 5px 0; border-bottom: 1px solid var(--line);
   align-items: baseline; font-variant-numeric: tabular-nums; }
-.ss-dlg-foot { display: flex; justify-content: flex-end; }
+.ss-dlg-foot { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 @media (max-width: 640px) { .ss-line { grid-template-columns: 1fr auto; } }
