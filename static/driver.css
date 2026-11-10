@@ -108,8 +108,7 @@ main { padding: 12px 12px calc(92px + env(safe-area-inset-bottom)); max-width: 6
 .box.debt h3 { color: var(--warn); }
 .prow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
 .prow .pl { font-weight: 700; font-size: 18px; }
-.prow .pp button { color: var(--blue); font-weight: 600; font-size: 14px; padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; }
-.prow .pp.need button { color: var(--bad); }
+.prow .pp { color: var(--muted); font-weight: 600; font-size: 14px; padding: 2px 0; }
 .step { display: flex; align-items: center; gap: 6px; }
 .step button { width: 52px; height: 52px; border-radius: 14px; background: var(--blue-soft); color: var(--blue); display: grid; place-items: center; }
 .step button:active { background: var(--blue-mid); }

@@ -68,9 +68,12 @@
     return list;
   }
   function custById(id) { return customers().filter(function (c) { return String(c.id) === String(id); })[0]; }
-  function priceOf(c, sale, k) {
-    if (sale && sale.price && sale.price[k] != null && sale.price[k] !== "") return n(sale.price[k]);
-    var p = (c && c.prices) || {}; return p[k] != null ? n(p[k]) : null;
+  function priceOf(c, sale, k) { var p = (c && c.prices) || {}; return p[k] != null ? n(p[k]) : null; }   // the route list's price only
+  function shortOf(k) { var p = products().filter(function (x) { return x.key === k; })[0]; return p && p.short ? p.short : label(k); }
+  function sellable(c) {               // what this customer can be sold: the products with a price (free customers: the bag ices)
+    if (c.free) return products().filter(function (p) { return ["lod", "lek", "mo"].indexOf(p.key) >= 0; });
+    var pr = c.prices || {};
+    return products().filter(function (p) { return pr[p.key] != null; });
   }
   function isFree(c, sale) { return !!(c.free || (sale && sale.free)); }
   function grossOf(c, sale) {
@@ -238,7 +241,7 @@
     var t = totals(), parts = [];
     products().forEach(function (p) {
       var left = t.loaded[p.key] - t.sold[p.key];
-      if (t.loaded[p.key] || t.sold[p.key]) parts.push(esc(p.label) + " " + (left < 0 ? '<span class="neg">' + fmt(left) + "</span>" : fmt(left)));
+      if (t.loaded[p.key] || t.sold[p.key]) parts.push(esc(shortOf(p.key)) + " " + (left < 0 ? '<span class="neg">' + fmt(left) + "</span>" : fmt(left)));
     });
     $("onTruck").innerHTML = parts.length ? parts.join(" · ") : '<span style="color:var(--muted);font-weight:400">ยังไม่ได้รับ</span>';
     $("cashNow").textContent = "฿" + money(t.cash + t.old);
@@ -339,24 +342,20 @@
     var s = JSON.parse(JSON.stringify(S.doc.sales[String(id)] || { q: {}, pay: "cash" }));
     if (!s.q) s.q = {};
     if (!s.pay) s.pay = "cash";
-    var showAll = false, ro = locked(), showExtra = !!(n(s.discount) || s.free);
+    var ro = locked(), showExtra = !!(n(s.discount) || s.free);
     function draw() {
-      var pr = c.prices || {};
-      var main = products().filter(function (p) { return pr[p.key] != null || n(s.q[p.key]); });
-      if (!main.length) main = products().filter(function (p) { return p.key === "lod"; });
-      var rest = products().filter(function (p) { return main.indexOf(p) < 0; });
-      var list = showAll ? main.concat(rest) : main;
+      var list = sellable(c);
       var bal = balanceOf(c.id), invoice = c.billing === "invoice", dis = ro ? " disabled" : "";
       var html = '<div class="sheet-head"><button class="back" id="sx" aria-label="กลับ">' + ic("back", "l") + "</button><h2>" + (c.fresh ? "" : c.seq + ". ") + esc(c.name) + "<small>" + esc(c.bins || "") + "</small></h2></div>" +
         '<div class="sheet-body" id="sb">';
       if (ro) html += '<div class="banner lock">' + ic("lock") + '<div class="t"><b>ล็อกแล้ว</b><small>ดูได้อย่างเดียว</small></div></div>';
       if (invoice) html += '<div class="banner warn"><div class="t"><b>วางบิล</b><small>ให้ลูกค้าเซ็นบิล ไม่ต้องเก็บเงิน</small></div></div>';
       if (c.free) html += '<div class="banner ok"><div class="t"><b>ลูกค้าฟรี</b><small>ไม่คิดเงิน · ใส่แค่จำนวน</small></div></div>';
-      html += '<div class="box"><h3>ขายวันนี้</h3>' + list.map(function (p) {
+      html += '<div class="box"><h3>ขายวันนี้</h3>' + (list.length ? list.map(function (p) {
         var price = priceOf(c, s, p.key);
-        return '<div class="prow"><div><div class="pl">' + esc(p.label) + '</div><div class="pp' + (price == null && n(s.q[p.key]) ? " need" : "") + '"><button data-price="' + p.key + '"' + dis + ">" +
-          (isFree(c, s) ? "ฟรี" : price == null ? "ใส่ราคา" : "฿" + money(price) + " / หน่วย") + "</button></div></div>" + stepper("q_" + p.key, n(s.q[p.key]), ro) + "</div>";
-      }).join("") + (!showAll && rest.length && !ro ? '<button class="more" id="more">+ สินค้าอื่น (' + rest.map(function (p) { return p.label; }).join(" ") + ")</button>" : "");
+        return '<div class="prow"><div><div class="pl">' + esc(p.label) + '</div><div class="pp">' + (isFree(c, s) ? "ฟรี" : "฿" + money(price) + " / หน่วย") + "</div></div>" +
+          stepper("q_" + p.key, n(s.q[p.key]), ro) + "</div>";
+      }).join("") : '<p class="note">ร้านนี้ยังไม่มีราคา — ติดต่อออฟฟิศ</p>');
       html += '<div class="total"><span>รวม</span><b id="amt">' + (isFree(c, s) ? "ฟรี" : "฿" + money(amountOf(c, s))) + "</b></div>";
       if (!ro && S.doc.sales[String(c.id)]) html += '<button class="clear-link" id="sclear">ล้างรายการร้านนี้</button>';
       if (!c.free && !ro) {
@@ -375,7 +374,7 @@
         if (s.pay === "part") html += '<div class="line"><span class="lbl">รับเงินมา</span><input class="num wide" id="paid" inputmode="decimal" value="' + (s.paid ? s.paid : "") + '" placeholder="0"' + dis + "></div>";
       }
       html += "</div>";
-      if (!invoice && !c.free) {
+      if (!invoice && !c.free && (bal > 0 || n(s.old_paid))) {     // only when there is ยอดค้าง (owner: confusing otherwise)
         html += '<div class="box debt"><h3>' + ic("cash", "s") + "เก็บเงินค่าน้ำแข็งวันก่อน (จ่ายเก่า)</h3>" +
           (bal > 0 ? '<p class="note" style="color:var(--warn)">ค้างในระบบ ฿' + money(bal) + "</p>" : '<p class="note">ลูกค้าจ่ายค่าน้ำแข็งที่ค้างไว้ ใส่ตรงนี้ ไม่ต้องขายวันนี้ก็ได้</p>') +
           (ro || !(bal > 0) ? "" : '<div class="quick"><button id="payall">ทั้งหมด ฿' + money(bal) + "</button></div>") +
@@ -387,12 +386,9 @@
       openSheet(html);
       $("sx").onclick = closeSheet;
       if (ro) { $("sclose").onclick = closeSheet; return; }
-      if ($("more")) $("more").onclick = function () { readInputs(); showAll = true; draw(); };
       if ($("extra")) $("extra").onclick = function () { readInputs(); showExtra = true; draw(); };
       bindSteppers($("sb"), function () { readInputs(); $("amt").textContent = isFree(c, s) ? "ฟรี" : "฿" + money(amountOf(c, s)); });
       $("sb").addEventListener("click", function (e) {
-        var pb = e.target.closest("button[data-price]");
-        if (pb) { readInputs(); askPrice(pb.getAttribute("data-price")); return; }
         var pay = e.target.closest("button[data-pay]");
         if (pay) { readInputs(); s.pay = pay.getAttribute("data-pay"); draw(); return; }
         var fr = e.target.closest("button[data-free]");
@@ -414,21 +410,11 @@
       if ($("oldp")) s.old_paid = n($("oldp").value);
       if ($("disc")) { var dv = n($("disc").value); if (dv) s.discount = dv; else delete s.discount; }
     }
-    function askPrice(k) {
-      var cur = priceOf(c, s, k);
-      var v = window.prompt("ราคา " + label(k) + " ต่อหน่วย (บาท)", cur == null ? "" : cur);
-      if (v == null) return;
-      if (!s.price) s.price = {};
-      if (String(v).trim() === "") delete s.price[k]; else s.price[k] = n(v);
-      draw();
-    }
     function save() {
       var any = Object.keys(s.q).some(function (k) { return n(s.q[k]); }) || n(s.old_paid);
       if (!c.free && (s.free || n(s.discount)) && !s.reason) { toast("เลือกเหตุผลของส่วนลด / แจกฟรี", true); return; }
       if (!s.free && !n(s.discount)) delete s.reason;
-      var missing = isFree(c, s) ? [] : products().filter(function (p) { return n(s.q[p.key]) && priceOf(c, s, p.key) == null; });
-      if (missing.length) { toast("ใส่ราคา " + missing.map(function (p) { return p.label; }).join(" "), true); return; }
-      if (any) { s.t = s.t || nowHM(); s.paid = paidOf(c, s); S.doc.sales[String(c.id)] = s; } else delete S.doc.sales[String(c.id)];
+      if (any) { delete s.price; s.t = s.t || nowHM(); s.paid = paidOf(c, s); S.doc.sales[String(c.id)] = s; } else delete S.doc.sales[String(c.id)];
       changed(); afterSale();
       var nx = nextCustomer(c.id);                  // straight to the next shop on the route
       if (nx) { openSale(nx.id); toast("บันทึกแล้ว ✓"); }
@@ -440,7 +426,7 @@
 
   function openNewCustomer() {
     openSheet('<div class="sheet-head"><button class="back" id="sx" aria-label="กลับ">' + ic("back", "l") + '</button><h2>ลูกค้าใหม่</h2></div><div class="sheet-body"><div class="box">' +
-      '<label class="lbl" for="ncn">ชื่อร้าน</label><input class="txt" id="ncn" autocomplete="off"><label class="lbl" for="ncp">ราคาหลอด / เล็ก / โม่ (บาท)</label>' +
+      '<label class="lbl" for="ncn">ชื่อร้าน</label><input class="txt" id="ncn" autocomplete="off"><label class="lbl" for="ncp">ราคาใหญ่ / เล็ก / บด (บาท)</label>' +
       '<input class="num wide" id="ncp" inputmode="decimal" placeholder="40"><p class="note">ออฟฟิศจะตรวจและเพิ่มเข้าใบขายถาวร</p></div></div>' +
       '<div class="actions one"><button class="btn primary" id="ncs">' + ic("plus", "s") + "เพิ่ม</button></div>");
     $("sx").onclick = closeSheet;

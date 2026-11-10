@@ -25,7 +25,8 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
-PRODUCTS = [("zong", "ซอง"), ("kak", "กั๊ก"), ("lod", "หลอด"), ("lek", "เล็ก"), ("pack", "แพ็ค"), ("mo", "โม่")]
+PRODUCTS = [("zong", "ซอง"), ("kak", "กั๊ก"), ("lod", "ใหญ่"), ("lek", "เล็ก"), ("pack", "แพ็ค"), ("mo", "บด")]   # owner's names (10 Nov 2026)
+SHORT = {"zong": "ซ", "kak": "ก", "lod": "ญ", "lek": "ล", "pack": "พ", "mo": "บ"}       # one letter, for the บนรถ card
 KEYS = [k for k, _ in PRODUCTS]
 NOTES = [1000, 500, 100, 50, 20]                 # cash counted by note, plus coins as one amount
 CHAIN = re.compile(r"lotus|big\s*c|7-11|เซเว่น|cj\s*x?|ซีเจ|tops|makro|แม็คโคร", re.I)
@@ -113,7 +114,7 @@ def line_amount(qty: dict, price: dict) -> float:
 
 def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start: Optional[float] = None) -> dict:
     """doc = what the phone sent; customers = {customer id (str): {"prices", "billing", "free"}}. -> the day's totals and what does
-    not add up. A sale line: {"q": {product: n}, "price": {product: baht} (the driver may change a price), "paid": baht,
+    not add up. A sale line: {"q": {product: n}, "paid": baht (prices come from the route list only),
     "old_paid": baht, "discount": baht, "free": true (given free this once), "reason": "factory" | "other"}.
     A discount or one-off free with reason "factory" (น้ำแข็งเสีย / แตก -- the plant's fault, owner 10 Nov 2026) still counts at full
     price in `commission_sales`, so the driver's percentage is not cut by the plant's mistake. Customers free on the route list
@@ -128,13 +129,18 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
     lines = []
     cash_sales = old_paid = credit = invoiced = amount_all = discounts = factory = other_waived = 0.0
     discount_shops = adhoc_free = 0
+    flags_extra: list = []
     for cid, s in (doc.get("sales") or {}).items():
         q = {k: _num((s.get("q") or {}).get(k)) for k in KEYS}
         if not any(q.values()) and not _num(s.get("old_paid")):
             continue
         cust = customers.get(str(cid)) or {}
         free = bool(cust.get("free") or s.get("free"))
-        price = {**(cust.get("prices") or {}), **{k: _num(v) for k, v in (s.get("price") or {}).items() if k in KEYS}}
+        price = cust.get("prices") or {}                 # the route list's price only: the phone cannot change a price (owner, 10 Nov 2026)
+        if not cust.get("free"):
+            unpriced = [lab for k, lab in PRODUCTS if q[k] and _num(price.get(k)) <= 0]
+            if unpriced:
+                flags_extra.append(f"{cust.get('name') or cid}: ขาย {' '.join(unpriced)} แต่ร้านนี้ไม่มีราคา")
         full = 0.0 if cust.get("free") else line_amount(q, price)          # what the line is worth at the customer's price
         gross = 0.0 if free else full
         disc = 0.0 if free else min(max(_num(s.get("discount")), 0.0), gross)
@@ -186,6 +192,7 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
         flags.append(f"เงิน{'เกิน' if counted > expected_cash else 'ขาด'} {abs(counted - expected_cash):,.0f} บาท")
     if km is not None and (km < 0 or km > 600):
         flags.append(f"ไมล์ดูไม่ถูก ({km:,.0f} กม.)")
+    flags += flags_extra
     if factory:
         flags.append(f"ลด / แจกเพราะน้ำแข็งเสีย (โรงงาน) {factory:,.0f} บาท — ไม่หักค่าคอมคนขับ")
     if other_waived:
@@ -335,7 +342,7 @@ def bootstrap(driver: dict, day: Optional[date] = None) -> dict:
     y = _day(r["id"], t - timedelta(days=1)) if day == t else None
     pending = y if y and y["status"] == "open" and now.hour < NOON else None
     return {"driver": {"id": driver["id"], "name": driver["name"]}, "route": r, "today": t.isoformat(), "day": day.isoformat(),
-            "products": [{"key": k, "label": l} for k, l in PRODUCTS], "notes": NOTES,
+            "products": [{"key": k, "label": l, "short": SHORT[k]} for k, l in PRODUCTS], "notes": NOTES,
             "customers": _customers(r["id"]), "balances": _balances(r["id"]), "last_km": _last_km(r["id"], day),
             "sheet": _sheet(d), "pending_yesterday": pending["day"] if pending else None,
             "editable": edit_refusal(day, d["status"] if d else None, now) is None}

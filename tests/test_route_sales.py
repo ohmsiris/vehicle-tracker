@@ -40,7 +40,7 @@ def test_day_totals_cash_credit_invoice_returns_and_cash_count():
     assert t["diff"]["lod"] == -1 and t["diff"]["pack"] == 0 and t["diff"]["mo"] == 0
     assert (t["amount"], t["cash_sales"], t["credit"], t["invoiced"], t["old_paid"]) == (630, 160, 70, 400, 100)
     assert t["expected_cash"] == 260 and t["counted"] == 260 and t["km"] == 140
-    assert t["flags"] == ["หลอด ขาด 1"]
+    assert t["flags"][0] == "ใหญ่ ขาด 1" and "ไม่มีราคา" in t["flags"][1] and len(t["flags"]) == 2
 
 
 def test_paid_never_above_the_amount_and_pin_rules():
@@ -73,7 +73,7 @@ def test_free_customers_discounts_returns_from_the_plant_and_km_from_the_last_re
     assert t["sold"]["lod"] == 7 and t["free"]["lod"] == 2 and t["left"]["lod"] == 13
     assert t["amount"] == 180 and t["cash_sales"] == 180 and t["discount"] == 20 and t["credit"] == 0
     assert t["returned"]["lod"] == 12 and t["diff"]["lod"] == -1 and t["km"] == 140
-    assert "หลอด ขาด 1" in t["flags"] and any("อื่นๆ 20" in f for f in t["flags"])
+    assert "ใหญ่ ขาด 1" in t["flags"] and any("อื่นๆ 20" in f for f in t["flags"])
     assert t["commission_sales"] == 180                                                  # a discount for another reason is the driver's
     one_off = rs.compute({"sales": {"2": {"q": {"lod": 1}, "free": True}}}, customers)
     assert one_off["amount"] == 0 and one_off["cash_sales"] == 0 and one_off["commission_sales"] == 0
@@ -95,3 +95,10 @@ def test_the_plants_fault_does_not_cut_the_drivers_commission():
 def test_sheet_free_customer():
     c = rs.customer_from_row(["1. ตำรวจ", "", "ฟรี", "", "", "", "", "", ""])
     assert c["free"] is True and c["prices"] == {}
+
+
+def test_the_phone_cannot_change_a_price_and_an_unpriced_product_is_flagged():
+    customers = {"1": {"name": "ร้านเอ", "prices": {"lod": 40}}}
+    t = rs.compute({"sales": {"1": {"q": {"lod": 2, "pack": 1}, "price": {"lod": 1}}}}, customers)
+    assert t["amount"] == 80                                             # 2 x 40: the phone's price of 1 is ignored
+    assert any("ร้านเอ" in f and "แพ็ค" in f for f in t["flags"])
