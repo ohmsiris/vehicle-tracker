@@ -34,3 +34,9 @@ def test_linking_rules():
     assert m["customer_id"] is None and m["suggest"] == [21]
     m = cu.match(reg("35", [("200", "2260")]), CUSTS, TRUCK)                                       # two share the bin, no name: review
     assert m["customer_id"] is None and set(m["suggest"]) == {11, 12}
+
+
+def test_names_that_do_not_agree_are_checked():
+    assert cu.name_ok({"shop": "ป้าแน๊ต"}, "ป้าแน็ต")                          # spelling only
+    assert not cu.name_ok({"shop": "ขายเนื้อ"}, "โรงอาหาร")                    # the bin may have moved
+    assert not cu.name_ok({"shop": "บุคคล", "contact_name": "สมชาย ใจดี"}, "ข้าวแกง")   # only a person's name: look

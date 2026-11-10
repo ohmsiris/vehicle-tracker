@@ -840,7 +840,7 @@ async function init() {
     const typed = $("tokenInput").value.trim();
     $("tokenError").hidden = isPlainAscii(typed);
     if (!isPlainAscii(typed)) { $("tokenInput").value = ""; $("tokenInput").focus(); return; }
-    state.token = typed; saveToken(state.token); loadMeta().then(loadBoard).then(() => { if (!$("homeView").hidden) loadHome(); }); });
+    state.token = typed; saveToken(state.token); location.href = "/"; });
 
   showView("home");                     // the app opens on the home page (clears the hash, as every non-truck page does)
   if (bootHash) history.replaceState(null, "", location.pathname + location.search + bootHash);
@@ -894,11 +894,14 @@ async function loadMeta() {
     state.vehicleClasses = meta.vehicle_classes || [];
     $("addShop").replaceChildren(el("option", { value: "", text: "ยังไม่ได้ส่งอู่ (รอซ่อม)" }), ...board.shops.map((n) => el("option", { value: n, text: `ส่งอู่เลย: ${n}` })));
     $("tokenBox").hidden = true;
+    document.body.classList.remove("signed-out", "booting");
     fillVehicleSelect($("vehicleSelect"));
     fillVehicleSelect($("addVehicle"));
     if (typeof startToday === "function") startToday();          // the bar at the top and the numbers beside the menu
   } catch (err) {
     $("tokenBox").hidden = false;
+    document.body.classList.remove("booting");
+    if (err.status === 403 || err.status === 503) { document.body.classList.add("signed-out"); setTimeout(() => $("loginUser").focus(), 0); }
     $("vehicleSelect").replaceChildren(el("option", { value: "", text: err.status === 403 || err.status === 503 ? "ต้องใส่รหัสเข้าใช้งานก่อน" : "โหลดรายชื่อรถไม่สำเร็จ" }));
   }
 }

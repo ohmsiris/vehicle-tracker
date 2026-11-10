@@ -29,9 +29,17 @@ function applyMe() {
   document.querySelectorAll("#sidebar .side-group").forEach((g) => { g.hidden = !g.querySelector(".sideitem:not([hidden])"); });
 }
 
+// Signing in with a name on a browser that had the owner's access code must not lose that code (owner, 10 Nov 2026): it is kept
+// aside, and ออกจากระบบ puts it back.
+function keepOwnerCode() {
+  const cur = state.token || storedToken();
+  if (cur && !cur.startsWith("u_")) { try { localStorage.setItem("vt_owner_code", cur); } catch (e) { /* storage blocked */ } }
+}
+function ownerCode() { try { return localStorage.getItem("vt_owner_code") || ""; } catch (e) { return ""; } }
+
 async function logout() {
   try { await api("/api/auth/logout", jsonOpts("POST", {})); } catch (e) { /* signed out on this browser anyway */ }
-  saveToken("");
+  saveToken(ownerCode());                                  // back to the access code if this browser had it
   location.href = "/";
 }
 
@@ -46,6 +54,7 @@ async function loginWithName(ev) {
     const r = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
+    keepOwnerCode();
     saveToken(j.token);
     location.href = "/";
   } catch (e) { err.textContent = e.message; err.hidden = false; }
@@ -55,6 +64,8 @@ async function loginWithName(ev) {
 async function showInvite(code) {
   for (const v of VIEW_NAMES) $(v + "View").hidden = true;
   $("tokenBox").hidden = true;
+  document.body.classList.remove("booting");
+  document.body.classList.add("signed-out");
   const box = $("inviteBox");
   box.hidden = false;
   let info;
@@ -76,6 +87,7 @@ async function showInvite(code) {
       const r = await fetch("/api/auth/invite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, password: a }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
+      keepOwnerCode();
       saveToken(j.token);
       location.href = "/";
     } catch (e) { err.textContent = e.message; err.hidden = false; }

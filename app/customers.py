@@ -178,6 +178,13 @@ def shrink(data: bytes, mime: str) -> tuple[bytes, str, str]:
 
 
 # --------------------------------------------------------------------------------------------- the office page
+def name_ok(reg: dict, route_name: Optional[str]) -> bool:
+    """Does the register's shop (or person) name agree with the route list's name? Spelling differences pass (ป้าแน๊ต / ป้าแน็ต);
+    a different shop, or a register row with only a person's name, does not -- the bin may have moved (owner, 10 Nov 2026)."""
+    shop = reg.get("shop") if (reg.get("shop") or "") not in ("บุคคล", "-") else None
+    return max([name_score(n, route_name) for n in (shop, reg.get("contact_name")) if n] or [0.0]) >= 0.6
+
+
 def _route_names() -> dict:
     from app import supabase
     return {r["id"]: r for r in supabase.select_all("sale_routes", {"select": "id,truck_no,name,driver_name", "order": "id.asc"})}
@@ -218,8 +225,10 @@ def list_register(branch: str = "สระบุรี") -> dict:
         r["customer"] = _cust_view(custs.get(r["customer_id"]), routes)
         r["suggest"] = [_cust_view(custs.get(i), routes) for i in r["suggest"] or [] if custs.get(i)]
         r["photos"] = photos.get(r["cust_no"], 0)
+        # linked by the bin but the names do not agree: someone has to look (a hand-made link counts as looked at)
+        r["check"] = bool(r["customer"]) and r["match"] != "manual" and not name_ok(r, r["customer"]["name"])
     return {"branch": branch, "rows": rows, "linked": sum(1 for r in rows if r["customer_id"]),
-            "review": sum(1 for r in rows if not r["customer_id"])}
+            "review": sum(1 for r in rows if not r["customer_id"]), "check": sum(1 for r in rows if r["check"])}
 
 
 def detail(branch: str, cust_no: int) -> dict:
@@ -231,6 +240,7 @@ def detail(branch: str, cust_no: int) -> dict:
     routes = _route_names()
     custs = _custs({r["customer_id"]} if r["customer_id"] else set())
     r["customer"] = _cust_view(custs.get(r["customer_id"]), routes)
+    r["check"] = bool(r["customer"]) and r["match"] != "manual" and not name_ok(r, r["customer"]["name"])
     r["photos"] = supabase.select_all("customer_photos", {"select": "id,name,mime_type,byte_size", "branch": f"eq.{branch}",
                                                           "cust_no": f"eq.{int(cust_no)}", "order": "id.asc"})
     return r

@@ -18,7 +18,7 @@
 <link rel="stylesheet" href="/static/fonts/fonts.css">
 <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
+<body class="booting">
 <header class="topbar">
   <button id="menuBtn" class="menubtn" type="button" aria-label="เปิด/ปิดเมนู" aria-controls="sidebar" aria-expanded="true">
     <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
@@ -129,9 +129,10 @@
 </aside>
 
 <main>
-  <div id="tokenBox" class="card" hidden>
+  <div id="tokenBox" class="card login-card" hidden>
+    <div class="login-brand"><span class="login-dot"></span>IceBox</div>
     <form id="loginForm" class="loginform">
-      <h3>เข้าระบบ</h3>
+      <h3>เข้าสู่ระบบ</h3>
       <label for="loginUser">ชื่อผู้ใช้</label>
       <input id="loginUser" type="text" autocomplete="username" autocapitalize="none" spellcheck="false">
       <label for="loginPw">รหัสผ่าน</label>
@@ -139,16 +140,18 @@
       <button class="btn primary" type="submit">เข้าระบบ</button>
       <p class="error" id="loginError" hidden></p>
     </form>
-    <label for="tokenInput" class="muted small">หรือ รหัสเข้าใช้งาน (เจ้าของ)</label>
-    <div class="row">
-      <input id="tokenInput" type="password" autocomplete="off">
-      <button id="tokenSave" class="btn">ตกลง</button>
-    </div>
-    <p class="error" id="tokenError" hidden>รหัสมีตัวอักษรภาษาไทย — สลับแป้นพิมพ์เป็นภาษาอังกฤษ (กด Alt + Shift ซ้าย หรือ ~) แล้วใส่ใหม่</p>
+    <details class="login-code">
+      <summary class="muted small">เจ้าของ: เข้าด้วยรหัสเข้าใช้งาน</summary>
+      <div class="row">
+        <input id="tokenInput" type="password" autocomplete="off" aria-label="รหัสเข้าใช้งาน">
+        <button id="tokenSave" class="btn">ตกลง</button>
+      </div>
+      <p class="error" id="tokenError" hidden>รหัสมีตัวอักษรภาษาไทย — สลับแป้นพิมพ์เป็นภาษาอังกฤษ (กด Alt + Shift ซ้าย หรือ ~) แล้วใส่ใหม่</p>
+    </details>
   </div>
 
   <!-- the one-time link from ผู้ใช้งาน: the person chooses their own password (users.js) -->
-  <div id="inviteBox" class="card loginform" hidden>
+  <div id="inviteBox" class="card loginform login-card" hidden>
     <h3>ตั้งรหัสผ่าน · <span id="invName"></span></h3>
     <p class="small">ชื่อเข้าระบบของคุณ: <b id="invUser"></b> — จำไว้ ใช้คู่กับรหัสผ่านที่ตั้งตอนนี้</p>
     <form id="invForm" class="loginform">

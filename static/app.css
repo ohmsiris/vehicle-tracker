@@ -1805,7 +1805,8 @@ button.ss-day:hover { background: var(--surface-2); }
 .ss-dlg-tools { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* ทะเบียนลูกค้า (customers.js) */
-.cu-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.cu-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.cu-table tr.cu-review td:first-child { box-shadow: inset 3px 0 0 var(--warn, #b54708); }
 .cu-tiles > div { display: flex; flex-direction: column; gap: 2px; }
 .cu-big { font-size: 26px; line-height: 1.1; }
 .cu-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
@@ -1825,3 +1826,19 @@ button.ss-day:hover { background: var(--surface-2); }
 .cu-photo img { width: 100%; height: 100%; object-fit: cover; }
 @media (max-width: 640px) { .cu-tiles { grid-template-columns: 1fr; } .cu-table th:nth-child(4), .cu-table td:nth-child(4) { display: none; } }
 .cu-tools .seg { margin: 0; }
+
+/* the sign-in page: no menus until someone is signed in (and none while the page is still finding out who) */
+body.booting .sidebar, body.booting .menubtn, body.booting #sideScrim { visibility: hidden; }
+body.signed-out .sidebar, body.signed-out .menubtn, body.signed-out #sideScrim, body.signed-out .mebox { display: none !important; }
+body.signed-out main > :not(#tokenBox):not(#inviteBox) { display: none !important; }
+body.signed-out main { margin: 0 auto; padding-top: 8vh; max-width: 420px; width: 100%; }
+body.signed-out .shell { display: block; }
+.login-card { max-width: 400px; margin: 0 auto; padding: 28px 26px; }
+.login-card .loginform { max-width: none; gap: 8px; }
+.login-card .loginform input { width: 100%; }
+.login-card .loginform .btn.primary { margin-top: 6px; padding: 10px; font-size: 15px; }
+.login-brand { display: flex; align-items: center; gap: 9px; font-size: 22px; font-weight: 700; margin-bottom: 14px; }
+.login-dot { width: 12px; height: 12px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.login-code { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+.login-code summary { cursor: pointer; }
+.login-code .row { margin-top: 8px; }
