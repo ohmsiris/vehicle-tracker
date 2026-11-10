@@ -358,6 +358,7 @@
           (isFree(c, s) ? "ฟรี" : price == null ? "ใส่ราคา" : "฿" + money(price) + " / หน่วย") + "</button></div></div>" + stepper("q_" + p.key, n(s.q[p.key]), ro) + "</div>";
       }).join("") + (!showAll && rest.length && !ro ? '<button class="more" id="more">+ สินค้าอื่น (' + rest.map(function (p) { return p.label; }).join(" ") + ")</button>" : "");
       html += '<div class="total"><span>รวม</span><b id="amt">' + (isFree(c, s) ? "ฟรี" : "฿" + money(amountOf(c, s))) + "</b></div>";
+      if (!ro && S.doc.sales[String(c.id)]) html += '<button class="clear-link" id="sclear">ล้างรายการร้านนี้</button>';
       if (!c.free && !ro) {
         if (!showExtra) html += '<button class="more" id="extra">+ ส่วนลด / แจกฟรี</button>';
         else html += '<div class="box" style="background:var(--soft)"><h3>ส่วนลด / แจกฟรี (เฉพาะที่ได้รับอนุญาต)</h3>' +
@@ -382,7 +383,7 @@
       }
       html += "</div>";
       html += ro ? '<div class="actions one"><button class="btn" id="sclose">' + ic("back", "s") + "กลับ</button></div>"
-        : '<div class="actions"><button class="btn" id="sclear">ล้าง</button><button class="btn primary" id="ssave">บันทึก · ร้านถัดไป' + ic("next", "s") + "</button></div>";
+        : '<div class="actions"><button class="btn" id="sback">' + ic("back", "s") + 'ย้อนกลับ</button><button class="btn primary" id="ssave">บันทึก · ร้านถัดไป' + ic("next", "s") + "</button></div>";
       openSheet(html);
       $("sx").onclick = closeSheet;
       if (ro) { $("sclose").onclick = closeSheet; return; }
@@ -400,7 +401,11 @@
         if (rs) { readInputs(); s.reason = rs.getAttribute("data-reason"); draw(); }
       });
       if ($("payall")) $("payall").onclick = function () { $("oldp").value = balanceOf(c.id); };
-      $("sclear").onclick = function () { delete S.doc.sales[String(c.id)]; changed(); closeSheet(); afterSale(); };
+      $("sback").onclick = closeSheet;                // back to the customer list (nothing saved)
+      if ($("sclear")) $("sclear").onclick = function () {
+        if (!window.confirm("ล้างรายการของร้านนี้ทั้งหมด?")) return;
+        delete S.doc.sales[String(c.id)]; changed(); closeSheet(); afterSale();
+      };
       $("ssave").onclick = function () { readInputs(); save(); };
     }
     function readInputs() {

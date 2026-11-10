@@ -118,6 +118,7 @@ main { padding: 12px 12px calc(92px + env(safe-area-inset-bottom)); max-width: 6
 .num.wide { width: 120px; }
 .num:disabled { background: var(--soft); color: var(--muted); }
 .more { color: var(--blue); font-weight: 600; padding: 6px 0; justify-self: start; }
+.clear-link { justify-self: end; color: var(--bad); font-weight: 600; font-size: 14px; padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; }
 .total { display: flex; justify-content: space-between; align-items: baseline; font-size: 18px; }
 .total b { font-size: 28px; font-variant-numeric: tabular-nums; }
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
