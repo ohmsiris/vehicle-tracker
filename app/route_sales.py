@@ -10,6 +10,10 @@ and price, products ซอง กั๊ก หลอด เล็ก แพ็�
 * The phone keeps the whole day as one document and sends all of it on every change (it works offline and catches up later); `rev`
   only goes up, so an old save that arrives late never overwrites a newer one. The server works out the day's totals and checks
   (compute) and rebuilds one sale_lines row per customer for reports.
+* Customers (owner, 10 Nov 2026): only the owner and the bookkeeper add customers to a route. A shop not on the list is sold under
+  เพิ่มลูกค้าเอง: the driver types the shop's name and price, it is cash only and lives on that day's sheet ("new:<n>" keys in
+  doc.new_customers), never on the route list. Every such sale is flagged for the office, which turns it into a real customer
+  (walkin_to_customer) or leaves it as a one-off.
 * Chain stores (Lotus, Big C, 7-11, CJ ...) are วางบิล: the driver brings back a signed paper bill, no cash is taken.
 * Locking (owner, 10 Nov 2026): the phone can only change TODAY's sheet, plus YESTERDAY's if it was never sent, until noon. Sending
   (ส่งใบขาย) locks the day. The driver can ask the office to reopen it; the office reopens it (the driver then fixes and sends
@@ -130,6 +134,7 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
     cash_sales = old_paid = credit = invoiced = amount_all = discounts = factory = other_waived = 0.0
     discount_shops = adhoc_free = 0
     flags_extra: list = []
+    walkins: list = []
     for cid, s in (doc.get("sales") or {}).items():
         q = {k: _num((s.get("q") or {}).get(k)) for k in KEYS}
         if not any(q.values()) and not _num(s.get("old_paid")):
@@ -151,8 +156,10 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
             factory += waived
         elif waived:
             other_waived += waived
-        billing = cust.get("billing") or s.get("billing") or "cash"
-        paid = 0.0 if billing == "invoice" or free else min(max(_num(s.get("paid", amount)), 0.0), amount)
+        billing = "cash" if cust.get("walkin") else cust.get("billing") or s.get("billing") or "cash"
+        paid = 0.0 if billing == "invoice" or free else amount if cust.get("walkin") else min(max(_num(s.get("paid", amount)), 0.0), amount)
+        if cust.get("walkin") and any(q.values()):           # a shop the driver added: cash only, and the owner is told
+            walkins.append({"key": str(cid), "name": cust.get("name") or "", "phone": cust.get("phone") or "", "amount": amount})
         op = max(_num(s.get("old_paid")), 0.0)
         for k in KEYS:
             sold[k] += q[k]
@@ -192,6 +199,8 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
         flags.append(f"เงิน{'เกิน' if counted > expected_cash else 'ขาด'} {abs(counted - expected_cash):,.0f} บาท")
     if km is not None and (km < 0 or km > 600):
         flags.append(f"ไมล์ดูไม่ถูก ({km:,.0f} กม.)")
+    for w in walkins:
+        flags.append(f"ลูกค้าเพิ่มเอง: {w['name']} ฿{w['amount']:,.0f} — ยังไม่อยู่ในรายชื่อสาย")
     flags += flags_extra
     if factory:
         flags.append(f"ลด / แจกเพราะน้ำแข็งเสีย (โรงงาน) {factory:,.0f} บาท — ไม่หักค่าคอมคนขับ")
@@ -202,7 +211,7 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
             "credit": round(credit, 2), "invoiced": round(invoiced, 2), "discount": round(discounts, 2), "expected_cash": round(expected_cash, 2),
             "factory_waived": round(factory, 2), "other_waived": round(other_waived, 2), "commission_sales": round(amount_all + factory, 2),
             "counted": round(counted, 2) if has_cash else None, "km_start": start or None, "km": km, "customers": len(lines), "flags": flags,
-            "lines": lines}
+            "walkins": walkins, "lines": lines}
 
 
 # --------------------------------------------------------------------------------------------- which day the phone may change (pure)
@@ -366,8 +375,8 @@ def bootstrap(driver: dict, day: Optional[date] = None) -> dict:
 
 
 def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
-    """The phone's whole day. New customers the driver added ("new:<n>" keys) are created (waiting for the office) and their real ids
-    sent back, so the phone can swap them in."""
+    """The phone's whole day. Shops the driver added (เพิ่มลูกค้าเอง, "new:<n>" keys) stay on this day only: the route list is never
+    changed from a phone (owner, 10 Nov 2026). `id_map` is kept in the answer (always empty) for phones running an older page."""
     from app import supabase
     try:
         day = date.fromisoformat(day_text)
@@ -382,22 +391,9 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
     refusal = edit_refusal(day, current["status"] if current else None, datetime.now(BANGKOK))
     if refusal:
         raise RouteSalesError(refusal)
-    customers = {str(c["id"]): c for c in _customers(route_id)}
-    id_map = {}
-    for nc in doc.get("new_customers") or []:
-        key = str(nc.get("key") or "")
-        name = re.sub(r"\s+", " ", str(nc.get("name") or "")).strip()[:120]
-        if not key.startswith("new:") or not name:
-            continue
-        price = {k: _num(v) for k, v in (nc.get("prices") or {}).items() if k in KEYS and _num(v) > 0}
-        seq = max([c["seq"] for c in customers.values()] or [0]) + 1
-        row = supabase.insert("sale_route_customers", [{"route_id": route_id, "seq": seq, "name": name, "prices": price,
-                                                        "billing": "cash", "added_by_driver": True, "approved": False}])[0]
-        id_map[key] = str(row["id"])
-        customers[str(row["id"])] = row
-    if id_map:
-        doc = {**doc, "sales": {id_map.get(k, k): v for k, v in (doc.get("sales") or {}).items()},
-               "new_customers": [nc for nc in doc.get("new_customers") or [] if str(nc.get("key")) not in id_map]}
+    doc = {**doc, "new_customers": clean_walkins(doc.get("new_customers"))}
+    customers = {**{str(c["id"]): c for c in _customers(route_id)}, **walkin_customers(doc)}
+    id_map: dict = {}
     doc["sales"] = {k: v for k, v in (doc.get("sales") or {}).items() if k in customers}      # a deleted customer's line is dropped
     totals = compute(doc, customers, (current or {}).get("returns_foh"), _last_km(route_id, day))
     status = "closed" if doc.get("closed") else "open"
@@ -406,12 +402,41 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
            "totals": {k: v for k, v in totals.items() if k != "lines"}, "updated_at": now, "closed_at": now if status == "closed" else None}
     saved = supabase.insert("sale_days", [row], on_conflict="route_id,day")[0]
     supabase.delete("sale_lines", {"day_id": f"eq.{saved['id']}"})
-    lines = [{"day_id": saved["id"], "route_id": route_id, "day": day.isoformat(), "customer_id": int(ln["customer"]), "qty": ln["qty"],
+    lines = [{"day_id": saved["id"], "route_id": route_id, "day": day.isoformat(), **_line_who(ln["customer"], customers), "qty": ln["qty"],
               "amount": ln["amount"], "paid": ln["paid"], "old_paid": ln["old_paid"], "billing": ln["billing"], "discount": ln["discount"],
               "free": ln["free"], "waived": ln["waived"], "waived_reason": ln["waived_reason"]} for ln in totals["lines"]]
     for i in range(0, len(lines), 500):
         supabase.insert("sale_lines", lines[i:i + 500])
     return {"rev": int(rev), "status": status, "totals": _public(row["totals"]), "id_map": id_map}
+
+
+def clean_walkins(raw) -> list:
+    """The shops a driver added on this day, tidied: [{"key": "new:<n>", "name", "phone", "prices": {product: baht}}]."""
+    out, seen = [], set()
+    for nc in raw if isinstance(raw, list) else []:
+        if not isinstance(nc, dict):
+            continue
+        key = str(nc.get("key") or "")[:40]
+        name = re.sub(r"\s+", " ", str(nc.get("name") or "")).strip()[:120]
+        if not key.startswith("new:") or not name or key in seen:
+            continue
+        seen.add(key)
+        prices = {k: _num(v) for k, v in (nc.get("prices") or {}).items() if k in KEYS and _num(v) > 0}
+        out.append({"key": key, "name": name, "phone": re.sub(r"[^\d+\- ]", "", str(nc.get("phone") or ""))[:20], "prices": prices})
+    return out[:30]
+
+
+def walkin_customers(doc: dict) -> dict:
+    """The day's walk-in shops in the shape compute() takes for a customer."""
+    return {w["key"]: {"name": w["name"], "phone": w.get("phone") or "", "prices": w.get("prices") or {}, "billing": "cash", "walkin": True}
+            for w in clean_walkins(doc.get("new_customers"))}
+
+
+def _line_who(cid: str, customers: dict) -> dict:
+    """sale_lines' customer columns: the route customer's id, or no id and the walk-in shop's name."""
+    if str(cid).isdigit():
+        return {"customer_id": int(cid), "walkin": None}
+    return {"customer_id": None, "walkin": (customers.get(str(cid)) or {}).get("name") or str(cid)}
 
 
 def request_reopen(driver: dict, day_text: str) -> dict:
@@ -454,12 +479,15 @@ def routes_overview(branch: str = "สระบุรี") -> list[dict]:
     since = (today() - timedelta(days=14)).isoformat()
     last = {}
     late: dict = {}
+    walk: dict = {}
     requests: dict = {}
     for dday in supabase.select_all("sale_days", {"select": "route_id,day,status,totals,reopen_requested_at", "day": f"gte.{since}",
                                                   "order": "day.asc"}):
         last[dday["route_id"]] = dday
         if unsent(date.fromisoformat(dday["day"]), dday["status"], now):
             late[dday["route_id"]] = late.get(dday["route_id"], 0) + 1
+        if (dday.get("totals") or {}).get("walkins") and dday["status"] != "checked":
+            walk[dday["route_id"]] = walk.get(dday["route_id"], 0) + len(dday["totals"]["walkins"])
         if dday["reopen_requested_at"]:
             requests[dday["route_id"]] = requests.get(dday["route_id"], 0) + 1
     out = []
@@ -468,7 +496,8 @@ def routes_overview(branch: str = "สระบุรี") -> list[dict]:
         n = counts.get(r["id"], [0, 0])
         out.append({**r, "customers": n[0], "new_customers": n[1], "pin_set": bool(d and d["pin_hash"]),
                     "driver_id": d["id"] if d else None, "last_day": last.get(r["id"]), "reopen_requests": requests.get(r["id"], 0),
-                    "phones": phones.get(d["id"], []) if d else [], "unsent": late.get(r["id"], 0)})
+                    "phones": phones.get(d["id"], []) if d else [], "unsent": late.get(r["id"], 0),
+                    "walkins": walk.get(r["id"], 0)})
     return sorted(out, key=lambda x: (len(x["truck_no"]), x["truck_no"]))
 
 
@@ -515,9 +544,15 @@ def day_detail(day_id: int) -> dict:
     if not d:
         raise RouteSalesError("ไม่พบวันนี้")
     cust = {str(c["id"]): c for c in _customers(d[0]["route_id"])}
-    lines = supabase.select_all("sale_lines", {"select": "customer_id,qty,amount,paid,old_paid,billing,discount,free,waived,waived_reason", "day_id": f"eq.{int(day_id)}",
-                                               "order": "id.asc"})
+    walk = {w["name"]: w for w in clean_walkins((d[0]["doc"] or {}).get("new_customers"))}
+    lines = supabase.select_all("sale_lines", {"select": "customer_id,walkin,qty,amount,paid,old_paid,billing,discount,free,waived,waived_reason",
+                                               "day_id": f"eq.{int(day_id)}", "order": "id.asc"})
     for ln in lines:
+        if ln.get("walkin"):
+            w = walk.get(ln["walkin"]) or {}
+            ln["name"], ln["seq"], ln["approved"] = ln["walkin"], 9999, False
+            ln["walkin_key"], ln["phone"], ln["prices"] = w.get("key"), w.get("phone"), w.get("prices")
+            continue
         c = cust.get(str(ln["customer_id"])) or {}
         ln["name"], ln["seq"], ln["approved"] = c.get("name"), c.get("seq"), c.get("approved", True)
     lines.sort(key=lambda x: x["seq"] or 0)
@@ -550,11 +585,50 @@ def set_returns(day_id: int, returns: dict) -> dict:
         raise RouteSalesError("ไม่พบวันนี้")
     d = d[0]
     back = {k: _num(v) for k, v in (returns or {}).items() if k in KEYS and str(v).strip() != ""}
-    customers = {str(c["id"]): c for c in _customers(d["route_id"])}
+    customers = {**{str(c["id"]): c for c in _customers(d["route_id"])}, **walkin_customers(d["doc"] or {})}
     totals = compute(d["doc"] or {}, customers, back, _last_km(d["route_id"], date.fromisoformat(d["day"])))
     supabase.update("sale_days", {"id": f"eq.{d['id']}"}, {"returns_foh": back, "returns_at": datetime.now(timezone.utc).isoformat(),
                                                         "totals": _public(totals)})
     return {"totals": _public(totals)}
+
+
+def walkin_to_customer(day_id: int, key: str) -> dict:
+    """The office makes a shop the driver added (เพิ่มลูกค้าเอง) a real customer at the end of the route, with the price the driver
+    used; the day's sheet is moved over to it (its rev goes up, so the phone takes the office's copy)."""
+    from app import supabase
+    d = supabase.select("sale_days", {"select": "id,route_id,day,doc,rev,returns_foh", "id": f"eq.{int(day_id)}", "limit": "1"})
+    if not d:
+        raise RouteSalesError("ไม่พบวันนี้")
+    d = d[0]
+    doc = d["doc"] or {}
+    w = next((x for x in clean_walkins(doc.get("new_customers")) if x["key"] == key), None)
+    if not w:
+        raise RouteSalesError("ไม่พบร้านนี้ในใบขายวันนี้ (อาจเพิ่มเข้ารายชื่อไปแล้ว)")
+    existing = _customers(d["route_id"])
+    row = supabase.insert("sale_route_customers", [{"route_id": d["route_id"], "seq": max([c["seq"] for c in existing] or [0]) + 1,
+                                                    "name": w["name"], "prices": w["prices"], "billing": "cash", "added_by_driver": True,
+                                                    "approved": True}])[0]
+    sales = dict(doc.get("sales") or {})
+    if key in sales:
+        sales[str(row["id"])] = sales.pop(key)
+    doc = {**doc, "sales": sales, "new_customers": [x for x in clean_walkins(doc.get("new_customers")) if x["key"] != key]}
+    customers = {**{str(c["id"]): c for c in existing}, str(row["id"]): row, **walkin_customers(doc)}
+    totals = compute(doc, customers, d.get("returns_foh"), _last_km(d["route_id"], date.fromisoformat(d["day"])))
+    supabase.update("sale_days", {"id": f"eq.{d['id']}"}, {"doc": doc, "rev": int(d["rev"]) + 1, "totals": _public(totals)})
+    supabase.delete("sale_lines", {"day_id": f"eq.{d['id']}"})
+    lines = [{"day_id": d["id"], "route_id": d["route_id"], "day": d["day"], **_line_who(ln["customer"], customers), "qty": ln["qty"],
+              "amount": ln["amount"], "paid": ln["paid"], "old_paid": ln["old_paid"], "billing": ln["billing"], "discount": ln["discount"],
+              "free": ln["free"], "waived": ln["waived"], "waived_reason": ln["waived_reason"]} for ln in totals["lines"]]
+    if lines:
+        supabase.insert("sale_lines", lines)
+    return {"customer_id": row["id"]}
+
+
+def attention() -> dict:
+    """The number beside ใบขายรถสาย in the menu: shops added by drivers not checked yet, reopen requests, days never sent."""
+    rows = routes_overview()
+    return {"walkins": sum(r["walkins"] for r in rows), "reopen_requests": sum(r["reopen_requests"] for r in rows),
+            "unsent": sum(r["unsent"] for r in rows)}
 
 
 def check_day(day_id: int, checked: bool = True) -> dict:

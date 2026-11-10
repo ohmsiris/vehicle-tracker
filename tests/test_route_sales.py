@@ -119,3 +119,22 @@ def test_phone_label():
     assert rs.phone_label("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1 Line/13.0.0") == "iPhone · LINE"
     assert rs.phone_label("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Version/17.0 Mobile/15E148 Safari/604.1") == "iPhone · Safari"
     assert rs.phone_label("") == "เครื่องอื่น"
+
+
+def test_a_shop_the_driver_added_is_cash_only_and_flagged():
+    doc = {"new_customers": [{"key": "new:1", "name": " ร้าน  ใหม่ ", "phone": "081-234 5678x", "prices": {"lod": 40, "bad": 9}}],
+           "sales": {"new:1": {"q": {"lod": 2}, "paid": 0}}}
+    walk = rs.walkin_customers(doc)
+    assert walk["new:1"]["name"] == "ร้าน ใหม่" and walk["new:1"]["prices"] == {"lod": 40.0} and walk["new:1"]["phone"] == "081-234 5678"
+    t = rs.compute(doc, walk)
+    assert t["amount"] == 80 and t["cash_sales"] == 80 and t["credit"] == 0       # no credit for a shop not on the list
+    assert t["walkins"] == [{"key": "new:1", "name": "ร้าน ใหม่", "phone": "081-234 5678", "amount": 80.0}]
+    assert any(f.startswith("ลูกค้าเพิ่มเอง: ร้าน ใหม่") for f in t["flags"])
+    assert rs._line_who("new:1", walk) == {"customer_id": None, "walkin": "ร้าน ใหม่"}
+    assert rs._line_who("12", walk) == {"customer_id": 12, "walkin": None}
+
+
+def test_clean_walkins_drops_junk():
+    assert rs.clean_walkins([{"key": "x", "name": "a"}, {"key": "new:2", "name": ""}, "junk", {"key": "new:3", "name": "b"},
+                             {"key": "new:3", "name": "dup"}]) == [{"key": "new:3", "name": "b", "phone": "", "prices": {}}]
+    assert rs.clean_walkins(None) == []

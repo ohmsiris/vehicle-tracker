@@ -10,7 +10,8 @@ POST /api/extract
     A file that fails to read doesn't sink the batch; it comes back with
     ok=false and an error, and a warning on the draft.
 
-Auth: shared secret APP_TOKEN, as `X-App-Token` header or `?token=`.
+Auth: shared secret APP_TOKEN, as `X-App-Token` header or `?token=` (the owner: everything), or a person's own sign-in token
+(app/users.py: the same header; only the menus the owner gave them -- role_gate).
 Refuses everything if APP_TOKEN isn't configured -- each call spends real
 money, so there's no open-by-default mode.
 """
@@ -22,12 +23,14 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from fastapi.concurrency import run_in_threadpool
 from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app import users
 from app import accounting, attendance, calendar_plan, dashboard, machine_reports, tyre_store, documents, employees, events, fleet, history, home, loans, rates, logbook, logsource, machine_mechanics, machine_plan, machinery, mgr, mgr_jobs, purchasing, repair_followup, repair_requests, service_plan, shops, stock, summarize, supabase, tyres
 from app.purchase_extraction import read_bill as read_purchase_bill
 from app.batch import build_draft
@@ -54,16 +57,45 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)        # the big JSON / sc
 MAX_PARALLEL_EXTRACTIONS = 4
 
 
+def _is_owner(supplied: str) -> bool:
+    return bool(settings.app_token) and hmac.compare_digest((supplied or "").encode(), settings.app_token.encode())
+
+
 def _check_token(header_token: str, query_token: str) -> None:
+    """The owner's access code, or a person's own sign-in (which menus they may use is checked before this, in role_gate)."""
     if not settings.app_token:
         raise HTTPException(503, "APP_TOKEN is not configured on the server")
     supplied = header_token or query_token
-    if not hmac.compare_digest(supplied.encode(), settings.app_token.encode()):
-        raise HTTPException(403, "missing or incorrect token")
+    if _is_owner(supplied):
+        return
+    if supplied.startswith("u_") and users.session_user(supplied):
+        return
+    raise HTTPException(403, "missing or incorrect token")
+
+
+def _check_owner(header_token: str, query_token: str) -> None:
+    """Only the owner's access code (the page of people and their menus)."""
+    if not settings.app_token:
+        raise HTTPException(503, "APP_TOKEN is not configured on the server")
+    if not _is_owner(header_token or query_token):
+        raise HTTPException(403, "เฉพาะเจ้าของ")
 
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def role_gate(request, call_next):
+    """A person signed in with their own name (not the owner's access code) may only reach the server paths of their menus."""
+    path = request.url.path
+    if path.startswith("/api/") and not path.startswith(("/api/d/", "/api/auth/")):
+        supplied = request.headers.get("x-app-token") or request.query_params.get("token") or ""
+        if supplied.startswith("u_") and not _is_owner(supplied):
+            user = await run_in_threadpool(users.session_user, supplied)
+            if user and not users.allowed(users.clean_menus(user.get("menus")), path):
+                return JSONResponse({"detail": "ไม่มีสิทธิ์ใช้เมนูนี้ — ขอเจ้าของเพิ่มเมนูให้"}, status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -135,7 +167,73 @@ def meta(x_app_token: str = Header(default=""), token: str = Query(default="")) 
             "usages": fleet.usage_choices(roster), "branches": fleet.BRANCHES,
             "fleet_ready": fleet.has_v6() if supabase.configured() else False,
             "fleet_v7": fleet.has_v7() if supabase.configured() else False, "vehicle_classes": fleet.VEHICLE_CLASSES,
-            "fleet_v8": fleet.has_v8() if supabase.configured() else False}
+            "fleet_v8": fleet.has_v8() if supabase.configured() else False,
+            "me": users.me_for(None if _is_owner(x_app_token or token) else users.session_user(x_app_token or token))}
+
+
+# --------------------------------------------------------------------------------------------- people's own sign-in (app/users.py)
+def _user_call(fn, *args, **kwargs):
+    if not supabase.configured():
+        raise HTTPException(503, "ระบบยังไม่พร้อม")
+    try:
+        return fn(*args, **kwargs)
+    except users.UserError as exc:
+        raise HTTPException(400, str(exc))
+    except supabase.SupabaseError:
+        logger.exception("users")
+        raise HTTPException(502, "บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง")
+
+
+@app.post("/api/auth/login")
+def api_auth_login(body: dict = Body(...), user_agent: str = Header(default="")) -> dict:
+    return _user_call(users.login, str(body.get("username") or ""), str(body.get("password") or ""), user_agent)
+
+
+@app.post("/api/auth/logout")
+def api_auth_logout(x_app_token: str = Header(default="")) -> dict:
+    if x_app_token.startswith("u_"):
+        _user_call(users.logout, x_app_token)
+    return {"ok": True}
+
+
+@app.get("/api/auth/invite")
+def api_auth_invite(code: str = Query(default="")) -> dict:
+    return _user_call(users.invite_info, code)
+
+
+@app.post("/api/auth/invite")
+def api_auth_accept_invite(body: dict = Body(...), user_agent: str = Header(default="")) -> dict:
+    return _user_call(users.accept_invite, str(body.get("code") or ""), str(body.get("password") or ""), user_agent)
+
+
+@app.get("/api/users")
+def api_users(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_owner(x_app_token, token)
+    return _user_call(users.list_users)
+
+
+@app.post("/api/users")
+def api_users_create(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_owner(x_app_token, token)
+    return _user_call(users.create_user, str(body.get("name") or ""), str(body.get("username") or ""), body.get("menus") or [])
+
+
+@app.patch("/api/users/{user_id}")
+def api_users_update(user_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_owner(x_app_token, token)
+    return _user_call(users.update_user, user_id, body)
+
+
+@app.post("/api/users/{user_id}/invite")
+def api_users_invite(user_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_owner(x_app_token, token)
+    return _user_call(users.new_invite, user_id)
+
+
+@app.post("/api/users/{user_id}/signout")
+def api_users_signout(user_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    _check_owner(x_app_token, token)
+    return _user_call(users.sign_out_all, user_id)
 
 
 # Dev-only: serves a saved extraction response so the review UI can be
@@ -2144,6 +2242,21 @@ def api_sales_route_returns(day_id: int, body: dict = Body(...), x_app_token: st
     from app import route_sales
     _check_token(x_app_token, token)
     return _route_call(route_sales.set_returns, day_id, body.get("returns") or {})
+
+
+@app.post("/api/sales-routes/day/{day_id}/walkin")
+def api_sales_route_walkin(day_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """A shop the driver added (เพิ่มลูกค้าเอง) becomes a customer on the route."""
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.walkin_to_customer, day_id, str(body.get("key") or ""))
+
+
+@app.get("/api/sales-routes-attention")
+def api_sales_routes_attention(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.attention)
 
 
 @app.post("/api/sales-routes/day/{day_id}/check")

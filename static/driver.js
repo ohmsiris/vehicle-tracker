@@ -64,7 +64,7 @@
   function label(k) { var p = products().filter(function (x) { return x.key === k; })[0]; return p ? p.label : k; }
   function customers() {
     var list = (S.boot.customers || []).slice();
-    (S.doc.new_customers || []).forEach(function (c) { list.push({ id: c.key, seq: 900 + list.length, name: c.name, prices: c.prices || {}, billing: "cash", fresh: true }); });
+    (S.doc.new_customers || []).forEach(function (c) { list.push({ id: c.key, seq: 900 + list.length, name: c.name, phone: c.phone || "", prices: c.prices || {}, billing: "cash", fresh: true }); });
     return list;
   }
   function custById(id) { return customers().filter(function (c) { return String(c.id) === String(id); })[0]; }
@@ -279,7 +279,7 @@
     var m = $("main"), owing = Object.keys(S.boot.balances || {}).filter(function (k) { return n(S.boot.balances[k]) > 0; }).length;
     m.innerHTML = banners() + '<div class="tools"><label class="search">' + ic("search", "s") + '<input id="q" type="search" placeholder="ค้นหาร้าน หรือเลขที่" value="' + esc(S.q) + '" autocomplete="off"></label>' +
       (owing ? '<button class="filter' + (S.owing ? " on" : "") + '" id="owing">ค้าง ' + owing + "</button>" : "") + "</div>" +
-      '<div class="list" id="list"></div>' + (locked() ? "" : '<button class="add" id="addc">' + ic("plus", "s") + "เพิ่มลูกค้าใหม่</button>");
+      '<div class="list" id="list"></div>' + (locked() ? "" : '<button class="add" id="addc">' + ic("plus", "s") + "เพิ่มลูกค้าเอง (ร้านที่ไม่มีในรายชื่อ)</button>");
     $("q").oninput = function () { S.q = this.value; paintList(); };
     if ($("owing")) $("owing").onclick = function () { S.owing = !S.owing; renderCustomers(); };
     $("list").onclick = function (e) { var r = e.target.closest(".cust"); if (r) openSale(r.getAttribute("data-id")); };
@@ -298,7 +298,7 @@
       var meta = [];
       if (isNext) meta.push('<span class="chip next">ร้านถัดไป</span>');
       if (c.billing === "invoice") meta.push('<span class="chip">วางบิล</span>');
-      if (c.fresh || c.approved === false) meta.push('<span class="chip warn">ลูกค้าใหม่</span>');
+      if (c.fresh) meta.push('<span class="chip warn">เพิ่มเอง · เงินสด</span>');
       var bal = balanceOf(c.id); if (bal > 0) meta.push('<span class="chip warn">ค้าง ฿' + money(bal) + "</span>");
       if (c.free) meta.push('<span class="chip">ฟรี</span>');
       var right;
@@ -369,7 +369,8 @@
           '<button data-reason="other" class="' + (s.reason === "other" ? "on" : "") + '">อื่น ๆ</button></div>' +
           '<p class="note">' + (s.reason === "factory" ? "ความผิดโรงงาน — ไม่หักค่าคอมของคุณ" : s.reason === "other" ? "นับเป็นยอดขายที่ลดลง" : "เลือกเหตุผลก่อนบันทึก") + " · ออฟฟิศจะเห็นและตรวจทุกครั้ง</p></div>";
       }
-      if (!invoice && !isFree(c, s)) {
+      if (c.fresh && !isFree(c, s)) html += '<p class="note">ร้านที่เพิ่มเอง — เก็บเงินสดเท่านั้น</p>';
+      else if (!invoice && !isFree(c, s)) {
         html += '<div class="seg" id="pay"><button data-pay="cash" class="' + (s.pay === "cash" ? "on" : "") + '"' + dis + '>จ่ายสด</button><button data-pay="credit" class="' + (s.pay === "credit" ? "on credit" : "") + '"' + dis +
           '>ค้าง</button><button data-pay="part" class="' + (s.pay === "part" ? "on" : "") + '"' + dis + ">จ่ายบางส่วน</button></div>";
         if (s.pay === "part") html += '<div class="line"><span class="lbl">รับเงินมา</span><input class="num wide" id="paid" inputmode="decimal" value="' + (s.paid ? s.paid : "") + '" placeholder="0"' + dis + "></div>";
@@ -425,17 +426,26 @@
   }
   function afterSale() { paintTop(); if (S.tab === "customers") { S.scrollToNext = true; paintList(); } }
 
+  // A shop not on the route list (owner, 10 Nov 2026: only the office adds customers). It stays on today's sheet only, cash only,
+  // and the office is told; the office adds it to the list if it becomes a regular.
   function openNewCustomer() {
-    openSheet('<div class="sheet-head"><button class="back" id="sx" aria-label="กลับ">' + ic("back", "l") + '</button><h2>ลูกค้าใหม่</h2></div><div class="sheet-body"><div class="box">' +
-      '<label class="lbl" for="ncn">ชื่อร้าน</label><input class="txt" id="ncn" autocomplete="off"><label class="lbl" for="ncp">ราคาใหญ่ / เล็ก / บด (บาท)</label>' +
-      '<input class="num wide" id="ncp" inputmode="decimal" placeholder="40"><p class="note">ออฟฟิศจะตรวจและเพิ่มเข้าใบขายถาวร</p></div></div>' +
-      '<div class="actions one"><button class="btn primary" id="ncs">' + ic("plus", "s") + "เพิ่ม</button></div>");
+    var pr = [["lod", "ใหญ่"], ["lek", "เล็ก"], ["mo", "บด"]];
+    openSheet('<div class="sheet-head"><button class="back" id="sx" aria-label="กลับ">' + ic("back", "l") + '</button><h2>เพิ่มลูกค้าเอง</h2></div><div class="sheet-body"><div class="box">' +
+      '<p class="note">สำหรับร้านที่ไม่มีในรายชื่อ — ขายเงินสดเท่านั้น ออฟฟิศจะได้รับแจ้งและเพิ่มเข้ารายชื่อให้ถ้าเป็นลูกค้าประจำ</p>' +
+      '<label class="lbl" for="ncn">ชื่อร้าน</label><input class="txt" id="ncn" autocomplete="off">' +
+      '<label class="lbl" for="nct">เบอร์โทรร้าน (ถ้ามี)</label><input class="txt" id="nct" inputmode="tel" autocomplete="off">' +
+      '<p class="lbl">ราคาต่อหน่วย (บาท) — ใส่เฉพาะที่ขาย</p>' + pr.map(function (x) {
+        return '<div class="prow"><div><div class="pl">' + x[1] + '</div></div><input class="num" id="ncp_' + x[0] + '" inputmode="decimal" placeholder="0"></div>';
+      }).join("") + "</div></div>" +
+      '<div class="actions one"><button class="btn primary" id="ncs">' + ic("plus", "s") + "เพิ่มแล้วขาย</button></div>");
     $("sx").onclick = closeSheet;
     $("ncs").onclick = function () {
-      var name = $("ncn").value.trim(), price = n($("ncp").value);
+      var name = $("ncn").value.trim(), prices = {};
+      pr.forEach(function (x) { var v = n($("ncp_" + x[0]).value); if (v > 0) prices[x[0]] = v; });
       if (!name) { toast("ใส่ชื่อร้าน", true); return; }
+      if (!Object.keys(prices).length) { toast("ใส่ราคาอย่างน้อย 1 อย่าง", true); return; }
       var key = "new:" + Date.now();
-      S.doc.new_customers = (S.doc.new_customers || []).concat([{ key: key, name: name, prices: price ? { lod: price, lek: price, mo: price } : {} }]);
+      S.doc.new_customers = (S.doc.new_customers || []).concat([{ key: key, name: name, phone: $("nct").value.trim(), prices: prices }]);
       changed(); closeSheet(); openSale(key);
     };
   }

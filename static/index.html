@@ -24,6 +24,7 @@
     <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
   </button>
   <h1>IceBox</h1>
+  <span id="meBox" class="mebox" hidden><span id="meName" class="mename"></span><button id="logoutBtn" class="btn small" type="button" hidden>ออกจากระบบ</button></span>
   <button id="themeBtn" class="themebtn" type="button" aria-label="สลับธีมสว่าง/มืด" title="สลับธีมสว่าง/มืด">☾</button>
 </header>
 
@@ -33,6 +34,7 @@
   <!-- Where the app opens: everything that needs attention, in one place -->
   <nav class="side-top">
     <button id="navHome" class="sideitem active" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span>หน้าแรก</span></button>
+    <button id="navUsers" class="sideitem" type="button" hidden><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.2c3 .2 5.5 2.6 5.5 5.8"/></svg><span>ผู้ใช้งาน</span></button>
   </nav>
 
   <!-- Accounting -->
@@ -127,12 +129,35 @@
 
 <main>
   <div id="tokenBox" class="card" hidden>
-    <label for="tokenInput">รหัสเข้าใช้งาน</label>
+    <form id="loginForm" class="loginform">
+      <h3>เข้าระบบ</h3>
+      <label for="loginUser">ชื่อผู้ใช้</label>
+      <input id="loginUser" type="text" autocomplete="username" autocapitalize="none" spellcheck="false">
+      <label for="loginPw">รหัสผ่าน</label>
+      <input id="loginPw" type="password" autocomplete="current-password">
+      <button class="btn primary" type="submit">เข้าระบบ</button>
+      <p class="error" id="loginError" hidden></p>
+    </form>
+    <label for="tokenInput" class="muted small">หรือ รหัสเข้าใช้งาน (เจ้าของ)</label>
     <div class="row">
       <input id="tokenInput" type="password" autocomplete="off">
       <button id="tokenSave" class="btn">ตกลง</button>
     </div>
     <p class="error" id="tokenError" hidden>รหัสมีตัวอักษรภาษาไทย — สลับแป้นพิมพ์เป็นภาษาอังกฤษ (กด Alt + Shift ซ้าย หรือ ~) แล้วใส่ใหม่</p>
+  </div>
+
+  <!-- the one-time link from ผู้ใช้งาน: the person chooses their own password (users.js) -->
+  <div id="inviteBox" class="card loginform" hidden>
+    <h3>ตั้งรหัสผ่าน · <span id="invName"></span></h3>
+    <p class="small">ชื่อเข้าระบบของคุณ: <b id="invUser"></b> — จำไว้ ใช้คู่กับรหัสผ่านที่ตั้งตอนนี้</p>
+    <form id="invForm" class="loginform">
+      <label for="invPw">รหัสผ่านใหม่ (อย่างน้อย 8 ตัว ภาษาอังกฤษ / ตัวเลข)</label>
+      <input id="invPw" type="password" autocomplete="new-password" minlength="8">
+      <label for="invPw2">ใส่รหัสผ่านอีกครั้ง</label>
+      <input id="invPw2" type="password" autocomplete="new-password" minlength="8">
+      <button class="btn primary" type="submit">ตั้งรหัสผ่าน แล้วเข้าระบบ</button>
+      <p class="error" id="invError" hidden></p>
+    </form>
   </div>
 
   <!-- the second lock of the พนักงาน section (only when the server has an HR_PIN) -->
@@ -959,6 +984,16 @@
     <div id="elAmr"></div>
   </section>
 
+  <!-- ============ ผู้ใช้งาน: who signs in with their own name and which menus they see (users.js, owner only) ============ -->
+  <section id="usersView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">ผู้ใช้งาน</h2>
+      <p class="muted small">เพิ่มคนที่เข้าระบบด้วยชื่อตัวเอง (เช่น ฝ่ายบัญชี) · เลือกเมนูที่เห็น · ส่งลิงก์ให้ตั้งรหัสผ่านเอง</p>
+    </div>
+    <p class="error" id="usError" hidden></p>
+    <div id="usBody"></div>
+  </section>
+
   <!-- ============ รถสาย · ใบขาย: the drivers' phone sheet, office side (salesheets.js) ============ -->
   <section id="salesSheetsView" hidden>
     <div class="page-head">
@@ -1615,6 +1650,7 @@
 <script src="/static/routes.js"></script>
 <script src="/static/salesheets.js"></script>
 <script src="/static/today.js"></script>
+<script src="/static/users.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/buy.js"></script>
 <script src="/static/manual.js"></script>

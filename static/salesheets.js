@@ -32,7 +32,7 @@ function renderSalesSheets() {
       el("div", { class: "ss-head" },
         el("b", { class: "ss-no", text: r.truck_no.replace("KK-", "แก่งคอย ") }),
         el("div", { class: "ss-who" }, el("strong", { text: r.driver_name || "—" }), el("span", { class: "muted small", text: ` · ${r.name} · ลูกค้า ${r.customers}` }),
-          r.new_customers ? el("span", { class: "badge warn", text: `ลูกค้าใหม่รอตรวจ ${r.new_customers}` }) : null,
+          r.walkins ? el("span", { class: "badge bad", text: `คนขับเพิ่มลูกค้าเอง ${r.walkins} ร้าน — รอตรวจ` }) : null,
           r.reopen_requests ? el("span", { class: "badge warn", text: `ขอแก้ใบขาย ${r.reopen_requests}` }) : null,
           r.unsent ? el("span", { class: "badge bad", text: `ไม่ได้ส่งใบขาย ${r.unsent} วัน` }) : null),
         el("span", { class: `badge ${r.pin_set ? "ok" : ""}`, text: r.pin_set ? "ตั้งรหัสแล้ว" : "ยังไม่ได้ตั้งรหัส" }),
@@ -120,7 +120,11 @@ async function ssOpenDay(dayId) {
         el("button", { class: "btn small", type: "button", text: "บันทึกน้ำแข็งคืน", onclick: () => ssSaveReturns(dayId, dlg) })) : null),
     el("div", { class: "ss-lines" },
       ...d.lines.map((ln) => el("div", { class: "ss-line" },
-        el("span", { text: `${ln.seq || ""}. ${ln.name || "?"}${ln.approved === false ? " (ใหม่)" : ""}` }),
+        ln.walkin
+          ? el("span", {}, el("span", { class: "badge bad", text: "เพิ่มเอง" }), ` ${ln.name}${ln.phone ? ` · โทร ${ln.phone}` : ""} `,
+              ln.walkin_key ? el("button", { class: "btn small", type: "button", text: "เพิ่มเข้ารายชื่อสาย", title: "ให้ร้านนี้อยู่ในรายชื่อของสายนี้ ราคาตามที่คนขับใส่",
+                onclick: () => ssWalkin(dayId, ln, dlg) }) : null)
+          : el("span", { text: `${ln.seq || ""}. ${ln.name || "?"}` }),
         el("span", { class: "muted small", text: P.filter((p) => ln.qty[p.key]).map((p) => `${p.label} ${elN(ln.qty[p.key])}`).join(" · ") }),
         el("b", { text: `฿${elN(ln.amount)}` }),
         el("span", { class: "small " + (ln.free ? "muted" : ln.billing === "invoice" ? "muted" : ln.paid < ln.amount ? "warn-text" : ""),
@@ -141,10 +145,22 @@ async function ssOpenDay(dayId) {
   dlg.showModal();
 }
 
+async function ssWalkin(dayId, ln, dlg) {
+  const P = { lod: "ใหญ่", lek: "เล็ก", mo: "บด" };
+  const price = Object.entries(ln.prices || {}).map(([k, v]) => `${P[k] || k} ฿${elN(v)}`).join(" · ");
+  if (!confirm(`เพิ่ม "${ln.name}" เข้ารายชื่อสายนี้ (ต่อท้ายสาย)
+ราคา: ${price || "—"}
+แก้ราคา / ลำดับได้ทีหลัง`)) return;
+  try { await api(`/api/sales-routes/day/${dayId}/walkin`, jsonOpts("POST", { key: ln.walkin_key })); } catch (err) { alert(err.message); return; }
+  dlg.close(); dlg.remove();
+  ssOpenDay(dayId);
+}
+
 async function ssCheck(dayId, checked, dlg) {
   try { await api(`/api/sales-routes/day/${dayId}/check`, jsonOpts("POST", { checked })); } catch (err) { alert(err.message); return; }
   dlg.close(); dlg.remove();
   if (ss_.open) ssLoadDays(ss_.open);
+  if (typeof loadSalesAttention === "function") loadSalesAttention();
 }
 
 async function ssReopen(dayId, dlg) {

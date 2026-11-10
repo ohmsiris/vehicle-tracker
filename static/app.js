@@ -44,7 +44,8 @@ async function api(path, opts = {}) {
   if (!res.ok) {
     let detail = "";
     try { detail = (await res.json()).detail || ""; } catch (_) { /* not json */ }
-    if (res.status === 403) detail = "รหัสเข้าใช้งานไม่ถูกต้อง หรือยังไม่ได้ใส่ — ใส่รหัสในช่อง “รหัสเข้าใช้งาน” ด้านบนแล้วกดตกลง (หรือเปิดลิงก์ที่มี ?token=รหัส ต่อท้าย)";
+    if (res.status === 403 && /ไม่มีสิทธิ์|เฉพาะเจ้าของ/.test(detail)) { /* signed in, but not this menu: say so as it is */ }
+    else if (res.status === 403) detail = "รหัสเข้าใช้งานไม่ถูกต้อง หรือยังไม่ได้ใส่ — ใส่รหัสในช่อง “รหัสเข้าใช้งาน” ด้านบนแล้วกดตกลง (หรือเปิดลิงก์ที่มี ?token=รหัส ต่อท้าย)";
     else if (res.status === 503 && /APP_TOKEN/.test(detail)) detail = "เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า APP_TOKEN (ตั้งใน Railway › Variables แล้วรอให้ deploy เสร็จ)";
     const err = new Error(detail || `HTTP ${res.status}`);
     err.status = res.status;
@@ -69,10 +70,10 @@ function initTheme() {
 
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
-const VIEW_NAMES = ["home", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
+const VIEW_NAMES = ["home", "users", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 // which sidebar entry lights up for each view
 const NAV_OF = {
-  home: "navHome", employees: "navEmployees", employee: "navEmployees", loans: "navLoans", loan: "navLoans", attendance: "navAttendance", documents: "navDocs", document: "navDocs", board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
+  home: "navHome", users: "navUsers", employees: "navEmployees", employee: "navEmployees", loans: "navLoans", loan: "navLoans", attendance: "navAttendance", documents: "navDocs", document: "navDocs", board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
   roster: "navRoster", truck: "navRoster", event: "navLog", log: "navLog", where: "navWhere", plan: "navPlan", tyreStock: "navTyreStock", odometers: "navOdometers", accounts: "navAccounts", electricity: "navElectricity", routes: "navRoutes", salesSheets: "navSalesSheets", mgr: "navMgr", mgrCal: "navMgrCal", mgrRecurring: "navMgrRecurring", mgrSettings: "navMgrSettings", settings: "navSettings", machinery: "navMachIndex", machine: "navMachIndex", machineParts: "navMachParts", machinePlan: "navMachPlan", machineLog: "navMachLog", purchases: "navPurchases", purchaseNew: "navPurchases", prices: "navPrices", priceItem: "navPrices", stock: "navStock", sheet: "navStock",
 };
 
@@ -776,6 +777,7 @@ async function init() {
   state.token = params.get("token") || storedToken();
   if (!isPlainAscii(state.token)) { state.token = ""; saveToken(""); }          // a code saved with the Thai keyboard on can never work: forget it
   if (params.get("token")) { saveToken(state.token); history.replaceState(null, "", location.pathname + (params.get("sample") ? "?sample=1" : "") + location.hash); }
+  if (params.get("invite")) { initTheme(); showInvite(params.get("invite")); return; }          // the one-time link: choose a password (users.js)
 
   wireDrop("billDrop", "billInput", state.pickBills, true);
   wireDrop("refDrop", "refInput", state.pickRefs, false);
@@ -799,6 +801,9 @@ async function init() {
   $("navElectricity").addEventListener("click", () => goHash("#electricity"));
   $("navRoutes").addEventListener("click", () => goHash("#routes"));
   $("navSalesSheets").addEventListener("click", () => goHash("#sales-sheets"));
+  $("navUsers").addEventListener("click", () => goHash("#users"));
+  $("loginForm").addEventListener("submit", loginWithName);
+  $("logoutBtn").addEventListener("click", logout);
   $("navSettings").addEventListener("click", () => goHash("#settings"));
   $("navMgr").addEventListener("click", () => goHash("#mgr"));
   $("navEmployees").addEventListener("click", () => goHash("#employees"));
@@ -854,6 +859,12 @@ async function init() {
   initPlan();
   initMgr();
   initManual();
+  if (isStaff()) {                        // a person with their own sign-in: straight to their first menu, never the owner's home page
+    if (location.hash && staffMayOpen(decodeURIComponent(location.hash.slice(1)))) route();
+    else if (state.me.home) goHash(state.me.home);
+    else { showView("home"); fill($("homeView"), el("p", { class: "card", text: "ยังไม่มีเมนูให้ใช้ — ขอเจ้าของเพิ่มเมนูให้" })); }
+    return;
+  }
   if (location.hash) route();
   else if (params.get("tab") !== "dash" && !params.get("sample")) loadHome();
   if (params.get("tab") === "dash") { showView("dash"); loadDashboard(); }
@@ -877,6 +888,8 @@ async function loadMeta() {
     state.fleetReady = meta.fleet_ready;
     state.fleetV7 = !!meta.fleet_v7;
     state.fleetV8 = !!meta.fleet_v8;
+    state.me = meta.me || null;
+    applyMe();
     state.vehicleClasses = meta.vehicle_classes || [];
     $("addShop").replaceChildren(el("option", { value: "", text: "ยังไม่ได้ส่งอู่ (รอซ่อม)" }), ...board.shops.map((n) => el("option", { value: n, text: `ส่งอู่เลย: ${n}` })));
     $("tokenBox").hidden = true;

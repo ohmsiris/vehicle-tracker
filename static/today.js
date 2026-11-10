@@ -69,6 +69,17 @@ async function loadToday(fresh = false) {
   checkTimed();
 }
 
+// ใบขายรถสาย: shops a driver added himself (เพิ่มลูกค้าเอง) are red; reopen requests and days never sent are amber
+async function loadSalesAttention() {
+  let a;
+  try { a = await api("/api/sales-routes-attention"); } catch (err) { return; }
+  const n = a.walkins + a.reopen_requests + a.unsent;
+  navBadge("navSalesSheets", n, a.walkins > 0);
+  const b = document.querySelector("#navSalesSheets .navbadge");
+  if (b) b.title = [a.walkins ? `คนขับเพิ่มลูกค้าเอง ${a.walkins} ร้าน` : "", a.reopen_requests ? `ขอแก้ใบขาย ${a.reopen_requests}` : "",
+    a.unsent ? `ไม่ได้ส่งใบขาย ${a.unsent} วัน` : ""].filter(Boolean).join(" · ");
+}
+
 function navBadge(navId, n, urgent) {
   const nav = document.getElementById(navId);
   if (!nav) return;
@@ -126,6 +137,8 @@ function startToday() {
   if (td.started) return;
   td.started = true;
   loadToday();
+  loadSalesAttention();
+  setInterval(loadSalesAttention, 5 * 60 * 1000);
   setInterval(() => loadToday(), 5 * 60 * 1000);
   setInterval(checkTimed, 30 * 1000);
 }

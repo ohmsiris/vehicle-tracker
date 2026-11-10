@@ -1785,3 +1785,20 @@ button.ss-day:hover { background: var(--surface-2); }
 .dtf > .dtf-cal:disabled { opacity: .4; cursor: default; }
 .dtf > input.dtf-real { position: absolute; right: 0; bottom: 0; width: 1px !important; height: 1px !important; min-height: 0 !important; padding: 0 !important;
   border: 0 !important; opacity: 0; pointer-events: none; }
+
+/* who is signed in (users.js) */
+.mebox { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.mename { color: var(--muted); font-weight: 600; }
+.loginform { display: grid; gap: 6px; max-width: 360px; margin-bottom: 14px; }
+.loginform h3 { margin: 0 0 4px; }
+#inviteBox { max-width: 440px; }
+.us-user .us-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.us-user.off { opacity: .6; }
+.us-menus { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 4px 0 8px; }
+.us-menu { display: flex; align-items: center; gap: 4px; font-size: 14px; }
+.us-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.us-add { display: grid; gap: 6px; max-width: 460px; }
+.us-add h3 { margin: 0; }
+.us-dialog { max-width: 520px; width: calc(100% - 32px); border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--text); }
+.us-link { width: 100%; font-size: 13px; }
+.us-dlg-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
