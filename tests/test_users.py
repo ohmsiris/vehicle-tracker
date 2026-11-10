@@ -72,3 +72,9 @@ def test_an_owner_account_sees_everything(monkeypatch):
     c = TestClient(main.app)
     r = c.get("/api/employees", headers={"X-App-Token": "u_boss"})
     assert "ไม่มีสิทธิ์" not in r.text                                           # the menu gate lets the owner through
+
+
+def test_the_register_is_its_own_menu():
+    assert not users.allowed(["sales_sheets"], "/api/customers")
+    assert not users.allowed(["sales_sheets"], "/api/customers/photo/1")
+    assert users.allowed(["customers"], "/api/customers/12")

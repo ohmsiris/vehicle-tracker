@@ -2275,6 +2275,59 @@ def api_sales_route_sheet_xlsx(route_id: int, day: str = "", x_app_token: str = 
                     headers={"Content-Disposition": f"attachment; filename=sheet.xlsx; filename*=UTF-8''{quote(name)}"})
 
 
+# --------------------------------------------------------------------------------------------- ทะเบียนลูกค้า (app/customers.py)
+def _cust_call(fn, *args, **kwargs):
+    from app import customers
+    if not supabase.configured():
+        raise HTTPException(503, "ระบบยังไม่พร้อม")
+    try:
+        return fn(*args, **kwargs)
+    except customers.CustomerError as exc:
+        raise HTTPException(400, str(exc))
+    except supabase.SupabaseError:
+        logger.exception("customers")
+        raise HTTPException(502, "โหลด / บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง")
+
+
+@app.get("/api/customers")
+def api_customers(branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import customers
+    _check_token(x_app_token, token)
+    return _cust_call(customers.list_register, branch)
+
+
+@app.get("/api/customers/route/{truck_no}")
+def api_customers_route(truck_no: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import customers
+    _check_token(x_app_token, token)
+    return {"customers": _cust_call(customers.route_customers, truck_no)}
+
+
+@app.get("/api/customers/photo/{photo_id}")
+def api_customers_photo(photo_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    """An ID card / form photo from the private bucket: never cached by a shared cache."""
+    from app import customers
+    _check_token(x_app_token, token)
+    data, mime = _cust_call(customers.photo, photo_id)
+    return Response(content=data, media_type=mime, headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/api/customers/{cust_no}")
+def api_customer(cust_no: int, branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import customers
+    _check_token(x_app_token, token)
+    return _cust_call(customers.detail, branch, cust_no)
+
+
+@app.post("/api/customers/{cust_no}/link")
+def api_customer_link(cust_no: int, body: dict = Body(...), branch: str = "สระบุรี", x_app_token: str = Header(default=""),
+                      token: str = Query(default="")) -> dict:
+    from app import customers
+    _check_token(x_app_token, token)
+    cid = body.get("customer_id")
+    return _cust_call(customers.link, branch, cust_no, int(cid) if cid else None)
+
+
 @app.post("/api/sales-routes/day/{day_id}/walkin")
 def api_sales_route_walkin(day_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """A shop the driver added (เพิ่มลูกค้าเอง) becomes a customer on the route."""

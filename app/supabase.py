@@ -24,6 +24,7 @@ from app.config import settings
 logger = logging.getLogger("vehicle_tracker.supabase")
 
 STORAGE_BUCKET = "event-files"
+PRIVATE_BUCKET = "customer-files"          # never public: ID cards (customer_photos)
 
 _http: Optional[httpx.Client] = None
 
@@ -174,27 +175,27 @@ def rpc(function: str, args: dict) -> Any:
         _forget()
 
 
-def storage_upload(path: str, data: bytes, content_type: str, upsert: bool = False) -> None:
+def storage_upload(path: str, data: bytes, content_type: str, upsert: bool = False, bucket: str = STORAGE_BUCKET) -> None:
     resp = _client().post(
-        f"/storage/v1/object/{STORAGE_BUCKET}/{quote(path)}",
+        f"/storage/v1/object/{bucket}/{quote(path)}",
         content=data,
         headers={"Content-Type": content_type, "x-upsert": "true" if upsert else "false"},
     )
     _check(resp, f"storage upload {path}")
 
 
-def storage_download(path: str) -> bytes:
+def storage_download(path: str, bucket: str = STORAGE_BUCKET) -> bytes:
     """One stored file, via the authenticated endpoint (works whether the bucket is public or not)."""
-    resp = _client().get(f"/storage/v1/object/{STORAGE_BUCKET}/{quote(path)}")
+    resp = _client().get(f"/storage/v1/object/{bucket}/{quote(path)}")
     return _check(resp, f"storage download {path}").content
 
 
-def storage_delete(paths: list[str]) -> None:
+def storage_delete(paths: list[str], bucket: str = STORAGE_BUCKET) -> None:
     """Best-effort cleanup (used when a save fails after photos were uploaded)."""
     if not paths:
         return
     try:
-        resp = _client().request("DELETE", f"/storage/v1/object/{STORAGE_BUCKET}", json={"prefixes": paths})
+        resp = _client().request("DELETE", f"/storage/v1/object/{bucket}", json={"prefixes": paths})
         if resp.status_code >= 400:
             logger.warning("storage cleanup of %d object(s) failed: HTTP %s", len(paths), resp.status_code)
     except httpx.HTTPError:
