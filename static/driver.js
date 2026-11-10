@@ -171,6 +171,7 @@
     var local = load(dayKey()), server = boot.sheet || null;
     S.sheetMeta = server || {};
     if (server && server.status !== "open") local = null;            // sent (locked) on the server: its copy wins
+    if (!server && local && local.savedRev > 0) local = null;        // reached the server once and is gone now: the office deleted it
     if (local && (!server || local.rev > server.rev)) { S.doc = local.doc; S.rev = local.rev; S.savedRev = server ? server.rev : (local.savedRev || 0); S.status = local.doc && local.doc.closed ? "closed" : "open"; }
     else if (server) { S.doc = server.doc || emptyDoc(); S.rev = server.rev; S.savedRev = server.rev; S.status = server.status; }
     else { S.doc = emptyDoc(); S.rev = 0; S.savedRev = 0; S.status = "open"; }
