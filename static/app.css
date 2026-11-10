@@ -1842,3 +1842,4 @@ body.signed-out .shell { display: block; }
 .login-code { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
 .login-code summary { cursor: pointer; }
 .login-code .row { margin-top: 8px; }
+.login-card #loginError { background: var(--bad-soft, #fdecec); color: var(--bad, #b42318); padding: 8px 10px; border-radius: 8px; font-weight: 600; }

@@ -141,6 +141,10 @@ def login(username: str, password: str, agent: str = "") -> dict:
     from app import supabase
     u = clean_username(username)
     rows = supabase.select("app_users", {"select": "*", "username": f"eq.{u}", "limit": "1"}) if valid_username(u) else []
+    shown = re.sub(r"\s+", " ", username or "").strip()[:60]
+    if not rows and shown:                                    # the name shown in the app works too (เจ้าของ), if only one person has it
+        by_name = supabase.select("app_users", {"select": "*", "name": f"eq.{shown}", "limit": "2"})
+        rows = by_name if len(by_name) == 1 else []
     if not rows or not rows[0]["active"] or not rows[0]["pw_hash"]:
         raise UserError("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
     user = rows[0]

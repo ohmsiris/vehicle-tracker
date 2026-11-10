@@ -131,9 +131,9 @@
 <main>
   <div id="tokenBox" class="card login-card" hidden>
     <div class="login-brand"><span class="login-dot"></span>IceBox</div>
-    <form id="loginForm" class="loginform">
+    <form id="loginForm" class="loginform" action="javascript:void 0" onsubmit="return false">
       <h3>เข้าสู่ระบบ</h3>
-      <label for="loginUser">ชื่อผู้ใช้</label>
+      <label for="loginUser">ชื่อเข้าระบบ (หรือชื่อที่แสดงในแอป)</label>
       <input id="loginUser" type="text" autocomplete="username" autocapitalize="none" spellcheck="false">
       <label for="loginPw">รหัสผ่าน</label>
       <input id="loginPw" type="password" autocomplete="current-password">
@@ -154,7 +154,7 @@
   <div id="inviteBox" class="card loginform login-card" hidden>
     <h3>ตั้งรหัสผ่าน · <span id="invName"></span></h3>
     <p class="small">ชื่อเข้าระบบของคุณ: <b id="invUser"></b> — จำไว้ ใช้คู่กับรหัสผ่านที่ตั้งตอนนี้</p>
-    <form id="invForm" class="loginform">
+    <form id="invForm" class="loginform" action="javascript:void 0" onsubmit="return false">
       <label for="invPw">รหัสผ่านใหม่ (อย่างน้อย 8 ตัว ภาษาอังกฤษ / ตัวเลข)</label>
       <input id="invPw" type="password" autocomplete="new-password" minlength="8">
       <label for="invPw2">ใส่รหัสผ่านอีกครั้ง</label>
