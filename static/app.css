@@ -1761,7 +1761,9 @@ button.ss-day:hover { background: var(--surface-2); }
 .ss-dlg-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .ss-dlg-head h3 { margin: 0; }
 .ss-stock { display: grid; gap: 2px; margin: 8px 0; }
-.ss-srow { display: grid; grid-template-columns: 5em repeat(4, 1fr); gap: 6px; font-variant-numeric: tabular-nums; }
+.ss-srow { display: grid; grid-template-columns: 5em repeat(4, 1fr); gap: 6px; font-variant-numeric: tabular-nums; align-items: center; }
+.ss-ret { width: 100%; max-width: 7em; }
+.ss-retsave { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
 .ss-lines { display: grid; gap: 2px; max-height: 50vh; overflow-y: auto; border-top: 1px solid var(--line); margin: 8px 0; }
 .ss-line { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.4fr) 6em 7em 8em; gap: 6px; padding: 5px 0; border-bottom: 1px solid var(--line);
   align-items: baseline; font-variant-numeric: tabular-nums; }

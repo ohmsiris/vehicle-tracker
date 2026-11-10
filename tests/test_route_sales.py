@@ -60,3 +60,24 @@ def test_only_today_or_an_unsent_yesterday_before_noon_can_change_and_a_sent_day
     assert "เที่ยง" in rs.edit_refusal(y, "open", datetime(2026, 11, 10, 12, 0))
     assert rs.edit_refusal(date(2026, 11, 8), None, now) == "แก้ได้เฉพาะใบขายวันนี้"
     assert "ล็อก" in rs.edit_refusal(t, "closed", now) and "ล็อก" in rs.edit_refusal(t, "checked", now)
+
+
+def test_free_customers_discounts_returns_from_the_plant_and_km_from_the_last_reading():
+    customers = {"1": {"prices": {}, "billing": "cash", "free": True},                     # ตำรวจ: always free
+                 "2": {"prices": {"lod": 40}, "billing": "cash"}}
+    doc = {"loads": [{"q": {"lod": 20}}],
+           "sales": {"1": {"q": {"lod": 2}},
+                     "2": {"q": {"lod": 5}, "discount": 20, "paid": 180}},             # 200 - 20 discount = 180 cash
+           "km_end": 111220}
+    t = rs.compute(doc, customers, returns={"lod": 12}, km_start=111080)
+    assert t["sold"]["lod"] == 7 and t["free"]["lod"] == 2 and t["left"]["lod"] == 13
+    assert t["amount"] == 180 and t["cash_sales"] == 180 and t["discount"] == 20 and t["credit"] == 0
+    assert t["returned"]["lod"] == 12 and t["diff"]["lod"] == -1 and t["km"] == 140
+    assert "หลอด ขาด 1" in t["flags"] and any("ส่วนลด 20" in f for f in t["flags"])
+    one_off = rs.compute({"sales": {"2": {"q": {"lod": 1}, "free": True}}}, customers)
+    assert one_off["amount"] == 0 and one_off["cash_sales"] == 0 and any("แจกฟรีนอกรายชื่อ" in f for f in one_off["flags"])
+
+
+def test_sheet_free_customer():
+    c = rs.customer_from_row(["1. ตำรวจ", "", "ฟรี", "", "", "", "", "", ""])
+    assert c["free"] is True and c["prices"] == {}

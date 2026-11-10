@@ -2139,6 +2139,13 @@ def api_sales_route_reopen(day_id: int, x_app_token: str = Header(default=""), t
     return _route_call(route_sales.reopen_day, day_id)
 
 
+@app.post("/api/sales-routes/day/{day_id}/returns")
+def api_sales_route_returns(day_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.set_returns, day_id, body.get("returns") or {})
+
+
 @app.post("/api/sales-routes/day/{day_id}/check")
 def api_sales_route_check(day_id: int, body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import route_sales

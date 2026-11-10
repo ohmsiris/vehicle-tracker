@@ -72,12 +72,15 @@
     if (sale && sale.price && sale.price[k] != null && sale.price[k] !== "") return n(sale.price[k]);
     var p = (c && c.prices) || {}; return p[k] != null ? n(p[k]) : null;
   }
-  function amountOf(c, sale) {
+  function isFree(c, sale) { return !!(c.free || (sale && sale.free)); }
+  function grossOf(c, sale) {
+    if (isFree(c, sale)) return 0;
     var t = 0; products().forEach(function (p) { var q = n(sale && sale.q && sale.q[p.key]); if (q) t += q * (priceOf(c, sale, p.key) || 0); });
     return Math.round(t * 100) / 100;
   }
+  function amountOf(c, sale) { var g = grossOf(c, sale); return Math.round((g - Math.min(Math.max(n(sale && sale.discount), 0), g)) * 100) / 100; }
   function paidOf(c, sale) {
-    if (c.billing === "invoice") return 0;
+    if (c.billing === "invoice" || isFree(c, sale)) return 0;
     var a = amountOf(c, sale);
     if (sale.pay === "credit") return 0;
     if (sale.pay === "part") return Math.min(n(sale.paid), a);
@@ -85,18 +88,19 @@
   }
   function soldTo(id) { var s = S.doc.sales[String(id)]; return !!(s && (Object.keys(s.q || {}).some(function (k) { return n(s.q[k]); }) || n(s.old_paid))); }
   function totals() {
-    var loaded = {}, sold = {}, cash = 0, credit = 0, inv = 0, old = 0, amt = 0, shops = 0;
+    var loaded = {}, sold = {}, cash = 0, credit = 0, inv = 0, old = 0, amt = 0, shops = 0, disc = 0, freeShops = 0;
     products().forEach(function (p) { loaded[p.key] = 0; sold[p.key] = 0; });
     (S.doc.loads || []).forEach(function (ld) { products().forEach(function (p) { loaded[p.key] += n(ld.q && ld.q[p.key]); }); });
     Object.keys(S.doc.sales || {}).forEach(function (id) {
       var s = S.doc.sales[id], c = custById(id); if (!c) return;
       products().forEach(function (p) { sold[p.key] += n(s.q && s.q[p.key]); });
-      var a = amountOf(c, s); amt += a;
+      var a = amountOf(c, s); amt += a; disc += grossOf(c, s) - a;
+      if (isFree(c, s) && Object.keys(s.q || {}).some(function (k) { return n(s.q[k]); })) freeShops += 1;
       if (c.billing === "invoice") inv += a; else { var pd = paidOf(c, s); cash += pd; credit += a - pd; }
       old += n(s.old_paid);
       if (soldTo(id)) shops += 1;
     });
-    return { loaded: loaded, sold: sold, cash: cash, credit: credit, invoiced: inv, old: old, amount: amt, shops: shops };
+    return { loaded: loaded, sold: sold, cash: cash, credit: credit, invoiced: inv, old: old, amount: amt, shops: shops, discount: disc, freeShops: freeShops };
   }
   function balanceOf(id) { return n((S.boot.balances || {})[String(id)]); }
   function nextCustomer(afterId) {          // the next shop in route order not served yet (after afterId, wrapping round)
@@ -113,7 +117,7 @@
 
   // ------------------------------------------------------------------ the day on the phone, and sending it
   function dayKey() { return "icebox_day_" + S.boot.route.id + "_" + S.day; }
-  function emptyDoc() { return { loads: [], sales: {}, new_customers: [], returns: null, km_start: S.boot.last_km || null, km_end: null, cash: null, closed: false }; }
+  function emptyDoc() { return { loads: [], sales: {}, new_customers: [], km_end: null, cash: null, closed: false }; }
   function persist() { store(dayKey(), { doc: S.doc, rev: S.rev, savedRev: S.savedRev, status: S.status }); }
   function locked() { return S.status === "closed" || S.status === "checked" || S.boot.editable === false; }
   function changed() {
@@ -169,7 +173,6 @@
     else { S.doc = emptyDoc(); S.rev = 0; S.savedRev = 0; S.status = "open"; }
     if (!S.doc.sales) S.doc.sales = {};
     if (!S.doc.loads) S.doc.loads = [];
-    if (S.doc.km_start == null && boot.last_km) S.doc.km_start = boot.last_km;
     S.scrollToNext = true;
     persist(); render();
     if (S.savedRev < S.rev) sync();
@@ -284,7 +287,7 @@
     var nx = locked() ? null : nextCustomer(lastServed());
     var rows = customers().filter(function (c) {
       if (S.owing && !(balanceOf(c.id) > 0)) return false;
-      return !q || (c.name + " " + c.seq + " " + (c.bins || "")).toLowerCase().indexOf(q) >= 0;
+      return !q || (c.name + " " + c.seq + " " + (c.bins || "")).toLowerCase().indexOf(q) >= 0;   // bins still searchable
     });
     $("list").innerHTML = rows.length ? rows.map(function (c) {
       var s = S.doc.sales[String(c.id)], sold = soldTo(c.id), isNext = nx && String(nx.id) === String(c.id);
@@ -293,7 +296,7 @@
       if (c.billing === "invoice") meta.push('<span class="chip">วางบิล</span>');
       if (c.fresh || c.approved === false) meta.push('<span class="chip warn">ลูกค้าใหม่</span>');
       var bal = balanceOf(c.id); if (bal > 0) meta.push('<span class="chip warn">ค้าง ฿' + money(bal) + "</span>");
-      if (c.bins) meta.push(esc(c.bins));
+      if (c.free) meta.push('<span class="chip">ฟรี</span>');
       var right;
       if (sold) {
         var what = products().filter(function (p) { return n(s.q && s.q[p.key]); }).map(function (p) { return p.label + " " + fmt(s.q[p.key]); });
@@ -301,7 +304,7 @@
         right = '<span class="right"><b>฿' + money(amountOf(c, s) + n(s.old_paid)) + "</b>" + esc(what.join(" · ")) + (s.pay === "credit" ? " · ค้าง" : "") + "</span>";
       } else {
         var pr = c.prices || {}, first = ["lod", "lek", "mo", "pack", "zong", "kak"].filter(function (k) { return pr[k] != null; })[0];
-        right = '<span class="right">' + (first ? money(pr[first]) + "฿" + (first === "pack" || first === "zong" || first === "kak" ? "<br>" + esc(label(first)) : "") : "") + "</span>";
+        right = '<span class="right">' + (c.free ? "" : first ? money(pr[first]) + "฿" + (first === "pack" || first === "zong" || first === "kak" ? "<br>" + esc(label(first)) : "") : "") + "</span>";
       }
       return '<button class="cust' + (sold ? " done" : "") + (isNext ? " next" : "") + '" data-id="' + esc(c.id) + '"><span class="no">' + (sold ? "✓" : c.fresh ? "+" : c.seq) +
         '</span><span class="mid"><span class="nm">' + esc(c.name) + '</span><span class="meta">' + meta.join(" ") + "</span></span>" + right + "</button>";
@@ -336,7 +339,7 @@
     var s = JSON.parse(JSON.stringify(S.doc.sales[String(id)] || { q: {}, pay: "cash" }));
     if (!s.q) s.q = {};
     if (!s.pay) s.pay = "cash";
-    var showAll = false, ro = locked();
+    var showAll = false, ro = locked(), showExtra = !!(n(s.discount) || s.free);
     function draw() {
       var pr = c.prices || {};
       var main = products().filter(function (p) { return pr[p.key] != null || n(s.q[p.key]); });
@@ -348,19 +351,27 @@
         '<div class="sheet-body" id="sb">';
       if (ro) html += '<div class="banner lock">' + ic("lock") + '<div class="t"><b>ล็อกแล้ว</b><small>ดูได้อย่างเดียว</small></div></div>';
       if (invoice) html += '<div class="banner warn"><div class="t"><b>วางบิล</b><small>ให้ลูกค้าเซ็นบิล ไม่ต้องเก็บเงิน</small></div></div>';
+      if (c.free) html += '<div class="banner ok"><div class="t"><b>ลูกค้าฟรี</b><small>ไม่คิดเงิน · ใส่แค่จำนวน</small></div></div>';
       html += '<div class="box"><h3>ขายวันนี้</h3>' + list.map(function (p) {
         var price = priceOf(c, s, p.key);
         return '<div class="prow"><div><div class="pl">' + esc(p.label) + '</div><div class="pp' + (price == null && n(s.q[p.key]) ? " need" : "") + '"><button data-price="' + p.key + '"' + dis + ">" +
-          (price == null ? "ใส่ราคา" : "฿" + money(price) + " / หน่วย") + "</button></div></div>" + stepper("q_" + p.key, n(s.q[p.key]), ro) + "</div>";
+          (isFree(c, s) ? "ฟรี" : price == null ? "ใส่ราคา" : "฿" + money(price) + " / หน่วย") + "</button></div></div>" + stepper("q_" + p.key, n(s.q[p.key]), ro) + "</div>";
       }).join("") + (!showAll && rest.length && !ro ? '<button class="more" id="more">+ สินค้าอื่น (' + rest.map(function (p) { return p.label; }).join(" ") + ")</button>" : "");
-      html += '<div class="total"><span>รวม</span><b id="amt">฿' + money(amountOf(c, s)) + "</b></div>";
-      if (!invoice) {
+      html += '<div class="total"><span>รวม</span><b id="amt">' + (isFree(c, s) ? "ฟรี" : "฿" + money(amountOf(c, s))) + "</b></div>";
+      if (!c.free && !ro) {
+        if (!showExtra) html += '<button class="more" id="extra">+ ส่วนลด / แจกฟรี</button>';
+        else html += '<div class="box" style="background:var(--soft)"><h3>ส่วนลด / แจกฟรี (เฉพาะที่ได้รับอนุญาต)</h3>' +
+          '<div class="line"><span class="lbl">ส่วนลด (บาท)</span><input class="num wide" id="disc" inputmode="decimal" value="' + (n(s.discount) || "") + '" placeholder="0"></div>' +
+          '<div class="seg" style="grid-template-columns:1fr 1fr"><button data-free="0" class="' + (s.free ? "" : "on") + '">คิดเงิน</button><button data-free="1" class="' + (s.free ? "on" : "") + '">แจกฟรีครั้งนี้</button></div>' +
+          '<p class="note">ออฟฟิศจะเห็นและตรวจทุกครั้ง</p></div>';
+      }
+      if (!invoice && !isFree(c, s)) {
         html += '<div class="seg" id="pay"><button data-pay="cash" class="' + (s.pay === "cash" ? "on" : "") + '"' + dis + '>จ่ายสด</button><button data-pay="credit" class="' + (s.pay === "credit" ? "on credit" : "") + '"' + dis +
           '>ค้าง</button><button data-pay="part" class="' + (s.pay === "part" ? "on" : "") + '"' + dis + ">จ่ายบางส่วน</button></div>";
         if (s.pay === "part") html += '<div class="line"><span class="lbl">รับเงินมา</span><input class="num wide" id="paid" inputmode="decimal" value="' + (s.paid ? s.paid : "") + '" placeholder="0"' + dis + "></div>";
       }
       html += "</div>";
-      if (!invoice) {
+      if (!invoice && !c.free) {
         html += '<div class="box debt"><h3>' + ic("cash", "s") + "เก็บเงินค่าน้ำแข็งวันก่อน (จ่ายเก่า)</h3>" +
           (bal > 0 ? '<p class="note" style="color:var(--warn)">ค้างในระบบ ฿' + money(bal) + "</p>" : '<p class="note">ลูกค้าจ่ายค่าน้ำแข็งที่ค้างไว้ ใส่ตรงนี้ ไม่ต้องขายวันนี้ก็ได้</p>') +
           (ro || !(bal > 0) ? "" : '<div class="quick"><button id="payall">ทั้งหมด ฿' + money(bal) + "</button></div>") +
@@ -373,12 +384,15 @@
       $("sx").onclick = closeSheet;
       if (ro) { $("sclose").onclick = closeSheet; return; }
       if ($("more")) $("more").onclick = function () { readInputs(); showAll = true; draw(); };
-      bindSteppers($("sb"), function () { readInputs(); $("amt").textContent = "฿" + money(amountOf(c, s)); });
+      if ($("extra")) $("extra").onclick = function () { readInputs(); showExtra = true; draw(); };
+      bindSteppers($("sb"), function () { readInputs(); $("amt").textContent = isFree(c, s) ? "ฟรี" : "฿" + money(amountOf(c, s)); });
       $("sb").addEventListener("click", function (e) {
         var pb = e.target.closest("button[data-price]");
         if (pb) { readInputs(); askPrice(pb.getAttribute("data-price")); return; }
         var pay = e.target.closest("button[data-pay]");
-        if (pay) { readInputs(); s.pay = pay.getAttribute("data-pay"); draw(); }
+        if (pay) { readInputs(); s.pay = pay.getAttribute("data-pay"); draw(); return; }
+        var fr = e.target.closest("button[data-free]");
+        if (fr) { readInputs(); if (fr.getAttribute("data-free") === "1") s.free = true; else delete s.free; draw(); }
       });
       if ($("payall")) $("payall").onclick = function () { $("oldp").value = balanceOf(c.id); };
       $("sclear").onclick = function () { delete S.doc.sales[String(c.id)]; changed(); closeSheet(); afterSale(); };
@@ -388,6 +402,7 @@
       products().forEach(function (p) { var el = $("q_" + p.key); if (el) { var v = n(el.value); if (v) s.q[p.key] = v; else delete s.q[p.key]; } });
       if ($("paid")) s.paid = n($("paid").value);
       if ($("oldp")) s.old_paid = n($("oldp").value);
+      if ($("disc")) { var dv = n($("disc").value); if (dv) s.discount = dv; else delete s.discount; }
     }
     function askPrice(k) {
       var cur = priceOf(c, s, k);
@@ -399,7 +414,7 @@
     }
     function save() {
       var any = Object.keys(s.q).some(function (k) { return n(s.q[k]); }) || n(s.old_paid);
-      var missing = products().filter(function (p) { return n(s.q[p.key]) && priceOf(c, s, p.key) == null; });
+      var missing = isFree(c, s) ? [] : products().filter(function (p) { return n(s.q[p.key]) && priceOf(c, s, p.key) == null; });
       if (missing.length) { toast("ใส่ราคา " + missing.map(function (p) { return p.label; }).join(" "), true); return; }
       if (any) { s.t = s.t || nowHM(); s.paid = paidOf(c, s); S.doc.sales[String(c.id)] = s; } else delete S.doc.sales[String(c.id)];
       changed(); afterSale();
@@ -467,22 +482,23 @@
     var used = products().filter(function (p) { return t.loaded[p.key] || t.sold[p.key]; });
     var ret = S.doc.returns || {};
     var html = banners();
-    html += '<div class="box"><h3>น้ำแข็งที่เหลือบนรถ (คืน)</h3>';
+    var foh = S.sheetMeta.returns_foh || null;
+    html += '<div class="box"><h3>น้ำแข็ง</h3>';
     if (used.length) {
-      html += '<div class="grid4"><span class="h"></span><span class="h">รับ</span><span class="h">ขาย</span><span class="h">ควรเหลือ</span><span class="h">นับได้</span>' +
+      html += '<div class="grid4" style="grid-template-columns:minmax(0,1.1fr) repeat(' + (foh ? 4 : 3) + ',minmax(0,1fr))"><span class="h"></span><span class="h">รับ</span><span class="h">ขาย</span><span class="h">เหลือ</span>' +
+        (foh ? '<span class="h">หน้าโรงนับ</span>' : "") +
         used.map(function (p) {
-          var left = t.loaded[p.key] - t.sold[p.key], has = S.doc.returns && S.doc.returns[p.key] != null && S.doc.returns[p.key] !== "";
-          var diff = has ? n(ret[p.key]) - left : 0;
-          return "<b>" + esc(p.label) + '</b><span class="c">' + fmt(t.loaded[p.key]) + '</span><span class="c">' + fmt(t.sold[p.key]) + '</span><span class="c">' + fmt(left) +
-            (has && diff ? '<br><span class="' + (diff < 0 ? "bad-t" : "warn-t") + '">' + (diff < 0 ? "ขาด " : "เกิน ") + fmt(Math.abs(diff)) + "</span>" : "") + "</span>" +
-            '<input class="num" data-ret="' + p.key + '" inputmode="numeric" pattern="[0-9]*" value="' + (has ? n(ret[p.key]) : "") + '" placeholder="' + fmt(Math.max(left, 0)) + '"' + dis + ">";
-        }).join("") + "</div>";
+          var left = t.loaded[p.key] - t.sold[p.key];
+          var cell = "";
+          if (foh) {
+            var got = n(foh[p.key]), diff = got - left;
+            cell = '<span class="c">' + fmt(got) + (diff ? '<br><span class="' + (diff < 0 ? "bad-t" : "warn-t") + '">' + (diff < 0 ? "ขาด " : "เกิน ") + fmt(Math.abs(diff)) + "</span>" : ' <span class="ok-t">✓</span>') + "</span>";
+          }
+          return "<b>" + esc(p.label) + '</b><span class="c">' + fmt(t.loaded[p.key]) + '</span><span class="c">' + fmt(t.sold[p.key]) + '</span><span class="c"><b>' + fmt(left) + "</b></span>" + cell;
+        }).join("") + "</div>" + (foh ? "" : '<p class="note">น้ำแข็งที่คืน หน้าโรงเป็นคนนับ</p>');
     } else html += '<p class="note">ยังไม่มีการรับ / ขาย</p>';
     html += "</div>";
-    var km = S.doc.km_start && S.doc.km_end ? n(S.doc.km_end) - n(S.doc.km_start) : null;
-    html += '<div class="box"><h3>' + ic("truck", "s") + 'ไมล์รถ</h3><div class="line"><span class="lbl">ไมล์เก่า</span><input class="num wide" id="kms" inputmode="numeric" value="' + (S.doc.km_start || "") + '"' + dis + "></div>" +
-      '<div class="line"><span class="lbl">ไมล์ใหม่</span><input class="num wide" id="kme" inputmode="numeric" value="' + (S.doc.km_end || "") + '"' + dis + "></div>" +
-      '<div class="line"><span class="lbl">รถวิ่ง</span><b>' + (km != null ? fmt(km) + " กม." : "—") + "</b></div></div>";
+    html += '<div class="box"><div class="line"><h3 style="margin:0">' + ic("truck", "s") + 'ไมล์</h3><input class="num wide" id="kme" inputmode="numeric" value="' + (S.doc.km_end || "") + '" placeholder="0"' + dis + "></div></div>";
     var cash = S.doc.cash || {}, counted = 0;
     html += '<div class="box"><h3>' + ic("cash", "s") + "นับเงิน</h3>" + (S.boot.notes || []).map(function (note) {
       var c = n(cash[String(note)]); counted += c * note;
@@ -495,7 +511,8 @@
     html += '<div class="sumgrid"><span>ต้องมีเงินสด</span><b>฿' + money(expect) + "</b><span>นับได้</span><b>฿" + money(counted) + "</b>" +
       (S.doc.cash ? '<span>ต่าง</span><b class="' + (Math.abs(cdiff) < 1 ? "ok-t" : cdiff < 0 ? "bad-t" : "warn-t") + '">' + (Math.abs(cdiff) < 1 ? "ตรง ✓" : (cdiff < 0 ? "ขาด ฿" : "เกิน ฿") + money(Math.abs(cdiff))) + "</b>" : "") + "</div></div>";
     html += '<div class="box"><h3>สรุปวันนี้</h3><div class="sumgrid"><span>ขายทั้งหมด</span><b>฿' + money(t.amount) + "</b><span>เงินสด (ขายวันนี้)</span><b>฿" + money(t.cash) +
-      "</b><span>เก็บเงินวันก่อน</span><b>฿" + money(t.old) + "</b><span>ค้าง</span><b>฿" + money(t.credit) + "</b><span>วางบิล</span><b>฿" + money(t.invoiced) + "</b></div></div>";
+      "</b><span>เก็บเงินวันก่อน</span><b>฿" + money(t.old) + "</b><span>ค้าง</span><b>฿" + money(t.credit) + "</b><span>วางบิล</span><b>฿" + money(t.invoiced) + "</b>" +
+      (t.discount ? "<span>ส่วนลด</span><b>฿" + money(t.discount) + "</b>" : "") + (t.freeShops ? "<span>แจกฟรี</span><b>" + t.freeShops + " ร้าน</b>" : "") + "</div></div>";
     if (!ro) html += '<button class="btn primary big" id="closeday">' + ic("send", "s") + 'ส่งใบขาย · ปิดวัน</button><p class="note" style="text-align:center;margin-top:6px">ส่งแล้วจะล็อก ถ้าต้องแก้ต้องขอออฟฟิศ</p>';
     html += '<div class="foot"><button class="link" id="logout">' + ic("out", "s") + "ออกจากระบบ</button></div>";
     m.innerHTML = html;
@@ -504,18 +521,15 @@
     if (ro) { m.onchange = null; return; }
     m.onchange = function (e) {
       var el = e.target;
-      if (el.hasAttribute("data-ret")) { if (!S.doc.returns) S.doc.returns = {}; if (el.value === "") delete S.doc.returns[el.getAttribute("data-ret")]; else S.doc.returns[el.getAttribute("data-ret")] = n(el.value); }
-      else if (el.hasAttribute("data-note")) { if (!S.doc.cash) S.doc.cash = {}; S.doc.cash[el.getAttribute("data-note")] = n(el.value); }
-      else if (el.id === "kms") S.doc.km_start = n(el.value) || null;
+      if (el.hasAttribute("data-note")) { if (!S.doc.cash) S.doc.cash = {}; S.doc.cash[el.getAttribute("data-note")] = n(el.value); }
       else if (el.id === "kme") S.doc.km_end = n(el.value) || null;
       else return;
       changed(); var y = window.scrollY; renderClose(); window.scrollTo(0, y); paintTop();
     };
     $("closeday").onclick = function () {
       var missing = [];
-      if (!S.doc.km_end) missing.push("ไมล์ใหม่");
+      if (!S.doc.km_end) missing.push("ไมล์");
       if (!S.doc.cash) missing.push("นับเงิน");
-      if (used.length && !S.doc.returns) missing.push("น้ำแข็งที่เหลือ");
       var msg = (missing.length ? "ยังไม่ได้ใส่: " + missing.join(", ") + "\n\n" : "") + "ส่งแล้วจะล็อก แก้ไม่ได้ ส่งเลยไหม?";
       if (!window.confirm(msg)) return;
       S.doc.closed = true; S.rev += 1; persist();

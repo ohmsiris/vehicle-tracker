@@ -61,6 +61,7 @@ def customer_from_row(cells: list[str]) -> Optional[dict]:
         return None
     name = re.sub(r"\s+", " ", m.group(2)).strip()
     bins = ", ".join(b.strip() for b in (cells[1] if len(cells) > 1 else "").split("/") if b.strip())
+    free = "ฟรี" in (cells[2] if len(cells) > 2 else "")
     base = _price(cells[2]) if len(cells) > 2 else None
     prices = {}
     for i, k in enumerate(KEYS, start=3):
@@ -78,7 +79,8 @@ def customer_from_row(cells: list[str]) -> Optional[dict]:
     elif base:
         for k in ("lod", "lek", "mo"):                   # own prices for some products; the usual price for the bags not listed
             prices.setdefault(k, base)
-    return {"seq": int(m.group(1)), "name": name, "bins": bins or None, "prices": prices, "billing": "invoice" if chain else "cash"}
+    return {"seq": int(m.group(1)), "name": name, "bins": bins or None, "prices": {} if free else prices, "billing": "invoice" if chain else "cash",
+            "free": free}
 
 
 def parse_sheet(rows: list[list[str]]) -> dict:
@@ -109,28 +111,42 @@ def line_amount(qty: dict, price: dict) -> float:
     return round(sum(_num(qty.get(k)) * _num(price.get(k)) for k in KEYS), 2)
 
 
-def compute(doc: dict, customers: dict) -> dict:
-    """doc = what the phone sent; customers = {customer id (str): {"prices", "billing"}}. -> the day's totals and what does not add up.
-    A sale line: {"q": {product: n}, "price": {product: baht} (the driver may change a price), "paid": baht, "old_paid": baht}."""
+def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start: Optional[float] = None) -> dict:
+    """doc = what the phone sent; customers = {customer id (str): {"prices", "billing", "free"}}. -> the day's totals and what does
+    not add up. A sale line: {"q": {product: n}, "price": {product: baht} (the driver may change a price), "paid": baht,
+    "old_paid": baht, "discount": baht, "free": true (given free this once)}.
+    returns = the ice back at the plant, counted by หน้าโรง (the office enters it); km_start = the last reading before this day."""
     loaded = {k: 0.0 for k in KEYS}
     for ld in doc.get("loads") or []:
         for k in KEYS:
             loaded[k] += _num((ld.get("q") or {}).get(k))
     sold = {k: 0.0 for k in KEYS}
+    free_q = {k: 0.0 for k in KEYS}
     lines = []
-    cash_sales = old_paid = credit = invoiced = amount_all = 0.0
+    cash_sales = old_paid = credit = invoiced = amount_all = discounts = 0.0
+    discount_shops = adhoc_free = 0
     for cid, s in (doc.get("sales") or {}).items():
         q = {k: _num((s.get("q") or {}).get(k)) for k in KEYS}
         if not any(q.values()) and not _num(s.get("old_paid")):
             continue
         cust = customers.get(str(cid)) or {}
+        free = bool(cust.get("free") or s.get("free"))
         price = {**(cust.get("prices") or {}), **{k: _num(v) for k, v in (s.get("price") or {}).items() if k in KEYS}}
-        amount = line_amount(q, price)
+        gross = 0.0 if free else line_amount(q, price)
+        disc = 0.0 if free else min(max(_num(s.get("discount")), 0.0), gross)
+        amount = round(gross - disc, 2)
         billing = cust.get("billing") or s.get("billing") or "cash"
-        paid = 0.0 if billing == "invoice" else min(max(_num(s.get("paid", amount)), 0.0), amount)
+        paid = 0.0 if billing == "invoice" or free else min(max(_num(s.get("paid", amount)), 0.0), amount)
         op = max(_num(s.get("old_paid")), 0.0)
         for k in KEYS:
             sold[k] += q[k]
+            if free:
+                free_q[k] += q[k]
+        if disc:
+            discounts += disc
+            discount_shops += 1
+        if s.get("free") and not cust.get("free") and any(q.values()):
+            adhoc_free += 1
         amount_all += amount
         if billing == "invoice":
             invoiced += amount
@@ -139,17 +155,19 @@ def compute(doc: dict, customers: dict) -> dict:
             credit += amount - paid
         old_paid += op
         lines.append({"customer": str(cid), "qty": {k: v for k, v in q.items() if v}, "amount": amount, "paid": paid, "old_paid": op,
-                      "billing": billing})
-    returned = {k: _num((doc.get("returns") or {}).get(k)) for k in KEYS}
+                      "billing": billing, "discount": round(disc, 2), "free": free})
+    back = returns if returns is not None else doc.get("returns")
+    returned = {k: _num((back or {}).get(k)) for k in KEYS}
     left = {k: loaded[k] - sold[k] for k in KEYS}
-    diff = {k: returned[k] - left[k] for k in KEYS} if doc.get("returns") else {k: 0.0 for k in KEYS}   # + เกิน / - ขาด
+    diff = {k: returned[k] - left[k] for k in KEYS} if back else {k: 0.0 for k in KEYS}   # + เกิน / - ขาด
     counted = sum(_num((doc.get("cash") or {}).get(str(n))) * n for n in NOTES) + _num((doc.get("cash") or {}).get("coins"))
     expected_cash = cash_sales + old_paid
-    km_start, km_end = _num(doc.get("km_start")), _num(doc.get("km_end"))
-    km = km_end - km_start if km_start and km_end else None
+    start = km_start if km_start is not None else _num(doc.get("km_start"))
+    km_end = _num(doc.get("km_end"))
+    km = km_end - start if start and km_end else None
     flags = []
     for k, label in PRODUCTS:
-        if doc.get("returns") and diff[k]:
+        if back and diff[k]:
             flags.append(f"{label} {'เกิน' if diff[k] > 0 else 'ขาด'} {abs(diff[k]):g}")
         if left[k] < 0:
             flags.append(f"{label} ขายมากกว่าที่รับ {abs(left[k]):g}")
@@ -158,10 +176,15 @@ def compute(doc: dict, customers: dict) -> dict:
         flags.append(f"เงิน{'เกิน' if counted > expected_cash else 'ขาด'} {abs(counted - expected_cash):,.0f} บาท")
     if km is not None and (km < 0 or km > 600):
         flags.append(f"ไมล์ดูไม่ถูก ({km:,.0f} กม.)")
-    return {"loaded": loaded, "sold": sold, "left": left, "returned": returned if doc.get("returns") else None, "diff": diff,
+    if discounts:
+        flags.append(f"ส่วนลด {discounts:,.0f} บาท ({discount_shops} ร้าน) — ตรวจว่าอนุญาตแล้ว")
+    if adhoc_free:
+        flags.append(f"แจกฟรีนอกรายชื่อ {adhoc_free} ร้าน — ตรวจว่าอนุญาตแล้ว")
+    return {"loaded": loaded, "sold": sold, "left": left, "returned": returned if back else None, "diff": diff, "free": free_q,
             "amount": round(amount_all, 2), "cash_sales": round(cash_sales, 2), "old_paid": round(old_paid, 2),
-            "credit": round(credit, 2), "invoiced": round(invoiced, 2), "expected_cash": round(expected_cash, 2),
-            "counted": round(counted, 2) if has_cash else None, "km": km, "customers": len(lines), "flags": flags, "lines": lines}
+            "credit": round(credit, 2), "invoiced": round(invoiced, 2), "discount": round(discounts, 2), "expected_cash": round(expected_cash, 2),
+            "counted": round(counted, 2) if has_cash else None, "km_start": start or None, "km": km, "customers": len(lines), "flags": flags,
+            "lines": lines}
 
 
 # --------------------------------------------------------------------------------------------- which day the phone may change (pure)
@@ -249,7 +272,7 @@ def logout(token: str) -> None:
 # --------------------------------------------------------------------------------------------- the driver's page
 def _customers(route_id: int) -> list[dict]:
     from app import supabase
-    return supabase.select_all("sale_route_customers", {"select": "id,seq,name,bins,prices,billing,approved,added_by_driver",
+    return supabase.select_all("sale_route_customers", {"select": "id,seq,name,bins,prices,billing,free,approved,added_by_driver",
                                                         "route_id": f"eq.{route_id}", "active": "eq.true", "order": "seq.asc,id.asc"})
 
 
@@ -266,7 +289,7 @@ def _balances(route_id: int) -> dict:
 
 def _day(route_id: int, day: date) -> Optional[dict]:
     from app import supabase
-    rows = supabase.select("sale_days", {"select": "id,day,doc,rev,status,totals,updated_at,closed_at,reopen_requested_at,reopen_log",
+    rows = supabase.select("sale_days", {"select": "id,day,doc,rev,status,totals,updated_at,closed_at,reopen_requested_at,reopen_log,returns_foh",
                                          "route_id": f"eq.{route_id}",
                                          "day": f"eq.{day.isoformat()}", "limit": "1"})
     return rows[0] if rows else None
@@ -286,7 +309,7 @@ def _sheet(d: Optional[dict]) -> Optional[dict]:
     if not d:
         return None
     return {"doc": d["doc"], "rev": d["rev"], "status": d["status"], "closed_at": d.get("closed_at"),
-            "reopen_requested_at": d.get("reopen_requested_at")}
+            "reopen_requested_at": d.get("reopen_requested_at"), "returns_foh": d.get("returns_foh")}
 
 
 def bootstrap(driver: dict, day: Optional[date] = None) -> dict:
@@ -341,7 +364,7 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
         doc = {**doc, "sales": {id_map.get(k, k): v for k, v in (doc.get("sales") or {}).items()},
                "new_customers": [nc for nc in doc.get("new_customers") or [] if str(nc.get("key")) not in id_map]}
     doc["sales"] = {k: v for k, v in (doc.get("sales") or {}).items() if k in customers}      # a deleted customer's line is dropped
-    totals = compute(doc, customers)
+    totals = compute(doc, customers, (current or {}).get("returns_foh"), _last_km(route_id, day))
     status = "closed" if doc.get("closed") else "open"
     now = datetime.now(timezone.utc).isoformat()
     row = {"route_id": route_id, "day": day.isoformat(), "driver_id": driver["id"], "doc": doc, "rev": int(rev), "status": status,
@@ -349,7 +372,8 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
     saved = supabase.insert("sale_days", [row], on_conflict="route_id,day")[0]
     supabase.delete("sale_lines", {"day_id": f"eq.{saved['id']}"})
     lines = [{"day_id": saved["id"], "route_id": route_id, "day": day.isoformat(), "customer_id": int(ln["customer"]), "qty": ln["qty"],
-              "amount": ln["amount"], "paid": ln["paid"], "old_paid": ln["old_paid"], "billing": ln["billing"]} for ln in totals["lines"]]
+              "amount": ln["amount"], "paid": ln["paid"], "old_paid": ln["old_paid"], "billing": ln["billing"], "discount": ln["discount"],
+              "free": ln["free"]} for ln in totals["lines"]]
     for i in range(0, len(lines), 500):
         supabase.insert("sale_lines", lines[i:i + 500])
     return {"rev": int(rev), "status": status, "totals": _public(row["totals"]), "id_map": id_map}
@@ -443,7 +467,8 @@ def day_detail(day_id: int) -> dict:
     if not d:
         raise RouteSalesError("ไม่พบวันนี้")
     cust = {str(c["id"]): c for c in _customers(d[0]["route_id"])}
-    lines = supabase.select_all("sale_lines", {"select": "customer_id,qty,amount,paid,old_paid,billing", "day_id": f"eq.{int(day_id)}", "order": "id.asc"})
+    lines = supabase.select_all("sale_lines", {"select": "customer_id,qty,amount,paid,old_paid,billing,discount,free", "day_id": f"eq.{int(day_id)}",
+                                               "order": "id.asc"})
     for ln in lines:
         c = cust.get(str(ln["customer_id"])) or {}
         ln["name"], ln["seq"], ln["approved"] = c.get("name"), c.get("seq"), c.get("approved", True)
@@ -466,6 +491,21 @@ def reopen_day(day_id: int) -> dict:
         "status": "open", "rev": int(d["rev"]) + 1, "doc": {**(d["doc"] or {}), "closed": False}, "closed_at": None, "checked_at": None,
         "reopen_requested_at": None, "reopen_log": (d.get("reopen_log") or []) + [{"at": now, "what": "reopened"}]})
     return {"status": "open"}
+
+
+def set_returns(day_id: int, returns: dict) -> dict:
+    """หน้าโรง counts the ice that came back (any time, even after the day is sent); the day's totals and checks are worked out again."""
+    from app import supabase
+    d = supabase.select("sale_days", {"select": "id,route_id,day,doc", "id": f"eq.{int(day_id)}", "limit": "1"})
+    if not d:
+        raise RouteSalesError("ไม่พบวันนี้")
+    d = d[0]
+    back = {k: _num(v) for k, v in (returns or {}).items() if k in KEYS and str(v).strip() != ""}
+    customers = {str(c["id"]): c for c in _customers(d["route_id"])}
+    totals = compute(d["doc"] or {}, customers, back, _last_km(d["route_id"], date.fromisoformat(d["day"])))
+    supabase.update("sale_days", {"id": f"eq.{d['id']}"}, {"returns_foh": back, "returns_at": datetime.now(timezone.utc).isoformat(),
+                                                        "totals": _public(totals)})
+    return {"totals": _public(totals)}
 
 
 def check_day(day_id: int, checked: bool = True) -> dict:

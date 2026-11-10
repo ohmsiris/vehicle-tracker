@@ -91,18 +91,23 @@ async function ssOpenDay(dayId) {
     el("div", { class: "ss-dlg-head" }, el("h3", { text: `ใบขาย ${beDate(day.day)}` }), el("button", { class: "btn small", type: "button", text: "ปิด", onclick: () => { dlg.close(); dlg.remove(); } })),
     (t.flags || []).length ? el("p", { class: "warn-text", text: `⚠ ${t.flags.join(" · ")}` }) : el("p", { class: "muted small", text: "ทุกอย่างตรง" }),
     el("div", { class: "ss-stock" },
-      el("div", { class: "ss-srow head muted small" }, el("span", { text: "" }), ...["รับ", "ขาย", "ควรเหลือ", "คืน"].map((h) => el("span", { text: h }))),
+      el("div", { class: "ss-srow head muted small" }, el("span", { text: "" }), ...["รับ", "ขาย", "เหลือ", "หน้าโรงนับ"].map((h) => el("span", { text: h }))),
       ...used.map((p) => el("div", { class: "ss-srow" }, el("b", { text: p.label }),
         el("span", { text: elN(t.loaded[p.key]) }), el("span", { text: elN(t.sold[p.key]) }), el("span", { text: elN(t.left[p.key]) }),
-        el("span", { text: t.returned ? elN(t.returned[p.key]) : "—" })))),
+        el("input", { class: "ss-ret", type: "number", inputmode: "numeric", min: "0", "data-ret": p.key, "aria-label": `${p.label} ที่คืน`,
+          value: day.returns_foh && day.returns_foh[p.key] != null ? day.returns_foh[p.key] : "", placeholder: elN(Math.max(t.left[p.key], 0)) }))),
+      used.length ? el("div", { class: "ss-retsave" },
+        el("span", { class: "muted small", text: day.returns_at ? `หน้าโรงนับแล้ว ${new Date(day.returns_at).toLocaleString("th-TH")}` : "หน้าโรงยังไม่ได้นับน้ำแข็งที่คืน" }),
+        el("button", { class: "btn small", type: "button", text: "บันทึกน้ำแข็งคืน", onclick: () => ssSaveReturns(dayId, dlg) })) : null),
     el("div", { class: "ss-lines" },
       ...d.lines.map((ln) => el("div", { class: "ss-line" },
         el("span", { text: `${ln.seq || ""}. ${ln.name || "?"}${ln.approved === false ? " (ใหม่)" : ""}` }),
         el("span", { class: "muted small", text: P.filter((p) => ln.qty[p.key]).map((p) => `${p.label} ${elN(ln.qty[p.key])}`).join(" · ") }),
         el("b", { text: `฿${elN(ln.amount)}` }),
-        el("span", { class: "small " + (ln.billing === "invoice" ? "muted" : ln.paid < ln.amount ? "warn-text" : ""), text: ln.billing === "invoice" ? "วางบิล" : ln.paid < ln.amount ? `ค้าง ฿${elN(ln.amount - ln.paid)}` : "สด" }),
+        el("span", { class: "small " + (ln.free ? "muted" : ln.billing === "invoice" ? "muted" : ln.paid < ln.amount ? "warn-text" : ""),
+          text: (ln.free ? "ฟรี" : ln.billing === "invoice" ? "วางบิล" : ln.paid < ln.amount ? `ค้าง ฿${elN(ln.amount - ln.paid)}` : "สด") + (Number(ln.discount) ? ` · ลด ฿${elN(ln.discount)}` : "") }),
         el("span", { class: "small muted", text: ln.old_paid ? `+หนี้เก่า ฿${elN(ln.old_paid)}` : "" })))),
-    el("p", { class: "muted small", text: `ขาย ฿${elN(t.amount)} · เงินสด ฿${elN(t.cash_sales)} + หนี้เก่า ฿${elN(t.old_paid)} = ต้องมี ฿${elN(t.expected_cash)} · นับได้ ${t.counted != null ? "฿" + elN(t.counted) : "—"} · ค้าง ฿${elN(t.credit)} · วางบิล ฿${elN(t.invoiced)}${t.km != null ? ` · วิ่ง ${elN(t.km)} กม.` : ""}` }),
+    el("p", { class: "muted small", text: `${t.discount ? `ส่วนลด ฿${elN(t.discount)} · ` : ""}ขาย ฿${elN(t.amount)} · เงินสด ฿${elN(t.cash_sales)} + หนี้เก่า ฿${elN(t.old_paid)} = ต้องมี ฿${elN(t.expected_cash)} · นับได้ ${t.counted != null ? "฿" + elN(t.counted) : "—"} · ค้าง ฿${elN(t.credit)} · วางบิล ฿${elN(t.invoiced)}${t.km != null ? ` · วิ่ง ${elN(t.km)} กม.` : ""}` }),
     day.reopen_requested_at ? el("p", { class: "warn-text", text: `คนขับขอแก้ใบขายนี้ (${new Date(day.reopen_requested_at).toLocaleString("th-TH")})` }) : null,
     (day.reopen_log || []).length ? el("p", { class: "muted small", text: "ประวัติ: " + day.reopen_log.map((x) => `${x.what === "reopened" ? "ออฟฟิศเปิดให้แก้" : "คนขับขอแก้"} ${new Date(x.at).toLocaleString("th-TH")}`).join(" · ") }) : null,
     el("div", { class: "ss-dlg-foot" },
@@ -125,4 +130,13 @@ async function ssReopen(dayId, dlg) {
   try { await api(`/api/sales-routes/day/${dayId}/reopen`, jsonOpts("POST", {})); } catch (err) { alert(err.message); return; }
   dlg.close(); dlg.remove();
   await openSalesSheets();
+}
+
+async function ssSaveReturns(dayId, dlg) {
+  const back = {};
+  dlg.querySelectorAll("input[data-ret]").forEach((i) => { if (i.value !== "") back[i.getAttribute("data-ret")] = Number(i.value); });
+  try { await api(`/api/sales-routes/day/${dayId}/returns`, jsonOpts("POST", { returns: back })); } catch (err) { alert(err.message); return; }
+  dlg.close(); dlg.remove();
+  ssOpenDay(dayId);
+  if (ss_.open) ssLoadDays(ss_.open);
 }
