@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -83,7 +83,7 @@ async def static_cache_policy(request, call_next):
     path = request.url.path
     if path.startswith("/static/fonts/"):
         response.headers["Cache-Control"] = "public, max-age=604800"
-    elif path == "/" or path.startswith("/static/"):
+    elif path == "/" or path.startswith("/static/") or path.startswith("/d/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
@@ -2008,3 +2008,125 @@ def api_log_csv(
     body = "\ufeff" + logbook.to_csv(hits)           # BOM so Excel reads the Thai text
     return Response(content=body, media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="maintenance-log-{repair_requests.today_bangkok().isoformat()}.csv"'})
+
+
+
+# ------------------------------------------------------------------ สายรถ · ใบขาย: the driver's phone page (/d/) and the office side
+# The driver's page has its own sign-in (name + 4-digit PIN once per phone, then a long token in X-Driver-Token); it never sees the
+# office token. app/route_sales.py holds the rules.
+def _route_call(fn, *args, **kwargs):
+    from app import route_sales
+    if not supabase.configured():
+        raise HTTPException(503, "ระบบยังไม่พร้อม")
+    try:
+        return fn(*args, **kwargs)
+    except route_sales.RouteSalesError as exc:
+        if str(exc) == "signin":
+            raise HTTPException(401, "signin")
+        raise HTTPException(422, str(exc))
+    except supabase.SupabaseError:
+        logger.exception("route sales call failed")
+        raise HTTPException(502, "ระบบขัดข้อง ลองใหม่อีกครั้ง")
+
+
+@app.get("/d", include_in_schema=False)
+def driver_redirect() -> RedirectResponse:
+    return RedirectResponse("/d/")
+
+
+@app.get("/d/", include_in_schema=False)
+def driver_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "driver.html")
+
+
+@app.get("/d/sw.js", include_in_schema=False)
+def driver_sw() -> FileResponse:
+    return FileResponse(STATIC_DIR / "driver-sw.js", media_type="application/javascript", headers={"Service-Worker-Allowed": "/d/"})
+
+
+@app.get("/api/d/drivers")
+def api_driver_names() -> dict:
+    from app import route_sales
+    return {"drivers": _route_call(route_sales.drivers_for_login)}
+
+
+@app.post("/api/d/login")
+def api_driver_login(body: dict = Body(...)) -> dict:
+    from app import route_sales
+    try:
+        driver_id = int(body.get("driver_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(422, "เลือกชื่อก่อน")
+    return {"token": _route_call(route_sales.login, driver_id, str(body.get("pin") or ""))}
+
+
+@app.get("/api/d/me")
+def api_driver_me(day: str = "", x_driver_token: str = Header(default="")) -> dict:
+    from app import route_sales
+    from datetime import date as _date
+    driver = _route_call(route_sales.driver_for_token, x_driver_token)
+    try:
+        d = _date.fromisoformat(day) if day else None
+    except ValueError:
+        raise HTTPException(422, "วันที่ไม่ถูกต้อง")
+    return _route_call(route_sales.bootstrap, driver, d)
+
+
+@app.put("/api/d/day")
+def api_driver_day(body: dict = Body(...), x_driver_token: str = Header(default="")) -> dict:
+    from app import route_sales
+    driver = _route_call(route_sales.driver_for_token, x_driver_token)
+    try:
+        rev = int(body.get("rev"))
+    except (TypeError, ValueError):
+        raise HTTPException(422, "ข้อมูลไม่ถูกต้อง")
+    return _route_call(route_sales.save_day, driver, str(body.get("day") or ""), rev, body.get("doc") or {})
+
+
+@app.post("/api/d/logout")
+def api_driver_logout(x_driver_token: str = Header(default="")) -> dict:
+    from app import route_sales
+    _route_call(route_sales.logout, x_driver_token)
+    return {"ok": True}
+
+
+@app.get("/api/sales-routes")
+def api_sales_routes(branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return {"routes": _route_call(route_sales.routes_overview, branch), "today": route_sales.today().isoformat()}
+
+
+@app.post("/api/sales-routes/{route_id}/pin")
+def api_sales_route_pin(route_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.set_pin, route_id, str(body.get("pin") or ""))
+
+
+@app.post("/api/sales-routes/{route_id}/signout")
+def api_sales_route_signout(route_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return {"signed_out": _route_call(route_sales.sign_out_phones, route_id)}
+
+
+@app.get("/api/sales-routes/{route_id}/days")
+def api_sales_route_days(route_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.route_days, route_id)
+
+
+@app.get("/api/sales-routes/day/{day_id}")
+def api_sales_route_day(day_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.day_detail, day_id)
+
+
+@app.post("/api/sales-routes/day/{day_id}/check")
+def api_sales_route_check(day_id: int, body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.check_day, day_id, bool(body.get("checked", True)))

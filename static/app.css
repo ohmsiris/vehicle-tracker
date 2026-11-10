@@ -1741,3 +1741,29 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .uc-tr.total { font-weight: 700; border-top: 1.5px solid var(--text); }
 .uc-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 .uc-assume { margin: 6px 0 0; padding-left: 1.2em; display: grid; gap: 4px; }
+
+/* สายรถ · ใบขาย, office side (salesheets.js) */
+.ss-link { display: grid; gap: 6px; margin-bottom: 12px; }
+.ss-linkrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ss-linkrow code { background: var(--surface-2); padding: 6px 10px; border-radius: 8px; font-size: 14px; word-break: break-all; }
+.ss-route { margin-bottom: 8px; display: grid; gap: 8px; }
+.ss-route.open { border-color: var(--accent, var(--ok)); }
+.ss-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.ss-no { font-size: 20px; min-width: 2.4em; }
+.ss-who { flex: 1; min-width: 220px; }
+.ss-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ss-days { display: grid; gap: 2px; overflow-x: auto; }
+.ss-day { display: grid; grid-template-columns: 7.5em 8.5em 6em 11em 6em 6em 4em minmax(10em, 1fr); gap: 8px; padding: 6px 4px; text-align: left;
+  border-top: 1px solid var(--line); background: none; font: inherit; color: inherit; min-width: 760px; font-variant-numeric: tabular-nums; }
+button.ss-day:hover { background: var(--surface-2); }
+.ss-dialog { width: min(720px, 96vw); border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: var(--surface); color: var(--text); }
+.ss-dialog::backdrop { background: rgba(0,0,0,.35); }
+.ss-dlg-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ss-dlg-head h3 { margin: 0; }
+.ss-stock { display: grid; gap: 2px; margin: 8px 0; }
+.ss-srow { display: grid; grid-template-columns: 5em repeat(4, 1fr); gap: 6px; font-variant-numeric: tabular-nums; }
+.ss-lines { display: grid; gap: 2px; max-height: 50vh; overflow-y: auto; border-top: 1px solid var(--line); margin: 8px 0; }
+.ss-line { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.4fr) 6em 7em 8em; gap: 6px; padding: 5px 0; border-bottom: 1px solid var(--line);
+  align-items: baseline; font-variant-numeric: tabular-nums; }
+.ss-dlg-foot { display: flex; justify-content: flex-end; }
+@media (max-width: 640px) { .ss-line { grid-template-columns: 1fr auto; } }

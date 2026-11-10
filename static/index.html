@@ -44,6 +44,7 @@
       <button id="navAccountsIn" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg><span>ลงข้อมูล / แนบไฟล์</span></button>
       <button id="navElectricity" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg><span>ค่าไฟฟ้า</span></button>
       <button id="navRoutes" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></svg><span>สายรถ · กำไรต่อคัน</span></button>
+      <button id="navSalesSheets" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg><span>ใบขายสายรถ (มือถือ)</span></button>
       <button id="navAccounts" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span>งบกำไรขาดทุน</span></button>
     </nav>
   </div>
@@ -949,6 +950,16 @@
     <div id="elAmr"></div>
   </section>
 
+  <!-- ============ สายรถ · ใบขาย: the drivers' phone sheet, office side (salesheets.js) ============ -->
+  <section id="salesSheetsView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">Driver sales sheets · ใบขายสายรถ</h2>
+      <p class="muted small">คนขับบันทึกการขายในมือถือแทนกระดาษ · ตั้งรหัสให้คนขับ · ดูและตรวจใบขายรายวัน</p>
+    </div>
+    <p class="error" id="ssError" hidden></p>
+    <div id="ssBody"></div>
+  </section>
+
   <!-- ============ Routes: profit per delivery truck (routes.js) ============ -->
   <section id="routesView" hidden>
     <div class="page-head">
@@ -1592,6 +1603,7 @@
 <script src="/static/elec.js"></script>
 <script src="/static/elec_amr.js"></script>
 <script src="/static/routes.js"></script>
+<script src="/static/salesheets.js"></script>
 <script src="/static/today.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/buy.js"></script>

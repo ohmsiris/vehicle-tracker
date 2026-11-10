@@ -11,7 +11,7 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
+const FLEET_VIEWS = ["employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 
 // ------------------------------------------------------------------ routing
 function route() {
@@ -34,6 +34,7 @@ function route() {
   if (h === "accounts-in") return openAccounts("in");
   if (h === "electricity") return openElectricity();
   if (h === "routes") return openRoutes();
+  if (h === "sales-sheets") return openSalesSheets();
   if (h === "plan-settings") { pl.tab = "set"; return openPlan(); }
   if (h === "settings") return openAppSettings();
   if (h === "mgr") return openMgr();
