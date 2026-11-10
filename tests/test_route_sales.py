@@ -102,3 +102,20 @@ def test_the_phone_cannot_change_a_price_and_an_unpriced_product_is_flagged():
     t = rs.compute({"sales": {"1": {"q": {"lod": 2, "pack": 1}, "price": {"lod": 1}}}}, customers)
     assert t["amount"] == 80                                             # 2 x 40: the phone's price of 1 is ignored
     assert any("ร้านเอ" in f and "แพ็ค" in f for f in t["flags"])
+
+
+def test_a_day_never_sent_is_unsent_once_it_can_no_longer_be_sent():
+    from datetime import date, datetime
+    now = datetime(2026, 11, 10, 9, 0)
+    assert not rs.unsent(date(2026, 11, 10), "open", now)                 # today: still selling
+    assert not rs.unsent(date(2026, 11, 9), "open", now)                  # yesterday before noon: can still send
+    assert rs.unsent(date(2026, 11, 9), "open", datetime(2026, 11, 10, 13, 0))
+    assert rs.unsent(date(2026, 11, 7), "open", now)
+    assert not rs.unsent(date(2026, 11, 7), "closed", now)
+
+
+def test_phone_label():
+    assert rs.phone_label("Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36") == "Android · Chrome"
+    assert rs.phone_label("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1 Line/13.0.0") == "iPhone · LINE"
+    assert rs.phone_label("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Version/17.0 Mobile/15E148 Safari/604.1") == "iPhone · Safari"
+    assert rs.phone_label("") == "เครื่องอื่น"

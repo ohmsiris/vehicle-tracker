@@ -221,6 +221,22 @@ def edit_refusal(day: date, status: Optional[str], now: datetime) -> Optional[st
     return "แก้ได้เฉพาะใบขายวันนี้"
 
 
+def unsent(day: date, status: Optional[str], now: datetime) -> bool:
+    """A past day the driver never sent and can no longer send (yesterday after noon, or older). now = Bangkok time."""
+    return status == "open" and day < now.date() and edit_refusal(day, status, now) is not None
+
+
+def phone_label(agent: str) -> str:
+    """A short name for the phone a driver signed in from, worked out from the browser's User-Agent: "Android · Chrome"."""
+    a = agent or ""
+    kind = "iPhone" if "iPhone" in a else "iPad" if "iPad" in a else "Android" if "Android" in a else \
+        "Windows" if "Windows" in a else "Mac" if "Macintosh" in a else "เครื่องอื่น"
+    app = "LINE" if re.search(r"\bLine/", a) else "Facebook" if ("FBAN" in a or "FBAV" in a) else \
+        "Samsung" if "SamsungBrowser" in a else "Edge" if "Edg" in a else "Firefox" if ("Firefox" in a or "FxiOS" in a) else \
+        "Chrome" if ("Chrome" in a or "CriOS" in a) else "Safari" if "Safari" in a else ""
+    return f"{kind} · {app}" if app else kind
+
+
 # --------------------------------------------------------------------------------------------- sign in
 def hash_pin(pin: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", pin.encode(), bytes.fromhex(salt), 120_000).hex()
@@ -245,7 +261,7 @@ def drivers_for_login() -> list[dict]:
     return sorted(out, key=lambda x: (len(x["truck_no"]), x["truck_no"]))
 
 
-def login(driver_id: int, pin: str) -> str:
+def login(driver_id: int, pin: str, agent: str = "") -> str:
     from app import supabase
     rows = supabase.select("sale_drivers", {"select": "*", "id": f"eq.{int(driver_id)}", "active": "eq.true", "limit": "1"})
     if not rows or not rows[0]["pin_hash"]:
@@ -261,7 +277,8 @@ def login(driver_id: int, pin: str) -> str:
         raise RouteSalesError("รหัสไม่ถูกต้อง" + (f" — ล็อก {LOCK_MINUTES} นาที" if lock else f" (เหลือ {PIN_TRIES - failed} ครั้ง)"))
     supabase.update("sale_drivers", {"id": f"eq.{d['id']}"}, {"failed": 0, "locked_until": None})
     token = secrets.token_urlsafe(32)
-    supabase.insert("sale_driver_devices", [{"token_hash": _token_hash(token), "driver_id": d["id"], "last_seen": now.isoformat()}])
+    supabase.insert("sale_driver_devices", [{"token_hash": _token_hash(token), "driver_id": d["id"], "last_seen": now.isoformat(),
+                                             "agent": phone_label(agent)[:60]}])
     return token
 
 
@@ -277,7 +294,7 @@ def driver_for_token(token: str) -> dict:
         raise RouteSalesError("signin")
     now = datetime.now(timezone.utc)
     last = dev[0]["last_seen"]
-    if not last or now - datetime.fromisoformat(last) > timedelta(hours=1):          # no write on every request
+    if not last or now - datetime.fromisoformat(last) > timedelta(minutes=10):       # no write on every request
         supabase.update("sale_driver_devices", {"token_hash": f"eq.{_token_hash(token)}"}, {"last_seen": now.isoformat()})
     return d[0]
 
@@ -428,12 +445,21 @@ def routes_overview(branch: str = "สระบุรี") -> list[dict]:
         n = counts.setdefault(c["route_id"], [0, 0])
         n[0] += 1
         n[1] += 0 if c["approved"] else 1
+    phones: dict = {}
+    for dev in supabase.select_all("sale_driver_devices", {"select": "driver_id,agent,created_at,last_seen", "revoked": "eq.false",
+                                                           "order": "last_seen.desc.nullslast"}):
+        phones.setdefault(dev["driver_id"], []).append({"agent": dev.get("agent") or "ไม่ทราบรุ่น", "since": dev["created_at"],
+                                                        "last_seen": dev["last_seen"]})
+    now = datetime.now(BANGKOK)
     since = (today() - timedelta(days=14)).isoformat()
     last = {}
+    late: dict = {}
     requests: dict = {}
     for dday in supabase.select_all("sale_days", {"select": "route_id,day,status,totals,reopen_requested_at", "day": f"gte.{since}",
                                                   "order": "day.asc"}):
         last[dday["route_id"]] = dday
+        if unsent(date.fromisoformat(dday["day"]), dday["status"], now):
+            late[dday["route_id"]] = late.get(dday["route_id"], 0) + 1
         if dday["reopen_requested_at"]:
             requests[dday["route_id"]] = requests.get(dday["route_id"], 0) + 1
     out = []
@@ -441,7 +467,8 @@ def routes_overview(branch: str = "สระบุรี") -> list[dict]:
         d = drivers.get(r["id"])
         n = counts.get(r["id"], [0, 0])
         out.append({**r, "customers": n[0], "new_customers": n[1], "pin_set": bool(d and d["pin_hash"]),
-                    "driver_id": d["id"] if d else None, "last_day": last.get(r["id"]), "reopen_requests": requests.get(r["id"], 0)})
+                    "driver_id": d["id"] if d else None, "last_day": last.get(r["id"]), "reopen_requests": requests.get(r["id"], 0),
+                    "phones": phones.get(d["id"], []) if d else [], "unsent": late.get(r["id"], 0)})
     return sorted(out, key=lambda x: (len(x["truck_no"]), x["truck_no"]))
 
 
@@ -476,6 +503,9 @@ def route_days(route_id: int, days: int = 31) -> dict:
     rows = supabase.select_all("sale_days", {"select": "id,day,status,totals,updated_at,closed_at,checked_at,reopen_requested_at,reopen_log",
                                              "route_id": f"eq.{int(route_id)}",
                                              "day": f"gte.{since}", "order": "day.desc"})
+    now = datetime.now(BANGKOK)
+    for x in rows:
+        x["unsent"] = unsent(date.fromisoformat(x["day"]), x["status"], now)
     return {"days": rows}
 
 
@@ -491,6 +521,7 @@ def day_detail(day_id: int) -> dict:
         c = cust.get(str(ln["customer_id"])) or {}
         ln["name"], ln["seq"], ln["approved"] = c.get("name"), c.get("seq"), c.get("approved", True)
     lines.sort(key=lambda x: x["seq"] or 0)
+    d[0]["unsent"] = unsent(date.fromisoformat(d[0]["day"]), d[0]["status"], datetime.now(BANGKOK))
     return {"day": d[0], "lines": lines, "products": [{"key": k, "label": l} for k, l in PRODUCTS]}
 
 

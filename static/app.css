@@ -1769,3 +1769,7 @@ button.ss-day:hover { background: var(--surface-2); }
   align-items: baseline; font-variant-numeric: tabular-nums; }
 .ss-dlg-foot { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 @media (max-width: 640px) { .ss-line { grid-template-columns: 1fr auto; } }
+
+.badge.bad { background: var(--bad-soft, #fdecec); color: var(--bad, #b42318); border-color: transparent; }
+.ss-phones { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
+.ss-phone { color: var(--muted); }

@@ -2051,13 +2051,13 @@ def api_driver_names() -> dict:
 
 
 @app.post("/api/d/login")
-def api_driver_login(body: dict = Body(...)) -> dict:
+def api_driver_login(body: dict = Body(...), user_agent: str = Header(default="")) -> dict:
     from app import route_sales
     try:
         driver_id = int(body.get("driver_id"))
     except (TypeError, ValueError):
         raise HTTPException(422, "เลือกชื่อก่อน")
-    return {"token": _route_call(route_sales.login, driver_id, str(body.get("pin") or ""))}
+    return {"token": _route_call(route_sales.login, driver_id, str(body.get("pin") or ""), user_agent)}
 
 
 @app.get("/api/d/me")

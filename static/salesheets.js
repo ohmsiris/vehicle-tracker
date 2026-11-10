@@ -33,9 +33,11 @@ function renderSalesSheets() {
         el("b", { class: "ss-no", text: r.truck_no.replace("KK-", "แก่งคอย ") }),
         el("div", { class: "ss-who" }, el("strong", { text: r.driver_name || "—" }), el("span", { class: "muted small", text: ` · ${r.name} · ลูกค้า ${r.customers}` }),
           r.new_customers ? el("span", { class: "badge warn", text: `ลูกค้าใหม่รอตรวจ ${r.new_customers}` }) : null,
-          r.reopen_requests ? el("span", { class: "badge warn", text: `ขอแก้ใบขาย ${r.reopen_requests}` }) : null),
+          r.reopen_requests ? el("span", { class: "badge warn", text: `ขอแก้ใบขาย ${r.reopen_requests}` }) : null,
+          r.unsent ? el("span", { class: "badge bad", text: `ไม่ได้ส่งใบขาย ${r.unsent} วัน` }) : null),
         el("span", { class: `badge ${r.pin_set ? "ok" : ""}`, text: r.pin_set ? "ตั้งรหัสแล้ว" : "ยังไม่ได้ตั้งรหัส" }),
         last ? el("span", { class: "muted small", text: `ล่าสุด ${beDate(last.day)} · ฿${elN((last.totals || {}).amount || 0)}${flags ? ` · ⚠ ${flags}` : ""}` }) : null),
+      r.pin_set ? ssPhones(r) : null,
       el("div", { class: "ss-actions" },
         el("button", { class: "btn small primary", type: "button", text: r.pin_set ? "ตั้งรหัสใหม่" : "ตั้งรหัส", onclick: () => ssSetPin(r) }),
         r.pin_set ? el("button", { class: "btn small", type: "button", text: "ออกจากระบบทุกเครื่อง", onclick: () => ssSignOut(r) }) : null,
@@ -44,6 +46,23 @@ function renderSalesSheets() {
   });
   fill($("ssBody"), link, ...rows);
   if (ss_.open) ssLoadDays(ss_.open);
+}
+
+function ssAgo(iso) {
+  if (!iso) return "—";
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (min < 15) return "เพิ่งใช้";
+  if (min < 60) return `${min} นาทีก่อน`;
+  if (min < 24 * 60) return `${Math.round(min / 60)} ชม.ก่อน`;
+  return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short" });
+}
+
+function ssPhones(r) {
+  const ph = r.phones || [];
+  if (!ph.length) return el("p", { class: "ss-phones muted small", text: "ยังไม่มีโทรศัพท์เข้าระบบ" });
+  return el("div", { class: "ss-phones" },
+    el("span", { class: `small${ph.length > 1 ? " warn-text" : ""}`, text: `เข้าระบบอยู่ ${ph.length} เครื่อง` }),
+    ...ph.map((x) => el("span", { class: "ss-phone small", text: `${x.agent} · ใช้ล่าสุด ${ssAgo(x.last_seen)} · เข้าระบบ ${new Date(x.since).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}` })));
 }
 
 async function ssSetPin(r) {
@@ -70,7 +89,7 @@ async function ssLoadDays(routeId) {
     el("div", { class: "ss-day head muted small" }, ...["วันที่", "สถานะ", "ขาย", "เงินสด ต้องมี / นับได้", "ค้าง", "วางบิล", "กม.", "ที่ไม่ตรง"].map((t) => el("span", { text: t }))),
     ...d.days.map((x) => {
       const t = x.totals || {};
-      const st = ST[x.status] || [x.status, ""];
+      const st = x.unsent ? ["ไม่ได้ส่ง", "bad"] : ST[x.status] || [x.status, ""];
       return el("button", { class: "ss-day", type: "button", onclick: () => ssOpenDay(x.id) },
         el("span", { text: beDate(x.day) }), el("span", {}, el("span", { class: `badge ${st[1]}`, text: st[0] }),
           x.reopen_requested_at ? el("span", { class: "badge warn", text: "ขอแก้" }) : null),
@@ -113,10 +132,11 @@ async function ssOpenDay(dayId) {
     day.reopen_requested_at ? el("p", { class: "warn-text", text: `คนขับขอแก้ใบขายนี้ (${new Date(day.reopen_requested_at).toLocaleString("th-TH")})` }) : null,
     (day.reopen_log || []).length ? el("p", { class: "muted small", text: "ประวัติ: " + day.reopen_log.map((x) => `${x.what === "reopened" ? "ออฟฟิศเปิดให้แก้" : "คนขับขอแก้"} ${new Date(x.at).toLocaleString("th-TH")}`).join(" · ") }) : null,
     el("div", { class: "ss-dlg-foot" },
-      day.status !== "open" ? el("button", { class: "btn", type: "button", text: "เปิดให้คนขับแก้", onclick: () => ssReopen(dayId, dlg) }) : el("span", { class: "muted small", text: "คนขับยังไม่ได้ส่ง" }),
+      day.status !== "open" ? el("button", { class: "btn", type: "button", text: "เปิดให้คนขับแก้", onclick: () => ssReopen(dayId, dlg) })
+        : el("span", { class: day.unsent ? "warn-text small" : "muted small", text: day.unsent ? "คนขับไม่ได้กดส่ง — ตัวเลขตามที่โทรศัพท์บันทึกไว้ล่าสุด (ยังไม่ได้นับเงิน / ไมล์)" : "คนขับยังไม่ได้ส่ง" }),
       day.status === "checked"
         ? el("button", { class: "btn", type: "button", text: "ยกเลิกการตรวจ", onclick: () => ssCheck(dayId, false, dlg) })
-        : day.status === "closed" ? el("button", { class: "btn primary", type: "button", text: "ตรวจแล้ว ✓", onclick: () => ssCheck(dayId, true, dlg) }) : null));
+        : day.status === "closed" || day.unsent ? el("button", { class: "btn primary", type: "button", text: "ตรวจแล้ว ✓", onclick: () => ssCheck(dayId, true, dlg) }) : null));
   document.body.append(dlg);
   dlg.showModal();
 }
