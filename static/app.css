@@ -1773,3 +1773,15 @@ button.ss-day:hover { background: var(--surface-2); }
 .badge.bad { background: var(--bad-soft, #fdecec); color: var(--bad, #b42318); border-color: transparent; }
 .ss-phones { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
 .ss-phone { color: var(--muted); }
+
+/* DD/MM/YYYY date boxes (datefield.js): a text box in front of the browser's date input, which stays as the value holder */
+.dtf { position: relative; display: flex; align-items: center; width: 100%; min-width: 10.5em; }
+.adddate .dtf { width: auto; display: inline-flex; }
+.dtf > .dtf-text { width: 100%; min-height: 40px; padding-right: 40px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.dtf.bad > .dtf-text { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+.dtf > .dtf-cal { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer; }
+.dtf > .dtf-cal:hover { background: var(--surface-2); color: var(--text); }
+.dtf > .dtf-cal:disabled { opacity: .4; cursor: default; }
+.dtf > input.dtf-real { position: absolute; right: 0; bottom: 0; width: 1px !important; height: 1px !important; min-height: 0 !important; padding: 0 !important;
+  border: 0 !important; opacity: 0; pointer-events: none; }
