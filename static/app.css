@@ -1678,7 +1678,7 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .hrs-kind.hrs-warning { background: var(--warn-soft); color: var(--warn); }
 @media (max-width: 640px) { .hrs-row { flex-direction: column; } .hrs-actions { justify-content: flex-start; } }
 
-/* ---- สายรถ กำไรต่อคัน (routes.js) ---- */
+/* ---- รถสาย กำไรต่อคัน (routes.js) ---- */
 .rt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .rt-bar select { width: auto; min-width: 110px; }
 .rt-status { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
@@ -1742,7 +1742,7 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .uc-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 .uc-assume { margin: 6px 0 0; padding-left: 1.2em; display: grid; gap: 4px; }
 
-/* สายรถ · ใบขาย, office side (salesheets.js) */
+/* รถสาย · ใบขาย, office side (salesheets.js) */
 .ss-link { display: grid; gap: 6px; margin-bottom: 12px; }
 .ss-linkrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .ss-linkrow code { background: var(--surface-2); padding: 6px 10px; border-radius: 8px; font-size: 14px; word-break: break-all; }

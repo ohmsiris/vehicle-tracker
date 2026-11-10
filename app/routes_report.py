@@ -1,5 +1,5 @@
 """
-สายรถ (#routes): Saraburi's delivery routes, one truck per row, month by month.
+รถสาย (#routes): Saraburi's delivery routes, one truck per row, month by month.
 
 Per truck per company month:
   sales    gross route sales (driver_sales_monthly.gross_sales: written sales + bags + the fuel the big trucks' sales were net of)

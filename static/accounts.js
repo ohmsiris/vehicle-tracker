@@ -130,7 +130,7 @@ function renderAccounts() {
     ` (${d.feeds.filter((f) => f.state === "missing" || f.state === "received").length} รายการยังไม่ครบ)`);
   const toOut = el("p", { class: "muted small" }, "ดูผลที่ ", el("a", { href: "#accounts", text: "งบกำไรขาดทุน" }));
   const toElec = (d.electricity || []).length ? el("p", { class: "muted small" }, "ค่าไฟแยกมิเตอร์ กราฟ demand / Peak / power factor: ", el("a", { href: "#electricity", text: "หน้าค่าไฟฟ้า" })) : null;
-  const toRoutes = el("p", { class: "muted small" }, "กำไรต่อคัน / น้ำมันต่อคัน: ", el("a", { href: "#routes", text: "หน้าสายรถ" }), " · ภาพรวมทั้งปี: เลือก \"ทั้งปี\" ที่ช่องเดือน");
+  const toRoutes = el("p", { class: "muted small" }, "กำไรต่อคัน / น้ำมันต่อคัน: ", el("a", { href: "#routes", text: "หน้ารถสาย" }), " · ภาพรวมทั้งปี: เลือก \"ทั้งปี\" ที่ช่องเดือน");
   acx.rev = p.revenue;
   if (acx.mode === "in") fill($("acxBody"), toOut, feeds, acxDocs(d.docs || []), acxFuel(d.fuel));
   else fill($("acxBody"), summary, toIn, toElec, toRoutes, tree);

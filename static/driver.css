@@ -1,4 +1,4 @@
-/* สายรถ · ใบขาย (driver.js) -- design A (owner, 10 Nov 2026): white, clean cards, blue as the app's colour. One hand, outdoors, a
+/* รถสาย · ใบขาย (driver.js) -- design A (owner, 10 Nov 2026): white, clean cards, blue as the app's colour. One hand, outdoors, a
    moving truck: touch targets 48px+, high contrast, system fonts only, line icons drawn inline (no icon download).
    Colour jobs: blue = the app / actions / "next shop", green = done / cash in, amber = credit / waiting, red = short / locked-out. */
 :root {

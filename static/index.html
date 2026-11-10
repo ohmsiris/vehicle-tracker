@@ -53,8 +53,8 @@
       <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h8.5a3.5 3.5 0 0 0 0-7h-9a3.5 3.5 0 0 1 0-7H16"/></svg><span>รถสาย</span>
     </button>
     <nav class="side-items" id="sideRoutes">
-      <button id="navRoutes" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></svg><span>สายรถ · กำไรต่อคัน</span></button>
-      <button id="navSalesSheets" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg><span>ใบขายสายรถ (มือถือ)</span></button>
+      <button id="navRoutes" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></svg><span>รถสาย · กำไรต่อคัน</span></button>
+      <button id="navSalesSheets" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg><span>ใบขายรถสาย (มือถือ)</span></button>
     </nav>
   </div>
 
@@ -959,10 +959,10 @@
     <div id="elAmr"></div>
   </section>
 
-  <!-- ============ สายรถ · ใบขาย: the drivers' phone sheet, office side (salesheets.js) ============ -->
+  <!-- ============ รถสาย · ใบขาย: the drivers' phone sheet, office side (salesheets.js) ============ -->
   <section id="salesSheetsView" hidden>
     <div class="page-head">
-      <h2 class="page-title">Driver sales sheets · ใบขายสายรถ</h2>
+      <h2 class="page-title">Driver sales sheets · ใบขายรถสาย</h2>
       <p class="muted small">คนขับบันทึกการขายในมือถือแทนกระดาษ · ตั้งรหัสให้คนขับ · ดูและตรวจใบขายรายวัน</p>
     </div>
     <p class="error" id="ssError" hidden></p>
@@ -972,8 +972,8 @@
   <!-- ============ Routes: profit per delivery truck (routes.js) ============ -->
   <section id="routesView" hidden>
     <div class="page-head">
-      <h2 class="page-title">Routes · สายรถ กำไรต่อคัน</h2>
-      <p class="muted small">ยอดขายสายรถ (ยอดเต็ม) − น้ำมัน − ค่าแรงคนขับ − ค่าซ่อม ต่อคันต่อเดือน · ยังไม่หักค่าน้ำแข็ง · คนขับปัจจุบันจาก IceBox · ชี้ที่กราฟเพื่อดูตัวเลข</p>
+      <h2 class="page-title">Routes · รถสาย กำไรต่อคัน</h2>
+      <p class="muted small">ยอดขายรถสาย (ยอดเต็ม) − น้ำมัน − ค่าแรงคนขับ − ค่าซ่อม ต่อคันต่อเดือน · ยังไม่หักค่าน้ำแข็ง · คนขับปัจจุบันจาก IceBox · ชี้ที่กราฟเพื่อดูตัวเลข</p>
     </div>
     <div class="card acx-bar rt-bar">
       <label class="small muted" for="rtFrom">ตั้งแต่</label><select id="rtFrom"></select>

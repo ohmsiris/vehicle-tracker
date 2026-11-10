@@ -1,5 +1,5 @@
 """
-สายรถ · ใบขาย: the route trucks' daily sales sheet, kept by the driver on their phone (static/driver.*, served at /d/) -- owner, 10 Nov 2026.
+รถสาย · ใบขาย: the route trucks' daily sales sheet, kept by the driver on their phone (static/driver.*, served at /d/) -- owner, 10 Nov 2026.
 
 It replaces the paper sheet one route at a time (route 35 first). The paper's layout stays: customers in route order with their bins
 and price, products ซอง กั๊ก หลอด เล็ก แพ็ค โม่, loads (รับ) by trip, returns (คืน), what was sold, cash counted by note, mileage.

@@ -1000,7 +1000,7 @@ def api_accounts_year(branch: str = "", x_app_token: str = Header(default=""), t
 
 @app.get("/api/routes")
 def api_routes(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
-    """สายรถ page: each Saraburi route truck month by month -- sales, fuel, driver pay, repairs, profit (app/routes_report.py)."""
+    """รถสาย page: each Saraburi route truck month by month -- sales, fuel, driver pay, repairs, profit (app/routes_report.py)."""
     from app import routes_report
     _check_token(x_app_token, token)
     return _acc_call(routes_report.report)
@@ -2011,7 +2011,7 @@ def api_log_csv(
 
 
 
-# ------------------------------------------------------------------ สายรถ · ใบขาย: the driver's phone page (/d/) and the office side
+# ------------------------------------------------------------------ รถสาย · ใบขาย: the driver's phone page (/d/) and the office side
 # The driver's page has its own sign-in (name + 4-digit PIN once per phone, then a long token in X-Driver-Token); it never sees the
 # office token. app/route_sales.py holds the rules.
 def _route_call(fn, *args, **kwargs):

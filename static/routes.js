@@ -1,6 +1,6 @@
 "use strict";
 
-// บัญชี › สายรถ กำไรต่อคัน (#routes): Saraburi's delivery trucks, month by month (app/routes_report.py).
+// บัญชี › รถสาย กำไรต่อคัน (#routes): Saraburi's delivery trucks, month by month (app/routes_report.py).
 //   * a month range (default: the months whose fuel is known truck by truck), the months' data status as chips
 //   * headline tiles for the range
 //   * where each truck's sales go: one horizontal bar per truck -- profit / fuel / driver pay / repairs -- sorted by profit
@@ -11,7 +11,7 @@
 // the four groups reuse the same four hues, always with their name beside them. Plain SVG, hover tooltip (elec.js's elTip).
 
 const rt_ = { data: null, wired: false, sort: "profit", desc: true, open: null };
-const RT_PARTS = [["profit", "กำไรสายรถ", "var(--el-hol)"], ["fuel", "น้ำมัน", "var(--el-peak)"], ["pay", "ค่าแรงคนขับ", "var(--el-off)"], ["repairs", "ซ่อม / ยาง / อะไหล่", "var(--el-dem)"]];
+const RT_PARTS = [["profit", "กำไรรถสาย", "var(--el-hol)"], ["fuel", "น้ำมัน", "var(--el-peak)"], ["pay", "ค่าแรงคนขับ", "var(--el-off)"], ["repairs", "ซ่อม / ยาง / อะไหล่", "var(--el-dem)"]];
 const RT_GROUPS = {
   star: ["ดาวเด่น", "ขายมาก + คุ้มน้ำมัน", "var(--el-hol)"],
   leak: ["ขายมากแต่กินน้ำมัน", "ยอดสูง แต่น้ำมันกินกำไร", "var(--el-peak)"],
@@ -33,7 +33,7 @@ async function openRoutes() {
   try { rt_.data = await api("/api/routes"); }
   catch (err) { fill($("rtBody"), null); showErr("rtError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
   const ms = rt_.data.months;
-  if (!ms.length) { fill($("rtBody"), el("div", { class: "card" }, el("p", { class: "muted", text: "ยังไม่มีข้อมูลยอดขายสายรถ" }))); return; }
+  if (!ms.length) { fill($("rtBody"), el("div", { class: "card" }, el("p", { class: "muted", text: "ยังไม่มีข้อมูลยอดขายรถสาย" }))); return; }
   for (const id of ["rtFrom", "rtTo"]) fill($(id), ...ms.map((m) => el("option", { value: m.month, text: elMon(m.month) })));
   rtBestRange();
   renderRoutes();
@@ -88,13 +88,20 @@ function renderRoutes() {
     el("div", { class: "card el-panel" }, el("div", { class: "el-panel-head" }, el("h3", { text: "ยอดขายแต่ละคันไปไหน" }),
       el("span", { class: "muted small", text: `${elMon(from)}–${elMon(to)} · เรียงตามกำไร · ความยาวแท่ง = ยอดขาย` })),
       elLegend(RT_PARTS.map(([, t, c]) => [t, c])), rtSplit(rows)),
-    el("div", { class: "el-grid" },
-      el("div", { class: "card el-panel" }, elChart("ยอดขาย เทียบ ยอดขายต่อน้ำมัน 1 บาท", `เส้นประ = ค่ากลาง (ยอด ${elShort(medS || 0)} · ${elN(medR, 1)} บาท/บาท) แบ่ง 4 กลุ่ม`,
-        rtScatter(ranked, medS, medR), elLegend(Object.values(RT_GROUPS).map(([t, , c]) => [t, c])))),
-      el("div", { class: "card el-panel" }, elChart("กำไรสายรถรวมทุกคัน รายเดือน", "ยอดขายรวมแยกส่วน · เดือนที่ขีดลาย = น้ำมันไม่ครบ",
-        rtMonthly(), elLegend(RT_PARTS.map(([, t, c]) => [t, c]))))),
+    el("div", { class: "card el-panel" }, elChart("ยอดขาย เทียบ ยอดขายต่อน้ำมัน 1 บาท", `เส้นประ = ค่ากลาง (ยอด ${elShort(medS || 0)} · ${elN(medR, 1)} บาท/บาท) แบ่ง 4 กลุ่ม`,
+        rtWide(() => rtScatter(ranked, medS, medR)), elLegend(Object.values(RT_GROUPS).map(([t, , c]) => [t, c])))),
+    el("div", { class: "card el-panel" }, elChart("กำไรรถสายรวมทุกคัน รายเดือน", "ยอดขายรวมแยกส่วน · เดือนที่ขีดลาย = น้ำมันไม่ครบ",
+        rtWide(rtMonthly), elLegend(RT_PARTS.map(([, t, c]) => [t, c])))),
     rtGroupsCard(rows),
     rtTable(rows));
+}
+
+// the scatter and the monthly chart run the full page width (owner: as big as the bars above), drawn at that width so text stays its size
+function rtWide(draw) {
+  const keep = [EL_W, EL_H];
+  EL_W = Math.min(980, Math.max(340, window.innerWidth - 80));
+  EL_H = EL_W < 600 ? 220 : 320;
+  try { return draw(); } finally { [EL_W, EL_H] = keep; }
 }
 
 function rtKpis(rows, ranked, medR, n) {
@@ -104,10 +111,10 @@ function rtKpis(rows, ranked, medR, n) {
     sub ? el("div", { class: "el-delta", text: sub }) : null);
   const watch = rows.filter((r) => r.group === "watch").length;
   return el("div", { class: "acx-kpis" },
-    tile("ยอดขายสายรถ", `${elShort(sales)} ฿`, `${n} เดือน · ${rows.length} คัน · เฉลี่ย ${elShort(sales / n)}/เดือน`),
+    tile("ยอดขายรถสาย", `${elShort(sales)} ฿`, `${n} เดือน · ${rows.length} คัน · เฉลี่ย ${elShort(sales / n)}/เดือน`),
     tile("น้ำมัน", `${elShort(sum("fuel"))} ฿`, sales ? `${elN((sum("fuel") / sales) * 100, 1)}% ของยอดขาย` : null),
     tile("ค่าแรงคนขับ", `${elShort(sum("pay"))} ฿`, sales ? `${elN((sum("pay") / sales) * 100, 1)}% ของยอดขาย` : null),
-    tile("กำไรสายรถ (ก่อนค่าน้ำแข็ง)", `${elShort(profit)} ฿`, sales ? `${elN((profit / sales) * 100, 1)}% ของยอดขาย` : null),
+    tile("กำไรรถสาย (ก่อนค่าน้ำแข็ง)", `${elShort(profit)} ฿`, sales ? `${elN((profit / sales) * 100, 1)}% ของยอดขาย` : null),
     tile("ยอดขายต่อน้ำมัน 1 บาท", `${elN(medR, 1)} ฿`, "ค่ากลางของทุกคัน"),
     tile("คันที่ต้องดู", `${watch} คัน`, "ยอดต่ำกว่ากลาง + น้ำมันสูงกว่ากลาง"));
 }
@@ -144,7 +151,7 @@ function rtSplit(rows) {
 
 // ---- scatter: x = sales, y = sales per baht of fuel; dashed medians; dot color = group (named in the legend and the tooltip)
 function rtScatter(rows, medS, medR) {
-  const W = EL_W, H = 260, P = { l: 46, r: 14, t: 12, b: 28 };
+  const W = EL_W, H = EL_W < 600 ? 280 : 420, P = { l: 46, r: 14, t: 12, b: 28 };
   const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: "el-svg", role: "img" });
   const mx = elNiceStep(Math.max(...rows.map((r) => r.sales), 1) / 4) * 4, my = Math.ceil(Math.max(...rows.map((r) => r.perFuel || 0), 1) / 5) * 5;
   const x = (v) => P.l + (W - P.l - P.r) * (v / mx), y = (v) => P.t + (H - P.t - P.b) * (1 - v / my);
@@ -163,7 +170,7 @@ function rtScatter(rows, medS, medR) {
     g.append(sv("circle", { cx, cy, r: 6, fill: RT_GROUPS[r.group][2], class: "rt-dot" }), sv("circle", { cx, cy, r: 14, fill: "transparent" }));
     if (notable.has(r)) g.append(sv("text", { x: cx + 9, y: cy + 4, class: "el-tick" }, document.createTextNode(rtName(r))));
     elTip(g, () => [`${rtName(r)} · ${rtDriver(r)}`, [RT_GROUPS[r.group][0], "", RT_GROUPS[r.group][2]], ["ยอดขาย", `${elN(r.sales)} ฿`],
-      ["น้ำมัน", `${elN(r.fuel)} ฿`], ["ยอดขายต่อน้ำมัน 1 บาท", elN(r.perFuel, 1)], ["กำไรสายรถ", `${elN(r.profit)} ฿`]]);
+      ["น้ำมัน", `${elN(r.fuel)} ฿`], ["ยอดขายต่อน้ำมัน 1 บาท", elN(r.perFuel, 1)], ["กำไรรถสาย", `${elN(r.profit)} ฿`]]);
     svg.append(g);
   });
   return svg;

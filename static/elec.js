@@ -138,7 +138,7 @@ function elLegend(items) {
 }
 
 // geometry shared by the small charts
-let EL_W = 520; const EL_H = 170, EL_P = { l: 58, r: 10, t: 10, b: 24 };
+let EL_W = 520; let EL_H = 170; const EL_P = { l: 58, r: 10, t: 10, b: 24 };
 function elFrame(max, fmtTick) {
   const svg = sv("svg", { viewBox: `0 0 ${EL_W} ${EL_H}`, class: "el-svg", role: "img" });
   const step = elNiceStep((max || 1) / 4);                         // round steps (1 / 2 / 5 × 10ⁿ), so ticks read 50k, 100k ...

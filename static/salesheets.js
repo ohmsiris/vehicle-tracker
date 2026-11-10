@@ -1,6 +1,6 @@
 "use strict";
 
-// สายรถ · ใบขาย (#sales-sheets) -- the office side of the drivers' phone sheet (app/route_sales.py; the drivers use /d/).
+// รถสาย · ใบขาย (#sales-sheets) -- the office side of the drivers' phone sheet (app/route_sales.py; the drivers use /d/).
 //   * every route: driver, customers, whether a PIN is set, the last day sent; set / reset the PIN, sign the phones out
 //   * one route's days: what was sold, cash expected vs counted, km, what does not add up; open a day, mark it checked
 

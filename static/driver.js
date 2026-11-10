@@ -1,5 +1,5 @@
 "use strict";
-/* สายรถ · ใบขาย -- the driver's phone (app/route_sales.py). Plain JS for old phones (no ?. or ??), no libraries.
+/* รถสาย · ใบขาย -- the driver's phone (app/route_sales.py). Plain JS for old phones (no ?. or ??), no libraries.
 
    The day lives on the phone first: every tap saves to localStorage at once and the whole day is sent to the server shortly after
    (and again when the signal comes back). `rev` counts the phone's saves; the server ignores a save older than what it has.
@@ -191,7 +191,7 @@
   function signedOut() { S.token = null; store(TOKEN_KEY, null); showSignIn(); }
   function showSignIn() {
     closeSheet();
-    $("app").innerHTML = '<div class="signin"><h1>ใบขายสายรถ</h1><p>เลือกชื่อของคุณ</p><div class="names" id="names"><div class="empty">กำลังโหลด…</div></div></div>';
+    $("app").innerHTML = '<div class="signin"><h1>ใบขายรถสาย</h1><p>เลือกชื่อของคุณ</p><div class="names" id="names"><div class="empty">กำลังโหลด…</div></div></div>';
     api("GET", "/api/d/drivers").then(function (r) {
       var list = r.drivers || [];
       $("names").innerHTML = list.length ? list.map(function (d) {
