@@ -46,17 +46,25 @@ function renderUnitCost() {
 function ucMonth(m) {
   const card = (key) => {
     const x = m[key], p = UC_PRODUCT[key];
-    const margin = x.price != null ? x.price - x.delivered : null;
     return el("div", { class: "card uc-card" },
       el("div", { class: "uc-card-head" }, el("strong", { text: p.name }), el("span", { class: "muted small", text: ` · ${p.size}` })),
       el("div", { class: "uc-big" }, el("span", { text: `${elN(x.plant, 2)} ฿` }), el("small", { class: "muted", text: ` ต่อ${p.unit} หน้าโรง` })),
       el("div", { class: "uc-rows" },
-        el("div", {}, el("span", { class: "muted", text: "+ ค่าส่งเฉลี่ย" }), el("b", { text: `${elN(x.per_unit.delivery, 2)} ฿` })),
-        el("div", {}, el("span", { class: "muted", text: "= ส่งถึงลูกค้า" }), el("b", { text: `${elN(x.delivered, 2)} ฿` })),
-        el("div", {}, el("span", { class: "muted", text: `ราคาขายเฉลี่ย (ใบขายในโปรแกรม ${elN(x.price_qty)} ${p.unit})` }), el("b", { text: x.price != null ? `${elN(x.price, 2)} ฿` : "–" })),
-        margin != null ? el("div", { class: margin < 0 ? "uc-bad" : "uc-good" }, el("span", { text: "เหลือต่อหน่วย หลังค่าส่ง" }), el("b", { text: `${margin < 0 ? "−" : ""}${elN(Math.abs(margin), 2)} ฿` })) : null),
+        el("div", {}, el("span", { class: "muted", text: "+ ค่าส่งเฉลี่ย (ตามน้ำหนัก)" }), el("b", { text: `${elN(x.per_unit.delivery, 2)} ฿` })),
+        el("div", { class: "uc-be" }, el("span", { text: "ราคาต่ำสุดที่ไม่ขาดทุน (ส่งถึงลูกค้า)" }), el("b", { text: `${elN(x.delivered, 2)} ฿` }))),
       el("p", { class: "muted small", text: `ผลิตประมาณ ${elN(x.units)} ${p.unit} (${elN(x.kg / 1000)} ตัน)` }));
   };
+  const c = m.company;
+  const left = c.left_per_kg;
+  const whole = el("div", { class: "card uc-company" },
+    el("div", { class: "uc-card-head" }, el("strong", { text: "ทั้งสาขา ต่อ กก." }),
+      el("span", { class: "muted small", text: ` · รายได้ทั้งหมดในบัญชี (รวมรถสาย) ÷ น้ำหนักที่ผลิต ${elN(c.kg / 1000)} ตัน` })),
+    el("div", { class: "uc-kg" },
+      el("div", {}, el("span", { class: "muted small", text: "รายได้" }), el("b", { text: `${elN(c.revenue_per_kg, 2)} ฿` })),
+      el("div", {}, el("span", { class: "muted small", text: "ต้นทุนหน้าโรง" }), el("b", { text: `${elN(c.plant_per_kg, 2)} ฿` })),
+      el("div", {}, el("span", { class: "muted small", text: "ส่งถึงลูกค้า" }), el("b", { text: `${elN(c.delivered_per_kg, 2)} ฿` })),
+      el("div", { class: left < 0 ? "uc-bad" : "uc-good" }, el("span", { class: "small", text: "เหลือ" }), el("b", { text: `${left < 0 ? "−" : ""}${elN(Math.abs(left), 2)} ฿` }))),
+    c.bought_ice ? el("p", { class: "muted small", text: `รายได้หักน้ำแข็งที่ซื้อจากสาขาอื่นมาขายต่อ ${elN(c.bought_ice)} ฿ ออกแล้ว` }) : null);
   const cats = uc_.data.categories;
   const table = el("div", { class: "card acx-feeds" }, el("h3", { text: "แยกตามประเภทต้นทุน" }),
     el("div", { class: "uc-table" },
@@ -69,7 +77,7 @@ function ucMonth(m) {
   return el("div", {},
     el("p", { class: "uc-head" }, el("strong", { text: `ต้นทุนต่อหน่วย · ${elMon(m.month)}` }), el("span", { class: "muted small", text: ` (${beDate(m.start)} – ${beDate(m.end)}) · ${uc_.data.branch}` })),
     m.incomplete ? el("p", { class: "badge warn uc-warn", text: "⚠ เดือนนี้ยังไม่ครบ: ถุง เกลือ เคมี ที่จ่ายด้วยเช็คยังไม่เข้า (มากับเช็คเดือนถัดไป) — ต้นทุนจริงสูงกว่านี้" }) : null,
-    el("div", { class: "uc-grid" }, card("tube"), card("block")), table);
+    el("div", { class: "uc-grid" }, card("tube"), card("block")), whole, table);
 }
 
 // ---- month by month: cost per bag and per block, stacked by cost type (two charts: different units, never one axis)

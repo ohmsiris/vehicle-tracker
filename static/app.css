@@ -1731,7 +1731,10 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .uc-rows > div { display: flex; justify-content: space-between; gap: 10px; }
 .uc-rows b { font-variant-numeric: tabular-nums; }
 .uc-good b { color: var(--ok); } .uc-bad b { color: var(--bad); }
-.uc-good, .uc-bad { border-top: 1px solid var(--line); padding-top: 4px; font-weight: 600; }
+.uc-be { border-top: 1px solid var(--line); padding-top: 4px; font-weight: 600; }
+.uc-company { margin: 0 0 14px; display: grid; gap: 6px; }
+.uc-kg { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.uc-kg > div { display: grid; gap: 2px; } .uc-kg b { font-size: 20px; font-variant-numeric: tabular-nums; }
 .uc-table { display: grid; font-size: 14px; }
 .uc-tr { display: grid; grid-template-columns: minmax(0, 2.4fr) 1fr 1fr 1.2fr; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); }
 .uc-tr > span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }

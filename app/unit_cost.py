@@ -81,7 +81,7 @@ def production(days: list[dict], month: str, p: dict) -> dict:
     return {k: round(v, 3 if k == "coverage" else 1) for k, v in out.items()}
 
 
-def compute(month: str, prod: dict, costs: dict, tagged: dict, sales: dict, p: dict) -> dict:
+def compute(month: str, prod: dict, costs: dict, tagged: dict, sales: dict, p: dict, revenue: float = 0.0) -> dict:
     """One company month. costs = {account: baht}, tagged = {account: {"block"|"tube": baht}} (part of costs booked against a machine),
     sales = {"tube": (qty, baht), "block": (qty, baht)} from the sales program."""
     tube_kg, block_kg = prod["bags"] * p["bag_kg"], prod["blocks"] * p["block_kg"]
@@ -123,8 +123,21 @@ def compute(month: str, prod: dict, costs: dict, tagged: dict, sales: dict, p: d
                          "plant": round(plant, 2), "delivered": round(plant + (rows["delivery"] or 0), 2),
                          "price": round(price, 2) if price else None, "price_qty": round(qty),
                          "total": {k: round(split[k][prod_key]) for k, _ in CATEGORIES}}
+    # the whole branch per kg: ALL revenue in the books (route trucks included) against everything made. Ice bought from another
+    # plant and resold is taken out at its cost (it earns its price back, roughly) so it does not flatter the plant.
+    bought = sum(costs.get(a, 0.0) for a in SKIP)
+    kg = tube_kg + block_kg
+    plant_total = sum(split[k][x] for k, _ in CATEGORIES if k != "delivery" for x in ("tube", "block"))
+    deliv_total = sum(split["delivery"].values())
+    own_revenue = revenue - bought
+    company = {"revenue": round(revenue), "bought_ice": round(bought), "own_revenue": round(own_revenue), "kg": round(kg),
+               "revenue_per_kg": round(own_revenue / kg, 3) if kg else None,
+               "plant_per_kg": round(plant_total / kg, 3) if kg else None,
+               "delivered_per_kg": round((plant_total + deliv_total) / kg, 3) if kg else None,
+               "delivery_total": round(deliv_total)}
+    company["left_per_kg"] = round(company["revenue_per_kg"] - company["delivered_per_kg"], 3) if kg else None
     return {"month": month, "start": month_bounds(month)[0].isoformat(), "end": month_bounds(month)[1].isoformat(),
-            "production": prod, "block_share_kg": round(w_block, 3), **per}
+            "production": prod, "block_share_kg": round(w_block, 3), "company": company, **per}
 
 
 _CACHE: dict = {}
@@ -179,7 +192,7 @@ def summary(branch: str = "สระบุรี") -> dict:
         if not prod or revenue.get(m, 0) <= 0:
             continue
         out.append(compute(m, prod, dict(costs[m]), {a: dict(v) for a, v in tagged[m].items()},
-                           {k: tuple(v) for k, v in sales[m].items()}, p))
+                           {k: tuple(v) for k, v in sales[m].items()}, p, revenue.get(m, 0.0)))
     # a month whose cheque-paid supplies (bags, salt, chemicals) are not booked yet reads too cheap: say so
     def cheque_items(x):
         return sum(x[k]["total"]["pack"] + x[k]["total"]["supply"] for k in ("tube", "block"))
@@ -193,7 +206,11 @@ def summary(branch: str = "สระบุรี") -> dict:
                "น้ำแข็งหลอด: ถุงละ 25 กก. · จำนวนถุงคิดจากหน่วยไฟของมิเตอร์ ÷ ไฟต่อถุงของเครื่องที่อยู่บนมิเตอร์นั้น (615: 1.72, 916: 1.82 kWh/ถุง) "
                "หักไฟพื้นฐาน (615 ~70 kW, 916 ~38 kW) และบ่อซองออกก่อน · เทียบกับใบบันทึกเปิด-ปิดเครื่องคลาด ~8%",
                "ค่าไฟแบ่งตามหน่วยไฟ · เกลือ → ซอง · ถุง → หลอด · ซ่อมที่ผูกกับเครื่อง → ตามเครื่อง · ค่าแรง น้ำ เคมี อะไหล่ บริหาร ค่าส่ง → ตามน้ำหนักที่ผลิต",
-               "ไม่รวม: น้ำแข็งที่ซื้อจากสาขาอื่น (ซื้อมาขายต่อ) และดอกเบี้ยเงินกู้ · ราคาขายเฉลี่ยจากใบขายในโปรแกรม (หลอดใหญ่ / ซอง) ไม่รวมยอดสายรถ",
+               "ค่าส่ง = น้ำมันทั้งหมดของเดือน (บัตร + เงินสด) + ค่าแรงคนขับ + ซ่อมรถ + ยาง + ภาษีรถ ÷ น้ำหนักที่ผลิตทั้งหมด → คิดต่อถุง / ต่อก้อนตามน้ำหนัก "
+               "(ถ้าซองส่วนใหญ่ลูกค้ามารับเอง หรือไปกับรถคันใหญ่เป็นเที่ยวๆ ค่าส่งจริงของซองจะต่ำกว่านี้)",
+               "รายได้ต่อ กก. = รายได้ทั้งหมดในบัญชี (รวมรถสาย) ÷ น้ำหนักที่ผลิต · น้ำแข็งที่ซื้อจากสาขาอื่นหักออกที่ราคาทุน · "
+               "ยอดสายรถไม่มีจำนวนถุง/ก้อน จึงยังแยกราคาขายต่อถุง/ต่อก้อนไม่ได้ — ใช้ราคาต่ำสุดที่ไม่ขาดทุนแทน",
+               "ไม่รวม: ดอกเบี้ยเงินกู้ · ผลิตได้ ≠ ขายได้ (น้ำแข็งละลาย / ค้างสต๊อก) ส่วนนี้อยู่ในรายได้ต่อ กก. แล้ว",
            ]}
     _CACHE[branch] = (time.time(), res)
     return res
