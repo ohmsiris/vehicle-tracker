@@ -1,7 +1,7 @@
 /* สายรถ · ใบขาย -- keeps the driver's page opening without signal. The page and its two files are served from the phone and refreshed
    in the background (a new version shows on the next open); the API always goes to the network (the page keeps its own copy of the
    day and sends it when the signal is back). Bump VERSION when driver.js / driver.css change shape. */
-const VERSION = "icebox-d-v3";
+const VERSION = "icebox-d-v4";
 const SHELL = ["/d/", "/static/driver.css", "/static/driver.js", "/static/driver.webmanifest", "/static/icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {

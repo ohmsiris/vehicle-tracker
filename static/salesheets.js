@@ -105,8 +105,10 @@ async function ssOpenDay(dayId) {
         el("span", { class: "muted small", text: P.filter((p) => ln.qty[p.key]).map((p) => `${p.label} ${elN(ln.qty[p.key])}`).join(" · ") }),
         el("b", { text: `฿${elN(ln.amount)}` }),
         el("span", { class: "small " + (ln.free ? "muted" : ln.billing === "invoice" ? "muted" : ln.paid < ln.amount ? "warn-text" : ""),
-          text: (ln.free ? "ฟรี" : ln.billing === "invoice" ? "วางบิล" : ln.paid < ln.amount ? `ค้าง ฿${elN(ln.amount - ln.paid)}` : "สด") + (Number(ln.discount) ? ` · ลด ฿${elN(ln.discount)}` : "") }),
+          text: (ln.free ? "ฟรี" : ln.billing === "invoice" ? "วางบิล" : ln.paid < ln.amount ? `ค้าง ฿${elN(ln.amount - ln.paid)}` : "สด") + (Number(ln.discount) ? ` · ลด ฿${elN(ln.discount)}` : "") +
+            (Number(ln.waived) ? (ln.waived_reason === "factory" ? ` · โรงงาน ฿${elN(ln.waived)}` : ` · อื่นๆ ฿${elN(ln.waived)}`) : "") }),
         el("span", { class: "small muted", text: ln.old_paid ? `+หนี้เก่า ฿${elN(ln.old_paid)}` : "" })))),
+    t.commission_sales != null ? el("p", { class: "small", text: `ยอดคิดค่าคอมคนขับ ฿${elN(t.commission_sales)}${t.factory_waived ? ` (รวมที่ลด / แจกเพราะน้ำแข็งเสีย ฿${elN(t.factory_waived)} — โรงงานรับ ไม่หักคนขับ)` : ""}` }) : null,
     el("p", { class: "muted small", text: `${t.discount ? `ส่วนลด ฿${elN(t.discount)} · ` : ""}ขาย ฿${elN(t.amount)} · เงินสด ฿${elN(t.cash_sales)} + หนี้เก่า ฿${elN(t.old_paid)} = ต้องมี ฿${elN(t.expected_cash)} · นับได้ ${t.counted != null ? "฿" + elN(t.counted) : "—"} · ค้าง ฿${elN(t.credit)} · วางบิล ฿${elN(t.invoiced)}${t.km != null ? ` · วิ่ง ${elN(t.km)} กม.` : ""}` }),
     day.reopen_requested_at ? el("p", { class: "warn-text", text: `คนขับขอแก้ใบขายนี้ (${new Date(day.reopen_requested_at).toLocaleString("th-TH")})` }) : null,
     (day.reopen_log || []).length ? el("p", { class: "muted small", text: "ประวัติ: " + day.reopen_log.map((x) => `${x.what === "reopened" ? "ออฟฟิศเปิดให้แก้" : "คนขับขอแก้"} ${new Date(x.at).toLocaleString("th-TH")}`).join(" · ") }) : null,

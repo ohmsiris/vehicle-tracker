@@ -73,9 +73,23 @@ def test_free_customers_discounts_returns_from_the_plant_and_km_from_the_last_re
     assert t["sold"]["lod"] == 7 and t["free"]["lod"] == 2 and t["left"]["lod"] == 13
     assert t["amount"] == 180 and t["cash_sales"] == 180 and t["discount"] == 20 and t["credit"] == 0
     assert t["returned"]["lod"] == 12 and t["diff"]["lod"] == -1 and t["km"] == 140
-    assert "หลอด ขาด 1" in t["flags"] and any("ส่วนลด 20" in f for f in t["flags"])
+    assert "หลอด ขาด 1" in t["flags"] and any("อื่นๆ 20" in f for f in t["flags"])
+    assert t["commission_sales"] == 180                                                  # a discount for another reason is the driver's
     one_off = rs.compute({"sales": {"2": {"q": {"lod": 1}, "free": True}}}, customers)
-    assert one_off["amount"] == 0 and one_off["cash_sales"] == 0 and any("แจกฟรีนอกรายชื่อ" in f for f in one_off["flags"])
+    assert one_off["amount"] == 0 and one_off["cash_sales"] == 0 and one_off["commission_sales"] == 0
+
+
+def test_the_plants_fault_does_not_cut_the_drivers_commission():
+    customers = {"1": {"prices": {}, "free": True}, "2": {"prices": {"lod": 40, "zong": 150}}, "3": {"prices": {"lod": 40}}}
+    doc = {"sales": {"1": {"q": {"lod": 2}},                                            # ตำรวจ: not a sale, not counted
+                     "2": {"q": {"lod": 5}, "discount": 40, "reason": "factory"},       # 200 - 40 for broken bags
+                     "3": {"q": {"zong": 0, "lod": 2}, "free": True, "reason": "factory"}}}   # 80 given free for bad ice
+    t = rs.compute(doc, customers)
+    assert t["amount"] == 160 and t["cash_sales"] == 160
+    assert t["factory_waived"] == 120 and t["commission_sales"] == 280
+    assert t["sold"]["lod"] == 9 and any("โรงงาน" in f for f in t["flags"])
+    line = [x for x in t["lines"] if x["customer"] == "3"][0]
+    assert line["waived"] == 80 and line["waived_reason"] == "factory"
 
 
 def test_sheet_free_customer():

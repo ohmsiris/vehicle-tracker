@@ -114,7 +114,10 @@ def line_amount(qty: dict, price: dict) -> float:
 def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start: Optional[float] = None) -> dict:
     """doc = what the phone sent; customers = {customer id (str): {"prices", "billing", "free"}}. -> the day's totals and what does
     not add up. A sale line: {"q": {product: n}, "price": {product: baht} (the driver may change a price), "paid": baht,
-    "old_paid": baht, "discount": baht, "free": true (given free this once)}.
+    "old_paid": baht, "discount": baht, "free": true (given free this once), "reason": "factory" | "other"}.
+    A discount or one-off free with reason "factory" (น้ำแข็งเสีย / แตก -- the plant's fault, owner 10 Nov 2026) still counts at full
+    price in `commission_sales`, so the driver's percentage is not cut by the plant's mistake. Customers free on the route list
+    (ตำรวจ ...) are not sales and do not count, as on the paper sheet.
     returns = the ice back at the plant, counted by หน้าโรง (the office enters it); km_start = the last reading before this day."""
     loaded = {k: 0.0 for k in KEYS}
     for ld in doc.get("loads") or []:
@@ -123,7 +126,7 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
     sold = {k: 0.0 for k in KEYS}
     free_q = {k: 0.0 for k in KEYS}
     lines = []
-    cash_sales = old_paid = credit = invoiced = amount_all = discounts = 0.0
+    cash_sales = old_paid = credit = invoiced = amount_all = discounts = factory = other_waived = 0.0
     discount_shops = adhoc_free = 0
     for cid, s in (doc.get("sales") or {}).items():
         q = {k: _num((s.get("q") or {}).get(k)) for k in KEYS}
@@ -132,9 +135,16 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
         cust = customers.get(str(cid)) or {}
         free = bool(cust.get("free") or s.get("free"))
         price = {**(cust.get("prices") or {}), **{k: _num(v) for k, v in (s.get("price") or {}).items() if k in KEYS}}
-        gross = 0.0 if free else line_amount(q, price)
+        full = 0.0 if cust.get("free") else line_amount(q, price)          # what the line is worth at the customer's price
+        gross = 0.0 if free else full
         disc = 0.0 if free else min(max(_num(s.get("discount")), 0.0), gross)
         amount = round(gross - disc, 2)
+        waived = round(full - amount, 2) if not cust.get("free") else 0.0  # given away: a discount, or ice given free this once
+        reason = ("factory" if s.get("reason") == "factory" else "other") if waived else None
+        if reason == "factory":
+            factory += waived
+        elif waived:
+            other_waived += waived
         billing = cust.get("billing") or s.get("billing") or "cash"
         paid = 0.0 if billing == "invoice" or free else min(max(_num(s.get("paid", amount)), 0.0), amount)
         op = max(_num(s.get("old_paid")), 0.0)
@@ -155,7 +165,7 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
             credit += amount - paid
         old_paid += op
         lines.append({"customer": str(cid), "qty": {k: v for k, v in q.items() if v}, "amount": amount, "paid": paid, "old_paid": op,
-                      "billing": billing, "discount": round(disc, 2), "free": free})
+                      "billing": billing, "discount": round(disc, 2), "free": free, "waived": waived, "waived_reason": reason})
     back = returns if returns is not None else doc.get("returns")
     returned = {k: _num((back or {}).get(k)) for k in KEYS}
     left = {k: loaded[k] - sold[k] for k in KEYS}
@@ -176,13 +186,14 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
         flags.append(f"เงิน{'เกิน' if counted > expected_cash else 'ขาด'} {abs(counted - expected_cash):,.0f} บาท")
     if km is not None and (km < 0 or km > 600):
         flags.append(f"ไมล์ดูไม่ถูก ({km:,.0f} กม.)")
-    if discounts:
-        flags.append(f"ส่วนลด {discounts:,.0f} บาท ({discount_shops} ร้าน) — ตรวจว่าอนุญาตแล้ว")
-    if adhoc_free:
-        flags.append(f"แจกฟรีนอกรายชื่อ {adhoc_free} ร้าน — ตรวจว่าอนุญาตแล้ว")
+    if factory:
+        flags.append(f"ลด / แจกเพราะน้ำแข็งเสีย (โรงงาน) {factory:,.0f} บาท — ไม่หักค่าคอมคนขับ")
+    if other_waived:
+        flags.append(f"ส่วนลด / แจกฟรี อื่นๆ {other_waived:,.0f} บาท — ตรวจว่าอนุญาตแล้ว")
     return {"loaded": loaded, "sold": sold, "left": left, "returned": returned if back else None, "diff": diff, "free": free_q,
             "amount": round(amount_all, 2), "cash_sales": round(cash_sales, 2), "old_paid": round(old_paid, 2),
             "credit": round(credit, 2), "invoiced": round(invoiced, 2), "discount": round(discounts, 2), "expected_cash": round(expected_cash, 2),
+            "factory_waived": round(factory, 2), "other_waived": round(other_waived, 2), "commission_sales": round(amount_all + factory, 2),
             "counted": round(counted, 2) if has_cash else None, "km_start": start or None, "km": km, "customers": len(lines), "flags": flags,
             "lines": lines}
 
@@ -373,7 +384,7 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
     supabase.delete("sale_lines", {"day_id": f"eq.{saved['id']}"})
     lines = [{"day_id": saved["id"], "route_id": route_id, "day": day.isoformat(), "customer_id": int(ln["customer"]), "qty": ln["qty"],
               "amount": ln["amount"], "paid": ln["paid"], "old_paid": ln["old_paid"], "billing": ln["billing"], "discount": ln["discount"],
-              "free": ln["free"]} for ln in totals["lines"]]
+              "free": ln["free"], "waived": ln["waived"], "waived_reason": ln["waived_reason"]} for ln in totals["lines"]]
     for i in range(0, len(lines), 500):
         supabase.insert("sale_lines", lines[i:i + 500])
     return {"rev": int(rev), "status": status, "totals": _public(row["totals"]), "id_map": id_map}
@@ -467,7 +478,7 @@ def day_detail(day_id: int) -> dict:
     if not d:
         raise RouteSalesError("ไม่พบวันนี้")
     cust = {str(c["id"]): c for c in _customers(d[0]["route_id"])}
-    lines = supabase.select_all("sale_lines", {"select": "customer_id,qty,amount,paid,old_paid,billing,discount,free", "day_id": f"eq.{int(day_id)}",
+    lines = supabase.select_all("sale_lines", {"select": "customer_id,qty,amount,paid,old_paid,billing,discount,free,waived,waived_reason", "day_id": f"eq.{int(day_id)}",
                                                "order": "id.asc"})
     for ln in lines:
         c = cust.get(str(ln["customer_id"])) or {}

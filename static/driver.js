@@ -363,7 +363,10 @@
         else html += '<div class="box" style="background:var(--soft)"><h3>ส่วนลด / แจกฟรี (เฉพาะที่ได้รับอนุญาต)</h3>' +
           '<div class="line"><span class="lbl">ส่วนลด (บาท)</span><input class="num wide" id="disc" inputmode="decimal" value="' + (n(s.discount) || "") + '" placeholder="0"></div>' +
           '<div class="seg" style="grid-template-columns:1fr 1fr"><button data-free="0" class="' + (s.free ? "" : "on") + '">คิดเงิน</button><button data-free="1" class="' + (s.free ? "on" : "") + '">แจกฟรีครั้งนี้</button></div>' +
-          '<p class="note">ออฟฟิศจะเห็นและตรวจทุกครั้ง</p></div>';
+          '<h3 style="margin-top:4px">เพราะอะไร</h3><div class="seg" style="grid-template-columns:1fr 1fr">' +
+          '<button data-reason="factory" class="' + (s.reason === "factory" ? "on" : "") + '">น้ำแข็งเสีย / แตก (โรงงาน)</button>' +
+          '<button data-reason="other" class="' + (s.reason === "other" ? "on" : "") + '">อื่น ๆ</button></div>' +
+          '<p class="note">' + (s.reason === "factory" ? "ความผิดโรงงาน — ไม่หักค่าคอมของคุณ" : s.reason === "other" ? "นับเป็นยอดขายที่ลดลง" : "เลือกเหตุผลก่อนบันทึก") + " · ออฟฟิศจะเห็นและตรวจทุกครั้ง</p></div>";
       }
       if (!invoice && !isFree(c, s)) {
         html += '<div class="seg" id="pay"><button data-pay="cash" class="' + (s.pay === "cash" ? "on" : "") + '"' + dis + '>จ่ายสด</button><button data-pay="credit" class="' + (s.pay === "credit" ? "on credit" : "") + '"' + dis +
@@ -392,7 +395,9 @@
         var pay = e.target.closest("button[data-pay]");
         if (pay) { readInputs(); s.pay = pay.getAttribute("data-pay"); draw(); return; }
         var fr = e.target.closest("button[data-free]");
-        if (fr) { readInputs(); if (fr.getAttribute("data-free") === "1") s.free = true; else delete s.free; draw(); }
+        if (fr) { readInputs(); if (fr.getAttribute("data-free") === "1") s.free = true; else delete s.free; draw(); return; }
+        var rs = e.target.closest("button[data-reason]");
+        if (rs) { readInputs(); s.reason = rs.getAttribute("data-reason"); draw(); }
       });
       if ($("payall")) $("payall").onclick = function () { $("oldp").value = balanceOf(c.id); };
       $("sclear").onclick = function () { delete S.doc.sales[String(c.id)]; changed(); closeSheet(); afterSale(); };
@@ -414,6 +419,8 @@
     }
     function save() {
       var any = Object.keys(s.q).some(function (k) { return n(s.q[k]); }) || n(s.old_paid);
+      if (!c.free && (s.free || n(s.discount)) && !s.reason) { toast("เลือกเหตุผลของส่วนลด / แจกฟรี", true); return; }
+      if (!s.free && !n(s.discount)) delete s.reason;
       var missing = isFree(c, s) ? [] : products().filter(function (p) { return n(s.q[p.key]) && priceOf(c, s, p.key) == null; });
       if (missing.length) { toast("ใส่ราคา " + missing.map(function (p) { return p.label; }).join(" "), true); return; }
       if (any) { s.t = s.t || nowHM(); s.paid = paidOf(c, s); S.doc.sales[String(c.id)] = s; } else delete S.doc.sales[String(c.id)];
@@ -495,7 +502,7 @@
             cell = '<span class="c">' + fmt(got) + (diff ? '<br><span class="' + (diff < 0 ? "bad-t" : "warn-t") + '">' + (diff < 0 ? "ขาด " : "เกิน ") + fmt(Math.abs(diff)) + "</span>" : ' <span class="ok-t">✓</span>') + "</span>";
           }
           return "<b>" + esc(p.label) + '</b><span class="c">' + fmt(t.loaded[p.key]) + '</span><span class="c">' + fmt(t.sold[p.key]) + '</span><span class="c"><b>' + fmt(left) + "</b></span>" + cell;
-        }).join("") + "</div>" + (foh ? "" : '<p class="note">น้ำแข็งที่คืน หน้าโรงเป็นคนนับ</p>');
+        }).join("") + "</div>";
     } else html += '<p class="note">ยังไม่มีการรับ / ขาย</p>';
     html += "</div>";
     html += '<div class="box"><div class="line"><h3 style="margin:0">' + ic("truck", "s") + 'ไมล์</h3><input class="num wide" id="kme" inputmode="numeric" value="' + (S.doc.km_end || "") + '" placeholder="0"' + dis + "></div></div>";
