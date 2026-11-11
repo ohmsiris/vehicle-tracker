@@ -2028,3 +2028,4 @@ body.signed-out .shell { display: block; }
 .ss-amtnote { font-weight: 400; white-space: nowrap; }
 .ss-table tfoot td, .ss-mini tr.ss-totrow td { font-weight: 700; background: var(--surface-2, #f1efe9); }
 .ss-mini td.r, .ss-mini th.r { text-align: right; padding-right: 10px; }
+.cf-ltable tbody td.cf-n, .cf-ltable tbody tr.cf-whyrow td:first-child, .cf-ltable tbody.doubt td.cf-n, .cf-ltable tbody.doubt tr.cf-whyrow td:first-child { background: transparent; }
