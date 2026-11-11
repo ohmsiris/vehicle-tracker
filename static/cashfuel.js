@@ -150,7 +150,7 @@ function cfSummary() {
       el("thead", {}, el("tr", {}, ...["รถเบอร์", "ทะเบียนรถ", "พนักงานขับรถ", "วันที่ · จำนวน", "รวม"].map((h) => el("th", { text: h })))),
       el("tbody", {}, ...rows.map((g) => el("tr", {},
         el("td", {}, el("b", { text: (g.v || {}).truck_number || "" })),
-        el("td", { text: g.v ? g.v.plate : "ไม่ทราบรถ" }),
+        el("td", { text: g.v ? g.v.plate : "ไม่มีทะเบียนรถ" }),
         el("td", { text: Object.entries(g.drivers).sort((a, b) => b[1] - a[1]).map(([n]) => n).slice(0, 2).join(", ") }),
         el("td", { class: "small" }, ...g.fills.slice().sort((a, b) => a.day.localeCompare(b.day)).map((l) =>
           el("button", { class: "cf-fill", type: "button", title: l.page_id ? "เปิดรูปที่อ่านรายการนี้" : "เพิ่มเอง",
@@ -254,13 +254,14 @@ async function cfReview(id) {
 }
 
 // a row still to sort out (orange): the reader was unsure and nobody has looked, or it counts but has no truck / no amount
-const cfMissing = (l) => !!(l.counted && (!l.vehicle_id || !(Number(l.amount) > 0)));
-const cfDoubt = (l) => !!(l.note && !l.checked && l.counted) || cfMissing(l);
+const cfMissing = (l) => !!(l.counted && ((!l.vehicle_id && !l.no_truck) || !(Number(l.amount) > 0)));
+const cfDoubt = (l) => cfReasons(l).length > 0;
 function cfReasons(l) {
   const out = [];
-  if (l.counted && !l.vehicle_id) out.push("ยังไม่ได้เลือกรถ — เลือกรถ หรือลบแถว");
+  if (l.counted && !l.vehicle_id && !l.no_truck) out.push("ยังไม่ได้เลือกรถ — เลือกรถ (หรือ “ไม่มีทะเบียนรถ”) หรือลบแถว");
   if (l.counted && !(Number(l.amount) > 0)) out.push("ยังไม่มียอด");
-  if (l.note && !l.checked && l.counted) out.push(...l.note.split(" · ").filter((r) => r && !(r === "ไม่พบรถ" && !l.vehicle_id)).map(cfPlain));
+  // "ไม่พบรถ" is settled once a truck (or ไม่มีทะเบียนรถ) is chosen; while none is, the line above says so
+  if (l.note && !l.checked && l.counted) out.push(...l.note.split(" · ").filter((r) => r && r !== "ไม่พบรถ").map(cfPlain));
   return out;
 }
 
@@ -296,8 +297,9 @@ function cfLineCard(l, d, n, onRemove) {
       el("tr", {},
         el("td", { class: "cf-n" }, n ? String(n) : ""),
         el("td", {}, el("input", { type: "date", class: "cf-day", value: l.day, onchange: (e) => e.target.value && save({ day: e.target.value }) })),
-        el("td", {}, el("select", { onchange: (e) => save({ vehicle_id: e.target.value || null }) },
-          el("option", { value: "", text: "— เลือก —" }), ...vopts.map((v) => el("option", { value: v.id, text: cfVehicleLabel(v), selected: v.id === l.vehicle_id })))),
+        el("td", {}, el("select", { onchange: (e) => save(e.target.value === "none" ? { no_truck: true } : { vehicle_id: e.target.value || null, no_truck: false }) },
+          el("option", { value: "", text: "— เลือก —", selected: !l.vehicle_id && !l.no_truck }),
+          el("option", { value: "none", text: "ไม่มีทะเบียนรถ", selected: !!l.no_truck }), ...vopts.map((v) => el("option", { value: v.id, text: cfVehicleLabel(v), selected: v.id === l.vehicle_id })))),
         el("td", {}, cfPeopleSelect(d, l.driver_name, (v) => save({ driver_name: v }))),
         el("td", { class: "cf-amount" }, el("input", { type: "text", inputmode: "decimal", value: String(Number(l.amount)), onchange: (e) => save({ amount: e.target.value }) })),
         el("td", { class: "cf-acts" },

@@ -401,13 +401,14 @@ def pending(branch: str) -> list[dict]:
                                                     "order": "id.asc"})
     if not pages:
         return []
-    lines = supabase.select_all("cash_fuel_lines", {"select": "page_id,day,amount,note,checked,counted,vehicle_id",
+    lines = supabase.select_all("cash_fuel_lines", {"select": "page_id,day,amount,note,checked,counted,vehicle_id,no_truck",
                                                     "page_id": f"in.({','.join(str(p['id']) for p in pages)})", "order": "id.asc"})
     for p in pages:
         mine = [ln for ln in lines if ln["page_id"] == p["id"]]
         days = sorted(ln["day"] for ln in mine)
         p.update({"lines": len(mine), "to_check": sum(1 for ln in mine if ln.get("counted") and (
-                      (ln.get("note") and not ln.get("checked")) or not ln.get("vehicle_id") or float(ln.get("amount") or 0) <= 0)),
+                      (ln.get("note") and not ln.get("checked")) or (not ln.get("vehicle_id") and not ln.get("no_truck"))
+                      or float(ln.get("amount") or 0) <= 0)),
                   "from": days[0] if days else None, "to": days[-1] if days else None,
                   "total": round(sum(float(ln["amount"] or 0) for ln in mine if ln.get("counted")), 2)})
     return pages
@@ -428,12 +429,13 @@ def page_detail(page_id: int, branch: str = "สระบุรี") -> dict:
 def confirm_page(page_id: int, who: str, confirmed: bool = True) -> dict:
     """ยืนยันหน้านี้: the page has been checked against the photo; its lines now count. Every doubtful line must be ticked first."""
     from app import supabase
-    lines = supabase.select_all("cash_fuel_lines", {"select": "id,note,checked,counted,vehicle_id,amount", "page_id": f"eq.{int(page_id)}", "order": "id.asc"})
+    lines = supabase.select_all("cash_fuel_lines", {"select": "id,note,checked,counted,vehicle_id,no_truck,amount", "page_id": f"eq.{int(page_id)}", "order": "id.asc"})
     if confirmed:
-        open_ = [ln for ln in lines if ln.get("note") and not ln.get("checked") and ln.get("counted")]
+        open_ = [ln for ln in lines if ln.get("note") and not ln.get("checked") and ln.get("counted")
+                 and [r for r in ln["note"].split(" · ") if r and r != "ไม่พบรถ"]]
         if open_:
             raise CashFuelError(f"ยังมี {len(open_)} รายการที่ต้องดูกับรูป — กด “ถูกแล้ว” หรือแก้ / ลบแถว ก่อนยืนยัน")
-        empty = [ln for ln in lines if ln.get("counted") and (not ln.get("vehicle_id") or float(ln.get("amount") or 0) <= 0)]
+        empty = [ln for ln in lines if ln.get("counted") and ((not ln.get("vehicle_id") and not ln.get("no_truck")) or float(ln.get("amount") or 0) <= 0)]
         if empty:
             raise CashFuelError(f"ยังมี {len(empty)} แถวที่ยังไม่ได้เลือกรถหรือไม่มียอด — ใส่ให้ครบ หรือลบแถว ก่อนยืนยัน")
         supabase.update("cash_fuel_lines", {"page_id": f"eq.{int(page_id)}"}, {"checked": True})
@@ -458,8 +460,14 @@ def update_line(line_id: int, body: dict) -> dict:
             raise CashFuelError("วันที่ไม่ถูกต้อง")
         m, b = month_of(d)
         values.update({"day": d.isoformat(), "month": m, "batch": b})
-    if "vehicle_id" in body:
+    if "no_truck" in body:                          # ไม่มีทะเบียนรถ: the driver wrote no truck (owner, 11 Nov 2026)
+        values["no_truck"] = bool(body["no_truck"])
+        if values["no_truck"]:
+            values["vehicle_id"] = None
+    if "vehicle_id" in body and not values.get("no_truck"):
         values["vehicle_id"] = body["vehicle_id"] or None
+        if values["vehicle_id"]:
+            values["no_truck"] = False
         if body["vehicle_id"] and "driver_name" not in body:
             v = next((x for x in _roster() if x["id"] == body["vehicle_id"]), None)
             values["driver_name"] = (v.get("driver") or None) if v else None
@@ -556,14 +564,14 @@ def summary(lines: list[dict], roster: list[dict], batch: Optional[int] = None) 
     for key, g in sorted(groups.items(), key=lambda kv: _truck_key(kv[1]["vehicle"])):
         v = g["vehicle"] or {}
         fills = sorted(g["fills"], key=lambda f: f["day"])
-        trucks.append({"truck_no": v.get("truck_number") or "", "plate": v.get("plate") or "ไม่ทราบรถ", "driver": ", ".join(n for n, _ in g["drivers"].most_common(2)),
+        trucks.append({"truck_no": v.get("truck_number") or "", "plate": v.get("plate") or "ไม่มีทะเบียนรถ", "driver": ", ".join(n for n, _ in g["drivers"].most_common(2)),
                        "fills": fills, "total": round(sum(f["amount"] for f in fills), 2)})
     rows = []                                                           # by date (owner, 11 Nov: HQ gets both lists)
     for ln in lines:
         if not ln.get("counted") or (batch and ln.get("batch") != batch):
             continue
         v = by_id.get(ln.get("vehicle_id")) or {}
-        rows.append({"day": ln["day"], "truck_no": v.get("truck_number") or "", "plate": v.get("plate") or "ไม่ทราบรถ",
+        rows.append({"day": ln["day"], "truck_no": v.get("truck_number") or "", "plate": v.get("plate") or "ไม่มีทะเบียนรถ",
                      "driver": short_name(ln["driver_name"]) if ln.get("driver_name") else "", "amount": float(ln.get("amount") or 0),
                      "_k": (ln["day"], _truck_key(v or None))})
     rows.sort(key=lambda x: x.pop("_k"))

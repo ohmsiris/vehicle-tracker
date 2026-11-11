@@ -146,3 +146,17 @@ def test_confirm_needs_a_truck_and_an_amount_on_every_counted_row(monkeypatch):
         cf.confirm_page(1, "x")
     rows[0].update({"vehicle_id": "a", "amount": 500})
     assert cf.confirm_page(1, "x") == {"ok": True}
+
+
+def test_no_truck_written_can_be_confirmed_as_such(monkeypatch):
+    import pytest
+    from app import supabase
+    rows = [{"id": 1, "note": "ไม่พบรถ", "checked": False, "counted": True, "vehicle_id": None, "no_truck": False, "amount": 1000}]
+    monkeypatch.setattr(supabase, "select_all", lambda table, params=None: rows)
+    monkeypatch.setattr(supabase, "update", lambda *a: None)
+    with pytest.raises(cf.CashFuelError):
+        cf.confirm_page(1, "x")
+    rows[0]["no_truck"] = True                                           # ไม่มีทะเบียนรถ
+    assert cf.confirm_page(1, "x") == {"ok": True}
+    s = cf.summary([{"vehicle_id": None, "day": "2026-11-02", "amount": 1000, "counted": True, "batch": 1, "driver_name": None}], ROSTER)
+    assert s["trucks"][0]["plate"] == "ไม่มีทะเบียนรถ" and s["by_date"][0]["plate"] == "ไม่มีทะเบียนรถ"
