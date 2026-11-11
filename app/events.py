@@ -42,6 +42,15 @@ class DuplicateBill(Exception):
         self.duplicates = duplicates   # [{"filename", "event_id", "saved_at"}]
 
 
+
+def truck_branch(vehicle_id, fallback=None):
+    """A bill's สาขา is always its truck's (owner, 11 Nov 2026): the AI used to copy the SHOP's branch off the bill ("อีซูซุ สาขา
+    แก่งคอย") onto a Saraburi truck. Only a bill with no truck keeps what it was given."""
+    if not vehicle_id:
+        return fallback
+    rows = supabase.select("vehicles", {"select": "branch", "id": f"eq.{vehicle_id}", "limit": "1"})
+    return (rows[0].get("branch") if rows else None) or fallback
+
 def _parse_date(raw) -> date:
     try:
         d = date.fromisoformat(str(raw))
@@ -188,7 +197,7 @@ def save_event(payload: dict, files: list[tuple[str, bytes]], *, allow_duplicate
             "next_service_mileage": ev.get("next_service_mileage"),
             "vendor": shops.fold_vendor(ev.get("vendor")),
             "performed_by": ev.get("performed_by"),
-            "branch": ev.get("branch"),
+            "branch": truck_branch(payload["vehicle_id"], ev.get("branch")),
             "total_cost": ev.get("total_cost"),
             "notes": ev.get("notes"),
             "low_confidence_fields": ev.get("low_confidence_fields") or [],
@@ -304,7 +313,8 @@ def update_event(event_id: str, payload: dict) -> None:
             "vehicle_id": vid or None,
             "event_date": ev["event_date"],
             "mileage": ev.get("mileage"), "next_service_mileage": ev.get("next_service_mileage"), "total_cost": ev.get("total_cost"),
-            "vendor": shops.fold_vendor(ev.get("vendor")), "performed_by": ev.get("performed_by"), "branch": ev.get("branch"),
+            "vendor": shops.fold_vendor(ev.get("vendor")), "performed_by": ev.get("performed_by"),
+            "branch": truck_branch(vid, ev.get("branch")) if vid else ev.get("branch"),
             "notes": ev.get("notes"), "summary": ev.get("summary"),
             "line_items": [
                 {

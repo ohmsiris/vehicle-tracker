@@ -250,7 +250,7 @@ function bindVehicleAutofill({ vehicleSel, branchEl, mileageEl, nextEl, hintEl, 
     if (v && v.branch) branchEl.value = v.branch;
     suggest();
   });
-  if (fillBranchNow && veh() && veh().branch && !branchEl.value) branchEl.value = veh().branch;
+  if (fillBranchNow && veh() && veh().branch) branchEl.value = veh().branch;       // the truck's branch wins over what was read off the bill
   suggest();
 }
 
@@ -317,7 +317,7 @@ function render(draft, pickedVehicle) {
     eventField("ร้าน / อู่", el("div", {}, flagInput(inp("evVendor", "text", ev.vendor, { list: "evVendorList", autocomplete: "off", placeholder: "พิมพ์ หรือเลือกจากรายการ" }), flags.has("vendor")),
       el("datalist", { id: "evVendorList" }, ...vendorNames().map((n) => el("option", { value: n }))),
       ev.vendor_read && ev.vendor && ev.vendor_read !== ev.vendor ? el("div", { class: "datecap", text: `บิลเขียนว่า “${ev.vendor_read}” — รวมเป็นร้านนี้ (แก้ได้)` }) : null)),
-    eventField("สาขา", flagInput(inp("evBranch", "text", ev.branch), flags.has("branch"))),
+    el("input", { type: "hidden", id: "evBranch", value: ev.branch || "" }),         // สาขา = the truck's, never typed (owner, 11 Nov 2026)
     eventField("เลขไมล์", el("div", {}, flagInput(inp("evMileage", "number", ev.mileage, { inputmode: "numeric" }), flags.has("mileage")), el("div", { id: "evMileHint", class: "datecap mileage-hint" }))),
     eventField("ไมล์ครั้งต่อไป", el("div", {}, flagInput(inp("evNext", "number", ev.next_service_mileage, { inputmode: "numeric" }), flags.has("next_service_mileage")), el("div", { id: "evNextHint", class: "datecap" }))),
     eventField("ยอดรวมในบิล (บาท)", flagInput(inp("evTotal", "number", ev.total_cost, { step: "0.01", inputmode: "decimal" }), flags.has("total_cost"))),

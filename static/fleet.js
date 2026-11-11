@@ -140,17 +140,24 @@ function evFilesCard(d, files) {
   const add = el("button", { class: "btn small", type: "button", text: "+ เพิ่มรูป", onclick: () => pick.click() });
   pick.onchange = async () => {
     if (!pick.files.length) return;
-    const fd = new FormData();
-    for (const f of pick.files) fd.append("files", f);
-    fd.append("kind", kind.value);
+    // any number of photos (owner, 11 Nov 2026): sent 10 at a time, which is what the server takes in one go
+    const all = [...pick.files];
     add.disabled = true;
-    add.textContent = "กำลังอัปโหลด…";
+    let sent = 0;
     try {
-      const res = await fetch(`/api/events/${e.id}/files`, { method: "POST", body: fd, headers: { "X-App-Token": state.token } });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.detail || `HTTP ${res.status}`); }
+      for (let i = 0; i < all.length; i += 10) {
+        add.textContent = `กำลังอัปโหลด ${sent}/${all.length}…`;
+        const fd = new FormData();
+        for (const f of all.slice(i, i + 10)) fd.append("files", f);
+        fd.append("kind", kind.value);
+        const res = await fetch(`/api/events/${e.id}/files`, { method: "POST", body: fd, headers: { "X-App-Token": state.token } });
+        if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.detail || `HTTP ${res.status}`); }
+        sent += Math.min(10, all.length - i);
+      }
       openEvent(e.id);
     } catch (err) {
-      showErr("eventError", `เพิ่มรูปไม่สำเร็จ: ${err.message}`);
+      showErr("eventError", `เพิ่มรูปไม่สำเร็จ${sent ? ` (เพิ่มแล้ว ${sent} จาก ${all.length} รูป)` : ""}: ${err.message}`);
+      if (sent) { openEvent(e.id); return; }
       add.disabled = false;
       add.textContent = "+ เพิ่มรูป";
     }
@@ -310,7 +317,7 @@ function startEdit() {
       field("ร้าน / อู่", el("div", {}, input("edVendor", "text", e.vendor, { maxlength: "200", list: "edVendorList", autocomplete: "off", placeholder: "พิมพ์ หรือเลือกจากรายการ" }),
         el("datalist", { id: "edVendorList" }, ...vendorNames().map((n) => el("option", { value: n }))))),
       field("ผู้ซ่อม", input("edPerformedBy", "text", e.performed_by, { maxlength: "200" })),
-      field("สาขา", input("edBranch", "text", e.branch, { maxlength: "100" })),
+      el("input", { type: "hidden", id: "edBranch", value: e.branch || "" }),          // สาขา = the truck's, never typed (owner, 11 Nov 2026)
       field("เลขไมล์", el("div", {}, input("edMileage", "number", e.mileage, { inputmode: "numeric" }), el("div", { id: "edMileHint", class: "datecap mileage-hint" }))),
       field("ไมล์ครั้งต่อไป", el("div", {}, input("edNext", "number", e.next_service_mileage, { inputmode: "numeric" }), el("div", { id: "edNextHint", class: "datecap" }))),
       field("ยอดรวม (บาท)", input("edTotal", "number", e.total_cost, { step: "0.01", inputmode: "decimal" })),
@@ -330,7 +337,7 @@ function startEdit() {
   fleet.paperCard = form;
   bindDateField($("edDate"), $("edDateCap"));
   bindVehicleAutofill({ vehicleSel: $("edVehicle"), branchEl: $("edBranch"), mileageEl: $("edMileage"), nextEl: $("edNext"), hintEl: $("edNextHint"),
-    hasOil: () => hasOilLine("#editLines") });
+    hasOil: () => hasOilLine("#editLines"), fillBranchNow: true });
   bindMileageHistory({ vehicleSel: $("edVehicle"), dateEl: $("edDate"), mileageEl: $("edMileage"), hintEl: $("edMileHint"), excludeId: (d.event && (d.event.id || d.event.event_id)) || "" });
   $("edTotal").addEventListener("input", () => { fleet.totalManual = true; editTotalsChanged(); });
   editHooks.renumber();
