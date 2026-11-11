@@ -299,13 +299,18 @@ def soffice() -> Optional[str]:
     return shutil.which("soffice") or shutil.which("libreoffice")
 
 
-def to_pdf(docx: bytes) -> bytes:
+def xlsx_to_pdf(xlsx: bytes) -> bytes:
+    """An Excel file (the รายการค่าน้ำมัน) -> PDF the same way."""
+    return to_pdf(xlsx, "xlsx")
+
+
+def to_pdf(docx: bytes, ext: str = "docx") -> bytes:
     """docx = build(..., marks=True)."""
     exe = soffice()
     if not exe:
         raise RuntimeError("no LibreOffice")
     with tempfile.TemporaryDirectory() as d:
-        src = Path(d) / "sheet.docx"
+        src = Path(d) / f"sheet.{ext}"
         src.write_bytes(docx)
         conf = Path(d) / "fonts.conf"
         conf.write_text(FONTS_CONF.format(fonts=Path(__file__).resolve().parent.parent / "static" / "fonts"), encoding="utf-8")

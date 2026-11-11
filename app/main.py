@@ -16,6 +16,7 @@ Refuses everything if APP_TOKEN isn't configured -- each call spends real
 money, so there's no open-by-default mode.
 """
 import hmac
+import re
 from contextlib import asynccontextmanager
 import json
 import logging
@@ -2211,6 +2212,91 @@ def api_ice_order_save(route_id: int, body: dict = Body(...), x_app_token: str =
     if not day:
         raise HTTPException(400, "วันที่ไม่ถูกต้อง")
     return _route_call(route_sales.save_order, route_id, day, body.get("q") or {}, _who(x_app_token or token), body.get("note"))
+
+
+# --------------------------------------------------------------------------------------------- น้ำมันเงินสด (app/cash_fuel.py)
+def _fuel_call(fn, *args, **kwargs):
+    from app import cash_fuel
+    if not supabase.configured():
+        raise HTTPException(503, "ระบบยังไม่พร้อม")
+    try:
+        return fn(*args, **kwargs)
+    except cash_fuel.CashFuelError as exc:
+        raise HTTPException(400, str(exc))
+    except supabase.SupabaseError:
+        logger.exception("cash fuel")
+        raise HTTPException(502, "บันทึก / โหลดไม่สำเร็จ ลองใหม่อีกครั้ง")
+
+
+@app.get("/api/cash-fuel")
+def api_cash_fuel(month: str = "", branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import cash_fuel, route_sales
+    _check_token(x_app_token, token)
+    if not re.fullmatch(r"\d{4}-\d{2}", month or ""):
+        month = cash_fuel.month_of(route_sales.today())[0]
+    return _fuel_call(cash_fuel.month_view, branch, month)
+
+
+@app.post("/api/cash-fuel/pages")
+def api_cash_fuel_pages(files: list[UploadFile] = File(...), branch: str = Form(default="สระบุรี"), x_app_token: str = Header(default=""),
+                        token: str = Query(default="")) -> dict:
+    """Photos of the handwritten รายการเบิก pages: read twice by Claude, the fuel lines kept."""
+    from app import cash_fuel
+    _check_token(x_app_token, token)
+    return _fuel_call(cash_fuel.add_pages, _read_uploads(files, 10), branch, _who(x_app_token or token))
+
+
+@app.get("/api/cash-fuel/pages/{page_id}/image")
+def api_cash_fuel_page_image(page_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    from app import cash_fuel
+    _check_token(x_app_token, token)
+    data, mime = _fuel_call(cash_fuel.page_image, page_id)
+    return Response(content=data, media_type=mime, headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.delete("/api/cash-fuel/pages/{page_id}")
+def api_cash_fuel_page_delete(page_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import cash_fuel
+    _check_token(x_app_token, token)
+    return _fuel_call(cash_fuel.delete_page, page_id)
+
+
+@app.post("/api/cash-fuel/lines")
+def api_cash_fuel_line_add(body: dict = Body(...), branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import cash_fuel
+    _check_token(x_app_token, token)
+    return _fuel_call(cash_fuel.add_line, branch, body)
+
+
+@app.patch("/api/cash-fuel/lines/{line_id}")
+def api_cash_fuel_line(line_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import cash_fuel
+    _check_token(x_app_token, token)
+    return _fuel_call(cash_fuel.update_line, line_id, body)
+
+
+@app.delete("/api/cash-fuel/lines/{line_id}")
+def api_cash_fuel_line_delete(line_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import cash_fuel
+    _check_token(x_app_token, token)
+    return _fuel_call(cash_fuel.delete_line, line_id)
+
+
+@app.get("/api/cash-fuel/summary.{kind}")
+def api_cash_fuel_summary(kind: str, month: str, batch: int = 0, branch: str = "สระบุรี", x_app_token: str = Header(default=""),
+                          token: str = Query(default="")) -> Response:
+    """รายการค่าน้ำมัน for HQ: Excel, or PDF made from it."""
+    from urllib.parse import quote
+
+    from app import cash_fuel, route_docx
+    _check_token(x_app_token, token)
+    if kind not in ("xlsx", "pdf") or not re.fullmatch(r"\d{4}-\d{2}", month):
+        raise HTTPException(404, "ไม่พบ")
+    if kind == "pdf" and not route_docx.soffice():
+        raise HTTPException(503, "เซิร์ฟเวอร์ยังไม่มีโปรแกรมทำ PDF — ดาวน์โหลดเป็น Excel")
+    data, mime, name = _fuel_call(cash_fuel.summary_file, branch, month, batch or None, kind)
+    disp = "inline" if kind == "pdf" else "attachment"
+    return Response(content=data, media_type=mime, headers={"Content-Disposition": f"{disp}; filename=fuel.{kind}; filename*=UTF-8''{quote(name)}"})
 
 
 @app.post("/api/d/reopen-request")
