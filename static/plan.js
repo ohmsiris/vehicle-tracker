@@ -587,8 +587,10 @@ function openReadingDialog(v) {
   const gpsOnly = el("div", { class: "mfields" }, mfield(d, "start_date", "ตั้งแต่วันที่", { type: "date", caption: true }));
   const draw = () => {
     gpsOnly.hidden = d.kind !== "gps";
-    $("mf_end_date").previousSibling.textContent = d.kind === "gps" ? "ถึงวันที่" : "วันที่อ่านเลขไมล์";
-    $("mf_km").previousSibling.textContent = d.kind === "gps" ? "ระยะทางที่วิ่งในช่วงนี้ (กม.)" : "เลขไมล์ (กม.)";
+    // the field's own <label> (not "the element before the input": the date box is wrapped by datefield.js)
+    const lab = (id) => document.querySelector(`#pdlgBody label[for="${id}"]`) || { };
+    lab("mf_end_date").textContent = d.kind === "gps" ? "ถึงวันที่" : "วันที่อ่านเลขไมล์";
+    lab("mf_km").textContent = d.kind === "gps" ? "ระยะทางที่วิ่งในช่วงนี้ (กม.)" : "เลขไมล์ (กม.)";
   };
   fill($("pdlgBody"),
     el("p", { class: "muted small", text: `${plLabel(v)} — ระยะทางจากแอป GPS (รวมทั้งช่วง) หรือเลขไมล์จากหน้าปัด ถ้ามี ระบบจะใช้บอกกม. ของแต่ละรอบ และเตือนก่อนถ้ารถวิ่งมากกว่าที่กลุ่มสมมติไว้` }),
