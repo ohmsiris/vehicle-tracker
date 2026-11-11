@@ -2312,6 +2312,36 @@ def api_customers_photo(photo_id: int, x_app_token: str = Header(default=""), to
     return Response(content=data, media_type=mime, headers={"Cache-Control": "private, no-store"})
 
 
+@app.get("/api/customers/for/{customer_id}")
+def api_customer_for(customer_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """A route customer's own details (contact, ID card, GPS) and photos -- the customer form."""
+    from app import customers
+    _check_token(x_app_token, token)
+    return _cust_call(customers.register_for_customer, customer_id)
+
+
+@app.put("/api/customers/for/{customer_id}")
+def api_customer_for_save(customer_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import customers
+    _check_token(x_app_token, token)
+    return _cust_call(customers.save_contact, customer_id, body)
+
+
+@app.post("/api/customers/for/{customer_id}/photos")
+def api_customer_for_photos(customer_id: int, files: list[UploadFile] = File(...), x_app_token: str = Header(default=""),
+                            token: str = Query(default="")) -> dict:
+    from app import customers
+    _check_token(x_app_token, token)
+    return _cust_call(customers.add_photos, customer_id, _read_uploads(files, 10))
+
+
+@app.delete("/api/customers/photo/{photo_id}")
+def api_customer_photo_delete(photo_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import customers
+    _check_token(x_app_token, token)
+    return _cust_call(customers.delete_photo, photo_id)
+
+
 @app.get("/api/customers/{cust_no}")
 def api_customer(cust_no: int, branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import customers
@@ -2326,6 +2356,11 @@ def api_customer_link(cust_no: int, body: dict = Body(...), branch: str = "ส�
     _check_token(x_app_token, token)
     cid = body.get("customer_id")
     return _cust_call(customers.link, branch, cust_no, int(cid) if cid else None)
+
+
+def _who(supplied: str) -> str:
+    """Who is doing this, for the logs: the access code is the owner; a sign-in is that person's name."""
+    return "เจ้าของ" if _is_owner(supplied) else ((users.session_user(supplied) or {}).get("name") or "office")
 
 
 @app.get("/api/sales-routes/{route_id}/office-day")
@@ -2344,22 +2379,33 @@ def api_sales_route_office_save(route_id: int, body: dict = Body(...), x_app_tok
     day = _sheet_day(str(body.get("day") or ""))
     if not day:
         raise HTTPException(400, "วันที่ไม่ถูกต้อง")
-    who = "เจ้าของ" if _is_owner(x_app_token or token) else ((users.session_user(x_app_token or token) or {}).get("name") or "office")
+    who = _who(x_app_token or token)
     return _route_call(route_sales.office_save_day, route_id, day, body.get("doc") or {}, body.get("returns"), who)
+
+
+@app.get("/api/sales-routes/bins/find")
+def api_sales_routes_bin_find(q: str = "", branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Where is this bin, and where has it been?"""
+    from app import bins
+    _check_token(x_app_token, token)
+    found = bins.find(branch, q)
+    for b in found:
+        b["history"] = bins.history(b["id"])
+    return {"bins": found}
 
 
 @app.post("/api/sales-routes/{route_id}/customers")
 def api_sales_route_add_customer(route_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import route_sales
     _check_token(x_app_token, token)
-    return _route_call(route_sales.add_customer, route_id, body)
+    return _route_call(route_sales.add_customer, route_id, {**body, "_who": _who(x_app_token or token)})
 
 
 @app.patch("/api/sales-routes/customers/{customer_id}")
 def api_sales_route_edit_customer(customer_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import route_sales
     _check_token(x_app_token, token)
-    return _route_call(route_sales.update_customer, customer_id, body)
+    return _route_call(route_sales.update_customer, customer_id, {**body, "_who": _who(x_app_token or token)})
 
 
 @app.post("/api/sales-routes/day/{day_id}/walkin")

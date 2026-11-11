@@ -277,3 +277,83 @@ def photo(photo_id: int) -> tuple[bytes, str]:
     if not p:
         raise CustomerError("ไม่พบรูปนี้")
     return supabase.storage_download(p[0]["storage_path"], bucket=supabase.PRIVATE_BUCKET), p[0]["mime_type"] or "image/jpeg"
+
+
+# --------------------------------------------------------------------------------------------- one route customer's own details (the form)
+CONTACT = ("shop", "contact_name", "phone", "id_card", "gps", "note", "loan_date")
+
+
+def register_for_customer(customer_id: int) -> dict:
+    """The register row (contact, ID card, GPS ...) and photos of a route customer, if it has one."""
+    from app import supabase
+    r = supabase.select("customer_register", {"select": "*", "customer_id": f"eq.{int(customer_id)}", "order": "cust_no.asc", "limit": "1"})
+    if not r:
+        return {"register": None, "photos": []}
+    r = r[0]
+    photos = supabase.select_all("customer_photos", {"select": "id,name,mime_type,byte_size", "branch": f"eq.{r['branch']}",
+                                                     "cust_no": f"eq.{r['cust_no']}", "order": "id.asc"})
+    return {"register": r, "photos": photos}
+
+
+def _ensure_register(customer_id: int) -> dict:
+    """The register row of a route customer, made now if it has none (next CUST_ID of its branch, linked by hand)."""
+    from app import supabase
+    have = register_for_customer(customer_id)["register"]
+    if have:
+        return have
+    c = supabase.select("sale_route_customers", {"select": "id,route_id,name", "id": f"eq.{int(customer_id)}", "limit": "1"})
+    if not c:
+        raise CustomerError("ไม่พบลูกค้านี้")
+    r = supabase.select("sale_routes", {"select": "truck_no,branch,driver_name", "id": f"eq.{c[0]['route_id']}", "limit": "1"})[0]
+    branch = r.get("branch") or "สระบุรี"
+    last = supabase.select("customer_register", {"select": "cust_no", "branch": f"eq.{branch}", "order": "cust_no.desc", "limit": "1"})
+    row = {"branch": branch, "cust_no": (last[0]["cust_no"] if last else 0) + 1, "customer_id": int(customer_id), "match": "manual",
+           "shop": c[0]["name"], "truck_no": r["truck_no"], "driver_name": r.get("driver_name"), "bins": [],
+           "updated_at": datetime.utcnow().isoformat() + "Z"}
+    return supabase.insert("customer_register", [row])[0]
+
+
+def save_contact(customer_id: int, body: dict) -> dict:
+    from app import supabase
+    reg = _ensure_register(customer_id)
+    values = {}
+    for k in CONTACT:
+        if k in body:
+            v = re.sub(r"\s+", " ", str(body.get(k) or "")).strip()
+            values[k] = (v[:300] or None) if k != "loan_date" else (v if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) else None)
+    values["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    supabase.update("customer_register", {"branch": f"eq.{reg['branch']}", "cust_no": f"eq.{reg['cust_no']}"}, values)
+    return {"cust_no": reg["cust_no"]}
+
+
+def add_photos(customer_id: int, files: list[tuple[str, bytes]]) -> dict:
+    """Photos for a route customer (ID card, the signed form, the shop ...), into the private bucket."""
+    import hashlib
+    import mimetypes
+
+    from app import supabase
+    reg = _ensure_register(customer_id)
+    n = 0
+    for name, raw in files:
+        mime = mimetypes.guess_type(name)[0] or ""
+        if mime not in ("image/jpeg", "image/png", "image/webp", "application/pdf"):
+            raise CustomerError(f"{name}: รับเฉพาะรูป หรือ PDF")
+        data, out_mime, ext = shrink(raw, mime)
+        digest = hashlib.sha1(raw).hexdigest()[:16]
+        path = photo_path(reg["branch"], reg["cust_no"], digest, ext)
+        supabase.storage_upload(path, data, out_mime, upsert=True, bucket=supabase.PRIVATE_BUCKET)
+        supabase.insert("customer_photos", [{"branch": reg["branch"], "cust_no": reg["cust_no"], "storage_path": path,
+                                             "source": f"app/{reg['branch']}/{reg['cust_no']}/{digest}", "name": name[:120],
+                                             "mime_type": out_mime, "byte_size": len(data)}], on_conflict="source", ignore_duplicates=True)
+        n += 1
+    return {"added": n}
+
+
+def delete_photo(photo_id: int) -> dict:
+    from app import supabase
+    p = supabase.select("customer_photos", {"select": "id,storage_path", "id": f"eq.{int(photo_id)}", "limit": "1"})
+    if not p:
+        raise CustomerError("ไม่พบรูปนี้")
+    supabase.delete("customer_photos", {"id": f"eq.{int(photo_id)}"})
+    supabase.storage_delete([p[0]["storage_path"]], bucket=supabase.PRIVATE_BUCKET)
+    return {"ok": True}

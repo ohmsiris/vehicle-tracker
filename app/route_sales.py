@@ -687,7 +687,18 @@ def office_day(route_id: int, day: date) -> dict:
         sheet = {"id": d["id"], "doc": d["doc"], "rev": d["rev"], "status": d["status"], "totals": _public(d["totals"]),
                  "returns_foh": d.get("returns_foh"), "closed_at": d.get("closed_at"), "reopen_requested_at": d.get("reopen_requested_at"),
                  "reopen_log": d.get("reopen_log") or [], "unsent": unsent(day, d["status"], now)}
-    return {"route": r[0], "day": day.isoformat(), "today": now.date().isoformat(), "customers": _customers(r[0]["id"]),
+    from app import bins as bn
+    custs = _customers(r[0]["id"])
+    extra = {c["id"]: c for c in supabase.select_all("sale_route_customers", {"select": "id,bins_legacy,bins_other", "route_id": f"eq.{r[0]['id']}",
+                                                                              "active": "eq.true", "order": "id.asc"})}
+    have = bn.for_customers([c["id"] for c in custs])
+    for c in custs:
+        c.update({k: (extra.get(c["id"]) or {}).get(k) for k in ("bins_legacy", "bins_other")})
+        c["bins_list"] = have.get(c["id"], [])
+    clash = bn.clashes_for(custs, have)
+    for c in custs:
+        c["bins_clash"] = clash.get(c["id"], [])
+    return {"route": r[0], "day": day.isoformat(), "today": now.date().isoformat(), "customers": custs,
             "owed_before": {k: v for k, v in before.items() if abs(v) >= 1}, "sheet": sheet, "days_with_sheet": days,
             "products": [{"key": k, "label": lab, "short": SHORT[k]} for k, lab in PRODUCTS], "notes": NOTES,
             "km_start": _last_km(r[0]["id"], day), "driver_selling": bool(d and d["status"] == "open" and day == now.date())}
@@ -698,6 +709,8 @@ def office_save_day(route_id: int, day: date, doc: dict, returns: Optional[dict]
     Works for a day the phone never sent, a sent one, and a day only on paper (created here). The status stays as it was (a new
     day is 'closed': it is a finished paper sheet); every save is written in reopen_log."""
     from app import supabase
+    if day > today():
+        raise RouteSalesError("ยังไม่ถึงวันนี้ — บันทึกล่วงหน้าไม่ได้")
     doc = clean_doc(doc)
     current = _day(int(route_id), day)
     customers = {**{str(c["id"]): c for c in _customers(int(route_id))}, **walkin_customers(doc)}
@@ -710,7 +723,8 @@ def office_save_day(route_id: int, day: date, doc: dict, returns: Optional[dict]
     now = datetime.now(timezone.utc).isoformat()
     row = {"route_id": int(route_id), "day": day.isoformat(), "doc": doc, "rev": int((current or {}).get("rev") or 0) + OFFICE_REV_STEP,
            "status": status, "totals": _public(totals), "updated_at": now, "returns_foh": back or None,
-           "reopen_log": ((current or {}).get("reopen_log") or []) + [{"at": now, "what": "office_edit", "who": who}]}
+           "reopen_log": ((current or {}).get("reopen_log") or []) + [{"at": now, "what": "office_edit", "who": who}],
+           "reopen_requested_at": None}            # the driver asked for a fix: the office just made it
     if not current:
         row["closed_at"] = now
     if returns is not None:
@@ -733,7 +747,7 @@ def _clean_customer(body: dict) -> dict:
         if not name:
             raise RouteSalesError("ใส่ชื่อร้าน")
         out["name"] = name
-    if "bins" in body:
+    if "bins" in body and "bins_list" not in body:
         out["bins"] = re.sub(r"\s+", " ", str(body.get("bins") or "")).strip()[:300] or None
     if "prices" in body:
         out["prices"] = {k: _num(v) for k, v in (body.get("prices") or {}).items() if k in KEYS and _num(v) > 0}
@@ -769,7 +783,22 @@ def add_customer(route_id: int, body: dict) -> dict:
     _make_room(int(route_id), seq)
     row = supabase.insert("sale_route_customers", [{"route_id": int(route_id), "seq": seq, "prices": {}, "billing": "cash",
                                                     "added_by_driver": False, "approved": True, **values}])[0]
-    return {"id": row["id"], "seq": seq}
+    moved = _set_bins(row["id"], int(route_id), body)
+    return {"id": row["id"], "seq": seq, "moved": moved}
+
+
+def _set_bins(customer_id: int, route_id: int, body: dict, who: str = "office") -> list:
+    """The form's bins (one per bin) -> app/bins.py, which also rebuilds the shop's bins text."""
+    from app import bins as bn
+    from app import supabase
+    if "bins_list" not in body:
+        return []
+    r = supabase.select("sale_routes", {"select": "branch", "id": f"eq.{int(route_id)}", "limit": "1"})
+    try:
+        return bn.set_for_customer(customer_id, (r[0].get("branch") if r else None) or "สระบุรี", body.get("bins_list") or [],
+                                   body.get("bins_other"), body.get("_who") or who)["moved"]
+    except bn.BinError as exc:
+        raise RouteSalesError(str(exc))
 
 
 def update_customer(customer_id: int, body: dict) -> dict:
@@ -782,11 +811,13 @@ def update_customer(customer_id: int, body: dict) -> dict:
         seq = max(int(_num(body["seq"])), 1)
         _make_room(c[0]["route_id"], seq, skip_id=c[0]["id"])
         values["seq"] = seq
-    if not values:
+    moved = _set_bins(c[0]["id"], c[0]["route_id"], body)
+    if not values and "bins_list" not in body:
         raise RouteSalesError("ไม่มีอะไรเปลี่ยน")
-    values["approved"] = True
-    supabase.update("sale_route_customers", {"id": f"eq.{int(customer_id)}"}, values)
-    return {"ok": True}
+    if values:
+        values["approved"] = True
+        supabase.update("sale_route_customers", {"id": f"eq.{int(customer_id)}"}, values)
+    return {"ok": True, "moved": moved}
 
 
 def check_day(day_id: int, checked: bool = True) -> dict:
