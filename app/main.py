@@ -133,7 +133,8 @@ def _startup_checks() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True}
+    from app import route_docx
+    return {"ok": True, "pdf": bool(route_docx.soffice())}      # pdf: LibreOffice is on the server (Dockerfile)
 
 
 @app.get("/", include_in_schema=False)
@@ -2254,6 +2255,58 @@ def _sheet_day(day: str):
         return _date.fromisoformat(day)
     except ValueError:
         raise HTTPException(400, "วันที่ไม่ถูกต้อง")
+
+
+# ใบงานคนขับ as the owner's own Word sheet (app/route_docx.py), and as PDF made from it on the server
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _sheet_file(sheets: list, kind: str, name: str) -> Response:
+    from urllib.parse import quote
+
+    from app import route_docx
+    if kind == "pdf":
+        if not route_docx.soffice():
+            raise HTTPException(503, "เซิร์ฟเวอร์ยังไม่มีโปรแกรมทำ PDF — ดาวน์โหลดเป็น Word แล้วพิมพ์ หรือ Save as PDF จาก Word")
+        try:
+            data = route_docx.to_pdf(route_docx.build(sheets, marks=True))
+        except Exception:
+            logger.exception("sheet pdf")
+            raise HTTPException(502, "ทำ PDF ไม่สำเร็จ — ลองใหม่ หรือดาวน์โหลดเป็น Word")
+        return Response(content=data, media_type="application/pdf",
+                        headers={"Content-Disposition": f"inline; filename=sheet.pdf; filename*=UTF-8''{quote(name + '.pdf')}"})
+    return Response(content=route_docx.build(sheets), media_type=DOCX,
+                    headers={"Content-Disposition": f"attachment; filename=sheet.docx; filename*=UTF-8''{quote(name + '.docx')}"})
+
+
+@app.get("/api/sales-routes/all/sheet.{kind}")
+def api_sales_routes_all_sheets(kind: str, day: str = "", branch: str = "สระบุรี", x_app_token: str = Header(default=""),
+                                token: str = Query(default="")) -> Response:
+    """Every route's ใบงานคนขับ in one file (blank, or one day)."""
+    from app import route_sales, route_sheet
+    _check_token(x_app_token, token)
+    if kind not in ("docx", "pdf"):
+        raise HTTPException(404, "ไม่พบ")
+    d = _sheet_day(day)
+    routes = [r for r in _route_call(route_sales.routes_overview, branch) if r.get("active", True)]
+    sheets = [_route_call(route_sheet.load, r["id"], d) for r in routes]
+    return _sheet_file(sheets, kind, f"ใบงานคนขับ ทุกสาย {route_sheet.be_date(d.isoformat()).replace('/', '-') if d else 'ใบเปล่า'}")
+
+
+@app.get("/api/sales-routes/{route_id}/sheet.docx")
+def api_sales_route_sheet_docx(route_id: int, day: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    from app import route_sheet
+    _check_token(x_app_token, token)
+    s = _route_call(route_sheet.load, route_id, _sheet_day(day))
+    return _sheet_file([s], "docx", f"ใบงานคนขับ รถ{s['truck_no']} {route_sheet.be_date(s['day']).replace('/', '-') or 'ใบเปล่า'}")
+
+
+@app.get("/api/sales-routes/{route_id}/sheet.pdf")
+def api_sales_route_sheet_pdf(route_id: int, day: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    from app import route_sheet
+    _check_token(x_app_token, token)
+    s = _route_call(route_sheet.load, route_id, _sheet_day(day))
+    return _sheet_file([s], "pdf", f"ใบงานคนขับ รถ{s['truck_no']} {route_sheet.be_date(s['day']).replace('/', '-') or 'ใบเปล่า'}")
 
 
 @app.get("/api/sales-routes/{route_id}/sheet")

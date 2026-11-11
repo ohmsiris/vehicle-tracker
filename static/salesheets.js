@@ -62,7 +62,9 @@ async function ssOverview() {
         !r.pin_set ? el("span", { class: "badge", text: "ยังไม่ได้ตั้งรหัส" }) : null));
   });
   const all = el("div", { class: "ss-custbar" },
-    el("button", { class: "btn", type: "button", text: "พิมพ์ใบงานเปล่า ทุกสาย / PDF", onclick: () => ssPrintAll("") }));
+    el("span", { class: "small muted", text: "ใบงานเปล่า ทุกสาย:" }),
+    el("button", { class: "btn", type: "button", text: "PDF (พิมพ์)", onclick: () => ssPrintAll("", "pdf") }),
+    el("button", { class: "btn", type: "button", text: "Word", onclick: () => ssPrintAll("", "docx") }));
   fill($("ssBody"), link, all, el("div", { class: "ss-grid" }, ...blocks));
 }
 
@@ -248,7 +250,9 @@ function ssDayTab() {
     sheet && sheet.status === "checked" ? el("button", { class: "btn", type: "button", text: "ยกเลิกการตรวจ", onclick: () => ssCheck(sheet.id, false) })
       : sheet ? el("button", { class: "btn", type: "button", text: "ตรวจแล้ว ✓", onclick: () => ssCheck(sheet.id, true) }) : null,
     el("span", { class: "grow" }),
-    el("button", { class: "btn", type: "button", text: "พิมพ์ใบงาน / PDF", onclick: () => ssPrintSheet(d.route.id, sheet ? ss_.day : "") }),
+    el("span", { class: "small muted", text: "ใบงาน:" }),
+    el("button", { class: "btn", type: "button", text: "PDF (พิมพ์)", onclick: () => ssPrintSheet(d.route.id, sheet ? ss_.day : "") }),
+    el("button", { class: "btn", type: "button", text: "Word", onclick: () => ssSheetDocx(d.route.id, sheet ? ss_.day : "") }),
     el("button", { class: "btn", type: "button", text: "Excel", onclick: () => ssSheetXlsx(d.route.id, sheet ? ss_.day : "") }));
   setTimeout(ssPaintNumbers, 0);
   return el("div", {}, nav, tiles, ...warn, table, under, bar);
@@ -359,7 +363,9 @@ function ssCustomersTab() {
       el("button", { class: "btn primary", type: "button", text: "+ เพิ่มลูกค้า", onclick: () => ssEditCustomer(null) }),
       q, binQ,
       el("span", { class: "grow" }),
-      el("button", { class: "btn", type: "button", text: "พิมพ์ใบงานเปล่า / PDF", onclick: () => ssPrintSheet(d.route.id, "") }),
+      el("span", { class: "small muted", text: "ใบงานเปล่า:" }),
+      el("button", { class: "btn", type: "button", text: "PDF (พิมพ์)", onclick: () => ssPrintSheet(d.route.id, "") }),
+      el("button", { class: "btn", type: "button", text: "Word", onclick: () => ssSheetDocx(d.route.id, "") }),
       el("button", { class: "btn", type: "button", text: "Excel", onclick: () => ssSheetXlsx(d.route.id, "") })),
     binOut, table);
 }
@@ -556,125 +562,26 @@ async function ssSignOut(r) {
   await ssLoadDay();
 }
 
-// ------------------------------------------------------------------ ใบงานคนขับ: the paper sheet, from IceBox (app/route_sheet.py)
-async function ssSheetXlsx(routeId, day) {
+// ------------------------------------------------------------------ ใบงานคนขับ: the owner's own Word sheet, filled from IceBox
+// Word = app/route_docx.py (their template, rows added); PDF = that Word file turned to PDF on the server; Excel = app/route_sheet.py.
+async function ssSheetFile(path, kind) {
+  const w = kind === "pdf" ? window.open("", "_blank") : null;
+  if (kind === "pdf" && !w) { alert("เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาตป๊อปอัปของเว็บนี้แล้วลองใหม่"); return; }
+  if (w) w.document.write("<p style='font-family:sans-serif;padding:16px'>กำลังทำ PDF… (ประมาณ 10–30 วินาที)</p>");
   let res;
   try {
-    res = await fetch(`/api/sales-routes/${routeId}/sheet.xlsx${day ? `?day=${day}` : ""}`, { headers: { "X-App-Token": state.token } });
+    res = await fetch(path, { headers: { "X-App-Token": state.token } });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
-  } catch (err) { alert(`โหลดไม่สำเร็จ: ${err.message}`); return; }
-  const cd = res.headers.get("Content-Disposition") || "";
-  const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
-  const a = el("a", { href: URL.createObjectURL(await res.blob()), download: m ? decodeURIComponent(m[1]) : "sheet.xlsx" });
+  } catch (err) { if (w) w.close(); alert(err.message); return; }
+  const url = URL.createObjectURL(await res.blob());
+  if (w) { w.location.href = url; return; }
+  const m = /filename\*=UTF-8''([^;]+)/.exec(res.headers.get("Content-Disposition") || "");
+  const a = el("a", { href: url, download: m ? decodeURIComponent(m[1]) : `sheet.${kind}` });
   document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
-
-// The print view: the same sheet as HTML in a new tab, A4, black and white; the browser's print dialog saves it as PDF.
-async function ssPrintSheet(routeId, day) {
-  const w = window.open("", "_blank");
-  if (!w) { alert("เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาตป๊อปอัปของเว็บนี้แล้วลองใหม่"); return; }
-  w.document.write("<p style='font-family:sans-serif'>กำลังโหลด…</p>");
-  let s;
-  try { s = await api(`/api/sales-routes/${routeId}/sheet${day ? `?day=${day}` : ""}`); }
-  catch (err) { w.document.body.textContent = `โหลดไม่สำเร็จ: ${err.message}`; return; }
-  w.document.open();
-  w.document.write(ssSheetHtml(s));
-  w.document.close();
-  w.onload = () => setTimeout(() => w.print(), 300);
-}
-
-// The print view = the Excel sheet (owner, 11 Nov 2026: "the Excel looks a lot better"), in the Word sheets' font (TH Sarabun New).
-// every route's sheet in one print (blank: for the drivers who still write on paper; or one day for all)
-async function ssPrintAll(day = "") {
-  const w = window.open("", "_blank");
-  if (!w) { alert("เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาตป๊อปอัปของเว็บนี้แล้วลองใหม่"); return; }
-  w.document.write("<p style='font-family:sans-serif'>กำลังโหลดใบงานทุกสาย…</p>");
-  const routes = (ss_.routes || []).filter((r) => r.active !== false);
-  const docs = [];
-  for (const r of routes) {
-    try { docs.push(ssSheetHtml(await api(`/api/sales-routes/${r.id}/sheet${day ? `?day=${day}` : ""}`))); } catch (err) { /* a route that fails is left out */ }
-    w.document.body.textContent = `กำลังโหลดใบงาน ${docs.length}/${routes.length}…`;
-  }
-  if (!docs.length) { w.document.body.textContent = "โหลดไม่สำเร็จ"; return; }
-  const bodyOf = (h) => h.slice(h.indexOf("<table class=\"main\""), h.lastIndexOf("</body>"));
-  const first = docs[0];
-  const html = first.slice(0, first.indexOf("<table class=\"main\"")).replace(/<title>[^<]*<\/title>/, `<title>ใบงานคนขับ ทุกสาย</title>`) +
-    docs.map((h) => `<section class="sheet">${bodyOf(h)}</section>`).join("") + "</body></html>";
-  w.document.open(); w.document.write(html); w.document.close();
-  w.onload = () => setTimeout(() => w.print(), 400);
-}
-
-function ssSheetHtml(s) {
-  const esc = (v) => String(v == null ? "" : v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const n = (v) => (v == null || v === "" || v === 0 ? "" : Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 }));
-  const d = s.day ? s.day.split("-").reverse().join("/") : "....................";
-  const P = s.products, sm = s.summary || {};
-  const base = typeof location !== "undefined" && location.origin !== "null" ? location.origin : (globalThis.SHEET_BASE || "");
-  const cols = ["ลูกค้า", "ถัง", "ราคา", ...P.map((p) => p.label), "รวมเงิน", "เก่ายกมา", "จ่ายเก่า", "จ่ายสด", "รวมจ่าย", "ค้าง"];
-  const qcell = (r, k) => {
-    if (r.split && r.split[k] != null) return `<td class="slash"><span class="sq">${n(r.q[k])}</span><span class="sp">${n(r.split[k])}</span></td>`;
-    return `<td class="c">${n(r.q[k])}</td>`;
-  };
-  const body = s.rows.map((r) => `<tr class="${r.sold ? "sold" : ""}"><td class="nm">${esc(r.name)}</td><td class="bins">${esc(r.bins).split(", ").map((b) => `<span>${b}</span>`).join("")}</td>
-      <td class="c">${esc(r.price)}</td>${P.map((p) => qcell(r, p.key)).join("")}
-      <td class="r">${n(r.amount)}</td><td class="r">${n(r.owed_before)}</td><td class="r">${n(r.old_paid)}</td><td class="r">${n(r.paid)}</td>
-      <td class="r">${n(r.paid_all)}</td><td class="r">${r.invoice && r.amount ? "วางบิล" : n(r.owed_after)}</td></tr>`).join("");
-  const t = s.totals;
-  const foot = `<tr class="tot"><td colspan="3" class="c">รวมถุง</td>${P.map((p) => `<td class="c">${n(t.q[p.key])}</td>`).join("")}<td></td><td></td><td></td><td></td><td></td><td></td></tr>
-    <tr class="tot"><td colspan="3" class="c">รวมเงิน</td>${P.map(() => "<td></td>").join("")}<td class="r">${n(t.amount)}</td><td class="r">${n(t.owed_before)}</td>
-      <td class="r">${n(t.old_paid)}</td><td class="r">${n(t.paid)}</td><td class="r">${n(t.paid_all)}</td><td class="r">${n(t.owed_after)}</td></tr>`;
-  const loads = (sm.loads && sm.loads.length ? sm.loads.map((q, i) => [String(i + 1), q]) : [["1", {}], ["2", {}], ["3", {}]])
-    .concat([["รวม", sm.loaded || {}], ["คืน", sm.returned || {}], ["ขายได้", sm.sold || {}], ["ขาด(-) / เกิน(+)", sm.diff || {}]]);
-  const stock = `<table class="box"><tr><th>รับ</th>${P.map((p) => `<th>${p.label}</th>`).join("")}</tr>${loads.map(([l, q]) =>
-    `<tr><td class="c">${l}</td>${P.map((p) => `<td class="c">${n(q[p.key])}</td>`).join("")}</tr>`).join("")}</table>`;
-  const money = [["รวมขาย", sm.amount], ["วางบิล", sm.invoiced], ["ค้าง (ขายเชื่อ)", sm.credit], ["ขายสด", sm.cash_sales], ["จ่ายเก่า", sm.old_paid],
-    ["รวมรับเงิน", sm.expected_cash], ["ค้างยกมา", sm.owed_before], ["ค้างยกไป", sm.owed_after]];
-  const notes = [1000, 500, 100, 50, 20].map((v) => [`${v.toLocaleString()} =`, (sm.notes || {})[String(v)]]).concat([["เหรียญ =", sm.coins], ["รวมเงิน", sm.counted]]);
-  const kv = (list, cls) => `<table class="box ${cls}">${list.map(([l, v]) => `<tr><td>${l}</td><td class="r b">${n(v)}</td></tr>`).join("")}</table>`;
-  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบงานคนขับ รถ ${esc(s.truck_no)} ${esc(d)}</title><style>
-@font-face { font-family: "SheetSarabun"; src: url("${base}/static/fonts/sarabun-regular.ttf") format("truetype"); font-weight: 400; }
-@font-face { font-family: "SheetSarabun"; src: url("${base}/static/fonts/sarabun-bold.ttf") format("truetype"); font-weight: 700; }
-@page { size: A4 portrait; margin: 8mm 7mm; }
-* { box-sizing: border-box; }
-body { font-family: "SheetSarabun", "Sarabun", "TH Sarabun New", sans-serif; color: #000; background: #fff; margin: 0; font-size: 10.5pt; line-height: 1.15; }
-table { border-collapse: collapse; width: 100%; }
-.main { table-layout: fixed; }
-.main th, .main td, .box th, .box td { border: 1px solid #000; padding: 1px 3px; vertical-align: middle; }
-.main thead .hd td { border: none; padding: 0 0 3px; }
-.main th { font-weight: 700; font-size: 9pt; text-align: center; line-height: 1.05; }
-.hdgrid { display: grid; grid-template-columns: 1.9fr .9fr 1.6fr .4fr 1fr; align-items: baseline; gap: 0 6px; font-size: 10pt; }
-.hdgrid b { font-size: 13pt; white-space: nowrap; }
-.nm { font-size: 10.5pt; } tr.sold .nm { font-weight: 700; }
-.bins { font-size: 7.5pt; text-align: center; line-height: 1.1; } .bins span { display: block; white-space: nowrap; }
-.main td.r { font-size: 10pt; white-space: nowrap; }
-.c { text-align: center; } .r { text-align: right; } .b { font-weight: 700; }
-td.slash { position: relative; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cline x1='0' y1='100' x2='100' y2='0' stroke='black' stroke-width='1' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E") no-repeat center / 100% 100%; }
-td.slash .sq { position: absolute; left: 3px; top: 0; font-weight: 700; font-size: 11pt; }
-td.slash .sp { position: absolute; right: 3px; bottom: 0; font-size: 8pt; }
-tr { page-break-inside: avoid; }
-.main tbody td { height: 9mm; }
-.box td, .box th { height: 8mm; }
-.tot td { font-weight: 700; }
-.under { display: grid; grid-template-columns: 1.5fr 1.05fr .85fr; gap: 10px; margin-top: 12px; page-break-inside: avoid; align-items: start; }
-.box.money td.r, .box.notes td.r { width: 48%; font-size: 13pt; }
-.box th { font-weight: 700; text-align: center; }
-.flags { margin-top: 6px; font-size: 9.5pt; }
-.box td, .box th { font-size: 11.5pt; }
-.box td.c { font-size: 12.5pt; }
-.sheet + .sheet { page-break-before: always; }
-.bar { position: sticky; top: 0; background: #f3f3f3; padding: 8px; display: flex; gap: 8px; align-items: center; font: 13px system-ui, sans-serif; }
-.bar button { font: inherit; padding: 4px 12px; }
-@media print { .bar { display: none; } }
-</style></head><body>
-<div class="bar"><button onclick="print()">พิมพ์ / บันทึกเป็น PDF</button><span>เลือกเครื่องพิมพ์ “Save as PDF” เพื่อบันทึกเป็นไฟล์ · A4 แนวตั้ง</span></div>
-<table class="main"><colgroup><col style="width:20%"><col style="width:10%"><col style="width:5%">${P.map(() => '<col style="width:4.5%">').join("")}<col style="width:7%"><col style="width:6.2%"><col style="width:6.2%"><col style="width:6.2%"><col style="width:6.2%"><col style="width:6.2%"></colgroup>
-<thead><tr class="hd"><td colspan="${cols.length}"><div class="hdgrid">
-  <span>รถเบอร์ <b>${esc(s.truck_no)}</b></span><span>พนักงานขับรถ</span><b>${esc(s.driver)}</b><span>วันที่</span><b>${esc(d)}</b>
-  <span>สาย <b>${esc(s.route)}</b></span><span>เบอร์โทรศัพท์</span><b>${esc(s.phone)}</b><span></span><span></span></div></td></tr>
-<tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr></thead>
-<tbody>${body}${foot}</tbody></table>
-<div class="under">${stock}${kv(money, "money")}${kv(notes, "notes")}</div>
-${(sm.flags || []).length ? `<div class="flags">ที่ไม่ตรง: ${sm.flags.map(esc).join(" · ")}</div>` : ""}
-</body></html>`;
-}
+const ssQ = (day) => (day ? `?day=${day}` : "");
+const ssPrintSheet = (routeId, day) => ssSheetFile(`/api/sales-routes/${routeId}/sheet.pdf${ssQ(day)}`, "pdf");
+const ssSheetDocx = (routeId, day) => ssSheetFile(`/api/sales-routes/${routeId}/sheet.docx${ssQ(day)}`, "docx");
+const ssSheetXlsx = (routeId, day) => ssSheetFile(`/api/sales-routes/${routeId}/sheet.xlsx${ssQ(day)}`, "xlsx");
+const ssPrintAll = (day = "", kind = "pdf") => ssSheetFile(`/api/sales-routes/all/sheet.${kind}${ssQ(day)}`, kind);

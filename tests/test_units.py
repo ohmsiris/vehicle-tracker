@@ -385,8 +385,11 @@ def test_production_hardening_headers_and_no_public_docs():
 def test_railway_config_is_valid_and_points_at_the_health_check():
     import json
     cfg = json.loads((ROOT / "railway.json").read_text(encoding="utf-8"))
-    assert cfg["deploy"]["startCommand"] == "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    assert cfg["build"]["builder"] == "DOCKERFILE"                 # LibreOffice for the ใบงานคนขับ PDF (11 Nov 2026)
     assert cfg["deploy"]["healthcheckPath"] == "/health"
+    docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "python:3.12" in docker and "libreoffice-writer" in docker
+    assert "uvicorn app.main:app --host 0.0.0.0 --port ${PORT" in docker
     assert (ROOT / ".python-version").read_text().strip() == "3.12"
 
 
