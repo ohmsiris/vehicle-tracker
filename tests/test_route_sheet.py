@@ -41,3 +41,14 @@ def test_a_filled_day_carries_debts_and_walkins():
     data = rsh.to_xlsx(s)
     ws = load_workbook(BytesIO(data)).active
     assert ws.print_title_rows == "$1:$3" and ws.page_setup.orientation == "portrait"
+
+
+def test_a_shop_with_its_own_price_per_product_gets_the_diagonal_cells():
+    assert rsh.split_prices({"zong": 150, "lod": 30, "lek": 30}) == {"zong": 150.0, "lod": 30.0, "lek": 30.0}
+    assert rsh.split_prices({"lod": 40, "lek": 40}) == {}                       # one price: it goes in ราคา
+    s = rsh.build(ROUTE, CUST, None, None, [], {})
+    b = s["rows"][1]                                                            # ร้านบี: ใหญ่ 40, แพ็ค 90
+    assert b["price"] == "" and b["split"] == {"lod": 40.0, "pack": 90.0}
+    ws = load_workbook(BytesIO(rsh.to_xlsx(s))).active
+    cell = ws.cell(row=5, column=4 + 2)                                         # row 2 of the customers, column ใหญ่
+    assert str(cell.value) == "40" and cell.border.diagonalUp

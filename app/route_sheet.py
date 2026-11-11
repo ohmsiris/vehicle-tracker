@@ -19,6 +19,13 @@ from app.route_sales import KEYS, NOTES, PRODUCTS, SHORT, _num, clean_walkins
 COLS = ["ลูกค้า", "ถัง", "ราคา", *[lab for _, lab in PRODUCTS], "รวมเงิน", "เก่ายกมา", "จ่ายเก่า", "จ่ายสด", "รวมจ่าย", "ค้าง"]
 
 
+def split_prices(prices: dict, free: bool = False) -> dict:
+    """A shop with different prices per product: {product: price}. The paper leaves ราคา empty, draws a diagonal line in each priced
+    product's cell and writes that price under it (owner, 11 Nov 2026; the Word sheets do the same). One price for all: {}."""
+    p = {k: _num(v) for k, v in (prices or {}).items() if k in KEYS and _num(v) > 0}
+    return p if not free and len(set(p.values())) > 1 else {}
+
+
 def price_text(prices: dict, free: bool = False) -> str:
     """ราคา as the paper writes it: one number when every product costs the same, else one letter per product (ญ40 พ90)."""
     if free:
@@ -45,7 +52,9 @@ def build(route: dict, customers: list[dict], day: Optional[str], day_row: Optio
         paid, old = _num((ln or {}).get("paid")), _num((ln or {}).get("old_paid"))
         invoice = (ln or {}).get("billing") == "invoice"
         after = owed if invoice else owed + amount - paid - old
-        return {"name": name, "bins": bins or "", "price": price_text(prices, free), "q": {k: _num(q.get(k)) or None for k in KEYS},
+        split = split_prices(prices, free)
+        return {"name": name, "bins": bins or "", "price": "" if split else price_text(prices, free), "split": split,
+                "q": {k: _num(q.get(k)) or None for k in KEYS},
                 "amount": amount or None, "owed_before": owed or None, "old_paid": old or None, "paid": paid or None,
                 "paid_all": (paid + old) or None, "owed_after": round(after, 2) or None, "invoice": invoice, "sold": bool(ln)}
 
@@ -116,6 +125,8 @@ def be_date(iso: Optional[str]) -> str:
 # --------------------------------------------------------------------------------------------- Excel
 def to_xlsx(s: dict) -> bytes:
     from openpyxl import Workbook
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
     from openpyxl.styles import Alignment, Border, Font, Side
     from openpyxl.utils import get_column_letter
 
@@ -124,12 +135,13 @@ def to_xlsx(s: dict) -> bytes:
     ws.title = f"รถ {s['truck_no']}"
     thin = Side(style="thin", color="000000")
     box = Border(left=thin, right=thin, top=thin, bottom=thin)
-    F = "Tahoma"
-    f_n, f_b, f_h = Font(name=F, size=9), Font(name=F, size=9, bold=True), Font(name=F, size=12, bold=True)
+    F = "TH Sarabun New"                          # the Word sheets' font (16 pt there; a little smaller to fit 15 columns)
+    f_n, f_b, f_h = Font(name=F, size=14), Font(name=F, size=14, bold=True), Font(name=F, size=18, bold=True)
+    slash = Border(left=thin, right=thin, top=thin, bottom=thin, diagonal=thin, diagonalUp=True)
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
     right = Alignment(horizontal="right", vertical="center")
-    widths = [24, 10, 7, 5.5, 5.5, 5.5, 5.5, 5.5, 5.5, 9, 8, 8, 8, 9, 8]
+    widths = [24, 10, 6, 5.5, 5.5, 5.5, 5.5, 5.5, 5.5, 8.5, 7.5, 7.5, 7.5, 8.5, 7.5]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ncol = len(COLS)
@@ -159,10 +171,19 @@ def to_xlsx(s: dict) -> bytes:
     r = 4
     for row in s["rows"]:
         put(r, 1, row["name"], f_b if row["sold"] else f_n)
-        put(r, 2, row["bins"].replace(", ", "\n"), Font(name=F, size=7), center)
+        put(r, 2, row["bins"].replace(", ", "\n"), Font(name=F, size=11), center)
         put(r, 3, row["price"], f_n, center)
         for i, k in enumerate(KEYS):
-            put(r, 4 + i, row["q"][k], f_n, center, fmt=QTY)
+            if k in row["split"]:                  # this product has its own price: diagonal line, the price under it
+                p = f"{row['split'][k]:g}"
+                cell = ws.cell(row=r, column=4 + i)
+                cell.value = CellRichText(TextBlock(InlineFont(rFont=F, sz=15, b=True), f"{row['q'][k]:g}\n"), TextBlock(InlineFont(rFont=F, sz=11), p)) \
+                    if row["q"][k] else p
+                cell.font = Font(name=F, size=11)
+                cell.alignment = Alignment(horizontal="right", vertical="bottom", wrap_text=True)
+                cell.border = slash
+            else:
+                put(r, 4 + i, row["q"][k], f_n, center, fmt=QTY)
         put(r, 10, row["amount"], f_n, right, fmt=MONEY)
         for c, key in ((11, "owed_before"), (12, "old_paid"), (13, "paid"), (14, "paid_all")):
             put(r, c, row[key], f_n, right, fmt=MONEY)
@@ -171,7 +192,7 @@ def to_xlsx(s: dict) -> bytes:
         else:
             put(r, 15, "วางบิล", f_n, center)
         nb = max(1, len([b for b in row["bins"].split(", ") if b]))
-        ws.row_dimensions[r].height = max(24, 10 * nb + 4)
+        ws.row_dimensions[r].height = max(30 if row["split"] else 24, 13 * nb + 4)
         r += 1
     tt = s["totals"]
     for label, vals in (("รวมถุง", None), ("รวมเงิน", tt)):
@@ -214,21 +235,8 @@ def to_xlsx(s: dict) -> bytes:
         put(top + j, 14, lab, f_n, right)
         put(top + j, 15, v, f_b, right, fmt=MONEY)
     r = top + max(len(stock), len(money), len(notes)) + 2
-    km = [("ไมล์ใหม่", sm.get("km_end")), ("ไมล์เก่า", sm.get("km_start")), ("รถวิ่ง (กม.)", sm.get("km"))]
-    c = 1
-    for lab, v in km:
-        put(r, c, lab, f_b, left)
-        put(r, c + 1, v, f_n, right, fmt="#,##0")
-        c += 3
-    put(r, 10, "ตรวจ", f_b, left)
-    ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=12)
-    put(r, 11, "", f_n)
-    put(r, 13, "ตรวจ", f_b, left)
-    ws.merge_cells(start_row=r, start_column=14, end_row=r, end_column=15)
-    put(r, 14, "", f_n)
-    if sm.get("flags"):
-        r += 2
-        put(r, 1, "ที่ไม่ตรง: " + " · ".join(sm["flags"]), Font(name=F, size=8), left, False)
+    if sm.get("flags"):                           # (no mileage / ตรวจ row: owner, 11 Nov 2026)
+        put(r, 1, "ที่ไม่ตรง: " + " · ".join(sm["flags"]), Font(name=F, size=12), left, False)
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
         ws.row_dimensions[r].height = 28
 
