@@ -80,14 +80,14 @@ def test_only_confirmed_pages_and_typed_lines_count(monkeypatch):
 def test_a_page_with_doubtful_lines_cannot_be_confirmed(monkeypatch):
     import pytest
     from app import supabase
-    rows = [{"id": 1, "note": "ลายมือไม่ชัด", "checked": False, "counted": True, "vehicle_id": "a", "amount": 1000}, {"id": 2, "note": "x", "checked": False, "counted": False}]
+    rows = [{"id": 1, "note": "ลายมือไม่ชัด", "checked": False, "counted": True, "vehicle_id": "a", "amount": 1000}, {"id": 2, "note": "x", "checked": False, "counted": False, "dup_of": 5}]
     writes = []
     monkeypatch.setattr(supabase, "select_all", lambda table, params=None: rows)
     monkeypatch.setattr(supabase, "update", lambda table, match, body: writes.append((table, body)))
     with pytest.raises(cf.CashFuelError):
         cf.confirm_page(3, "เจ้าของ")
     assert writes == []
-    rows[0]["checked"] = True                                              # ticked "ถูกแล้ว"; the uncounted one does not block
+    rows[0]["checked"] = True                                              # ticked "ถูกแล้ว"; a duplicate does not block
     cf.confirm_page(3, "เจ้าของ")
     assert writes[-1][0] == "cash_fuel_pages" and writes[-1][1]["confirmed"] is True and writes[-1][1]["confirmed_by"] == "เจ้าของ"
 

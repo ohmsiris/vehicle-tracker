@@ -227,10 +227,16 @@ async function cfReview(id) {
   const paintConfirm = () => {
     const rows = [...ltable.querySelectorAll("tbody.cf-lrow")];
     const openNo = rows.map((b, i) => (b.classList.contains("doubt") ? i + 1 : 0)).filter(Boolean);
-    const counted = d.lines.filter((l) => l.counted);
-    const off = d.lines.length - counted.length;
-    fill(totRow, el("td", {}), el("td", { colspan: "3", text: `รวม ${counted.length} รายการที่ส่ง HQ${off ? ` (ไม่นับ ${off})` : ""}` }),
-      el("td", { class: "cf-amount", text: `฿${elN(total())}` }), el("td", {}));
+    const all = d.lines.reduce((a, l) => a + Number(l.amount || 0), 0);
+    const foh = d.lines.filter((l) => !l.counted && !l.dup_of).reduce((a, l) => a + Number(l.amount || 0), 0);
+    const w = d.page.written_total, other = Number(d.page.other_total || 0);
+    const gap = w == null ? null : Number(w) - all - other;
+    fill(totRow, el("td", {}),
+      el("td", { colspan: "3" }, el("div", { text: `รวมทั้งหน้า ${d.lines.length} รายการ` }),
+        w == null ? null : el("div", { class: `small ${Math.abs(gap) < 1 ? "ok-text" : "warn-text"}`,
+          text: `ยอดรวมที่เขียนในรูป ฿${elN(w)}${other ? ` (มีรายการอื่นที่ไม่ใช่น้ำมัน ฿${elN(other)})` : ""} · ${Math.abs(gap) < 1 ? "ตรง" : `ไม่ตรง ต่าง ฿${elN(Math.abs(gap))}`}` }),
+        foh ? el("div", { class: "small muted", text: `ส่ง HQ ฿${elN(total())} · ไม่รวมหน้าโรง ฿${elN(foh)}` }) : null),
+      el("td", { class: "cf-amount", text: `฿${elN(all)}` }), el("td", {}));
     confirmBtn.textContent = d.page.confirmed ? "ยืนยันแล้ว" : "ยืนยันหน้านี้";
     confirmBtn.disabled = !!openNo.length || d.page.confirmed;
     why.textContent = d.page.confirmed || !openNo.length ? "" : `ยังกดไม่ได้: แถวที่ ${openNo.slice(0, 6).join(", ")}${openNo.length > 6 ? " …" : ""} ยังต้องดู (สีส้ม)`;
@@ -261,7 +267,7 @@ function cfReasons(l) {
   if (l.counted && !l.vehicle_id && !l.no_truck) out.push("ยังไม่ได้เลือกรถ — เลือกรถ (หรือ “ไม่มีทะเบียนรถ”) หรือลบแถว");
   if (l.counted && !(Number(l.amount) > 0)) out.push("ยังไม่มียอด");
   // "ไม่พบรถ" is settled once a truck (or ไม่มีทะเบียนรถ) is chosen; while none is, the line above says so
-  if (l.note && !l.checked && l.counted) out.push(...l.note.split(" · ").filter((r) => r && r !== "ไม่พบรถ").map(cfPlain));
+  if (l.note && !l.checked && !l.dup_of) out.push(...l.note.split(" · ").filter((r) => r && r !== "ไม่พบรถ" && !r.startsWith("ซ้ำกับ")).map(cfPlain));
   return out;
 }
 
@@ -291,7 +297,7 @@ function cfLineCard(l, d, n, onRemove) {
   const paint = () => {
     const doubt = cfDoubt(l);
     const foh = !l.counted && !l.dup_of && ((d.people || {}).foh || []).some((p) => p.name === l.driver_name);
-    body.className = `cf-lrow${doubt ? " doubt" : ""}${l.counted ? "" : " off"}`;
+    body.className = `cf-lrow${doubt ? " doubt" : ""}`;
     const reasons = cfReasons(l);
     fill(body,
       el("tr", {},
@@ -304,10 +310,10 @@ function cfLineCard(l, d, n, onRemove) {
         el("td", { class: "cf-amount" }, el("input", { type: "text", inputmode: "decimal", value: String(Number(l.amount)), onchange: (e) => save({ amount: e.target.value }) })),
         el("td", { class: "cf-acts" },
           doubt && !cfMissing(l) ? el("button", { class: "btn small primary", type: "button", text: "ถูกแล้ว", title: "ดูกับรูปแล้ว ถูกต้อง", onclick: () => save({ checked: true }) })
-            : !doubt && l.note && l.checked && l.counted ? el("span", { class: "ok-text small", text: "✓ ดูแล้ว" }) : null,
+            : !doubt && l.note && l.checked ? el("span", { class: "ok-text small", text: "✓ ดูแล้ว" }) : null,
+          foh ? el("span", { class: "cf-tag", text: "หน้าโรง", title: "อยู่ในยอดรวมของหน้านี้ แต่ไม่อยู่ในรายงานส่ง HQ" }) : null,
           el("button", { class: "btn small cf-del", type: "button", text: "ลบ", title: "ลบแถวนี้ (อ่านผิด หรือไม่ใช่ค่าน้ำมัน)", onclick: del }))),
       doubt ? el("tr", { class: "cf-whyrow" }, el("td", {}), el("td", { colspan: "5" }, reasons.join(" · "))) : null,
-      foh ? el("tr", { class: "cf-inforow" }, el("td", {}), el("td", { colspan: "5" }, "คนเบิกเป็นหน้าโรง — เก็บไว้ แต่ไม่รวมในรายการส่ง HQ")) : null,
       !l.counted && l.dup_of ? el("tr", { class: "cf-inforow" }, el("td", {}), el("td", { colspan: "5" }, "ซ้ำกับรายการในรูปอื่นที่นับแล้ว — ไม่นับซ้ำ ",
         el("button", { class: "btn small", type: "button", text: "ไม่ซ้ำ นับด้วย", onclick: () => save({ counted: true }) }))) : null);
   };

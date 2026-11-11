@@ -111,8 +111,9 @@ SCHEMA = {
                 "unsure": {"type": "boolean"},
             },
             "required": ["date", "text", "is_fuel", "plate", "truck_number", "amount", "requester", "position", "unsure"]}},
+        "page_total": {"type": ["number", "null"], "description": "the total written on the page (often in red), null if none"},
     },
-    "required": ["lines"],
+    "required": ["lines", "page_total"],
 }
 
 PROMPT = """You read a page of a Thai ice factory's handwritten expense list (รายการเบิก). Columns: วัน/เดือน/ปี (date), รายการ (what),
@@ -129,7 +130,9 @@ Return EVERY line on the page, top to bottom, exactly as written:
 - amount: the จำนวนเงิน as a number (no commas). A stray leading mark like ",1000" or "1,000" is 1000.
 - requester / position: as read; null if blank.
 - unsure: true if you could not read the amount, date, plate or number with confidence.
-Do not invent lines; skip empty rows."""
+Do not invent lines; skip empty rows.
+page_total: the page's total as written on it (usually at the bottom of the จำนวนเงิน column, often in red ink); null if none is written.
+Read it as written: do not add the lines up yourself."""
 
 
 READ_MODEL = "claude-opus-5-5"     # the handwriting is hard: the most capable Opus, high effort, and every page read twice
@@ -162,7 +165,9 @@ def read_twice(data: bytes, mime: str) -> dict:
     compared with it line by line."""
     with ThreadPoolExecutor(max_workers=2) as pool:
         a, b = pool.map(lambda _: read_page(data, mime), (1, 2))
-    return {"lines": a.get("lines") or [], "second": b.get("lines") or []}
+    total = a.get("page_total") if a.get("page_total") is not None else b.get("page_total")
+    return {"lines": a.get("lines") or [], "second": b.get("lines") or [], "page_total": total,
+            "page_total_second": b.get("page_total")}
 
 
 def _same(x, y, key: str) -> bool:
@@ -417,10 +422,13 @@ def pending(branch: str) -> list[dict]:
 def page_detail(page_id: int, branch: str = "สระบุรี") -> dict:
     """One page to check: the page, its fuel lines (the doubtful ones first), and the choices for truck / คนเบิก."""
     from app import supabase
-    p = supabase.select("cash_fuel_pages", {"select": "id,name,status,error,confirmed,confirmed_at,confirmed_by,created_at,branch",
+    p = supabase.select("cash_fuel_pages", {"select": "id,name,status,error,confirmed,confirmed_at,confirmed_by,created_at,branch,raw",
                                             "id": f"eq.{int(page_id)}", "limit": "1"})
     if not p:
         raise CashFuelError("ไม่พบรูปนี้")
+    raw = p[0].pop("raw", None) or {}
+    p[0]["written_total"] = raw.get("page_total")                     # the red number on the page, as read
+    p[0]["other_total"] = round(sum(float(x.get("amount") or 0) for x in raw.get("lines") or [] if not x.get("is_fuel")), 2)   # non-fuel lines
     lines = supabase.select_all("cash_fuel_lines", {"select": "*", "page_id": f"eq.{int(page_id)}", "order": "seq.asc"})
     queue = [x["id"] for x in pending(p[0]["branch"])]
     return {"page": p[0], "lines": lines, "queue": queue, **_choices(p[0]["branch"])}
@@ -429,10 +437,10 @@ def page_detail(page_id: int, branch: str = "สระบุรี") -> dict:
 def confirm_page(page_id: int, who: str, confirmed: bool = True) -> dict:
     """ยืนยันหน้านี้: the page has been checked against the photo; its lines now count. Every doubtful line must be ticked first."""
     from app import supabase
-    lines = supabase.select_all("cash_fuel_lines", {"select": "id,note,checked,counted,vehicle_id,no_truck,amount", "page_id": f"eq.{int(page_id)}", "order": "id.asc"})
+    lines = supabase.select_all("cash_fuel_lines", {"select": "id,note,checked,counted,dup_of,vehicle_id,no_truck,amount", "page_id": f"eq.{int(page_id)}", "order": "id.asc"})
     if confirmed:
-        open_ = [ln for ln in lines if ln.get("note") and not ln.get("checked") and ln.get("counted")
-                 and [r for r in ln["note"].split(" · ") if r and r != "ไม่พบรถ"]]
+        open_ = [ln for ln in lines if ln.get("note") and not ln.get("checked") and not ln.get("dup_of")
+                 and [r for r in ln["note"].split(" · ") if r and r != "ไม่พบรถ" and not r.startswith("ซ้ำกับ")]]
         if open_:
             raise CashFuelError(f"ยังมี {len(open_)} รายการที่ต้องดูกับรูป — กด “ถูกแล้ว” หรือแก้ / ลบแถว ก่อนยืนยัน")
         empty = [ln for ln in lines if ln.get("counted") and ((not ln.get("vehicle_id") and not ln.get("no_truck")) or float(ln.get("amount") or 0) <= 0)]

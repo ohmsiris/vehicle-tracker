@@ -2041,3 +2041,11 @@ body.signed-out .shell { display: block; }
 .cf-why-bar { align-self: center; }
 .cf-rbar .btn.danger { color: #fff; background: var(--bad, #c4320a); border-color: var(--bad, #c4320a); }
 .cf-rbar .btn.danger:hover:not(:disabled) { background: #a32a08; color: #fff; }
+
+.cf-ltable tbody.off td input, .cf-ltable tbody.off td select { opacity: 1; }
+.cf-tag { display: inline-block; font-size: 12px; color: var(--muted); background: var(--surface-2, #f1efe9); border-radius: 999px; padding: 1px 8px; margin-right: 4px; white-space: nowrap; }
+.cf-ltable tr.cf-totrow td { vertical-align: top; }
+.cf-ltable tr.cf-totrow td div.small { font-weight: 500; font-size: 13px; margin-top: 2px; }
+/* the checking screen uses a big screen's width (owner, 11 Nov 2026: 1920 x 1080) */
+main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
+@media (min-width: 1400px) { .cf-review { grid-template-columns: minmax(0, 1fr) minmax(640px, 1fr); } }
