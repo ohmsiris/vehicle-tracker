@@ -116,20 +116,23 @@ function ssLine(c) {             // one customer's line, worked out like the ser
   const s = ss_.doc.sales[String(c.id)] || {};
   const q = s.q || {};
   const free = !!(c.free || s.free);
-  const full = c.free ? 0 : Object.entries(q).reduce((a, [k, v]) => a + ssN(v) * ssN((c.prices || {})[k]), 0);
+  const byPrice = Object.entries(q).reduce((a, [k, v]) => a + ssN(v) * ssN((c.prices || {})[k]), 0);
+  const set = s.office_amount != null && s.office_amount !== "";            // the office typed the line's total (owner, 11 Nov 2026)
+  const unpriced = !c.free && !set && Object.entries(q).some(([k, v]) => ssN(v) && !ssN((c.prices || {})[k]));
+  const full = c.free ? 0 : set ? Math.max(ssN(s.office_amount), 0) : byPrice;
   const gross = free ? 0 : full;
   const amount = Math.max(gross - Math.min(Math.max(ssN(s.discount), 0), gross), 0);
   const invoice = c.billing === "invoice";
   const paid = invoice || free ? 0 : c.walkin ? amount : Math.min(Math.max(s.paid == null || s.paid === "" ? amount : ssN(s.paid), 0), amount);
   const old = Math.max(ssN(s.old_paid), 0);
   const before = ssN(ss_.data.owed_before[String(c.id)]);
-  return { s, q, free, amount, invoice, paid, old, before, after: invoice ? before : before + amount - paid - old,
+  return { s, q, free, amount, invoice, paid, old, before, after: invoice ? before : before + amount - paid - old, byPrice, set, unpriced,
     sold: Object.values(q).some((v) => ssN(v)) || old > 0 };
 }
 
 function ssTotals() {
   const P = ss_.data.products.map((p) => p.key);
-  const t = { amount: 0, cash: 0, credit: 0, invoiced: 0, old: 0, shops: 0, sold: {}, loaded: {} };
+  const t = { amount: 0, cash: 0, credit: 0, invoiced: 0, old: 0, shops: 0, sold: {}, loaded: {}, back: {} };
   P.forEach((k) => { t.sold[k] = 0; t.loaded[k] = 0; });
   ssCustomers().forEach((c) => {
     const ln = ssLine(c);
@@ -139,6 +142,7 @@ function ssTotals() {
     P.forEach((k) => { t.sold[k] += ssN(ln.q[k]); });
   });
   (ss_.doc.loads || []).forEach((ld) => P.forEach((k) => { t.loaded[k] += ssN((ld.q || {})[k]); }));
+  P.forEach((k) => { t.back[k] = ssN((ss_.returns || {})[k]); });
   const cash = ss_.doc.cash || {};
   t.expected = t.cash + t.old;
   t.counted = ss_.data.notes.reduce((a, n) => a + ssN(cash[String(n)]) * n, 0) + ssN(cash.coins);
@@ -196,7 +200,12 @@ function ssDayTab() {
     el("th", { class: "r", text: "รับเงิน" }), el("th", { class: "r", text: "ค้าง" }));
   const rows = ssCustomers().map((c) => {
     const ln = ssLine(c);
-    const cells = { amount: el("td", { class: "r b" }), after: el("td", { class: "r" }), paid: el("td", { class: "r" }) };
+    const cells = { amount: el("td", { class: "r b ss-amt" }), after: el("td", { class: "r" }), paid: el("td", { class: "r" }) };
+    if (!c.free) cells.amount.append(ssNumIn(ln.s.office_amount, (v) => {
+      const s = ss_.doc.sales[String(c.id)] || (ss_.doc.sales[String(c.id)] = { q: {} });
+      if (v === "") delete s.office_amount; else s.office_amount = ssN(v);
+      ssPaintRow(c, cells);
+    }, { "aria-label": `${c.name} รวมเงิน`, title: "ว่าง = คิดจากราคา × จำนวน · พิมพ์ตัวเลขเพื่อใส่ยอดเอง" }), el("div", { class: "ss-amtnote small" }));
     const tr = el("tr", { class: `${ln.sold ? "sold" : ""}${c.walkin ? " walk" : ""}` },
       el("td", { class: "muted", text: c.seq ? String(c.seq) : "+" }),
       el("td", {}, c.walkin ? el("span", { class: "badge bad", text: "เพิ่มเอง" }) : null, el("span", { text: ` ${c.name}` }),
@@ -222,7 +231,8 @@ function ssDayTab() {
     ssPaintRow(c, cells);
     return tr;
   });
-  const table = el("div", { class: "ss-tablewrap soft" }, el("table", { class: "ss-table" }, el("thead", {}, head), el("tbody", {}, ...rows)));
+  const table = el("div", { class: "ss-tablewrap soft" }, el("table", { class: "ss-table" }, el("thead", {}, head), el("tbody", {}, ...rows),
+    el("tfoot", {}, el("tr", { class: "ss-totrow", id: "ssFootRow" }))));
 
   // รับ / คืน, money counted, mileage
   const loads = el("table", { class: "ss-mini" },
@@ -233,12 +243,17 @@ function ssDayTab() {
         el("td", {}, ss_.doc.loads.length > 1 ? el("button", { class: "btn small", type: "button", text: "ลบ", onclick: () => { ss_.doc.loads.splice(i, 1); ss_.dirty = true; ssRenderDriver(); } }) : null))),
       el("tr", {}, el("td", { text: "คืน (หน้าโรงนับ)" }), ...P.map((p) => el("td", { class: "c" }, ssNumIn((ss_.returns || {})[p.key], (v) => {
         ss_.returns = ss_.returns || {}; if (v === "") delete ss_.returns[p.key]; else ss_.returns[p.key] = ssN(v); }))), el("td", {})),
-      el("tr", { class: "muted", id: "ssLeftRow" })));
+      el("tr", { class: "muted", id: "ssSoldRow" }),
+      el("tr", { class: "ss-totrow", id: "ssLeftRow" })));
   const cash = ss_.doc.cash || (ss_.doc.cash = {});
   const money = el("table", { class: "ss-mini" },
-    el("thead", {}, el("tr", {}, el("th", { text: "เงินที่นับได้" }), el("th", { class: "c", text: "จำนวน" }))),
-    el("tbody", {}, ...d.notes.map((n) => el("tr", {}, el("td", { text: `แบงก์ ${elN(n)}` }), el("td", { class: "c" }, ssNumIn(cash[String(n)], (v) => { if (v === "") delete cash[String(n)]; else cash[String(n)] = ssN(v); })))),
-      el("tr", {}, el("td", { text: "เหรียญ (บาท)" }), el("td", { class: "c" }, ssNumIn(cash.coins, (v) => { if (v === "") delete cash.coins; else cash.coins = ssN(v); })))));
+    el("thead", {}, el("tr", {}, el("th", { text: "เงินที่นับได้" }), el("th", { class: "c", text: "จำนวน" }), el("th", { class: "r", text: "เป็นเงิน" }))),
+    el("tbody", {}, ...d.notes.map((n) => el("tr", {}, el("td", { text: `แบงก์ ${elN(n)}` }), el("td", { class: "c" }, ssNumIn(cash[String(n)], (v) => { if (v === "") delete cash[String(n)]; else cash[String(n)] = ssN(v); })),
+        el("td", { class: "r", id: `ssCash${n}` }))),
+      el("tr", {}, el("td", { text: "เหรียญ (บาท)" }), el("td", { class: "c" }, ssNumIn(cash.coins, (v) => { if (v === "") delete cash.coins; else cash.coins = ssN(v); })), el("td", { class: "r", id: "ssCashcoins" }))),
+    el("tfoot", {}, el("tr", { class: "ss-totrow" }, el("td", { text: "รวมนับได้" }), el("td", {}), el("td", { class: "r", id: "ssCashTot" })),
+      el("tr", {}, el("td", { text: "เงินสดต้องมี" }), el("td", {}), el("td", { class: "r", id: "ssCashWant" })),
+      el("tr", {}, el("td", { id: "ssCashDiffL" }), el("td", {}), el("td", { class: "r", id: "ssCashDiff" }))));
   const km = el("div", { class: "ss-km" },
     el("label", {}, "ไมล์ใหม่ ", ssNumIn(ss_.doc.km_end, (v) => { ss_.doc.km_end = v === "" ? null : ssN(v); }, { "aria-label": "ไมล์ใหม่" })),
     el("span", { class: "muted small", text: `ไมล์เก่า ${d.km_start ? elN(d.km_start) : "—"}` }));
@@ -269,7 +284,15 @@ function ssPrice(c) {
 
 function ssPaintRow(c, cells) {
   const ln = ssLine(c);
-  cells.amount.textContent = ln.amount ? elN(ln.amount) : "";
+  const ain = cells.amount.querySelector("input"), note = cells.amount.querySelector(".ss-amtnote");
+  if (ain) {
+    ain.placeholder = ln.byPrice ? elN(ln.byPrice) : "";
+    ain.classList.toggle("set", ln.set);
+    if (note) {
+      note.textContent = ln.unpriced ? "ไม่มีราคา — ใส่ยอดเอง" : ln.set && Math.abs(ln.byPrice - ln.amount) >= 1 && ln.byPrice ? `ตามราคา ${elN(ln.byPrice)}` : "";
+      note.className = `ss-amtnote small ${ln.unpriced ? "warn-text" : "muted"}`;
+    }
+  } else cells.amount.textContent = ln.amount ? elN(ln.amount) : "";
   cells.after.textContent = ln.invoice ? (ln.amount ? "วางบิล" : "") : ln.after >= 1 ? elN(ln.after) : "";
   cells.after.className = `r${ln.after >= 1 && !ln.invoice ? " warn-text" : ""}`;
   const inp = cells.paid.querySelector("input");
@@ -291,11 +314,26 @@ function ssPaintNumbers() {
     tile("ค้าง (ขายเชื่อ)", `฿${elN(t.credit)}`),
     tile("วางบิล", `฿${elN(t.invoiced)}`),
     tile("วิ่ง", t.km != null ? `${elN(t.km)} กม.` : "—"));
+  const sold = $("ssSoldRow");
+  if (sold) fill(sold, el("td", { text: "ขาย (จากตาราง)" }), ...P.map((p) => el("td", { class: "c", text: t.sold[p.key] ? elN(t.sold[p.key]) : "" })), el("td", {}));
   const left = $("ssLeftRow");
-  if (left) fill(left, el("td", { text: "รับ − ขาย = เหลือ" }), ...P.map((p) => {
-    const v = t.loaded[p.key] - t.sold[p.key];
-    return el("td", { class: `c${v < 0 ? " warn-text" : ""}`, text: t.loaded[p.key] || t.sold[p.key] ? elN(v) : "" });
+  if (left) fill(left, el("td", { text: "รับ − ขาย − คืน = เหลือ" }), ...P.map((p) => {
+    const v = t.loaded[p.key] - t.sold[p.key] - t.back[p.key];
+    return el("td", { class: `c${Math.abs(v) >= 1 ? " warn-text" : ""}`, text: t.loaded[p.key] || t.sold[p.key] || t.back[p.key] ? elN(v) : "" });
   }), el("td", {}));
+  const foot = $("ssFootRow");
+  if (foot) fill(foot, el("td", {}), el("td", { text: `รวม ${t.shops} ร้าน` }), el("td", {}),
+    ...P.map((p) => el("td", { class: "c", text: t.sold[p.key] ? elN(t.sold[p.key]) : "" })),
+    el("td", { class: "r", text: elN(t.amount) }), el("td", {}), el("td", { class: "r", text: t.old ? elN(t.old) : "" }),
+    el("td", { class: "r", text: elN(t.cash) }), el("td", { class: "r", text: t.credit ? elN(t.credit) : "" }));
+  const cash = ss_.doc.cash || {};
+  ss_.data.notes.concat(["coins"]).forEach((n) => { const c = $(`ssCash${n}`); if (c) c.textContent = ssN(cash[String(n)]) ? elN(ssN(cash[String(n)]) * (n === "coins" ? 1 : n)) : ""; });
+  const put = (id, v) => { const c = $(id); if (c) c.textContent = v; };
+  put("ssCashTot", t.hasCash ? `฿${elN(t.counted)}` : "—");
+  put("ssCashWant", `฿${elN(t.expected)}`);
+  put("ssCashDiffL", diff == null ? "" : Math.abs(diff) < 1 ? "ตรง" : diff > 0 ? "เกิน" : "ขาด");
+  put("ssCashDiff", diff == null || Math.abs(diff) < 1 ? "" : `฿${elN(Math.abs(diff))}`);
+  ["ssCashDiffL", "ssCashDiff"].forEach((id) => { const c = $(id); if (c) c.className = `${id === "ssCashDiff" ? "r " : ""}${diff != null && Math.abs(diff) >= 1 ? "warn-text b" : "ok-text"}`; });
 }
 
 async function ssSaveDay() {

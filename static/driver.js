@@ -78,6 +78,7 @@
   function isFree(c, sale) { return !!(c.free || (sale && sale.free)); }
   function grossOf(c, sale) {
     if (isFree(c, sale)) return 0;
+    if (sale && sale.office_amount != null && sale.office_amount !== "") return Math.max(n(sale.office_amount), 0);   // the office set this line's total
     var t = 0; products().forEach(function (p) { var q = n(sale && sale.q && sale.q[p.key]); if (q) t += q * (priceOf(c, sale, p.key) || 0); });
     return Math.round(t * 100) / 100;
   }

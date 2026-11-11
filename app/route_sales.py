@@ -142,11 +142,12 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
         cust = customers.get(str(cid)) or {}
         free = bool(cust.get("free") or s.get("free"))
         price = cust.get("prices") or {}                 # the route list's price only: the phone cannot change a price (owner, 10 Nov 2026)
-        if not cust.get("free"):
+        set_by_office = s.get("office_amount") not in (None, "")          # the office typed the line's total itself (owner, 11 Nov 2026)
+        if not cust.get("free") and not set_by_office:
             unpriced = [lab for k, lab in PRODUCTS if q[k] and _num(price.get(k)) <= 0]
             if unpriced:
                 flags_extra.append(f"{cust.get('name') or cid}: ขาย {' '.join(unpriced)} แต่ร้านนี้ไม่มีราคา")
-        full = 0.0 if cust.get("free") else line_amount(q, price)          # what the line is worth at the customer's price
+        full = 0.0 if cust.get("free") else round(max(_num(s.get("office_amount")), 0.0), 2) if set_by_office             else line_amount(q, price)                                     # what the line is worth at the customer's price
         gross = 0.0 if free else full
         disc = 0.0 if free else min(max(_num(s.get("discount")), 0.0), gross)
         amount = round(gross - disc, 2)
@@ -397,6 +398,10 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
     customers = {**{str(c["id"]): c for c in _customers(route_id)}, **walkin_customers(doc)}
     id_map: dict = {}
     doc["sales"] = {k: v for k, v in (doc.get("sales") or {}).items() if k in customers}      # a deleted customer's line is dropped
+    had = ((current or {}).get("doc") or {}).get("sales") or {}
+    for k, v in doc["sales"].items():                     # a line total only the office sets: the phone keeps the office's, never its own
+        if isinstance(v, dict) and "office_amount" in v and v.get("office_amount") != (had.get(k) or {}).get("office_amount"):
+            v.pop("office_amount")
     totals = compute(doc, customers, (current or {}).get("returns_foh"), _last_km(route_id, day))
     status = "closed" if doc.get("closed") else "open"
     now = datetime.now(timezone.utc).isoformat()
@@ -702,7 +707,7 @@ def clean_doc(doc: dict) -> dict:
         if not isinstance(s, dict):
             continue
         line = {"q": q(s.get("q"))}
-        for k in ("paid", "old_paid", "discount"):
+        for k in ("paid", "old_paid", "discount", "office_amount"):
             if s.get(k) not in (None, ""):
                 line[k] = max(_num(s.get(k)), 0.0)
         for k in ("free",):

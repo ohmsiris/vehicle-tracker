@@ -160,3 +160,12 @@ def test_an_order_keeps_only_real_products_and_the_phone_orders_today_or_tomorro
     assert saved == [(30, date(2026, 11, 12), {"lod": 5}, "ทดสอบ")]
     with pytest.raises(rs.RouteSalesError):
         rs.driver_order({"route_id": 30, "name": "x"}, "2026-11-14", {"lod": 5})
+
+
+def test_the_office_can_set_a_line_total():
+    customers = {"1": {"name": "ร้าน", "prices": {"lod": 50}}}
+    t = rs.compute({"sales": {"1": {"q": {"lod": 1, "lek": 4}}}}, customers)
+    assert t["amount"] == 50 and any("ไม่มีราคา" in f for f in t["flags"])
+    t = rs.compute({"sales": {"1": {"q": {"lod": 1, "lek": 4}, "office_amount": 250}}}, customers)
+    assert t["amount"] == 250 and not any("ไม่มีราคา" in f for f in t["flags"])
+    assert rs.clean_doc({"sales": {"1": {"q": {"lod": 1}, "office_amount": "250"}}})["sales"]["1"]["office_amount"] == 250

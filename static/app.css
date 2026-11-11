@@ -2021,3 +2021,10 @@ body.signed-out .shell { display: block; }
 .cf-ltable tbody.off td { opacity: .5; }
 .cf-ltable .cf-acts .btn + .btn { margin-left: 4px; }
 .cf-ltable .cf-acts .dtf, .cf-ltable .dtf { min-width: 0; }
+
+/* ใบขายรายวัน: the line total can be typed; totals under the table, the loads and the money */
+.ss-table td.ss-amt .ss-in { width: 84px; text-align: right; font-weight: 700; }
+.ss-table td.ss-amt .ss-in.set { border-color: var(--accent); background: var(--accent-soft); }
+.ss-amtnote { font-weight: 400; white-space: nowrap; }
+.ss-table tfoot td, .ss-mini tr.ss-totrow td { font-weight: 700; background: var(--surface-2, #f1efe9); }
+.ss-mini td.r, .ss-mini th.r { text-align: right; padding-right: 10px; }
