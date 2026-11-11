@@ -401,12 +401,13 @@ def pending(branch: str) -> list[dict]:
                                                     "order": "id.asc"})
     if not pages:
         return []
-    lines = supabase.select_all("cash_fuel_lines", {"select": "page_id,day,amount,note,checked,counted",
+    lines = supabase.select_all("cash_fuel_lines", {"select": "page_id,day,amount,note,checked,counted,vehicle_id",
                                                     "page_id": f"in.({','.join(str(p['id']) for p in pages)})", "order": "id.asc"})
     for p in pages:
         mine = [ln for ln in lines if ln["page_id"] == p["id"]]
         days = sorted(ln["day"] for ln in mine)
-        p.update({"lines": len(mine), "to_check": sum(1 for ln in mine if ln.get("note") and not ln.get("checked")),
+        p.update({"lines": len(mine), "to_check": sum(1 for ln in mine if ln.get("counted") and (
+                      (ln.get("note") and not ln.get("checked")) or not ln.get("vehicle_id") or float(ln.get("amount") or 0) <= 0)),
                   "from": days[0] if days else None, "to": days[-1] if days else None,
                   "total": round(sum(float(ln["amount"] or 0) for ln in mine if ln.get("counted")), 2)})
     return pages
@@ -434,7 +435,7 @@ def confirm_page(page_id: int, who: str, confirmed: bool = True) -> dict:
             raise CashFuelError(f"ยังมี {len(open_)} รายการที่ต้องดูกับรูป — กด “ถูกแล้ว” หรือแก้ / ลบแถว ก่อนยืนยัน")
         empty = [ln for ln in lines if ln.get("counted") and (not ln.get("vehicle_id") or float(ln.get("amount") or 0) <= 0)]
         if empty:
-            raise CashFuelError(f"ยังมี {len(empty)} แถวที่ไม่มีรถหรือยอด — ใส่ให้ครบ หรือลบแถว ก่อนยืนยัน")
+            raise CashFuelError(f"ยังมี {len(empty)} แถวที่ยังไม่ได้เลือกรถหรือไม่มียอด — ใส่ให้ครบ หรือลบแถว ก่อนยืนยัน")
         supabase.update("cash_fuel_lines", {"page_id": f"eq.{int(page_id)}"}, {"checked": True})
     now = datetime.now(timezone.utc).isoformat()
     supabase.update("cash_fuel_pages", {"id": f"eq.{int(page_id)}"},

@@ -2035,3 +2035,9 @@ body.signed-out .shell { display: block; }
 .cf-ltable tbody.off td input, .cf-ltable tbody.off td select { opacity: .6; }
 .cf-ltable tbody.off td { opacity: 1; }
 .cf-addrow { justify-self: start; margin-top: 6px; }
+
+.cf-ltable tr.cf-totrow td { font-weight: 700; font-size: 15px; padding-top: 10px; background: transparent; }
+.cf-ltable tr.cf-totrow td.cf-amount { text-align: right; padding-right: 10px; }
+.cf-why-bar { align-self: center; }
+.cf-rbar .btn.danger { color: #fff; background: var(--bad, #c4320a); border-color: var(--bad, #c4320a); }
+.cf-rbar .btn.danger:hover:not(:disabled) { background: #a32a08; color: #fff; }
