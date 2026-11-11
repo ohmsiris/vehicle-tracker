@@ -501,64 +501,92 @@ def summary(lines: list[dict], roster: list[dict], batch: Optional[int] = None) 
         fills = sorted(g["fills"], key=lambda f: f["day"])
         trucks.append({"truck_no": v.get("truck_number") or "", "plate": v.get("plate") or "ไม่ทราบรถ", "driver": ", ".join(n for n, _ in g["drivers"].most_common(2)),
                        "fills": fills, "total": round(sum(f["amount"] for f in fills), 2)})
-    return {"trucks": trucks, "total": round(sum(t["total"] for t in trucks), 2), "fills": sum(len(t["fills"]) for t in trucks)}
+    rows = []                                                           # by date (owner, 11 Nov: HQ gets both lists)
+    for ln in lines:
+        if not ln.get("counted") or (batch and ln.get("batch") != batch):
+            continue
+        v = by_id.get(ln.get("vehicle_id")) or {}
+        rows.append({"day": ln["day"], "truck_no": v.get("truck_number") or "", "plate": v.get("plate") or "ไม่ทราบรถ",
+                     "driver": short_name(ln["driver_name"]) if ln.get("driver_name") else "", "amount": float(ln.get("amount") or 0),
+                     "_k": (ln["day"], _truck_key(v or None))})
+    rows.sort(key=lambda x: x.pop("_k"))
+    return {"trucks": trucks, "by_date": rows, "total": round(sum(t["total"] for t in trucks), 2), "fills": sum(len(t["fills"]) for t in trucks)}
 
 
 def to_xlsx(month: str, s: dict, batch: Optional[int] = None) -> bytes:
-    """The รายการค่าน้ำมัน as the bookkeeper's: title, period, one block per truck (number, plate and driver over all its fills, its
-    total), the grand total. TH Sarabun New, A4."""
+    """The รายการค่าน้ำมัน as the bookkeeper's, two sheets: by date (one row per fill, in date order) and by truck (number, plate
+    and driver over all its fills, its total). Grand total at the end of each. TH Sarabun New, A4, black and white."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, Side
     start, end = period(month, batch)
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "รายการค่าน้ำมัน"
     F = "TH Sarabun New"
     thin = Side(style="thin", color="000000")
     box = Border(left=thin, right=thin, top=thin, bottom=thin)
     c, l = Alignment(horizontal="center", vertical="center", wrap_text=True), Alignment(horizontal="left", vertical="center")
-    for col, w in zip("ABCDEF", (9, 16, 21, 18, 12, 13)):
-        ws.column_dimensions[col].width = w
-    ws.merge_cells("A1:F1")
-    ws["A1"], ws["A1"].font, ws["A1"].alignment = "รายการค่าน้ำมัน", Font(name=F, size=20, bold=True), c
-    ws.merge_cells("A2:F2")
-    ws["A2"] = f"วันที่ {start.day} {TH_MONTHS[start.month]} {start.year + 543}  ถึงวันที่ {end.day} {TH_MONTHS[end.month]} {end.year + 543}"
-    ws["A2"].font, ws["A2"].alignment = Font(name=F, size=15), l
-    for i, h in enumerate(("รถเบอร์", "ทะเบียนรถ", "พนักงานขับรถ", "วัน/เดือน/ปี", "จำนวน", "รวม"), start=1):
-        cell = ws.cell(row=4, column=i, value=h)
-        cell.font, cell.alignment, cell.border = Font(name=F, size=15, bold=True), c, box
+    when = f"วันที่ {start.day} {TH_MONTHS[start.month]} {start.year + 543}  ถึงวันที่ {end.day} {TH_MONTHS[end.month]} {end.year + 543}"
+    th_day = lambda iso: (lambda d: f"{d.day}/{d.month}/{d.year + 543}")(date.fromisoformat(iso))
+
+    def head(ws, title, heads, widths):
+        ws.title = title
+        last = "ABCDEF"[len(heads) - 1]
+        for col, w in zip("ABCDEF", widths):
+            ws.column_dimensions[col].width = w
+        ws.merge_cells(f"A1:{last}1")
+        ws["A1"], ws["A1"].font, ws["A1"].alignment = "รายการค่าน้ำมัน", Font(name=F, size=20, bold=True), c
+        ws.merge_cells(f"A2:{last}2")
+        ws["A2"], ws["A2"].font, ws["A2"].alignment = when, Font(name=F, size=15), l
+        for i, h in enumerate(heads, start=1):
+            cell = ws.cell(row=4, column=i, value=h)
+            cell.font, cell.alignment, cell.border = Font(name=F, size=15, bold=True), c, box
+
+    def put(ws, r, col, val, size=14, bold=False, money=False):
+        cell = ws.cell(row=r, column=col, value=val)
+        cell.font, cell.alignment, cell.border = Font(name=F, size=size, bold=bold), c, box
+        ws.row_dimensions[r].height = 22
+        if money:
+            cell.number_format = "#,##0.##"
+        return cell
+
+    def foot(ws, r, ncols):
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols - 1)
+        for col in range(1, ncols + 1):
+            ws.cell(row=r, column=col).border = box
+        put(ws, r, 1, "รวม", 15, True)
+        put(ws, r, ncols, s["total"], 15, True, True)
+        ws.print_title_rows = "4:4"
+        ws.page_setup.paperSize, ws.page_setup.orientation = ws.PAPERSIZE_A4, "portrait"
+        ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.oddFooter.center.text = "หน้า &P / &N"
+
+    wb = Workbook()
+    # 1. by date: ลำดับ วันที่ เบอร์รถ ทะเบียนรถ พนักงานขับรถ จำนวน
+    ws = wb.active
+    head(ws, "ตามวันที่", ("ลำดับ", "วันที่", "เบอร์รถ", "ทะเบียนรถ", "พนักงานขับรถ", "จำนวน"), (8, 15, 11, 17, 20, 13))
+    r = 5
+    for i, x in enumerate(s.get("by_date") or [], start=1):
+        for col, val in enumerate((i, th_day(x["day"]), x["truck_no"], x["plate"], x["driver"], x["amount"]), start=1):
+            put(ws, r, col, val, money=col == 6)
+        r += 1
+    foot(ws, r, 6)
+
+    # 2. by truck: รถเบอร์ ทะเบียนรถ พนักงานขับรถ วัน/เดือน/ปี จำนวน รวม
+    ws = wb.create_sheet()
+    head(ws, "ตามรถ", ("รถเบอร์", "ทะเบียนรถ", "พนักงานขับรถ", "วัน/เดือน/ปี", "จำนวน", "รวม"), (9, 16, 21, 18, 12, 13))
     r = 5
     for t in s["trucks"]:
         n = max(1, len(t["fills"]))
         for j, f in enumerate(t["fills"]):
-            d = date.fromisoformat(f["day"])
-            for col, val in ((4, f"{d.day}/{d.month}/{d.year + 543}"), (5, f["amount"])):
-                cell = ws.cell(row=r + j, column=col, value=val)
-                cell.font, cell.alignment, cell.border = Font(name=F, size=14, bold=True), c, box
-                if col == 5:
-                    cell.number_format = "#,##0.##"
+            put(ws, r + j, 4, th_day(f["day"]), bold=True)
+            put(ws, r + j, 5, f["amount"], bold=True, money=True)
         for col, val in ((1, t["truck_no"]), (2, t["plate"]), (3, t["driver"]), (6, t["total"])):
             if n > 1:
                 ws.merge_cells(start_row=r, start_column=col, end_row=r + n - 1, end_column=col)
-            cell = ws.cell(row=r, column=col, value=val)
-            cell.font, cell.alignment = Font(name=F, size=15, bold=col in (1, 6)), c
-            if col == 6:
-                cell.number_format = "#,##0.##"
+            put(ws, r, col, val, 15, col in (1, 6), col == 6)
             for k in range(n):
                 ws.cell(row=r + k, column=col).border = box
         r += n
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
-    ws.cell(row=r, column=1, value="รวม").font = Font(name=F, size=15, bold=True)
-    ws.cell(row=r, column=1).alignment = c
-    for col in range(1, 7):
-        ws.cell(row=r, column=col).border = box
-    tot = ws.cell(row=r, column=6, value=s["total"])
-    tot.font, tot.alignment, tot.number_format = Font(name=F, size=15, bold=True), c, "#,##0.##"
-    ws.print_title_rows = "4:4"
-    ws.page_setup.paperSize, ws.page_setup.orientation = ws.PAPERSIZE_A4, "portrait"
-    ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.oddFooter.center.text = "หน้า &P / &N"
+    foot(ws, r, 6)
     out = BytesIO()
     wb.save(out)
     return out.getvalue()

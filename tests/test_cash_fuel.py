@@ -53,9 +53,14 @@ def test_summary_per_truck_and_the_file():
     assert [t["truck_no"] for t in s["trucks"]] == ["34", "52"] and s["total"] == 3500
     assert s["trucks"][1]["driver"] == "มานัส" and [f["day"] for f in s["trucks"][1]["fills"]] == ["2026-10-28", "2026-10-30"]
     assert cf.summary(lines, ROSTER, batch=2)["total"] == 1500
-    ws = load_workbook(BytesIO(cf.to_xlsx("2026-11", s))).active
+    assert [(x["day"], x["truck_no"], x["driver"]) for x in s["by_date"]] == [("2026-10-28", "52", "มานัส"), ("2026-10-30", "52", "มานัส"), ("2026-11-12", "34", "")]
+    wb = load_workbook(BytesIO(cf.to_xlsx("2026-11", s)))
+    assert wb.sheetnames == ["ตามวันที่", "ตามรถ"]
+    ws = wb["ตามวันที่"]
     assert ws["A1"].value == "รายการค่าน้ำมัน" and "26 ตุลาคม 2569" in ws["A2"].value
-    assert ws.cell(row=5, column=1).value == "34"
+    assert [ws.cell(row=5, column=k).value for k in range(1, 7)] == [1, "28/10/2569", "52", "2ฒค 3332", "มานัส", 1000]
+    assert ws.cell(row=8, column=1).value == "รวม" and ws.cell(row=8, column=6).value == 3500
+    assert wb["ตามรถ"].cell(row=5, column=1).value == "34"
 
 
 def test_a_plate_and_number_that_point_at_different_trucks_are_flagged():

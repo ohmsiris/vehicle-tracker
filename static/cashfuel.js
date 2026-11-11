@@ -137,10 +137,10 @@ function cfSummary() {
   const rows = [...groups.values()].sort((a, b) => (Number((a.v || {}).truck_number) || 999) - (Number((b.v || {}).truck_number) || 999));
   const q = `month=${cf_.month}&batch=${cf_.batch}`;
   return el("div", { class: "cf-summary" },
-    el("div", { class: "ss-custbar" }, el("b", { text: `งวด ${cfRange(p.from, p.to)}` }), el("span", { class: "grow" }),
+    el("div", { class: "ss-custbar" }, el("b", { text: `งวด ${cfRange(p.from, p.to)}` }), el("span", { class: "muted small", text: "ไฟล์ส่ง HQ มี 2 แบบ: ตามวันที่ และ ตามรถ" }), el("span", { class: "grow" }),
       el("button", { class: "btn small", type: "button", text: "+ เพิ่มรายการเอง", onclick: cfAddLine }),
-      el("button", { class: "btn", type: "button", text: "PDF (พิมพ์)", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.pdf?${q}`, "pdf") }),
-      el("button", { class: "btn", type: "button", text: "Excel", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.xlsx?${q}`, "xlsx") })),
+      el("button", { class: "btn", type: "button", text: "PDF (พิมพ์)", title: "2 แบบ: ตามวันที่ และ ตามรถ", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.pdf?${q}`, "pdf") }),
+      el("button", { class: "btn", type: "button", text: "Excel", title: "2 แผ่นงาน: ตามวันที่ และ ตามรถ", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.xlsx?${q}`, "xlsx") })),
     rows.length ? el("div", { class: "ss-tablewrap soft" }, el("table", { class: "ss-table" },
       el("thead", {}, el("tr", {}, ...["รถเบอร์", "ทะเบียนรถ", "พนักงานขับรถ", "วันที่ · จำนวน", "รวม"].map((h) => el("th", { text: h })))),
       el("tbody", {}, ...rows.map((g) => el("tr", {},
