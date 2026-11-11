@@ -10,4 +10,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
+# the PDF is set in Sarabun (app/route_docx.py: TH Sarabun New's size at 72%): a system font, so LibreOffice always finds it
+RUN mkdir -p /usr/local/share/fonts && cp static/fonts/sarabun-*.ttf /usr/local/share/fonts/ && fc-cache -f
 CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

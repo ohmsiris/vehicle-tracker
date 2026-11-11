@@ -22,7 +22,8 @@ def _doc(b):
 def test_blank_sheet_is_the_template_with_rows_added():
     s = rsh.build(ROUTE, _custs(30), None, None, [], {})
     x = _doc(rd.build([s]))
-    assert x.count("<w:tbl>") == 2 * 2 + 1                            # 2 blocks (17 + 13): header + customers each, one summary box
+    assert x.count("<w:tbl>") == 2 * 2 + 1                            # 2 blocks (24 + 6): header + customers each, one summary box
+    assert x.rindex("รวมขาย") > x.rindex("ร้าน30")                       # the summary box comes after the last shop
     assert "ร้าน30" in x and "ร้าน1" in x and "คนขับ ทดสอบ" in x
     assert x.count("<w:tr2bl") == 2                                  # shop 2: ซอง and ใหญ่ have their own price
     assert "ใหญ่" in x and "หลอด" not in x and "โม่" not in x            # the owner's product names
@@ -39,3 +40,10 @@ def test_a_filled_day_and_several_routes():
     x = _doc(b)
     assert "10/11/2026" in x and rd.MARK in x
     assert len(re.findall(r'<w:sectPr[ >]', x)) == 2                  # route 2 starts on a new sheet (+ the document's own)
+
+
+def test_the_pdf_copy_uses_the_servers_font_scaled():
+    s = rsh.build(ROUTE, _custs(3), None, None, [], {})
+    x = _doc(rd.build([s], marks=True))
+    assert "TH Sarabun New" not in x and 'w:ascii="Sarabun"' in x
+    assert '<w:sz w:val="32"/>' not in x                              # 16 pt -> about 11.5 pt

@@ -28,7 +28,8 @@ from xml.sax.saxutils import escape
 from app.route_sales import KEYS
 
 TEMPLATE = Path(__file__).resolve().parent / "templates" / "route_sheet.docx"
-FIRST_BLOCK, BLOCK = 17, 24          # customers per block, as the paper (block 1 leaves room for the summary box)
+FIRST_BLOCK, BLOCK = 24, 24          # customers per block; the summary box comes after the LAST block (owner, 11 Nov 2026)
+PDF_FONT, PDF_SCALE = "Sarabun", 0.72  # the server has no TH Sarabun New: Sarabun (static/fonts) at 72% looks the same size
 NAMES = {"หลอด": "ใหญ่", "โม่": "บด"}  # the owner's product names (10 Nov 2026)
 MARK = "§"                       # an invisible marker in a diagonal cell (PDF only): LibreOffice does not draw cell diagonals
 
@@ -139,7 +140,7 @@ def _header(t: _Template, s: dict, day_text: str) -> str:
     rows = _rows(t.hdr)
     keep = lambda r, i: _cells(r)[i]                                                   # noqa: E731
     r0 = _row(rows[0], _wrap({0: _text_of(keep(rows[0], 0)), 1: [(s["truck_no"], {})], 2: _text_of(keep(rows[0], 2)), 3: [(s["driver"], {})],
-                              4: _text_of(keep(rows[0], 4)), 5: [(day_text, {})]}))
+                              4: _text_of(keep(rows[0], 4)), 5: [(day_text, {"sz": 28})]}))
     r1 = _row(rows[1], _wrap({0: _text_of(keep(rows[1], 0)), 1: [(s["route"], {})], 2: _text_of(keep(rows[1], 2)), 3: [(s["phone"], {})]}))
     return t.hdr.replace(rows[0], r0, 1).replace(rows[1], r1, 1)
 
@@ -152,7 +153,18 @@ def _wrap(values: dict) -> dict:
     return {i: (v if isinstance(v, tuple) else (v, None, None)) for i, v in values.items()}
 
 
+ROW_MIN = '<w:trHeight w:val="482" w:hRule="atLeast"/>'          # a shop's row is never under ~0.85 cm: room to write
+
+
+def _min_height(tr: str) -> str:
+    return tr.replace("<w:trPr>", "<w:trPr>" + ROW_MIN, 1) if "<w:trPr>" in tr else tr.replace(">", "><w:trPr>" + ROW_MIN + "</w:trPr>", 1)
+
+
 def _customer(t: _Template, row: Optional[dict], filled: bool = True, marks: bool = False) -> str:
+    return _min_height(_customer_row(t, row, filled, marks))
+
+
+def _customer_row(t: _Template, row: Optional[dict], filled: bool = True, marks: bool = False) -> str:
     if row is None:                                                     # an empty row for a new shop
         return _row(t.cust_row, {})
     v = {0: [(row["name"], {"b": True})], 1: [(b, {}) for b in (row["bins"] or "").split(", ") if b] or [],
@@ -180,7 +192,7 @@ def _totals(t: _Template, rows: list[dict], filled: bool) -> str:
         for i, k in enumerate(KEYS):
             bags[1 + i] = [(_n(sum(r["q"].get(k) or 0 for r in rows)), {})]
         for i, key in enumerate(("amount", "owed_before", "old_paid", "paid", "paid_all", "owed_after")):
-            money[7 + i] = [(_n(sum(r.get(key) or 0 for r in rows if not (key == "owed_after" and r["invoice"]))), {"jc": "right"})]
+            money[7 + i] = [(_n(sum(r.get(key) or 0 for r in rows if not (key == "owed_after" and r["invoice"]))), {"jc": "right", "sz": 26})]
     return _row(t.tot_bags, _wrap(bags)) + _row(t.tot_money, _wrap(money))
 
 
@@ -221,6 +233,12 @@ def _summary(t: _Template, sm: Optional[dict]) -> str:
     return _rename(start + "".join(out) + "</w:tbl>")
 
 
+def _head_row(t: _Template) -> str:
+    """The column titles, a size smaller so แพ็ค / เก่ายกมา / จ่ายเก่า fit their narrow columns."""
+    start, cells, end = _split_row(_rename(t.cust_head))
+    return start + "".join(_set(c, [(_text_of(c)[0][0], {"sz": 24})]) for c in cells) + end
+
+
 def _route_body(t: _Template, s: dict, marks: bool = False) -> list[str]:
     """One route as a list of blocks (each ends where the next sheet starts)."""
     filled = s.get("summary") is not None
@@ -235,9 +253,9 @@ def _route_body(t: _Template, s: dict, marks: bool = False) -> list[str]:
         body_rows = [_customer(t, r, filled, marks) for r in chunk]
         if last:
             body_rows += [_customer(t, None)] * max(size - len(chunk), 4 if not first else 0)
-        table = t.cust_start + _rename(t.cust_head) + "".join(body_rows) + _totals(t, chunk, filled) + "</w:tbl>"
+        table = t.cust_start + _head_row(t) + "".join(body_rows) + _totals(t, chunk, filled) + "</w:tbl>"
         block = _header(t, s, day_text) + t.gap + table
-        if first:
+        if last:
             block += t.gap + _summary(t, s.get("summary"))
         blocks.append(block)
         first = False
@@ -246,8 +264,14 @@ def _route_body(t: _Template, s: dict, marks: bool = False) -> list[str]:
     return blocks
 
 
+def _for_pdf(xml: str) -> str:
+    """TH Sarabun New -> Sarabun at 72% (the PDF server's font; same look and size)."""
+    xml = re.sub(r'w:(ascii|hAnsi|cs|eastAsia)="TH Sarabun New"', lambda m: f'w:{m.group(1)}="{PDF_FONT}"', xml)
+    return re.sub(r'(<w:sz(?:Cs)? w:val=")(\d+)(")', lambda m: f"{m.group(1)}{max(2, round(int(m.group(2)) * PDF_SCALE))}{m.group(3)}", xml)
+
+
 def build(sheets: list[dict], marks: bool = False) -> bytes:
-    """One or more routes' sheets -> a .docx (bytes). marks: put the diagonal-cell markers in (for to_pdf)."""
+    """One or more routes' sheets -> a .docx (bytes). marks: the copy for to_pdf (diagonal-cell markers, the server's font)."""
     t = _Template()
     blocks = [b for s in sheets for b in _route_body(t, s, marks)]
     body = t.section.join(blocks) + t.tail
@@ -255,7 +279,11 @@ def build(sheets: list[dict], marks: bool = False) -> bytes:
     out = BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for name, data in t.files.items():
-            z.writestr(name, doc.encode("utf-8") if name == "word/document.xml" else data)
+            if name == "word/document.xml":
+                data = (_for_pdf(doc) if marks else doc).encode("utf-8")
+            elif marks and name == "word/styles.xml":
+                data = _for_pdf(data.decode("utf-8")).encode("utf-8")
+            z.writestr(name, data)
     return out.getvalue()
 
 
@@ -319,6 +347,11 @@ def _draw_diagonals(pdf: bytes) -> bytes:
             bottoms = [y for y, x0, x1 in horiz if y > cy and x0 - 1 <= cx <= x1 + 1]
             if lefts and rights and tops and bottoms:
                 page.draw_line((max(lefts), min(bottoms)), (min(rights), max(tops)), color=(0, 0, 0), width=0.6)
-    out = doc.tobytes(garbage=3, deflate=True)
+    cat = doc.pdf_catalog()                              # LibreOffice tags every cell for screen readers: thousands of objects,
+    for key in ("StructTreeRoot", "MarkInfo", "ParentTree"):  # most of the file. Not needed on paper -> dropped
+        doc.xref_set_key(cat, key, "null")
+    for page in doc:
+        doc.xref_set_key(page.xref, "StructParents", "null")
+    out = doc.tobytes(garbage=4, deflate=True, deflate_fonts=True)
     doc.close()
     return out
