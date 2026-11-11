@@ -90,3 +90,14 @@ def test_a_page_with_doubtful_lines_cannot_be_confirmed(monkeypatch):
     rows[0]["checked"] = True                                              # ticked "ถูกแล้ว"; the uncounted one does not block
     cf.confirm_page(3, "เจ้าของ")
     assert writes[-1][0] == "cash_fuel_pages" and writes[-1][1]["confirmed"] is True and writes[-1][1]["confirmed_by"] == "เจ้าของ"
+
+
+def test_no_plate_written_takes_the_truck_the_requester_drives():
+    ppl = {"route": [{"name": "มานัส ใจดี", "nickname": "นัส", "truck": "52"}], "foh": []}
+    read = {"lines": [{"is_fuel": True, "date": "2026-11-03", "text": "เติมน้ำมัน", "plate": None, "truck_number": None, "amount": 1000,
+                       "requester": "มานัส", "position": "ขับรถ", "unsure": False},
+                      {"is_fuel": True, "date": "2026-11-03", "text": "เติมน้ำมัน", "plate": None, "truck_number": None, "amount": 500,
+                       "requester": "ใครไม่รู้", "position": None, "unsure": False}]}
+    a, b = cf.fuel_lines(read, ROSTER, "สระบุรี", ppl)
+    assert a["vehicle_id"] == "a" and a["driver_name"] == "มานัส ใจดี" and "ไม่ได้เขียนทะเบียน" in a["note"]
+    assert b["vehicle_id"] is None and b["note"] == "ไม่พบรถ"

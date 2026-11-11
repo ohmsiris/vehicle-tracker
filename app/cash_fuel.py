@@ -210,6 +210,11 @@ def fuel_lines(read: dict, roster: list[dict], branch: str, ppl: Optional[dict] 
             notes.append(f"ทะเบียน {ln.get('plate')} เป็นของรถ {by_plate.get('truck_number') or by_plate.get('plate')} แต่เขียนเบอร์ {ln.get('truck_number')}")
         if not d:
             notes.append("อ่านวันที่ไม่ได้")
+        took = who_took(ln.get("requester"), ppl or {})
+        if not v and took:                 # no plate / number written: the truck คนเบิก drives in IceBox (owner, 11 Nov 2026), to be checked
+            v = next((x for x in roster if (x.get("driver") or "").strip() == took.strip() and (not x.get("branch") or x.get("branch") == branch)), None)
+            if v:
+                notes.append(f"ไม่ได้เขียนทะเบียน — ใช้รถที่ {short_name(took)} ขับ")
         if not v:
             notes.append("ไม่พบรถ")
         if ln.get("unsure"):
@@ -219,7 +224,7 @@ def fuel_lines(read: dict, roster: list[dict], branch: str, ppl: Optional[dict] 
         out.append({"seq": i, "day": d, "text": (ln.get("text") or "")[:200], "plate_read": ln.get("plate"), "number_read": ln.get("truck_number"),
                     "amount": float(ln.get("amount") or 0), "requester": ln.get("requester"), "position": ln.get("position"),
                     "vehicle_id": v["id"] if v else None,
-                    "driver_name": who_took(ln.get("requester"), ppl or {}) or ((v.get("driver") or None) if v else None),
+                    "driver_name": took or ((v.get("driver") or None) if v else None),
                     "note": " · ".join(notes) or None})
     return out
 
