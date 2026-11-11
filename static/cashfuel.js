@@ -245,8 +245,7 @@ function cfLineCard(l, d, n) {
     const reasons = (l.note || "").split(" · ").filter(Boolean).map(cfPlain);
     fill(card,
       cfDoubt(l) ? el("div", { class: "cf-why" }, el("b", { text: "ต้องดูกับรูป:" }), ...reasons.map((r) => el("div", { text: `• ${r}` }))) : null,
-      el("div", { class: "cf-read" }, n ? el("span", { class: "cf-n", text: String(n) }) : null, el("span", { class: "muted small", text: "อ่านได้ว่า" }), el("span", { text: ` “${l.text || ""}”` }),
-        l.requester ? el("span", { class: "muted small", text: ` · ผู้เบิก ${l.requester}${l.position ? ` (${l.position})` : ""}` }) : null),
+      n ? el("div", { class: "cf-read" }, el("span", { class: "cf-n", text: String(n) })) : null,
       el("div", { class: "cf-fields" },
         el("label", {}, el("span", { class: "small muted", text: "วันที่" }), el("input", { type: "date", value: l.day, onchange: (e) => e.target.value && save({ day: e.target.value }) })),
         el("label", {}, el("span", { class: "small muted", text: "รถ" }), el("select", { onchange: (e) => save({ vehicle_id: e.target.value || null }) },
