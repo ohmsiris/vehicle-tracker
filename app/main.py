@@ -2246,6 +2246,21 @@ def api_cash_fuel_pages(files: list[UploadFile] = File(...), branch: str = Form(
     return _fuel_call(cash_fuel.add_pages, _read_uploads(files, 10), branch, _who(x_app_token or token))
 
 
+@app.get("/api/cash-fuel/pages/{page_id}")
+def api_cash_fuel_page(page_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """One page to check against its photo."""
+    from app import cash_fuel
+    _check_token(x_app_token, token)
+    return _fuel_call(cash_fuel.page_detail, page_id)
+
+
+@app.post("/api/cash-fuel/pages/{page_id}/confirm")
+def api_cash_fuel_page_confirm(page_id: int, body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import cash_fuel
+    _check_token(x_app_token, token)
+    return _fuel_call(cash_fuel.confirm_page, page_id, _who(x_app_token or token), bool(body.get("confirmed", True)))
+
+
 @app.get("/api/cash-fuel/pages/{page_id}/image")
 def api_cash_fuel_page_image(page_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
     from app import cash_fuel

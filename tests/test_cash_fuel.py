@@ -63,3 +63,25 @@ def test_a_plate_and_number_that_point_at_different_trucks_are_flagged():
                        "amount": 1000, "requester": None, "position": None, "unsure": False}]}
     ln = cf.fuel_lines(read, ROSTER, "สระบุรี", {})[0]
     assert ln["vehicle_id"] == "a" and "เป็นของรถ 34" in ln["note"]
+
+
+def test_only_confirmed_pages_and_typed_lines_count(monkeypatch):
+    from app import supabase
+    monkeypatch.setattr(supabase, "select_all", lambda table, params=None: [{"id": 7}])
+    lines = [{"id": 1, "page_id": 7}, {"id": 2, "page_id": 8}, {"id": 3, "page_id": None}]
+    assert [ln["id"] for ln in cf._confirmed_lines(lines)] == [1, 3]
+
+
+def test_a_page_with_doubtful_lines_cannot_be_confirmed(monkeypatch):
+    import pytest
+    from app import supabase
+    rows = [{"id": 1, "note": "ลายมือไม่ชัด", "checked": False, "counted": True}, {"id": 2, "note": "x", "checked": False, "counted": False}]
+    writes = []
+    monkeypatch.setattr(supabase, "select_all", lambda table, params=None: rows)
+    monkeypatch.setattr(supabase, "update", lambda table, match, body: writes.append((table, body)))
+    with pytest.raises(cf.CashFuelError):
+        cf.confirm_page(3, "เจ้าของ")
+    assert writes == []
+    rows[0]["checked"] = True                                              # ticked "ถูกแล้ว"; the uncounted one does not block
+    cf.confirm_page(3, "เจ้าของ")
+    assert writes[-1][0] == "cash_fuel_pages" and writes[-1][1]["confirmed"] is True and writes[-1][1]["confirmed_by"] == "เจ้าของ"

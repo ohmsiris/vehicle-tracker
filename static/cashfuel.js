@@ -1,199 +1,293 @@
 "use strict";
 
-// น้ำมันเงินสด (#cash-fuel, owner 11 Nov 2026): the bookkeeper's รายการค่าน้ำมัน, done by IceBox. Photos of the handwritten รายการเบิก
-// pages go in (twice a month), Claude reads every page twice, the fuel lines come out with their truck and driver; the bookkeeper
-// checks them against the photo, and downloads the summary for HQ (per truck: plate, driver, every fill, total). Server: app/cash_fuel.py.
+// น้ำมันเงินสด (#cash-fuel), redesigned with the owner 11 Nov 2026 -- like checking a repair bill:
+//   1. drop the photos of the handwritten รายการเบิก pages; each is read twice (server: app/cash_fuel.py), with its own progress;
+//   2. check each page: the photo big on one side, what was read on the other; the lines the reader is unsure of come first, with
+//      the reason in plain words; tick or fix them, then ยืนยันหน้านี้ -- only confirmed pages count;
+//   3. the month's two periods by their dates (26 - 10, 11 - 25, worked out from the lines' own dates), each with its
+//      รายการค่าน้ำมัน for HQ (Excel / PDF).
+// #cash-fuel[/YYYY-MM] = home; #cash-fuel/review/<page id> = checking one page.
 
-const cf_ = { month: null, batch: 0, data: null, pageUrls: {}, shown: null };
+const cf_ = { month: null, batch: null, data: null, files: [], urls: {}, zoom: 1 };
 const CF_TH = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
-const cfDmy = (iso) => (iso ? iso.split("-").reverse().join("/") : "");
-const cfBe = (iso) => { const [y, m, d] = iso.split("-").map(Number); return `${d} ${CF_TH[m]} ${y + 543}`; };
+const CF_SH = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+const cfD = (iso) => { const [y, m, d] = iso.split("-").map(Number); return { y, m, d }; };
+const cfShort = (iso) => { const x = cfD(iso); return `${x.d} ${CF_SH[x.m]}`; };
+const cfRange = (a, b) => { if (!a) return "—"; const x = cfD(a), y = cfD(b || a); return x.m === y.m ? `${x.d}–${y.d} ${CF_SH[y.m]} ${y.y + 543}` : `${cfShort(a)} – ${cfShort(b)} ${y.y + 543}`; };
 const cfShift = (month, n) => { let [y, m] = month.split("-").map(Number); m += n; while (m < 1) { m += 12; y -= 1; } while (m > 12) { m -= 12; y += 1; } return `${y}-${String(m).padStart(2, "0")}`; };
 
 async function openCashFuel(sub = "") {
   showView("cashFuel");
   showErr("cfError", "");
+  if (sub.startsWith("review/")) return cfReview(Number(sub.slice(7)));
   if (/^\d{4}-\d{2}$/.test(sub)) cf_.month = sub;
+  document.querySelector("#cashFuelView .page-head").hidden = false;
   fill($("cfBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
   try { cf_.data = await api(`/api/cash-fuel${cf_.month ? `?month=${cf_.month}` : ""}`); }
   catch (err) { fill($("cfBody"), null); showErr("cfError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
+  if (cf_.month !== cf_.data.month) cf_.batch = null;
   cf_.month = cf_.data.month;
-  cfRender();
+  cfHome();
 }
 
-// คนเบิก: the drivers, คนขับรถสาย and หน้าโรง in their own groups (owner, 11 Nov 2026)
-function cfPeopleSelect(value, onChange) {
-  const d = cf_.data, known = new Set();
-  const groups = (d.groups || []).map((g) => el("optgroup", { label: g.label }, ...(d.people[g.key] || []).map((p) => {
-    known.add(p.name);
-    const label = `${p.nickname ? `${p.nickname} · ` : ""}${p.name}${p.truck ? ` (รถ ${p.truck})` : ""}`;
-    return el("option", { value: p.name, text: label, selected: p.name === value });
-  })));
-  const extra = value && !known.has(value) ? el("option", { value, text: `${value} (ไม่อยู่ในรายชื่อ)`, selected: true }) : null;
-  return el("select", { class: "cf-sel cf-ppl", onchange: (e) => onChange(e.target.value || null) },
-    el("option", { value: "", text: "— เลือกคนเบิก —", selected: !value }), extra, ...groups);
-}
-
-function cfVehicleLabel(v) { return v ? `${v.truck_number ? `${v.truck_number} · ` : ""}${v.plate || ""}${v.branch && v.branch !== "สระบุรี" ? ` (${v.branch})` : ""}` : ""; }
-
-function cfRender() {
+// ------------------------------------------------------------------ home: upload, pages to check, the month
+function cfHome() {
   const d = cf_.data;
-  const [y, m] = d.month.split("-").map(Number);
-  const lines = d.lines.filter((l) => !cf_.batch || l.batch === cf_.batch);
-  const counted = lines.filter((l) => l.counted);
-  const toCheck = lines.filter((l) => l.note && !l.checked).length;
-  const nav = el("div", { class: "ss-daynav card" },
-    el("button", { class: "btn ss-arrow", type: "button", text: "‹", "aria-label": "เดือนก่อน", onclick: () => goHash(`#cash-fuel/${cfShift(d.month, -1)}`) }),
-    el("div", { class: "ss-daypick" }, el("b", { class: "ss-daybig", text: `${CF_TH[m]} ${y + 543}` }), el("span", { class: "muted small", text: `${cfBe(d.from)} – ${cfBe(d.to)}` })),
-    el("button", { class: "btn ss-arrow", type: "button", text: "›", "aria-label": "เดือนถัดไป", onclick: () => goHash(`#cash-fuel/${cfShift(d.month, 1)}`) }),
-    el("div", { class: "seg ss-tabs" }, ...[[0, "ทั้งเดือน"], [1, "งวด 1 (26–10)"], [2, "งวด 2 (11–25)"]].map(([b, t]) =>
-      el("button", { type: "button", class: `segbtn${cf_.batch === b ? " active" : ""}`, text: t, onclick: () => { cf_.batch = b; cfRender(); } }))));
-  const tile = (label, value, cls = "") => el("div", { class: "ss-tile" }, el("span", { class: "muted small", text: label }), el("b", { class: cls, text: value }));
-  const tiles = el("div", { class: "ss-tiles" },
-    tile("รวมค่าน้ำมันเงินสด", `฿${elN(counted.reduce((a, l) => a + Number(l.amount || 0), 0))}`),
-    tile("จำนวนครั้ง", String(counted.length)),
-    tile("รถ", `${new Set(counted.map((l) => l.vehicle_id || "?")).size} คัน`),
-    tile("ต้องตรวจกับรูป", String(toCheck), toCheck ? "warn-text" : ""));
-  // upload
-  const pick = el("input", { type: "file", accept: "image/*,application/pdf", multiple: true, id: "cfFiles" });
-  const status = el("span", { class: "muted small" });
-  const up = el("div", { class: "card cf-upload" },
-    el("b", { text: "อัปโหลดรูปรายการเบิก" }),
-    el("span", { class: "muted small", text: "ถ่ายรูปหน้ารายการเบิกให้เห็นทั้งหน้า · อ่านทุกหน้า 2 รอบ (ใช้เวลาประมาณ 1 นาทีต่อชุด) · รูปเดิมอัปโหลดซ้ำไม่ได้ · เดือน / งวด ดูจากวันที่ของแต่ละบรรทัดเอง" }),
-    el("div", { class: "cf-uprow" }, pick, el("button", { class: "btn primary", type: "button", text: "อ่านรูป", onclick: () => cfUpload(pick, status) }), status));
-  // lines
-  const vopts = d.vehicles.slice().sort((a, b) => (Number(a.truck_number) || 999) - (Number(b.truck_number) || 999));
-  const pageName = Object.fromEntries(d.pages.map((p, i) => [p.id, `รูป ${i + 1}`]));
-  const body = el("tbody", {}, ...lines.map((l) => {
-    const save = async (patch) => {
-      try { Object.assign(l, await api(`/api/cash-fuel/lines/${l.id}`, jsonOpts("PATCH", patch))); } catch (err) { alert(err.message); }
-      cfPaintSummary();
-    };
-    const sel = el("select", { class: "cf-sel", onchange: (e) => save({ vehicle_id: e.target.value || null }) },
-      el("option", { value: "", text: "— ไม่ทราบรถ —" }), ...vopts.map((v) => el("option", { value: v.id, text: cfVehicleLabel(v), selected: v.id === l.vehicle_id })));
-    const amt = el("input", { class: "ss-in cf-amt", type: "text", inputmode: "decimal", value: String(Number(l.amount)), onchange: (e) => save({ amount: e.target.value }) });
-    const drv = cfPeopleSelect(l.driver_name, (v) => save({ driver_name: v }));
-    const day = el("input", { type: "date", value: l.day, class: "cf-day", onchange: (e) => e.target.value && save({ day: e.target.value }).then(() => openCashFuel(cf_.month)) });
-    return el("tr", { class: `${l.counted ? "" : "cf-off"}${l.note && !l.checked ? " cu-review" : ""}` },
-      el("td", {}, day),
-      el("td", {}, sel),
-      el("td", {}, drv),
-      el("td", { class: "r" }, amt),
-      el("td", { class: "small" }, el("div", { text: l.text || "" }), el("div", { class: "muted", text: [l.requester, l.position].filter(Boolean).join(" · ") }),
-        l.note ? el("div", { class: "warn-text", text: l.note }) : null),
-      el("td", {}, l.page_id ? el("button", { class: "btn small", type: "button", text: pageName[l.page_id] || "รูป", onclick: () => cfShowPage(l.page_id) }) : el("span", { class: "muted small", text: "เพิ่มเอง" })),
-      el("td", { class: "c" }, el("label", { class: "cf-chk", title: "ตรวจกับรูปแล้ว" }, el("input", { type: "checkbox", checked: !!l.checked, onchange: (e) => save({ checked: e.target.checked }).then(cfRender) }), " ตรวจแล้ว")),
-      el("td", { class: "c" }, el("label", { class: "cf-chk", title: "นับในรายการค่าน้ำมัน" }, el("input", { type: "checkbox", checked: !!l.counted, onchange: (e) => save({ counted: e.target.checked }).then(cfRender) }), " นับ")),
-      el("td", {}, el("button", { class: "btn small", type: "button", text: "ลบ", onclick: async () => {
-        if (!confirm("ลบรายการนี้?")) return;
-        try { await api(`/api/cash-fuel/lines/${l.id}`, { method: "DELETE" }); } catch (err) { alert(err.message); return; }
-        openCashFuel(cf_.month);
-      } })));
-  }));
-  const table = el("div", { class: "ss-tablewrap soft" }, el("table", { class: "ss-table cf-table" },
-    el("thead", {}, el("tr", {}, ...["วันที่", "รถ", "คนเบิก", "ยอด", "ที่อ่านได้", "รูป", "", "", ""].map((h) => el("th", { text: h })))), body));
-  const pages = d.pages.length ? el("div", { class: "cf-pages" }, el("span", { class: "small muted", text: "รูปในเดือนนี้:" }),
-    ...d.pages.map((p, i) => el("span", { class: "cf-page" },
-      el("button", { class: "btn small", type: "button", text: `รูป ${i + 1}${p.status === "error" ? " ⚠" : ""}`, title: p.name || "", onclick: () => cfShowPage(p.id) }),
-      el("button", { class: "btn small", type: "button", text: "×", title: "ลบรูปนี้และรายการจากรูปนี้", onclick: async () => {
-        if (!confirm(`ลบ ${p.name || "รูปนี้"} และทุกรายการที่อ่านจากรูปนี้?`)) return;
-        try { await api(`/api/cash-fuel/pages/${p.id}`, { method: "DELETE" }); } catch (err) { alert(err.message); return; }
-        openCashFuel(cf_.month);
-      } })))) : null;
-  const viewer = el("div", { class: "cf-viewer", id: "cfViewer" }, el("p", { class: "muted small", text: "กด “รูป” ที่บรรทัดเพื่อดูหน้ารายการเบิกตรงนี้" }));
-  fill($("cfBody"), nav, tiles, up, pages,
-    el("div", { class: "cf-split" },
-      el("div", {},
-        el("div", { class: "ss-custbar" }, el("b", { text: `รายการเติมน้ำมัน (${lines.length})` }), el("span", { class: "grow" }),
-          el("button", { class: "btn small", type: "button", text: "+ เพิ่มรายการเอง", onclick: cfAddLine })),
-        lines.length ? table : el("p", { class: "muted", text: "ยังไม่มีรายการ — อัปโหลดรูปรายการเบิกด้านบน" })),
-      viewer),
-    el("div", { class: "card", id: "cfSummary" }));
-  cfPaintSummary();
-  if (cf_.shown) cfShowPage(cf_.shown);
+  fill($("cfBody"), cfUploadCard(), cfPendingCard(), cfMonthCard());
 }
 
-async function cfUpload(pick, status) {
-  const files = [...pick.files];
-  if (!files.length) { status.textContent = "เลือกรูปก่อน"; return; }
-  let added = 0, lines = 0;
-  const notes = [];
-  for (let i = 0; i < files.length; i += 4) {
-    status.textContent = `กำลังอ่าน ${i + 1}–${Math.min(i + 4, files.length)} จาก ${files.length} รูป (อ่าน 2 รอบ)…`;
+function cfUploadCard() {
+  const input = el("input", { type: "file", accept: "image/*,application/pdf", multiple: true, hidden: true });
+  const list = el("ul", { class: "filelist cf-files" });
+  const go = el("button", { class: "btn primary", type: "button", text: "อ่านรูป", disabled: true, onclick: () => cfRead(list, go) });
+  const paint = () => {
+    fill(list, ...cf_.files.map((f, i) => el("li", { class: `cf-file ${f.state || ""}` },
+      el("span", { class: "cf-fname", text: f.file.name }),
+      el("span", { class: "cf-fstate", text: f.msg || "พร้อมอ่าน" }),
+      !f.state ? el("button", { class: "btn small", type: "button", text: "เอาออก", onclick: () => { cf_.files.splice(i, 1); paint(); } }) : null)));
+    const waiting = cf_.files.filter((f) => !f.state).length;
+    go.disabled = !waiting;
+    go.textContent = waiting ? `อ่านรูป ${waiting} รูป` : "อ่านรูป";
+  };
+  const add = (files) => { cf_.files.push(...[...files].map((file) => ({ file }))); paint(); };
+  input.addEventListener("change", () => { add(input.files); input.value = ""; });
+  const drop = el("div", { class: "drop cf-drop", tabindex: "0", role: "button", onclick: () => input.click(),
+    onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } } },
+    el("b", { text: "ลากรูปรายการเบิกมาวางที่นี่ หรือแตะเพื่อเลือกรูป" }),
+    el("span", { class: "muted small", text: "ถ่ายให้เห็นทั้งหน้า · หลายรูปได้ · ระบบอ่านแต่ละรูป 2 รอบ ประมาณครึ่งนาทีต่อรูป" }), input);
+  ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", (e) => add(e.dataTransfer.files));
+  paint();
+  return el("section", { class: "card cf-card" }, el("h3", { text: "1 · อัปโหลดรูปรายการเบิก" }), drop, list, el("div", { class: "cf-actions" }, go));
+}
+
+async function cfRead(list, go) {
+  const todo = cf_.files.filter((f) => !f.state);
+  go.disabled = true;
+  const one = async (f) => {
+    f.state = "busy"; f.msg = "กำลังอ่าน (2 รอบ)…"; cfPaintFiles(list);
     const fd = new FormData();
-    files.slice(i, i + 4).forEach((f) => fd.append("files", f));
+    fd.append("files", f.file);
     try {
       const res = await fetch("/api/cash-fuel/pages", { method: "POST", body: fd, headers: { "X-App-Token": state.token } });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.detail || `HTTP ${res.status}`);
-      added += j.added.length; lines += j.lines;
-      notes.push(...j.refused, ...j.added.filter((a) => a.error).map((a) => `${a.name}: ${a.error}`));
-    } catch (err) { notes.push(err.message); }
-  }
-  pick.value = "";
-  if (notes.length) alert(notes.join("\n"));
-  status.textContent = `อ่านแล้ว ${added} รูป · ได้ ${lines} รายการเติมน้ำมัน`;
-  await openCashFuel(cf_.month);
+      if (j.refused.length) { f.state = "bad"; f.msg = j.refused[0].replace(/^[^:]*:\s*/, ""); }
+      else if (j.added[0] && j.added[0].error) { f.state = "bad"; f.msg = `อ่านไม่สำเร็จ: ${j.added[0].error}`; }
+      else { f.state = "ok"; f.msg = `อ่านแล้ว · ${j.lines} รายการเติมน้ำมัน`; f.page = j.added[0] && j.added[0].page_id; }
+    } catch (err) { f.state = "bad"; f.msg = err.message; }
+    cfPaintFiles(list);
+  };
+  for (let i = 0; i < todo.length; i += 2) await Promise.all(todo.slice(i, i + 2).map(one));     // two at a time
+  const first = cf_.files.find((f) => f.state === "ok" && f.page);
+  cf_.files = cf_.files.filter((f) => f.state === "bad");                                          // the read ones move to "check"
+  if (first) goHash(`#cash-fuel/review/${first.page}`);
+  else openCashFuel(cf_.month);
 }
 
-async function cfShowPage(id) {
-  cf_.shown = id;
-  const box = $("cfViewer");
-  if (!box) return;
-  if (!cf_.pageUrls[id]) {
-    fill(box, el("p", { class: "muted small", text: "กำลังโหลดรูป…" }));
-    try {
-      const res = await fetch(`/api/cash-fuel/pages/${id}/image`, { headers: { "X-App-Token": state.token } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      cf_.pageUrls[id] = URL.createObjectURL(await res.blob());
-    } catch (err) { fill(box, el("p", { class: "error small", text: `โหลดรูปไม่ได้: ${err.message}` })); return; }
-  }
-  const p = cf_.data.pages.find((x) => x.id === id) || {};
-  fill(box, el("div", { class: "cf-vhead" }, el("b", { class: "small", text: p.name || "รูป" }), el("a", { href: cf_.pageUrls[id], target: "_blank", rel: "noopener", class: "small", text: "เปิดเต็มจอ" })),
-    el("img", { src: cf_.pageUrls[id], alt: "หน้ารายการเบิก" }));
+function cfPaintFiles(list) {
+  fill(list, ...cf_.files.map((f) => el("li", { class: `cf-file ${f.state || ""}` }, el("span", { class: "cf-fname", text: f.file.name }),
+    el("span", { class: "cf-fstate", text: f.msg || "พร้อมอ่าน" }))));
 }
 
-function cfPaintSummary() {
-  const box = $("cfSummary");
-  if (!box) return;
+function cfPendingCard() {
+  const p = cf_.data.pending;
+  return el("section", { class: "card cf-card" },
+    el("h3", { text: `2 · รอตรวจกับรูป${p.length ? ` (${p.length} รูป)` : ""}` }),
+    p.length ? el("div", { class: "cf-queue" }, ...p.map((x, i) => el("button", { class: `cf-qitem${x.to_check ? " warn" : ""}`, type: "button",
+      onclick: () => goHash(`#cash-fuel/review/${x.id}`) },
+      el("b", { text: `รูปที่ ${i + 1}` }),
+      el("span", { class: "small", text: `${cfRange(x.from, x.to)} · ${x.lines} รายการ · ฿${elN(x.total)}` }),
+      x.status === "error" ? el("span", { class: "badge bad", text: "อ่านไม่สำเร็จ" })
+        : x.to_check ? el("span", { class: "badge warn", text: `ต้องดูกับรูป ${x.to_check} รายการ` }) : el("span", { class: "badge ok", text: "อ่านชัดทุกรายการ" }),
+      el("span", { class: "cf-qgo", text: "ตรวจ ›" }))))
+      : el("p", { class: "muted small", text: "ไม่มีรูปรอตรวจ — ทุกรูปยืนยันแล้ว" }));
+}
+
+function cfMonthCard() {
   const d = cf_.data;
+  const [y, m] = d.month.split("-").map(Number);
+  if (cf_.batch == null) cf_.batch = d.periods[1].fills ? 2 : 1;
+  const nav = el("div", { class: "cf-mnav" },
+    el("button", { class: "btn small", type: "button", text: "‹", "aria-label": "เดือนก่อน", onclick: () => goHash(`#cash-fuel/${cfShift(d.month, -1)}`) }),
+    el("b", { text: `เดือน ${CF_TH[m]} ${y + 543}` }), el("span", { class: "muted small", text: `(${cfRange(d.from, d.to)})` }),
+    el("button", { class: "btn small", type: "button", text: "›", "aria-label": "เดือนถัดไป", onclick: () => goHash(`#cash-fuel/${cfShift(d.month, 1)}`) }));
+  const cards = el("div", { class: "cf-periods" }, ...d.periods.map((p) => el("button", { type: "button", class: `cf-period${cf_.batch === p.batch ? " on" : ""}`,
+    onclick: () => { cf_.batch = p.batch; cfHome(); } },
+    el("span", { class: "muted small", text: `งวดวันที่` }), el("b", { class: "cf-prange", text: cfRange(p.from, p.to) }),
+    el("span", { class: "cf-ptotal", text: `฿${elN(p.total)}` }),
+    el("span", { class: "muted small", text: p.fills ? `${p.fills} ครั้ง · ${p.trucks} คัน` : "ยังไม่มีรายการที่ยืนยัน" }))));
+  return el("section", { class: "card cf-card" }, el("h3", { text: "3 · รายการค่าน้ำมัน (ส่ง HQ)" }), nav,
+    el("p", { class: "muted small", text: "นับเฉพาะรูปที่ยืนยันแล้ว · งวดดูจากวันที่ของแต่ละรายการเอง" }), cards, cfSummary());
+}
+
+function cfSummary() {
+  const d = cf_.data, p = d.periods.find((x) => x.batch === cf_.batch);
   const byId = Object.fromEntries(d.vehicles.map((v) => [v.id, v]));
   const groups = new Map();
-  d.lines.filter((l) => l.counted && (!cf_.batch || l.batch === cf_.batch)).forEach((l) => {
+  d.lines.filter((l) => l.counted && l.batch === cf_.batch).forEach((l) => {
     const k = l.vehicle_id || "?";
     if (!groups.has(k)) groups.set(k, { v: byId[l.vehicle_id], fills: [], drivers: {} });
     const g = groups.get(k);
     g.fills.push(l);
-    if (l.driver_name) g.drivers[l.driver_name] = (g.drivers[l.driver_name] || 0) + 1;
+    const n = (l.driver_name || "").split(" ")[0];
+    if (n) g.drivers[n] = (g.drivers[n] || 0) + 1;
   });
   const rows = [...groups.values()].sort((a, b) => (Number((a.v || {}).truck_number) || 999) - (Number((b.v || {}).truck_number) || 999));
-  const total = rows.reduce((a, g) => a + g.fills.reduce((x, l) => x + Number(l.amount || 0), 0), 0);
-  const q = cf_.batch ? `&batch=${cf_.batch}` : "";
-  fill(box,
-    el("div", { class: "ss-custbar" }, el("b", { text: "รายการค่าน้ำมัน (ส่ง HQ)" }), el("span", { class: "grow" }),
-      el("button", { class: "btn", type: "button", text: "PDF (พิมพ์)", onclick: () => ssSheetFile(`/api/cash-fuel/summary.pdf?month=${cf_.month}${q}`, "pdf") }),
-      el("button", { class: "btn", type: "button", text: "Excel", onclick: () => ssSheetFile(`/api/cash-fuel/summary.xlsx?month=${cf_.month}${q}`, "xlsx") })),
-    el("div", { class: "ss-tablewrap soft" }, el("table", { class: "ss-table" },
+  const q = `month=${cf_.month}&batch=${cf_.batch}`;
+  return el("div", { class: "cf-summary" },
+    el("div", { class: "ss-custbar" }, el("b", { text: `งวด ${cfRange(p.from, p.to)}` }), el("span", { class: "grow" }),
+      el("button", { class: "btn small", type: "button", text: "+ เพิ่มรายการเอง", onclick: cfAddLine }),
+      el("button", { class: "btn", type: "button", text: "PDF (พิมพ์)", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.pdf?${q}`, "pdf") }),
+      el("button", { class: "btn", type: "button", text: "Excel", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.xlsx?${q}`, "xlsx") })),
+    rows.length ? el("div", { class: "ss-tablewrap soft" }, el("table", { class: "ss-table" },
       el("thead", {}, el("tr", {}, ...["รถเบอร์", "ทะเบียนรถ", "พนักงานขับรถ", "วันที่ · จำนวน", "รวม"].map((h) => el("th", { text: h })))),
       el("tbody", {}, ...rows.map((g) => el("tr", {},
         el("td", {}, el("b", { text: (g.v || {}).truck_number || "" })),
         el("td", { text: g.v ? g.v.plate : "ไม่ทราบรถ" }),
         el("td", { text: Object.entries(g.drivers).sort((a, b) => b[1] - a[1]).map(([n]) => n).slice(0, 2).join(", ") }),
-        el("td", { class: "small", text: g.fills.slice().sort((a, b) => a.day.localeCompare(b.day)).map((l) => `${cfDmy(l.day).slice(0, 5)} ${elN(l.amount)}`).join(" · ") }),
+        el("td", { class: "small" }, ...g.fills.slice().sort((a, b) => a.day.localeCompare(b.day)).map((l) =>
+          el("button", { class: "cf-fill", type: "button", title: l.page_id ? "เปิดรูปที่อ่านรายการนี้" : "เพิ่มเอง",
+            text: `${cfShort(l.day)} ${elN(l.amount)}`, onclick: () => l.page_id && goHash(`#cash-fuel/review/${l.page_id}`) }))),
         el("td", { class: "r" }, el("b", { text: elN(g.fills.reduce((x, l) => x + Number(l.amount || 0), 0)) })))),
-        el("tr", { class: "tot" }, el("td", { colspan: "4", class: "r", text: "รวม" }), el("td", { class: "r" }, el("b", { text: elN(total) })))))));
+        el("tr", { class: "tot" }, el("td", { colspan: "4", class: "r", text: "รวม" }), el("td", { class: "r" }, el("b", { text: elN(p.total) }))))))
+      : el("p", { class: "muted", text: "ยังไม่มีรายการที่ยืนยันในงวดนี้" }));
+}
+
+// ------------------------------------------------------------------ checking one page against its photo
+async function cfReview(id) {
+  document.querySelector("#cashFuelView .page-head").hidden = true;
+  fill($("cfBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
+  let d;
+  try { d = await api(`/api/cash-fuel/pages/${id}`); } catch (err) { fill($("cfBody"), null); showErr("cfError", err.message); return; }
+  cf_.review = d;
+  cf_.zoom = 1;
+  const pos = d.queue.indexOf(id);
+  const next = d.queue.find((x) => x !== id && d.queue.indexOf(x) > pos) || d.queue.find((x) => x !== id);
+  const img = el("img", { alt: "หน้ารายการเบิก", class: "cf-img" });
+  const photo = el("div", { class: "cf-photo" }, el("p", { class: "muted small", text: "กำลังโหลดรูป…" }));
+  const setZoom = (z) => { cf_.zoom = z; img.style.width = `${z * 100}%`; };
+  cfImage(id).then((u) => { img.src = u; fill(photo, img); }).catch((err) => fill(photo, el("p", { class: "error small", text: `โหลดรูปไม่ได้: ${err.message}` })));
+  const head = el("div", { class: "cf-rhead" },
+    el("button", { class: "btn small", type: "button", text: "‹ กลับ", onclick: () => goHash(`#cash-fuel/${cf_.month || ""}`) }),
+    el("b", { text: d.page.confirmed ? "รูปนี้ยืนยันแล้ว" : pos >= 0 ? `ตรวจรูปที่ ${pos + 1} จาก ${d.queue.length}` : "ตรวจรูป" }),
+    el("span", { class: "muted small", text: d.page.name || "" }), el("span", { class: "grow" }),
+    el("span", { class: "cf-zoom" }, ...[[1, "พอดี"], [1.6, "ขยาย"], [2.4, "ขยายมาก"]].map(([z, t]) =>
+      el("button", { class: "btn small", type: "button", text: t, onclick: () => setZoom(z) }))));
+  const lines = d.lines.slice().sort((a, b) => (cfDoubt(b) - cfDoubt(a)) || (a.seq - b.seq));
+  const doubts = lines.filter(cfDoubt).length;
+  const list = el("div", { class: "cf-lines" },
+    d.page.status === "error" ? el("p", { class: "error", text: `อ่านรูปนี้ไม่สำเร็จ: ${d.page.error || ""} — ลบรูปนี้แล้วถ่ายใหม่ หรือเพิ่มรายการเอง` }) : null,
+    d.page.confirmed ? el("p", { class: "ok-text small", text: `ยืนยันแล้วโดย ${d.page.confirmed_by || "—"} · ${new Date(d.page.confirmed_at).toLocaleString("th-TH")}` }) : null,
+    doubts ? el("p", { class: "warn-text", text: `มี ${doubts} รายการที่ระบบไม่แน่ใจ — ดูกับรูป แล้วกด “ถูกแล้ว” หรือแก้ให้ถูก` })
+      : el("p", { class: "muted small", text: `อ่านได้ ${lines.length} รายการเติมน้ำมัน · ดูกับรูปอีกครั้งแล้วกดยืนยัน` }),
+    ...lines.map((l) => cfLineCard(l, d)));
+  const total = () => d.lines.filter((l) => l.counted).reduce((a, l) => a + Number(l.amount || 0), 0);
+  const confirmBtn = el("button", { class: "btn primary", type: "button", onclick: async () => {
+    try { await api(`/api/cash-fuel/pages/${id}/confirm`, jsonOpts("POST", { confirmed: true })); } catch (err) { alert(err.message); return; }
+    if (typeof todayToast === "function") todayToast("ยืนยันแล้ว ✓");
+    goHash(next ? `#cash-fuel/review/${next}` : `#cash-fuel/${cf_.month || ""}`);
+  } });
+  const paintConfirm = () => {
+    const open = d.lines.filter((l) => cfDoubt(l)).length;
+    confirmBtn.textContent = d.page.confirmed ? "บันทึกแล้ว" : `ยืนยันหน้านี้ · ${d.lines.filter((l) => l.counted).length} รายการ ฿${elN(total())}`;
+    confirmBtn.disabled = !!open || d.page.confirmed;
+    confirmBtn.title = open ? `ยังมี ${open} รายการที่ต้องดูกับรูป` : "";
+  };
+  cf_.paintConfirm = paintConfirm;
+  paintConfirm();
+  const bar = el("div", { class: "ss-savebar cf-rbar" },
+    confirmBtn,
+    d.page.confirmed ? el("button", { class: "btn", type: "button", text: "แก้ไข (ยกเลิกการยืนยัน)", onclick: async () => {
+      try { await api(`/api/cash-fuel/pages/${id}/confirm`, jsonOpts("POST", { confirmed: false })); } catch (err) { alert(err.message); return; }
+      cfReview(id);
+    } }) : null,
+    next ? el("button", { class: "btn", type: "button", text: "ข้ามไปรูปถัดไป ›", onclick: () => goHash(`#cash-fuel/review/${next}`) }) : null,
+    el("span", { class: "grow" }),
+    el("button", { class: "btn", type: "button", text: "ลบรูปนี้", onclick: async () => {
+      if (!confirm("ลบรูปนี้และทุกรายการที่อ่านจากรูปนี้?")) return;
+      try { await api(`/api/cash-fuel/pages/${id}`, { method: "DELETE" }); } catch (err) { alert(err.message); return; }
+      goHash(next ? `#cash-fuel/review/${next}` : `#cash-fuel/${cf_.month || ""}`);
+    } }));
+  fill($("cfBody"), head, el("div", { class: "cf-review" }, photo, el("div", { class: "cf-right" }, list, bar)));
+}
+
+const cfDoubt = (l) => !!(l.note && !l.checked && l.counted);
+
+async function cfImage(id) {
+  if (cf_.urls[id]) return cf_.urls[id];
+  const res = await fetch(`/api/cash-fuel/pages/${id}/image`, { headers: { "X-App-Token": state.token } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  cf_.urls[id] = URL.createObjectURL(await res.blob());
+  return cf_.urls[id];
+}
+
+// one line: the reason first when the reader is unsure, then the fields (date, truck, คนเบิก, ยอด), ถูกแล้ว / ไม่นับ
+function cfLineCard(l, d) {
+  const card = el("div", { class: "cf-line" });
+  const save = async (patch) => {
+    try { Object.assign(l, await api(`/api/cash-fuel/lines/${l.id}`, jsonOpts("PATCH", patch))); } catch (err) { alert(err.message); }
+    paint();
+    if (cf_.paintConfirm) cf_.paintConfirm();
+  };
+  const vopts = d.vehicles.slice().sort((a, b) => (Number(a.truck_number) || 999) - (Number(b.truck_number) || 999));
+  const paint = () => {
+    card.className = `cf-line${cfDoubt(l) ? " doubt" : ""}${l.counted ? "" : " off"}`;
+    const reasons = (l.note || "").split(" · ").filter(Boolean).map(cfPlain);
+    fill(card,
+      cfDoubt(l) ? el("div", { class: "cf-why" }, el("b", { text: "ต้องดูกับรูป:" }), ...reasons.map((r) => el("div", { text: `• ${r}` }))) : null,
+      el("div", { class: "cf-read" }, el("span", { class: "muted small", text: "อ่านได้ว่า" }), el("span", { text: ` “${l.text || ""}”` }),
+        l.requester ? el("span", { class: "muted small", text: ` · ผู้เบิก ${l.requester}${l.position ? ` (${l.position})` : ""}` }) : null),
+      el("div", { class: "cf-fields" },
+        el("label", {}, el("span", { class: "small muted", text: "วันที่" }), el("input", { type: "date", value: l.day, onchange: (e) => e.target.value && save({ day: e.target.value }) })),
+        el("label", {}, el("span", { class: "small muted", text: "รถ" }), el("select", { onchange: (e) => save({ vehicle_id: e.target.value || null }) },
+          el("option", { value: "", text: "— เลือกรถ —" }), ...vopts.map((v) => el("option", { value: v.id, text: cfVehicleLabel(v), selected: v.id === l.vehicle_id })))),
+        el("label", {}, el("span", { class: "small muted", text: "คนเบิก" }), cfPeopleSelect(d, l.driver_name, (v) => save({ driver_name: v }))),
+        el("label", { class: "cf-amount" }, el("span", { class: "small muted", text: "ยอด (บาท)" }),
+          el("input", { type: "text", inputmode: "decimal", value: String(Number(l.amount)), onchange: (e) => save({ amount: e.target.value }) }))),
+      el("div", { class: "cf-lineacts" },
+        cfDoubt(l) ? el("button", { class: "btn small primary", type: "button", text: "✓ ถูกแล้ว", onclick: () => save({ checked: true }) }) : null,
+        l.note && l.checked ? el("span", { class: "ok-text small", text: "✓ ดูแล้ว" }) : null,
+        el("button", { class: "btn small", type: "button", text: l.counted ? "ไม่นับรายการนี้" : "นับรายการนี้", onclick: () => save({ counted: !l.counted }) }),
+        !l.counted && l.dup_of ? el("span", { class: "muted small", text: "ซ้ำกับรายการที่นับแล้ว" }) : null));
+  };
+  paint();
+  return card;
+}
+
+function cfPlain(r) {   // the reader's notes in plain words
+  if (r.startsWith("อ่านรอบสองได้")) return `อ่าน 2 รอบได้ไม่ตรงกัน — รอบที่สองเห็น ${r.replace("อ่านรอบสองได้", "").trim()}`;
+  if (r.startsWith("รอบสองไม่เห็น")) return "อ่าน 2 รอบได้ไม่ตรงกัน — รอบที่สองไม่เห็นบรรทัดนี้";
+  if (r === "อ่านไม่ชัด — ตรวจกับรูป") return "ลายมือไม่ชัด — ระบบไม่แน่ใจตัวเลข";
+  if (r === "ไม่พบรถ") return "ไม่รู้ว่าเป็นรถคันไหน — เลือกรถ";
+  if (r === "อ่านวันที่ไม่ได้") return "อ่านวันที่ไม่ได้ — ใส่วันที่";
+  return r;
+}
+
+function cfVehicleLabel(v) { return v ? `${v.truck_number ? `${v.truck_number} · ` : ""}${v.plate || ""}${v.branch && v.branch !== "สระบุรี" ? ` (${v.branch})` : ""}` : ""; }
+
+// คนเบิก: the drivers, คนขับรถสาย and หน้าโรง in their own groups (owner, 11 Nov 2026)
+function cfPeopleSelect(d, value, onChange) {
+  const known = new Set();
+  const groups = (d.groups || []).map((g) => el("optgroup", { label: g.label }, ...(d.people[g.key] || []).map((p) => {
+    known.add(p.name);
+    return el("option", { value: p.name, text: `${p.nickname ? `${p.nickname} · ` : ""}${p.name}${p.truck ? ` (รถ ${p.truck})` : ""}`, selected: p.name === value });
+  })));
+  const extra = value && !known.has(value) ? el("option", { value, text: `${value} (ไม่อยู่ในรายชื่อ)`, selected: true }) : null;
+  return el("select", { onchange: (e) => onChange(e.target.value || null) }, el("option", { value: "", text: "— เลือกคนเบิก —", selected: !value }), extra, ...groups);
 }
 
 async function cfAddLine() {
   const d = cf_.data;
-  const day = prompt("วันที่ (วว/ดด/ปปปป)", cfDmy(new Date().toISOString().slice(0, 10)));
+  const day = prompt("วันที่ (วว/ดด/ปปปป)", "");
   if (!day) return;
   const iso = typeof parseDMY === "function" ? parseDMY(day) : null;
   if (!iso) { alert("วันที่ไม่ถูกต้อง"); return; }
   const truck = prompt("รถเบอร์ (หรือทะเบียน)", "");
   if (truck == null) return;
   const v = d.vehicles.find((x) => String(x.truck_number) === truck.trim() && x.branch === "สระบุรี") || d.vehicles.find((x) => (x.plate || "").replace(/[\s-]/g, "") === truck.replace(/[\s-]/g, ""));
-  const amount = prompt(`จำนวนเงิน${v ? ` (${cfVehicleLabel(v)})` : " (ไม่พบรถนี้ — เลือกรถทีหลังได้)"}`, "1000");
+  const amount = prompt(`ยอด (บาท)${v ? ` · ${cfVehicleLabel(v)}` : " · ไม่พบรถนี้"}`, "1000");
   if (!amount) return;
   try { await api("/api/cash-fuel/lines", jsonOpts("POST", { day: iso, vehicle_id: v ? v.id : null, amount })); } catch (err) { alert(err.message); return; }
   openCashFuel(cf_.month);

@@ -1951,3 +1951,53 @@ body.signed-out .shell { display: block; }
 .cf-table .cf-sel { min-width: 130px; }
 @media (max-width: 1400px) { .cf-split { grid-template-columns: 1fr; } .cf-viewer { position: static; max-height: none; } .cf-viewer img { max-width: 720px; } }
 .cf-split > div { min-width: 0; }
+
+/* น้ำมันเงินสด, redesigned (cashfuel.js): upload -> check each page against its photo -> confirm -> the month's two periods */
+.cf-card { margin-bottom: 14px; display: grid; gap: 10px; }
+.cf-card h3 { margin: 0; font-size: 16px; }
+.cf-drop { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; text-align: center; padding: 26px 16px; cursor: pointer; }
+.cf-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cf-file { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--surface-2, #f4f2ec); font-size: 14px; }
+.cf-file .cf-fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf-file .cf-fstate { color: var(--muted); font-size: 13px; }
+.cf-file.busy .cf-fstate { color: var(--accent); }
+.cf-file.ok .cf-fstate { color: var(--ok, #16794c); }
+.cf-file.bad .cf-fstate { color: var(--bad, #b42318); }
+.cf-actions { display: flex; justify-content: flex-end; }
+.cf-queue { display: grid; gap: 8px; }
+.cf-qitem { display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px; align-items: center; text-align: left; font: inherit; color: inherit;
+  padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; }
+.cf-qitem:hover { border-color: var(--accent); }
+.cf-qitem.warn { border-left: 4px solid var(--warn, #b54708); }
+.cf-qgo { color: var(--accent); font-weight: 600; }
+.cf-mnav { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.cf-periods { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.cf-period { display: flex; flex-direction: column; gap: 2px; text-align: left; font: inherit; color: inherit; padding: 14px 16px; border-radius: 12px;
+  border: 2px solid var(--line); background: var(--surface); cursor: pointer; }
+.cf-period.on { border-color: var(--accent); background: var(--accent-soft); }
+.cf-prange { font-size: 17px; } .cf-ptotal { font-size: 24px; font-weight: 700; }
+.cf-summary { display: grid; gap: 8px; margin-top: 4px; }
+.cf-fill { font: inherit; border: 0; background: var(--surface-2, #f1efe9); border-radius: 999px; padding: 1px 8px; margin: 1px 4px 1px 0; cursor: pointer; white-space: nowrap; }
+.cf-rhead { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+.cf-rhead .grow, .cf-rbar .grow { flex: 1; }
+.cf-zoom { display: inline-flex; gap: 4px; }
+.cf-review { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.cf-photo { position: sticky; top: 66px; max-height: calc(100vh - 80px); overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 6px; }
+.cf-img { width: 100%; display: block; border-radius: 8px; }
+.cf-right { display: grid; gap: 10px; min-width: 0; }
+.cf-lines { display: grid; gap: 8px; }
+.cf-line { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 8px; }
+.cf-line.doubt { border: 2px solid var(--warn, #b54708); background: var(--warn-soft, #fff8eb); }
+.cf-line.off { opacity: .55; }
+.cf-why { color: var(--warn, #b54708); font-size: 14px; display: grid; gap: 2px; }
+.cf-read { font-size: 14px; }
+.cf-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.cf-fields > :nth-child(1) { order: 1; } .cf-fields > :nth-child(4) { order: 2; } .cf-fields > :nth-child(2) { order: 3; } .cf-fields > :nth-child(3) { order: 4; }
+.cf-fields label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cf-fields select, .cf-fields input { width: 100%; min-width: 0; }
+.cf-amount input { text-align: right; font-weight: 700; }
+.cf-lineacts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cf-rbar { position: sticky; bottom: 0; flex-wrap: wrap; }
+.ok-text { color: var(--ok, #16794c); }
+@media (max-width: 1100px) { .cf-review { grid-template-columns: 1fr; } .cf-photo { position: static; max-height: 70vh; } }
+@media (max-width: 700px) { .cf-qitem { grid-template-columns: 1fr; } }

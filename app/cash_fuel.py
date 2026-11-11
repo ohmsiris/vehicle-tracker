@@ -319,19 +319,81 @@ def _mark_duplicates(rows: list[dict], branch: str) -> None:
             r["note"] = " · ".join(x for x in (r.get("note"), "ซ้ำกับรายการที่นับแล้ว — ไม่นับซ้ำ") if x)
 
 
-def month_view(branch: str, month: str) -> dict:
-    """Everything the page shows for one company month: the lines (both halves), their photos, the trucks to choose from."""
+def _confirmed_lines(lines: list[dict]) -> list[dict]:
+    """Only what someone has checked against the photo counts (owner, 11 Nov 2026): lines of confirmed pages, and lines typed in."""
     from app import supabase
-    lines = supabase.select_all("cash_fuel_lines", {"select": "*", "branch": f"eq.{branch}", "month": f"eq.{month}", "order": "day.asc,page_id.asc,seq.asc"})
-    page_ids = sorted({ln["page_id"] for ln in lines if ln.get("page_id")})
-    pages = supabase.select_all("cash_fuel_pages", {"select": "id,name,status,error,by_name,created_at", "id": f"in.({','.join(map(str, page_ids))})",
-                                                    "order": "id.asc"}) if page_ids else []
+    ids = sorted({ln["page_id"] for ln in lines if ln.get("page_id")})
+    ok = {p["id"] for p in supabase.select_all("cash_fuel_pages", {"select": "id", "id": f"in.({','.join(map(str, ids))})", "confirmed": "eq.true",
+                                                                   "order": "id.asc"})} if ids else set()
+    return [ln for ln in lines if not ln.get("page_id") or ln["page_id"] in ok]
+
+
+def _choices(branch: str) -> dict:
     full = _roster()
     roster = [{"id": v["id"], "truck_number": v.get("truck_number"), "plate": v.get("plate"), "branch": v.get("branch"), "usage": v.get("usage"),
                "driver": v.get("driver")} for v in full]
+    return {"vehicles": roster, "people": people(branch, full), "groups": [{"key": k, "label": lab} for k, _, lab in GROUPS]}
+
+
+def month_view(branch: str, month: str) -> dict:
+    """One company month: its two periods (by their dates), the confirmed fills and the summary of each; pages still to check."""
+    from app import supabase
+    lines = _confirmed_lines(supabase.select_all("cash_fuel_lines", {"select": "*", "branch": f"eq.{branch}", "month": f"eq.{month}",
+                                                                     "order": "day.asc,page_id.asc,seq.asc"}))
+    ch = _choices(branch)
+    periods = []
+    for b in (1, 2):
+        s, e = period(month, b)
+        sm = summary(lines, ch["vehicles"], b)
+        periods.append({"batch": b, "from": s.isoformat(), "to": e.isoformat(), "total": sm["total"], "fills": sm["fills"], "trucks": len(sm["trucks"])})
     s, e = period(month)
-    return {"branch": branch, "month": month, "from": s.isoformat(), "to": e.isoformat(), "lines": lines, "pages": pages, "vehicles": roster,
-            "people": people(branch, full), "groups": [{"key": k, "label": lab} for k, _, lab in GROUPS], "summary": summary(lines, roster)}
+    return {"branch": branch, "month": month, "from": s.isoformat(), "to": e.isoformat(), "lines": lines, "periods": periods,
+            "pending": pending(branch), **ch}
+
+
+def pending(branch: str) -> list[dict]:
+    """Pages read but not confirmed yet (any month): what is waiting to be checked, oldest first."""
+    from app import supabase
+    pages = supabase.select_all("cash_fuel_pages", {"select": "id,name,status,error,created_at", "branch": f"eq.{branch}", "confirmed": "eq.false",
+                                                    "order": "id.asc"})
+    if not pages:
+        return []
+    lines = supabase.select_all("cash_fuel_lines", {"select": "page_id,day,amount,note,checked,counted",
+                                                    "page_id": f"in.({','.join(str(p['id']) for p in pages)})", "order": "id.asc"})
+    for p in pages:
+        mine = [ln for ln in lines if ln["page_id"] == p["id"]]
+        days = sorted(ln["day"] for ln in mine)
+        p.update({"lines": len(mine), "to_check": sum(1 for ln in mine if ln.get("note") and not ln.get("checked")),
+                  "from": days[0] if days else None, "to": days[-1] if days else None,
+                  "total": round(sum(float(ln["amount"] or 0) for ln in mine if ln.get("counted")), 2)})
+    return pages
+
+
+def page_detail(page_id: int, branch: str = "สระบุรี") -> dict:
+    """One page to check: the page, its fuel lines (the doubtful ones first), and the choices for truck / คนเบิก."""
+    from app import supabase
+    p = supabase.select("cash_fuel_pages", {"select": "id,name,status,error,confirmed,confirmed_at,confirmed_by,created_at,branch",
+                                            "id": f"eq.{int(page_id)}", "limit": "1"})
+    if not p:
+        raise CashFuelError("ไม่พบรูปนี้")
+    lines = supabase.select_all("cash_fuel_lines", {"select": "*", "page_id": f"eq.{int(page_id)}", "order": "seq.asc"})
+    queue = [x["id"] for x in pending(p[0]["branch"])]
+    return {"page": p[0], "lines": lines, "queue": queue, **_choices(p[0]["branch"])}
+
+
+def confirm_page(page_id: int, who: str, confirmed: bool = True) -> dict:
+    """ยืนยันหน้านี้: the page has been checked against the photo; its lines now count. Every doubtful line must be ticked first."""
+    from app import supabase
+    lines = supabase.select_all("cash_fuel_lines", {"select": "id,note,checked,counted", "page_id": f"eq.{int(page_id)}", "order": "id.asc"})
+    if confirmed:
+        open_ = [ln for ln in lines if ln.get("note") and not ln.get("checked") and ln.get("counted")]
+        if open_:
+            raise CashFuelError(f"ยังมี {len(open_)} รายการที่ต้องดูกับรูป — ติ๊ก “ถูกแล้ว” หรือแก้ / ไม่นับ ก่อนยืนยัน")
+        supabase.update("cash_fuel_lines", {"page_id": f"eq.{int(page_id)}"}, {"checked": True})
+    now = datetime.now(timezone.utc).isoformat()
+    supabase.update("cash_fuel_pages", {"id": f"eq.{int(page_id)}"},
+                    {"confirmed": confirmed, "confirmed_at": now if confirmed else None, "confirmed_by": who if confirmed else None})
+    return {"ok": True}
 
 
 def recent_pages(branch: str, limit: int = 30) -> list[dict]:
@@ -504,7 +566,7 @@ def to_xlsx(month: str, s: dict, batch: Optional[int] = None) -> bytes:
 
 def summary_file(branch: str, month: str, batch: Optional[int], kind: str) -> tuple[bytes, str, str]:
     from app import supabase
-    lines = supabase.select_all("cash_fuel_lines", {"select": "*", "branch": f"eq.{branch}", "month": f"eq.{month}", "order": "day.asc"})
+    lines = _confirmed_lines(supabase.select_all("cash_fuel_lines", {"select": "*", "branch": f"eq.{branch}", "month": f"eq.{month}", "order": "day.asc"}))
     roster = [{"id": v["id"], "truck_number": v.get("truck_number"), "plate": v.get("plate")} for v in _roster()]
     s = summary(lines, roster, batch)
     data = to_xlsx(month, s, batch)
