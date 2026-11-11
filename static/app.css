@@ -1991,6 +1991,9 @@ body.signed-out .shell { display: block; }
 .cf-line.off { opacity: .55; }
 .cf-why { color: var(--warn, #b54708); font-size: 14px; display: grid; gap: 2px; }
 .cf-read { font-size: 14px; }
+.cf-n { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 999px; background: var(--surface-2, #f1efe9); font-weight: 700; font-size: 13px; margin-right: 8px; }
+.cf-doubthead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.cf-doubthead .warn-text { margin: 0; flex: 1 1 260px; }
 .cf-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 .cf-fields > :nth-child(1) { order: 1; } .cf-fields > :nth-child(4) { order: 2; } .cf-fields > :nth-child(2) { order: 3; } .cf-fields > :nth-child(3) { order: 4; }
 .cf-fields label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

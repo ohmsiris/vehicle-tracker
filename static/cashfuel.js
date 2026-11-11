@@ -175,14 +175,22 @@ async function cfReview(id) {
     el("span", { class: "muted small", text: d.page.name || "" }), el("span", { class: "grow" }),
     el("span", { class: "cf-zoom" }, ...[[1, "พอดี"], [1.6, "ขยาย"], [2.4, "ขยายมาก"]].map(([z, t]) =>
       el("button", { class: "btn small", type: "button", text: t, onclick: () => setZoom(z) }))));
-  const lines = d.lines.slice().sort((a, b) => (cfDoubt(b) - cfDoubt(a)) || (a.seq - b.seq));
+  // same order as the photo, top to bottom (owner, 11 Nov: doubtful-first hid the first row); doubtful ones are marked, and a button jumps to the next
+  const lines = d.lines.slice().sort((a, b) => a.seq - b.seq);
   const doubts = lines.filter(cfDoubt).length;
+  const nextDoubt = () => {
+    const c = [...document.querySelectorAll(".cf-line.doubt")];
+    if (!c.length) return;
+    const top = c.find((x) => x.getBoundingClientRect().top > 140) || c[0];
+    top.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   const list = el("div", { class: "cf-lines" },
     d.page.status === "error" ? el("p", { class: "error", text: `อ่านรูปนี้ไม่สำเร็จ: ${d.page.error || ""} — ลบรูปนี้แล้วถ่ายใหม่ หรือเพิ่มรายการเอง` }) : null,
     d.page.confirmed ? el("p", { class: "ok-text small", text: `ยืนยันแล้วโดย ${d.page.confirmed_by || "—"} · ${new Date(d.page.confirmed_at).toLocaleString("th-TH")}` }) : null,
-    doubts ? el("p", { class: "warn-text", text: `มี ${doubts} รายการที่ระบบไม่แน่ใจ — ดูกับรูป แล้วกด “ถูกแล้ว” หรือแก้ให้ถูก` })
+    doubts ? el("div", { class: "cf-doubthead" }, el("p", { class: "warn-text", text: `อ่านได้ ${lines.length} รายการ เรียงตามรูป · มี ${doubts} รายการที่ระบบไม่แน่ใจ (กรอบสีส้ม) — ดูกับรูป แล้วกด “ถูกแล้ว” หรือแก้ให้ถูก` }),
+      el("button", { class: "btn small", type: "button", text: "ไปรายการที่ต้องดู ›", onclick: nextDoubt }))
       : el("p", { class: "muted small", text: `อ่านได้ ${lines.length} รายการเติมน้ำมัน · ดูกับรูปอีกครั้งแล้วกดยืนยัน` }),
-    ...lines.map((l) => cfLineCard(l, d)));
+    ...lines.map((l, i) => cfLineCard(l, d, i + 1)));
   const total = () => d.lines.filter((l) => l.counted).reduce((a, l) => a + Number(l.amount || 0), 0);
   const confirmBtn = el("button", { class: "btn primary", type: "button", onclick: async () => {
     try { await api(`/api/cash-fuel/pages/${id}/confirm`, jsonOpts("POST", { confirmed: true })); } catch (err) { alert(err.message); return; }
@@ -224,7 +232,7 @@ async function cfImage(id) {
 }
 
 // one line: the reason first when the reader is unsure, then the fields (date, truck, คนเบิก, ยอด), ถูกแล้ว / ไม่นับ
-function cfLineCard(l, d) {
+function cfLineCard(l, d, n) {
   const card = el("div", { class: "cf-line" });
   const save = async (patch) => {
     try { Object.assign(l, await api(`/api/cash-fuel/lines/${l.id}`, jsonOpts("PATCH", patch))); } catch (err) { alert(err.message); }
@@ -237,7 +245,7 @@ function cfLineCard(l, d) {
     const reasons = (l.note || "").split(" · ").filter(Boolean).map(cfPlain);
     fill(card,
       cfDoubt(l) ? el("div", { class: "cf-why" }, el("b", { text: "ต้องดูกับรูป:" }), ...reasons.map((r) => el("div", { text: `• ${r}` }))) : null,
-      el("div", { class: "cf-read" }, el("span", { class: "muted small", text: "อ่านได้ว่า" }), el("span", { text: ` “${l.text || ""}”` }),
+      el("div", { class: "cf-read" }, n ? el("span", { class: "cf-n", text: String(n) }) : null, el("span", { class: "muted small", text: "อ่านได้ว่า" }), el("span", { text: ` “${l.text || ""}”` }),
         l.requester ? el("span", { class: "muted small", text: ` · ผู้เบิก ${l.requester}${l.position ? ` (${l.position})` : ""}` }) : null),
       el("div", { class: "cf-fields" },
         el("label", {}, el("span", { class: "small muted", text: "วันที่" }), el("input", { type: "date", value: l.day, onchange: (e) => e.target.value && save({ day: e.target.value }) })),
