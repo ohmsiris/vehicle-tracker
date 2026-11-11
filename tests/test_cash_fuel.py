@@ -80,7 +80,7 @@ def test_only_confirmed_pages_and_typed_lines_count(monkeypatch):
 def test_a_page_with_doubtful_lines_cannot_be_confirmed(monkeypatch):
     import pytest
     from app import supabase
-    rows = [{"id": 1, "note": "ลายมือไม่ชัด", "checked": False, "counted": True}, {"id": 2, "note": "x", "checked": False, "counted": False}]
+    rows = [{"id": 1, "note": "ลายมือไม่ชัด", "checked": False, "counted": True, "vehicle_id": "a", "amount": 1000}, {"id": 2, "note": "x", "checked": False, "counted": False}]
     writes = []
     monkeypatch.setattr(supabase, "select_all", lambda table, params=None: rows)
     monkeypatch.setattr(supabase, "update", lambda table, match, body: writes.append((table, body)))
@@ -122,3 +122,27 @@ def test_a_pdf_of_several_pages_is_split_into_one_picture_per_page(monkeypatch):
     out = cf.add_pages([("scan.pdf", raw)], "สระบุรี", "test")
     assert [a["name"] for a in out["added"]] == ["scan.pdf หน้า 1", "scan.pdf หน้า 2", "scan.pdf หน้า 3"]
     assert seen == ["image/jpeg"] * 3 and len({r["image_hash"] for r in inserted}) == 3
+
+
+def test_a_front_of_house_requester_is_kept_but_not_sent_to_hq():
+    ppl = {"route": [{"name": "มานัส ใจดี", "nickname": "", "truck": "52"}], "foh": [{"name": "สมชาย ดี", "nickname": "ชาย", "truck": None}]}
+    read = {"lines": [{"is_fuel": True, "date": "2026-11-03", "text": "เติมน้ำมัน 84-4764", "plate": "84-4764", "truck_number": None, "amount": 500,
+                       "requester": "สมชาย", "position": None, "unsure": False},
+                      {"is_fuel": True, "date": "2026-11-03", "text": "เติมน้ำมัน 52", "plate": None, "truck_number": "52", "amount": 1000,
+                       "requester": "มานัส", "position": None, "unsure": False}]}
+    foh, route = cf.fuel_lines(read, ROSTER, "สระบุรี", ppl)
+    assert foh["driver_name"] == "สมชาย ดี" and foh["counted"] is False
+    assert route["counted"] is True
+
+
+def test_confirm_needs_a_truck_and_an_amount_on_every_counted_row(monkeypatch):
+    import pytest
+    from app import supabase
+    rows = [{"id": 1, "note": None, "checked": True, "counted": True, "vehicle_id": None, "amount": 0},
+            {"id": 2, "note": None, "checked": True, "counted": False, "vehicle_id": None, "amount": 0}]
+    monkeypatch.setattr(supabase, "select_all", lambda table, params=None: rows)
+    monkeypatch.setattr(supabase, "update", lambda *a: None)
+    with pytest.raises(cf.CashFuelError):
+        cf.confirm_page(1, "x")
+    rows[0].update({"vehicle_id": "a", "amount": 500})
+    assert cf.confirm_page(1, "x") == {"ok": True}

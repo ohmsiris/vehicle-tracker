@@ -222,6 +222,7 @@ def fuel_lines(read: dict, roster: list[dict], branch: str, ppl: Optional[dict] 
         if i in second:
             notes.append(second[i])
         out.append({"seq": i, "day": d, "text": (ln.get("text") or "")[:200], "plate_read": ln.get("plate"), "number_read": ln.get("truck_number"),
+                    "counted": not is_foh(took, ppl or {}),
                     "amount": float(ln.get("amount") or 0), "requester": ln.get("requester"), "position": ln.get("position"),
                     "vehicle_id": v["id"] if v else None,
                     "driver_name": took or ((v.get("driver") or None) if v else None),
@@ -244,6 +245,11 @@ def people(branch: str, roster: list[dict]) -> dict:
         out[pos[e["position"]]].append({"name": e["full_name"], "nickname": e.get("nickname") or "", "truck": truck_of.get((e["full_name"] or "").strip())})
     out["route"].sort(key=lambda x: (int(x["truck"]) if str(x["truck"] or "").isdigit() else 999, x["name"]))
     return out
+
+
+def is_foh(name: Optional[str], ppl: dict) -> bool:
+    """คนเบิก is a หน้าโรง driver: the fill is kept for the accounts but is not on HQ's รายการค่าน้ำมัน (owner, 11 Nov 2026)."""
+    return bool(name) and any(p["name"] == name for p in (ppl or {}).get("foh") or [])
 
 
 def who_took(requester: Optional[str], ppl: dict) -> Optional[str]:
@@ -421,11 +427,14 @@ def page_detail(page_id: int, branch: str = "สระบุรี") -> dict:
 def confirm_page(page_id: int, who: str, confirmed: bool = True) -> dict:
     """ยืนยันหน้านี้: the page has been checked against the photo; its lines now count. Every doubtful line must be ticked first."""
     from app import supabase
-    lines = supabase.select_all("cash_fuel_lines", {"select": "id,note,checked,counted", "page_id": f"eq.{int(page_id)}", "order": "id.asc"})
+    lines = supabase.select_all("cash_fuel_lines", {"select": "id,note,checked,counted,vehicle_id,amount", "page_id": f"eq.{int(page_id)}", "order": "id.asc"})
     if confirmed:
         open_ = [ln for ln in lines if ln.get("note") and not ln.get("checked") and ln.get("counted")]
         if open_:
-            raise CashFuelError(f"ยังมี {len(open_)} รายการที่ต้องดูกับรูป — ติ๊ก “ถูกแล้ว” หรือแก้ / ไม่นับ ก่อนยืนยัน")
+            raise CashFuelError(f"ยังมี {len(open_)} รายการที่ต้องดูกับรูป — กด “ถูกแล้ว” หรือแก้ / ลบแถว ก่อนยืนยัน")
+        empty = [ln for ln in lines if ln.get("counted") and (not ln.get("vehicle_id") or float(ln.get("amount") or 0) <= 0)]
+        if empty:
+            raise CashFuelError(f"ยังมี {len(empty)} แถวที่ไม่มีรถหรือยอด — ใส่ให้ครบ หรือลบแถว ก่อนยืนยัน")
         supabase.update("cash_fuel_lines", {"page_id": f"eq.{int(page_id)}"}, {"checked": True})
     now = datetime.now(timezone.utc).isoformat()
     supabase.update("cash_fuel_pages", {"id": f"eq.{int(page_id)}"},
@@ -466,6 +475,10 @@ def update_line(line_id: int, body: dict) -> dict:
             values[k] = bool(body[k])
     if not values:
         raise CashFuelError("ไม่มีอะไรเปลี่ยน")
+    if "driver_name" in values and "counted" not in body:
+        cur = supabase.select("cash_fuel_lines", {"select": "branch,dup_of", "id": f"eq.{int(line_id)}", "limit": "1"})
+        if cur:
+            values["counted"] = not cur[0].get("dup_of") and not is_foh(values["driver_name"], people(cur[0]["branch"], _roster()))
     rows = supabase.update("cash_fuel_lines", {"id": f"eq.{int(line_id)}"}, values)
     if not rows:
         raise CashFuelError("ไม่พบรายการนี้")
@@ -480,12 +493,18 @@ def add_line(branch: str, body: dict) -> dict:
         amount = round(float(str(body.get("amount") or 0).replace(",", "")), 2)
     except ValueError:
         raise CashFuelError("ใส่วันที่และจำนวนเงินให้ถูกต้อง")
-    v = next((x for x in _roster() if x["id"] == body.get("vehicle_id")), None)
+    roster = _roster()
+    v = next((x for x in roster if x["id"] == body.get("vehicle_id")), None)
     m, b = month_of(d)
-    return supabase.insert("cash_fuel_lines", [{"page_id": None, "branch": branch, "month": m, "batch": b, "day": d.isoformat(), "text": "เพิ่มเอง",
-                                                "amount": amount, "vehicle_id": v["id"] if v else None,
-                                                "driver_name": body.get("driver_name") or ((v.get("driver") or None) if v else None),
-                                                "checked": True, "seq": 999}])[0]
+    page_id, seq = body.get("page_id"), 999
+    if page_id:                                     # เพิ่มแถว under a page's table: the line belongs to that page, after its last row
+        page_id = int(page_id)
+        have = supabase.select_all("cash_fuel_lines", {"select": "seq", "page_id": f"eq.{page_id}", "order": "seq.asc"})
+        seq = max([int(x["seq"] or 0) for x in have] + [-1]) + 1
+    name = body.get("driver_name") or ((v.get("driver") or None) if v else None)
+    return supabase.insert("cash_fuel_lines", [{"page_id": page_id or None, "branch": branch, "month": m, "batch": b, "day": d.isoformat(), "text": "เพิ่มเอง",
+                                                "amount": amount, "vehicle_id": v["id"] if v else None, "driver_name": name,
+                                                "counted": not is_foh(name, people(branch, roster)), "checked": True, "seq": seq}])[0]
 
 
 def delete_line(line_id: int) -> dict:

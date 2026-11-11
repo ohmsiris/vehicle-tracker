@@ -2029,3 +2029,9 @@ body.signed-out .shell { display: block; }
 .ss-table tfoot td, .ss-mini tr.ss-totrow td { font-weight: 700; background: var(--surface-2, #f1efe9); }
 .ss-mini td.r, .ss-mini th.r { text-align: right; padding-right: 10px; }
 .cf-ltable tbody td.cf-n, .cf-ltable tbody tr.cf-whyrow td:first-child, .cf-ltable tbody.doubt td.cf-n, .cf-ltable tbody.doubt tr.cf-whyrow td:first-child { background: transparent; }
+
+.cf-ltable tr.cf-inforow td { font-size: 12.5px; color: var(--muted); padding-top: 0; padding-bottom: 6px; }
+.cf-ltable tr.cf-inforow td:first-child { background: transparent; }
+.cf-ltable tbody.off td input, .cf-ltable tbody.off td select { opacity: .6; }
+.cf-ltable tbody.off td { opacity: 1; }
+.cf-addrow { justify-self: start; margin-top: 6px; }
