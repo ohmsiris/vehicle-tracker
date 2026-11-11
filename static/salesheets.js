@@ -61,7 +61,9 @@ async function ssOverview() {
         (t.flags || []).length && isToday ? el("span", { class: "badge warn", text: `⚠ ${t.flags.length}` }) : null,
         !r.pin_set ? el("span", { class: "badge", text: "ยังไม่ได้ตั้งรหัส" }) : null));
   });
-  fill($("ssBody"), link, el("div", { class: "ss-grid" }, ...blocks));
+  const all = el("div", { class: "ss-custbar" },
+    el("button", { class: "btn", type: "button", text: "พิมพ์ใบงานเปล่า ทุกสาย / PDF", onclick: () => ssPrintAll("") }));
+  fill($("ssBody"), link, all, el("div", { class: "ss-grid" }, ...blocks));
 }
 
 // ------------------------------------------------------------------ one driver
@@ -583,6 +585,26 @@ async function ssPrintSheet(routeId, day) {
 }
 
 // The print view = the Excel sheet (owner, 11 Nov 2026: "the Excel looks a lot better"), in the Word sheets' font (TH Sarabun New).
+// every route's sheet in one print (blank: for the drivers who still write on paper; or one day for all)
+async function ssPrintAll(day = "") {
+  const w = window.open("", "_blank");
+  if (!w) { alert("เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาตป๊อปอัปของเว็บนี้แล้วลองใหม่"); return; }
+  w.document.write("<p style='font-family:sans-serif'>กำลังโหลดใบงานทุกสาย…</p>");
+  const routes = (ss_.routes || []).filter((r) => r.active !== false);
+  const docs = [];
+  for (const r of routes) {
+    try { docs.push(ssSheetHtml(await api(`/api/sales-routes/${r.id}/sheet${day ? `?day=${day}` : ""}`))); } catch (err) { /* a route that fails is left out */ }
+    w.document.body.textContent = `กำลังโหลดใบงาน ${docs.length}/${routes.length}…`;
+  }
+  if (!docs.length) { w.document.body.textContent = "โหลดไม่สำเร็จ"; return; }
+  const bodyOf = (h) => h.slice(h.indexOf("<table class=\"main\""), h.lastIndexOf("</body>"));
+  const first = docs[0];
+  const html = first.slice(0, first.indexOf("<table class=\"main\"")).replace(/<title>[^<]*<\/title>/, `<title>ใบงานคนขับ ทุกสาย</title>`) +
+    docs.map((h) => `<section class="sheet">${bodyOf(h)}</section>`).join("") + "</body></html>";
+  w.document.open(); w.document.write(html); w.document.close();
+  w.onload = () => setTimeout(() => w.print(), 400);
+}
+
 function ssSheetHtml(s) {
   const esc = (v) => String(v == null ? "" : v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const n = (v) => (v == null || v === "" || v === 0 ? "" : Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 }));
@@ -627,15 +649,20 @@ table { border-collapse: collapse; width: 100%; }
 .bins { font-size: 7.5pt; text-align: center; line-height: 1.1; } .bins span { display: block; white-space: nowrap; }
 .main td.r { font-size: 10pt; white-space: nowrap; }
 .c { text-align: center; } .r { text-align: right; } .b { font-weight: 700; }
-td.slash { position: relative; height: 30px; background: linear-gradient(to bottom right, transparent calc(50% - .6px), #000 calc(50% - .6px), #000 calc(50% + .6px), transparent calc(50% + .6px)); }
+td.slash { position: relative; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cline x1='0' y1='100' x2='100' y2='0' stroke='black' stroke-width='1' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E") no-repeat center / 100% 100%; }
 td.slash .sq { position: absolute; left: 3px; top: 0; font-weight: 700; font-size: 11pt; }
 td.slash .sp { position: absolute; right: 3px; bottom: 0; font-size: 8pt; }
 tr { page-break-inside: avoid; }
+.main tbody td { height: 9mm; }
+.box td, .box th { height: 8mm; }
 .tot td { font-weight: 700; }
-.under { display: grid; grid-template-columns: 1.6fr 1fr .8fr; gap: 10px; margin-top: 10px; page-break-inside: avoid; align-items: start; }
+.under { display: grid; grid-template-columns: 1.5fr 1.05fr .85fr; gap: 10px; margin-top: 12px; page-break-inside: avoid; align-items: start; }
+.box.money td.r, .box.notes td.r { width: 48%; font-size: 13pt; }
 .box th { font-weight: 700; text-align: center; }
 .flags { margin-top: 6px; font-size: 9.5pt; }
-.box td, .box th { font-size: 10pt; }
+.box td, .box th { font-size: 11.5pt; }
+.box td.c { font-size: 12.5pt; }
+.sheet + .sheet { page-break-before: always; }
 .bar { position: sticky; top: 0; background: #f3f3f3; padding: 8px; display: flex; gap: 8px; align-items: center; font: 13px system-ui, sans-serif; }
 .bar button { font: inherit; padding: 4px 12px; }
 @media print { .bar { display: none; } }

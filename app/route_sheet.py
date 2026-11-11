@@ -192,7 +192,7 @@ def to_xlsx(s: dict) -> bytes:
         else:
             put(r, 15, "วางบิล", f_n, center)
         nb = max(1, len([b for b in row["bins"].split(", ") if b]))
-        ws.row_dimensions[r].height = max(30 if row["split"] else 24, 13 * nb + 4)
+        ws.row_dimensions[r].height = max(28, 13 * nb + 4)        # never smaller than a hand can write in (~10 mm)
         r += 1
     tt = s["totals"]
     for label, vals in (("รวมถุง", None), ("รวมเงิน", tt)):
@@ -222,6 +222,9 @@ def to_xlsx(s: dict) -> bytes:
     stock += [("รวม", sm.get("loaded") or {}), ("คืน", sm.get("returned") or {}), ("ขายได้", sm.get("sold") or {}),
               ("ขาด(-) / เกิน(+)", sm.get("diff") or {})]
     top = r
+    for j in range(1, max(len(stock), len(money), len(notes)) + 1):
+        ws.row_dimensions[top + j].height = 24              # the box underneath: room to write too
+    ws.row_dimensions[top].height = 24
     for j, (lab, q) in enumerate(stock, start=1):
         put(top + j, 1, lab, f_n, center)
         for i, k in enumerate(KEYS):
