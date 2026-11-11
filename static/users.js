@@ -11,7 +11,7 @@ const isStaff = () => !!(state.me && state.me.role === "staff");
 
 function staffMayOpen(hash) {
   if (!isStaff()) return true;
-  return (state.me.hashes || []).includes(`#${hash}`);
+  return (state.me.hashes || []).some((a) => `#${hash}` === a || `#${hash}`.startsWith(`${a}/`));      // a menu's own sub-pages too
 }
 
 // a person with their own sign-in sees only their menus; everyone sees who is signed in and can sign out

@@ -2328,6 +2328,40 @@ def api_customer_link(cust_no: int, body: dict = Body(...), branch: str = "ส�
     return _cust_call(customers.link, branch, cust_no, int(cid) if cid else None)
 
 
+@app.get("/api/sales-routes/{route_id}/office-day")
+def api_sales_route_office_day(route_id: int, day: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The office day page: one route, one day (today without a day)."""
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.office_day, route_id, _sheet_day(day) or route_sales.today())
+
+
+@app.put("/api/sales-routes/{route_id}/office-day")
+def api_sales_route_office_save(route_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The owner / bookkeeper saves a day straight away (no reopen request)."""
+    from app import route_sales
+    _check_token(x_app_token, token)
+    day = _sheet_day(str(body.get("day") or ""))
+    if not day:
+        raise HTTPException(400, "วันที่ไม่ถูกต้อง")
+    who = "เจ้าของ" if _is_owner(x_app_token or token) else ((users.session_user(x_app_token or token) or {}).get("name") or "office")
+    return _route_call(route_sales.office_save_day, route_id, day, body.get("doc") or {}, body.get("returns"), who)
+
+
+@app.post("/api/sales-routes/{route_id}/customers")
+def api_sales_route_add_customer(route_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.add_customer, route_id, body)
+
+
+@app.patch("/api/sales-routes/customers/{customer_id}")
+def api_sales_route_edit_customer(customer_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.update_customer, customer_id, body)
+
+
 @app.post("/api/sales-routes/day/{day_id}/walkin")
 def api_sales_route_walkin(day_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """A shop the driver added (เพิ่มลูกค้าเอง) becomes a customer on the route."""

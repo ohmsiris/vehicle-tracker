@@ -136,6 +136,9 @@
     api("PUT", "/api/d/day", { day: day, rev: rev, doc: S.doc }).then(function (r) {
       S.syncing = false; S.failCount = 0;
       if (day !== S.day) return;
+      if (r.stale && (r.rev || 0) > rev) {           // the office changed this day: its copy wins (owner, 11 Nov 2026)
+        S.savedRev = r.rev; toast("ออฟฟิศแก้ใบขายนี้แล้ว — โหลดตัวเลขใหม่"); reload(true); return;
+      }
       S.savedRev = Math.max(S.savedRev, r.rev || rev);
       if (r.status) S.status = r.status;
       var map = r.id_map || {}, keys = Object.keys(map);

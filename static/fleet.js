@@ -37,7 +37,7 @@ function route() {
   if (h === "accounts-in") return openAccounts("in");
   if (h === "electricity") return openElectricity();
   if (h === "routes") return openRoutes();
-  if (h === "sales-sheets") return openSalesSheets();
+  if (h === "sales-sheets" || h.startsWith("sales-sheets/")) return openSalesSheets(h.slice(13));
   if (h === "plan-settings") { pl.tab = "set"; return openPlan(); }
   if (h === "settings") return openAppSettings();
   if (h === "mgr") return openMgr();

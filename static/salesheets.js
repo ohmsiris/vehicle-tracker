@@ -1,53 +1,420 @@
 "use strict";
 
 // รถสาย · ใบขาย (#sales-sheets) -- the office side of the drivers' phone sheet (app/route_sales.py; the drivers use /d/).
-//   * every route: driver, customers, whether a PIN is set, the last day sent; set / reset the PIN, sign the phones out
-//   * one route's days: what was sold, cash expected vs counted, km, what does not add up; open a day, mark it checked
+// Redesigned with the owner, 11 Nov 2026:
+//   #sales-sheets              one block per driver: today's sales and what needs a look
+//   #sales-sheets/<route>      that driver: ใบขายรายวัน (‹ date ›, the numbers on top, every customer's line -- edit and save
+//                              straight away, no "ask the driver to fix it"), รายชื่อลูกค้า (add / edit / take off the route),
+//                              คนขับ / รหัส (PIN, phones). Print the paper sheet (ใบงานคนขับ) from the day.
+//   #sales-sheets/<route>/<YYYY-MM-DD> | /customers | /driver
 
-const ss_ = { routes: null, open: null, days: null };
-
-async function openSalesSheets() {
-  showView("salesSheets");
-  showErr("ssError", "");
-  fill($("ssBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
-  try { const r = await api("/api/sales-routes"); ss_.routes = r.routes; ss_.today = r.today; }
-  catch (err) { fill($("ssBody"), null); showErr("ssError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
-  renderSalesSheets();
-}
+const ss_ = { routes: null, today: null, routeId: null, day: null, tab: "day", data: null, doc: null, returns: null, dirty: false };
+const SS_ST = { open: ["กำลังขาย", ""], closed: ["ส่งแล้ว รอตรวจ", "warn"], checked: ["ตรวจแล้ว", "ok"] };
+const ssN = (v) => { const x = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return Number.isFinite(x) ? x : 0; };
+const ssDmy = (iso) => (iso ? iso.split("-").reverse().join("/") : "");
+const ssAddDay = (iso, n) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const ssWeekday = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString("th-TH", { weekday: "long", timeZone: "UTC" });
 
 function ssLink() { return `${location.origin}/d/`; }
 
-function renderSalesSheets() {
+async function openSalesSheets(sub = "") {
+  if (ss_.dirty && !confirm("ยังไม่ได้บันทึกการแก้ไข — ออกจากหน้านี้เลยไหม?")) { history.back(); return; }
+  ss_.dirty = false;
+  showView("salesSheets");
+  showErr("ssError", "");
+  const [rid, part] = sub.split("/");
+  if (!rid) { ss_.routeId = null; return ssOverview(); }
+  const sameRoute = ss_.routeId === Number(rid);
+  ss_.routeId = Number(rid);
+  ss_.tab = part === "customers" ? "customers" : part === "driver" ? "driver" : "day";
+  // a date in the link wins; switching tabs keeps the day; opening a driver starts on today
+  ss_.day = /^\d{4}-\d{2}-\d{2}$/.test(part || "") ? part : sameRoute && part ? ss_.day : null;
+  await ssLoadDay();
+}
+
+// ------------------------------------------------------------------ every driver, one block each
+async function ssOverview() {
+  fill($("ssBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
+  try { const r = await api("/api/sales-routes"); ss_.routes = r.routes; ss_.today = r.today; }
+  catch (err) { fill($("ssBody"), null); showErr("ssError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
   const link = el("div", { class: "card ss-link" },
     el("strong", { text: "ลิงก์สำหรับคนขับ (ลิงก์เดียวทุกคน)" }),
     el("div", { class: "ss-linkrow" }, el("code", { text: ssLink() }),
       el("button", { class: "btn small", type: "button", text: "คัดลอก", onclick: async (e) => {
         try { await navigator.clipboard.writeText(ssLink()); e.target.textContent = "คัดลอกแล้ว ✓"; } catch (x) { window.prompt("คัดลอกลิงก์", ssLink()); }
-      } })),
-    el("p", { class: "muted small", text: "คนขับเปิดลิงก์ เลือกชื่อ ใส่รหัส 4 หลักครั้งเดียว แล้วโทรศัพท์จะจำไว้ · ให้กด \"เพิ่มไปยังหน้าจอหลัก\" เพื่อเปิดเหมือนแอป · ต้องตั้งรหัสให้ก่อน คนขับถึงจะเห็นชื่อ" }));
-  const rows = ss_.routes.map((r) => {
-    const last = r.last_day;
-    const flags = last && last.totals && last.totals.flags ? last.totals.flags.length : 0;
-    return el("div", { class: `card ss-route${ss_.open === r.id ? " open" : ""}` },
-      el("div", { class: "ss-head" },
-        el("b", { class: "ss-no", text: r.truck_no.replace("KK-", "แก่งคอย ") }),
-        el("div", { class: "ss-who" }, el("strong", { text: r.driver_name || "—" }), el("span", { class: "muted small", text: ` · ${r.name} · ลูกค้า ${r.customers}` }),
-          r.walkins ? el("span", { class: "badge bad", text: `คนขับเพิ่มลูกค้าเอง ${r.walkins} ร้าน — รอตรวจ` }) : null,
-          r.reopen_requests ? el("span", { class: "badge warn", text: `ขอแก้ใบขาย ${r.reopen_requests}` }) : null,
-          r.unsent ? el("span", { class: "badge bad", text: `ไม่ได้ส่งใบขาย ${r.unsent} วัน` }) : null),
-        el("span", { class: `badge ${r.pin_set ? "ok" : ""}`, text: r.pin_set ? "ตั้งรหัสแล้ว" : "ยังไม่ได้ตั้งรหัส" }),
-        last ? el("span", { class: "muted small", text: `ล่าสุด ${beDate(last.day)} · ฿${elN((last.totals || {}).amount || 0)}${flags ? ` · ⚠ ${flags}` : ""}` }) : null),
-      r.pin_set ? ssPhones(r) : null,
-      el("div", { class: "ss-actions" },
-        el("button", { class: "btn small primary", type: "button", text: r.pin_set ? "ตั้งรหัสใหม่" : "ตั้งรหัส", onclick: () => ssSetPin(r) }),
-        r.pin_set ? el("button", { class: "btn small", type: "button", text: "ออกจากระบบทุกเครื่อง", onclick: () => ssSignOut(r) }) : null,
-        el("button", { class: "btn small", type: "button", text: ss_.open === r.id ? "ซ่อนรายวัน" : "ดูรายวัน", onclick: () => ssToggle(r.id) }),
-        el("button", { class: "btn small", type: "button", text: "ใบงานเปล่า (พิมพ์)", title: "ใบงานคนขับแบบกระดาษ ยังไม่กรอก — รายชื่อ ถัง ราคา ล่าสุด", onclick: () => ssPrintSheet(r.id, "") }),
-        el("button", { class: "btn small", type: "button", text: "ใบงานเปล่า (Excel)", onclick: () => ssSheetXlsx(r.id, "") })),
-      ss_.open === r.id ? el("div", { id: "ssDays" }, el("p", { class: "muted small", text: "กำลังโหลด…" })) : null);
+      } })));
+  const blocks = ss_.routes.map((r) => {
+    const last = r.last_day, t = (last && last.totals) || {};
+    const isToday = last && last.day === ss_.today;
+    return el("button", { class: "card ss-block", type: "button", onclick: () => goHash(`#sales-sheets/${r.id}`) },
+      el("div", { class: "ss-block-top" },
+        el("b", { class: "ss-block-no", text: r.truck_no.replace("KK-", "แก่งคอย ") }),
+        el("span", { class: "ss-block-who" }, el("strong", { text: r.driver_name || "—" }), el("span", { class: "muted small", text: r.name || "" }))),
+      el("div", { class: "ss-block-num" },
+        el("b", { text: isToday ? `฿${elN(t.amount || 0)}` : "—" }),
+        el("span", { class: "muted small", text: isToday ? `วันนี้ · ${t.customers || 0}/${r.customers} ร้าน` : last ? `ล่าสุด ${ssDmy(last.day)} ฿${elN(t.amount || 0)}` : `ลูกค้า ${r.customers} ร้าน` })),
+      el("div", { class: "ss-block-badges" },
+        r.walkins ? el("span", { class: "badge bad", text: `เพิ่มลูกค้าเอง ${r.walkins}` }) : null,
+        r.unsent ? el("span", { class: "badge bad", text: `ไม่ได้ส่ง ${r.unsent} วัน` }) : null,
+        r.reopen_requests ? el("span", { class: "badge warn", text: `ขอแก้ ${r.reopen_requests}` }) : null,
+        (t.flags || []).length && isToday ? el("span", { class: "badge warn", text: `⚠ ${t.flags.length}` }) : null,
+        !r.pin_set ? el("span", { class: "badge", text: "ยังไม่ได้ตั้งรหัส" }) : null));
   });
-  fill($("ssBody"), link, ...rows);
-  if (ss_.open) ssLoadDays(ss_.open);
+  fill($("ssBody"), link, el("div", { class: "ss-grid" }, ...blocks));
+}
+
+// ------------------------------------------------------------------ one driver
+async function ssLoadDay() {
+  fill($("ssBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
+  let d;
+  try { d = await api(`/api/sales-routes/${ss_.routeId}/office-day${ss_.day ? `?day=${ss_.day}` : ""}`); }
+  catch (err) { fill($("ssBody"), null); showErr("ssError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
+  ss_.data = d; ss_.day = d.day; ss_.today = d.today;
+  const sheet = d.sheet;
+  ss_.doc = JSON.parse(JSON.stringify((sheet && sheet.doc) || { sales: {}, loads: [], new_customers: [], cash: null, km_end: null }));
+  if (!ss_.doc.sales) ss_.doc.sales = {};
+  if (!ss_.doc.loads || !ss_.doc.loads.length) ss_.doc.loads = [{ q: {} }];
+  ss_.returns = sheet && sheet.returns_foh ? { ...sheet.returns_foh } : null;
+  ss_.dirty = false;
+  if (ss_.tab === "driver" && !ss_.routes) { try { const r = await api("/api/sales-routes"); ss_.routes = r.routes; } catch (e) { /* the tab says so */ } }
+  ssRenderDriver();
+}
+
+function ssRenderDriver() {
+  const d = ss_.data, r = d.route;
+  const tab = (key, label) => el("button", { type: "button", class: `segbtn${ss_.tab === key ? " active" : ""}`, text: label,
+    onclick: () => goHash(`#sales-sheets/${r.id}${key === "day" ? `/${ss_.day}` : `/${key}`}`) });
+  const head = el("div", { class: "ss-dhead" },
+    el("a", { href: "#sales-sheets", class: "ss-back", text: "← ทุกสาย" }),
+    el("div", { class: "ss-dtitle" }, el("b", { class: "ss-block-no", text: r.truck_no }),
+      el("span", {}, el("strong", { text: r.driver_name || "—" }), el("span", { class: "muted small", text: ` · ${r.name || ""}${r.driver_phone ? ` · ${r.driver_phone}` : ""}` }))),
+    el("div", { class: "seg ss-tabs" }, tab("day", "ใบขายรายวัน"), tab("customers", `รายชื่อลูกค้า (${d.customers.length})`), tab("driver", "คนขับ / รหัส")));
+  const body = ss_.tab === "customers" ? ssCustomersTab() : ss_.tab === "driver" ? ssDriverTab() : ssDayTab();
+  fill($("ssBody"), head, body);
+}
+
+// ---- ใบขายรายวัน
+function ssProducts() {
+  const d = ss_.data, used = new Set();
+  d.customers.forEach((c) => Object.keys(c.prices || {}).forEach((k) => used.add(k)));
+  Object.values(ss_.doc.sales).forEach((s) => Object.keys(s.q || {}).forEach((k) => used.add(k)));
+  (ss_.doc.loads || []).forEach((ld) => Object.keys(ld.q || {}).forEach((k) => used.add(k)));
+  return d.products.filter((p) => used.has(p.key));
+}
+
+function ssCustomers() {        // the route list + the shops the driver added on this day
+  const walk = (ss_.doc.new_customers || []).map((w, i) => ({ id: w.key, seq: null, name: w.name, prices: w.prices || {}, billing: "cash", walkin: w, i }));
+  return ss_.data.customers.concat(walk);
+}
+
+function ssLine(c) {             // one customer's line, worked out like the server does (app/route_sales.compute)
+  const s = ss_.doc.sales[String(c.id)] || {};
+  const q = s.q || {};
+  const free = !!(c.free || s.free);
+  const full = c.free ? 0 : Object.entries(q).reduce((a, [k, v]) => a + ssN(v) * ssN((c.prices || {})[k]), 0);
+  const gross = free ? 0 : full;
+  const amount = Math.max(gross - Math.min(Math.max(ssN(s.discount), 0), gross), 0);
+  const invoice = c.billing === "invoice";
+  const paid = invoice || free ? 0 : c.walkin ? amount : Math.min(Math.max(s.paid == null || s.paid === "" ? amount : ssN(s.paid), 0), amount);
+  const old = Math.max(ssN(s.old_paid), 0);
+  const before = ssN(ss_.data.owed_before[String(c.id)]);
+  return { s, q, free, amount, invoice, paid, old, before, after: invoice ? before : before + amount - paid - old,
+    sold: Object.values(q).some((v) => ssN(v)) || old > 0 };
+}
+
+function ssTotals() {
+  const P = ss_.data.products.map((p) => p.key);
+  const t = { amount: 0, cash: 0, credit: 0, invoiced: 0, old: 0, shops: 0, sold: {}, loaded: {} };
+  P.forEach((k) => { t.sold[k] = 0; t.loaded[k] = 0; });
+  ssCustomers().forEach((c) => {
+    const ln = ssLine(c);
+    if (!ln.sold) return;
+    t.shops += 1; t.amount += ln.amount; t.old += ln.old;
+    if (ln.invoice) t.invoiced += ln.amount; else { t.cash += ln.paid; t.credit += ln.amount - ln.paid; }
+    P.forEach((k) => { t.sold[k] += ssN(ln.q[k]); });
+  });
+  (ss_.doc.loads || []).forEach((ld) => P.forEach((k) => { t.loaded[k] += ssN((ld.q || {})[k]); }));
+  const cash = ss_.doc.cash || {};
+  t.expected = t.cash + t.old;
+  t.counted = ss_.data.notes.reduce((a, n) => a + ssN(cash[String(n)]) * n, 0) + ssN(cash.coins);
+  t.hasCash = Object.values(cash).some((v) => ssN(v));
+  t.km = ssN(ss_.doc.km_end) && ssN(ss_.data.km_start) ? ssN(ss_.doc.km_end) - ssN(ss_.data.km_start) : null;
+  return t;
+}
+
+function ssChanged() {
+  ss_.dirty = true;
+  const b = $("ssSave"); if (b) { b.disabled = false; b.textContent = "บันทึก"; }
+  ssPaintNumbers();
+}
+
+function ssNumIn(value, onChange, attrs = {}) {
+  return el("input", { class: "ss-in", type: "text", inputmode: "decimal", value: value == null || value === "" || value === 0 ? "" : String(value),
+    oninput: (e) => { onChange(e.target.value.trim()); ssChanged(); }, ...attrs });
+}
+
+function ssSetQ(c, k, v) {
+  const key = String(c.id);
+  const s = ss_.doc.sales[key] || (ss_.doc.sales[key] = { q: {} });
+  if (!s.q) s.q = {};
+  if (v === "" || !ssN(v)) delete s.q[k]; else s.q[k] = ssN(v);
+  if (!s.t) s.t = "";
+}
+
+function ssDayTab() {
+  const d = ss_.data, sheet = d.sheet, P = ssProducts();
+  const go = (n) => { if (ss_.dirty && !confirm("ยังไม่ได้บันทึก — ไปวันอื่นเลยไหม?")) return; ss_.dirty = false; goHash(`#sales-sheets/${d.route.id}/${ssAddDay(ss_.day, n)}`); };
+  const pick = el("input", { type: "date", value: ss_.day, "aria-label": "เลือกวัน",
+    onchange: (e) => { if (e.target.value && e.target.value !== ss_.day) { if (ss_.dirty && !confirm("ยังไม่ได้บันทึก — ไปวันอื่นเลยไหม?")) return; ss_.dirty = false; goHash(`#sales-sheets/${d.route.id}/${e.target.value}`); } } });
+  const has = new Set(d.days_with_sheet);
+  const prevDay = [...has].filter((x) => x < ss_.day).pop(), nextDay = [...has].filter((x) => x > ss_.day)[0];
+  const st = !sheet ? ["ไม่มีใบขาย — กรอกจากใบกระดาษแล้วกดบันทึกได้", ""] : sheet.unsent ? ["คนขับไม่ได้กดส่ง", "bad"] : SS_ST[sheet.status] || [sheet.status, ""];
+  const nav = el("div", { class: "ss-daynav card" },
+    el("button", { class: "btn ss-arrow", type: "button", text: "‹", "aria-label": "วันก่อน", onclick: () => go(-1) }),
+    el("div", { class: "ss-daypick" }, el("b", { class: "ss-daybig", text: ssDmy(ss_.day) }),
+      el("span", { class: "muted small", text: `${ssWeekday(ss_.day)}${ss_.day === d.today ? " · วันนี้" : ""}` }), pick),
+    el("button", { class: "btn ss-arrow", type: "button", text: "›", "aria-label": "วันถัดไป", onclick: () => go(1) }),
+    el("div", { class: "ss-dayjump" },
+      prevDay ? el("button", { class: "btn small", type: "button", text: `‹ วันที่มีใบขาย ${ssDmy(prevDay)}`, onclick: () => goHash(`#sales-sheets/${d.route.id}/${prevDay}`) }) : null,
+      nextDay ? el("button", { class: "btn small", type: "button", text: `${ssDmy(nextDay)} ›`, onclick: () => goHash(`#sales-sheets/${d.route.id}/${nextDay}`) }) : null,
+      ss_.day !== d.today ? el("button", { class: "btn small", type: "button", text: "วันนี้", onclick: () => goHash(`#sales-sheets/${d.route.id}/${d.today}`) }) : null,
+      el("span", { class: `badge ${st[1]}`, text: st[0] })));
+  const tiles = el("div", { class: "ss-tiles", id: "ssTiles" });
+  const warn = [];
+  if (d.driver_selling) warn.push(el("p", { class: "warn-text small", text: "คนขับกำลังขายวันนี้อยู่ — ถ้าบันทึกตอนนี้ ตัวเลขของออฟฟิศจะทับในโทรศัพท์ของคนขับ" }));
+  if (sheet && (sheet.totals.flags || []).length) warn.push(el("p", { class: "warn-text small", text: `⚠ ${sheet.totals.flags.join(" · ")}` }));
+  if (sheet && sheet.reopen_requested_at) warn.push(el("p", { class: "warn-text small" }, `คนขับขอแก้ใบขายนี้ (${new Date(sheet.reopen_requested_at).toLocaleString("th-TH")}) — แก้ที่นี่ได้เลย หรือ `,
+    el("button", { class: "btn small", type: "button", text: "เปิดให้คนขับแก้เอง", onclick: () => ssReopen(sheet.id) })));
+
+  // every customer's line
+  const head = el("tr", {}, el("th", { text: "#" }), el("th", { text: "ร้าน" }), el("th", { text: "ราคา" }), ...P.map((p) => el("th", { class: "c", text: p.label })),
+    el("th", { class: "r", text: "รวมเงิน" }), el("th", { class: "r", text: "เก่ายกมา" }), el("th", { class: "r", text: "จ่ายเก่า" }),
+    el("th", { class: "r", text: "รับเงิน" }), el("th", { class: "r", text: "ค้าง" }));
+  const rows = ssCustomers().map((c) => {
+    const ln = ssLine(c);
+    const cells = { amount: el("td", { class: "r b" }), after: el("td", { class: "r" }), paid: el("td", { class: "r" }) };
+    const tr = el("tr", { class: `${ln.sold ? "sold" : ""}${c.walkin ? " walk" : ""}` },
+      el("td", { class: "muted", text: c.seq ? String(c.seq) : "+" }),
+      el("td", {}, c.walkin ? el("span", { class: "badge bad", text: "เพิ่มเอง" }) : null, el("span", { text: ` ${c.name}` }),
+        c.bins ? el("div", { class: "ss-bins", text: c.bins }) : null,
+        c.walkin && sheet ? el("button", { class: "btn small", type: "button", text: "เพิ่มเข้ารายชื่อสาย", onclick: () => ssWalkin(sheet.id, c) }) : null),
+      el("td", { class: "small", text: c.free ? "ฟรี" : c.billing === "invoice" ? `${ssPrice(c)} วางบิล` : ssPrice(c) }),
+      ...P.map((p) => el("td", { class: "c" }, ssNumIn(ln.q[p.key], (v) => { ssSetQ(c, p.key, v); ssPaintRow(c, cells); }, { "aria-label": `${c.name} ${p.label}` }))),
+      cells.amount,
+      el("td", { class: "r muted", text: ln.before ? elN(ln.before) : "" }),
+      el("td", { class: "r" }, c.billing === "invoice" || c.walkin ? null : ssNumIn(ln.s.old_paid, (v) => {
+        const s = ss_.doc.sales[String(c.id)] || (ss_.doc.sales[String(c.id)] = { q: {} });
+        if (v === "") delete s.old_paid; else s.old_paid = ssN(v);
+        ssPaintRow(c, cells);
+      }, { "aria-label": `${c.name} จ่ายเก่า` })),
+      cells.paid, cells.after);
+    if (c.billing !== "invoice" && !c.free && !c.walkin) {
+      cells.paid.append(ssNumIn(ln.s.paid, (v) => {
+        const s = ss_.doc.sales[String(c.id)] || (ss_.doc.sales[String(c.id)] = { q: {} });
+        if (v === "") delete s.paid; else s.paid = ssN(v);
+        ssPaintRow(c, cells);
+      }, { "aria-label": `${c.name} รับเงิน`, title: "ว่าง = จ่ายเต็ม · 0 = ค้างทั้งหมด" }));
+    }
+    ssPaintRow(c, cells);
+    return tr;
+  });
+  const table = el("div", { class: "ss-tablewrap" }, el("table", { class: "ss-table" }, el("thead", {}, head), el("tbody", {}, ...rows)));
+
+  // รับ / คืน, money counted, mileage
+  const loads = el("table", { class: "ss-mini" },
+    el("thead", {}, el("tr", {}, el("th", { text: "รับน้ำแข็ง" }), ...P.map((p) => el("th", { class: "c", text: p.label })), el("th", {}))),
+    el("tbody", {},
+      ...ss_.doc.loads.map((ld, i) => el("tr", {}, el("td", { text: `เที่ยว ${i + 1}${ld.t ? ` · ${ld.t}` : ""}` }),
+        ...P.map((p) => el("td", { class: "c" }, ssNumIn((ld.q || {})[p.key], (v) => { ld.q = ld.q || {}; if (v === "" || !ssN(v)) delete ld.q[p.key]; else ld.q[p.key] = ssN(v); }))),
+        el("td", {}, ss_.doc.loads.length > 1 ? el("button", { class: "btn small", type: "button", text: "ลบ", onclick: () => { ss_.doc.loads.splice(i, 1); ss_.dirty = true; ssRenderDriver(); } }) : null))),
+      el("tr", {}, el("td", { text: "คืน (หน้าโรงนับ)" }), ...P.map((p) => el("td", { class: "c" }, ssNumIn((ss_.returns || {})[p.key], (v) => {
+        ss_.returns = ss_.returns || {}; if (v === "") delete ss_.returns[p.key]; else ss_.returns[p.key] = ssN(v); }))), el("td", {})),
+      el("tr", { class: "muted", id: "ssLeftRow" })));
+  const cash = ss_.doc.cash || (ss_.doc.cash = {});
+  const money = el("table", { class: "ss-mini" },
+    el("thead", {}, el("tr", {}, el("th", { text: "เงินที่นับได้" }), el("th", { class: "c", text: "จำนวน" }))),
+    el("tbody", {}, ...d.notes.map((n) => el("tr", {}, el("td", { text: `แบงก์ ${elN(n)}` }), el("td", { class: "c" }, ssNumIn(cash[String(n)], (v) => { if (v === "") delete cash[String(n)]; else cash[String(n)] = ssN(v); })))),
+      el("tr", {}, el("td", { text: "เหรียญ (บาท)" }), el("td", { class: "c" }, ssNumIn(cash.coins, (v) => { if (v === "") delete cash.coins; else cash.coins = ssN(v); })))));
+  const km = el("div", { class: "ss-km" },
+    el("label", {}, "ไมล์ใหม่ ", ssNumIn(ss_.doc.km_end, (v) => { ss_.doc.km_end = v === "" ? null : ssN(v); }, { "aria-label": "ไมล์ใหม่" })),
+    el("span", { class: "muted small", text: `ไมล์เก่า ${d.km_start ? elN(d.km_start) : "—"}` }));
+  const under = el("div", { class: "ss-under" }, el("div", {}, loads, el("button", { class: "btn small", type: "button", text: "+ เพิ่มเที่ยว",
+    onclick: () => { ss_.doc.loads.push({ q: {} }); ss_.dirty = true; ssRenderDriver(); } })), el("div", {}, money, km));
+
+  const bar = el("div", { class: "ss-savebar" },
+    el("button", { class: "btn primary", id: "ssSave", type: "button", text: sheet ? "บันทึกแล้ว" : "บันทึก", disabled: true, onclick: ssSaveDay }),
+    sheet && sheet.status === "checked" ? el("button", { class: "btn", type: "button", text: "ยกเลิกการตรวจ", onclick: () => ssCheck(sheet.id, false) })
+      : sheet ? el("button", { class: "btn", type: "button", text: "ตรวจแล้ว ✓", onclick: () => ssCheck(sheet.id, true) }) : null,
+    el("span", { class: "grow" }),
+    el("button", { class: "btn", type: "button", text: "พิมพ์ใบงาน / PDF", onclick: () => ssPrintSheet(d.route.id, sheet ? ss_.day : "") }),
+    el("button", { class: "btn", type: "button", text: "Excel", onclick: () => ssSheetXlsx(d.route.id, sheet ? ss_.day : "") }));
+  setTimeout(ssPaintNumbers, 0);
+  return el("div", {}, nav, tiles, ...warn, table, under, bar);
+}
+
+function ssPrice(c) {
+  const p = c.prices || {}, keys = Object.keys(p);
+  if (!keys.length) return "";
+  const vals = [...new Set(keys.map((k) => p[k]))];
+  if (vals.length === 1) return elN(vals[0]);
+  const short = Object.fromEntries(ss_.data.products.map((x) => [x.key, x.short]));
+  return keys.map((k) => `${short[k] || k}${elN(p[k])}`).join(" ");
+}
+
+function ssPaintRow(c, cells) {
+  const ln = ssLine(c);
+  cells.amount.textContent = ln.amount ? elN(ln.amount) : "";
+  cells.after.textContent = ln.invoice ? (ln.amount ? "วางบิล" : "") : ln.after >= 1 ? elN(ln.after) : "";
+  cells.after.className = `r${ln.after >= 1 && !ln.invoice ? " warn-text" : ""}`;
+  const inp = cells.paid.querySelector("input");
+  if (inp) inp.placeholder = ln.amount ? elN(ln.amount) : "";
+  else cells.paid.textContent = ln.invoice ? "" : c.walkin && ln.amount ? elN(ln.amount) : c.free && ln.sold ? "ฟรี" : "";
+  cells.amount.parentElement && cells.amount.parentElement.classList.toggle("sold", ln.sold);
+}
+
+function ssPaintNumbers() {
+  const box = $("ssTiles");
+  if (!box) return;
+  const t = ssTotals(), P = ssProducts();
+  const tile = (label, value, sub, cls = "") => el("div", { class: "ss-tile" }, el("span", { class: "muted small", text: label }), el("b", { class: cls, text: value }), sub ? el("span", { class: "muted small", text: sub }) : null);
+  const diff = t.hasCash ? t.counted - t.expected : null;
+  fill(box,
+    tile("ขายรวม", `฿${elN(t.amount)}`, `${t.shops}/${ss_.data.customers.length} ร้าน`),
+    tile("เงินสดต้องมี", `฿${elN(t.expected)}`, t.old ? `รวมจ่ายเก่า ฿${elN(t.old)}` : ""),
+    tile("นับได้", t.hasCash ? `฿${elN(t.counted)}` : "—", diff != null && Math.abs(diff) >= 1 ? `${diff > 0 ? "เกิน" : "ขาด"} ฿${elN(Math.abs(diff))}` : t.hasCash ? "ตรง" : "", diff != null && Math.abs(diff) >= 1 ? "warn-text" : ""),
+    tile("ค้าง (ขายเชื่อ)", `฿${elN(t.credit)}`),
+    tile("วางบิล", `฿${elN(t.invoiced)}`),
+    tile("วิ่ง", t.km != null ? `${elN(t.km)} กม.` : "—"));
+  const left = $("ssLeftRow");
+  if (left) fill(left, el("td", { text: "รับ − ขาย = เหลือ" }), ...P.map((p) => {
+    const v = t.loaded[p.key] - t.sold[p.key];
+    return el("td", { class: `c${v < 0 ? " warn-text" : ""}`, text: t.loaded[p.key] || t.sold[p.key] ? elN(v) : "" });
+  }), el("td", {}));
+}
+
+async function ssSaveDay() {
+  const b = $("ssSave");
+  b.disabled = true; b.textContent = "กำลังบันทึก…";
+  // the phone shows how each shop paid from s.pay: keep it in step with what the office typed
+  ssCustomers().forEach((c) => {
+    const s = ss_.doc.sales[String(c.id)];
+    if (!s) return;
+    const ln = ssLine(c);
+    s.pay = s.paid == null || s.paid === "" || ln.paid >= ln.amount ? "cash" : ln.paid <= 0 ? "credit" : "part";
+  });
+  const doc = { ...ss_.doc, loads: (ss_.doc.loads || []).filter((ld) => Object.values(ld.q || {}).some((v) => ssN(v))) };
+  try { await api(`/api/sales-routes/${ss_.routeId}/office-day`, jsonOpts("PUT", { day: ss_.day, doc, returns: ss_.returns })); }
+  catch (err) { alert(`บันทึกไม่สำเร็จ: ${err.message}`); b.disabled = false; b.textContent = "บันทึก"; return; }
+  ss_.dirty = false;
+  await ssLoadDay();
+  const s = $("ssSave"); if (s) s.textContent = "บันทึกแล้ว ✓";
+  if (typeof loadSalesAttention === "function") loadSalesAttention();
+}
+
+async function ssCheck(dayId, checked) {
+  if (ss_.dirty && !confirm("ยังไม่ได้บันทึกการแก้ไข — ทำต่อโดยไม่บันทึก?")) return;
+  try { await api(`/api/sales-routes/day/${dayId}/check`, jsonOpts("POST", { checked })); } catch (err) { alert(err.message); return; }
+  await ssLoadDay();
+  if (typeof loadSalesAttention === "function") loadSalesAttention();
+}
+
+async function ssReopen(dayId) {
+  try { await api(`/api/sales-routes/day/${dayId}/reopen`, jsonOpts("POST", {})); } catch (err) { alert(err.message); return; }
+  await ssLoadDay();
+}
+
+async function ssWalkin(dayId, c) {
+  if (ss_.dirty) { alert("บันทึกการแก้ไขก่อน แล้วค่อยเพิ่มร้านนี้เข้ารายชื่อ"); return; }
+  if (!confirm(`เพิ่ม "${c.name}" เข้ารายชื่อสายนี้ (ต่อท้ายสาย) ราคาตามที่คนขับใส่ — แก้ราคา / ลำดับได้ที่ "รายชื่อลูกค้า"`)) return;
+  try { await api(`/api/sales-routes/day/${dayId}/walkin`, jsonOpts("POST", { key: c.id })); } catch (err) { alert(err.message); return; }
+  await ssLoadDay();
+  if (typeof loadSalesAttention === "function") loadSalesAttention();
+}
+
+// ---- รายชื่อลูกค้า
+function ssCustomersTab() {
+  const d = ss_.data, P = d.products;
+  const owed = Object.values(d.owed_before).reduce((a, v) => a + (v > 0 ? v : 0), 0);
+  const tiles = el("div", { class: "ss-tiles" },
+    el("div", { class: "ss-tile" }, el("span", { class: "muted small", text: "ลูกค้าในสาย" }), el("b", { text: String(d.customers.length) })),
+    el("div", { class: "ss-tile" }, el("span", { class: "muted small", text: "วางบิล" }), el("b", { text: String(d.customers.filter((c) => c.billing === "invoice").length) })),
+    el("div", { class: "ss-tile" }, el("span", { class: "muted small", text: "ฟรี" }), el("b", { text: String(d.customers.filter((c) => c.free).length) })),
+    el("div", { class: "ss-tile" }, el("span", { class: "muted small", text: `ค้างรวม (ก่อน ${ssDmy(d.day)})` }), el("b", { class: owed ? "warn-text" : "", text: `฿${elN(owed)}` })));
+  const rows = d.customers.map((c) => el("tr", { onclick: () => ssEditCustomer(c) },
+    el("td", { class: "muted", text: String(c.seq) }),
+    el("td", {}, el("b", { text: c.name }), c.added_by_driver ? el("span", { class: "muted small", text: " · คนขับเพิ่ม" }) : null),
+    el("td", { class: "ss-bins", text: c.bins || "" }),
+    ...P.map((p) => el("td", { class: "c", text: c.prices && c.prices[p.key] ? elN(c.prices[p.key]) : "" })),
+    el("td", { class: "small", text: [c.billing === "invoice" ? "วางบิล" : "", c.free ? "ฟรี" : ""].filter(Boolean).join(" · ") }),
+    el("td", { class: `r${ssN(d.owed_before[String(c.id)]) >= 1 ? " warn-text" : ""}`, text: ssN(d.owed_before[String(c.id)]) >= 1 ? elN(d.owed_before[String(c.id)]) : "" })));
+  return el("div", {},
+    tiles,
+    el("div", { class: "ss-custbar" },
+      el("button", { class: "btn primary", type: "button", text: "+ เพิ่มลูกค้า", onclick: () => ssEditCustomer(null) }),
+      el("button", { class: "btn", type: "button", text: "พิมพ์ใบงานเปล่า / PDF", onclick: () => ssPrintSheet(d.route.id, "") }),
+      el("button", { class: "btn", type: "button", text: "ใบงานเปล่า Excel", onclick: () => ssSheetXlsx(d.route.id, "") }),
+      el("span", { class: "muted small", text: "กดที่ร้านเพื่อแก้ชื่อ ถัง ราคา ลำดับ หรือเลิกส่ง" })),
+    el("div", { class: "ss-tablewrap" }, el("table", { class: "ss-table ss-custtable" },
+      el("thead", {}, el("tr", {}, el("th", { text: "#" }), el("th", { text: "ร้าน" }), el("th", { text: "ถัง" }), ...P.map((p) => el("th", { class: "c", text: p.label })),
+        el("th", { text: "" }), el("th", { class: "r", text: "ค้าง" }))),
+      el("tbody", {}, ...rows))));
+}
+
+function ssEditCustomer(c) {
+  const d = ss_.data, P = d.products;
+  const close = () => { dlg.close(); dlg.remove(); };
+  const f = (id, label, input) => el("label", { class: "ss-f", for: id }, el("span", { class: "small muted", text: label }), input);
+  const name = el("input", { id: "sceName", type: "text", maxlength: "120", value: c ? c.name : "" });
+  const seq = el("input", { id: "sceSeq", type: "number", min: "1", value: c ? c.seq : (Math.max(0, ...d.customers.map((x) => x.seq)) + 1) });
+  const bins = el("input", { id: "sceBins", type: "text", maxlength: "300", value: c ? c.bins || "" : "", placeholder: "เช่น V200-1805, S200-0412" });
+  const prices = P.map((p) => el("input", { type: "text", inputmode: "decimal", "data-k": p.key, value: c && c.prices && c.prices[p.key] ? c.prices[p.key] : "", "aria-label": `ราคา${p.label}` }));
+  const invoice = el("input", { type: "checkbox", checked: !!(c && c.billing === "invoice") });
+  const free = el("input", { type: "checkbox", checked: !!(c && c.free) });
+  const save = async () => {
+    const body = { name: name.value.trim(), seq: seq.value, bins: bins.value.trim(), billing: invoice.checked ? "invoice" : "cash", free: free.checked,
+      prices: Object.fromEntries(prices.filter((x) => ssN(x.value) > 0).map((x) => [x.dataset.k, ssN(x.value)])) };
+    if (!body.name) { alert("ใส่ชื่อร้าน"); return; }
+    try {
+      if (c) await api(`/api/sales-routes/customers/${c.id}`, jsonOpts("PATCH", body));
+      else await api(`/api/sales-routes/${d.route.id}/customers`, jsonOpts("POST", body));
+    } catch (err) { alert(err.message); return; }
+    close(); await ssLoadDay();
+  };
+  const drop = async () => {
+    if (!confirm(`เลิกส่ง "${c.name}"? (เอาออกจากรายชื่อสาย ประวัติการขายยังอยู่)`)) return;
+    try { await api(`/api/sales-routes/customers/${c.id}`, jsonOpts("PATCH", { active: false })); } catch (err) { alert(err.message); return; }
+    close(); await ssLoadDay();
+  };
+  const dlg = el("dialog", { class: "ss-dialog" },
+    el("div", { class: "ss-dlg-head" }, el("h3", { text: c ? `แก้ไขลูกค้า · ${c.name}` : `เพิ่มลูกค้า · รถ ${d.route.truck_no}` }),
+      el("button", { class: "btn small", type: "button", text: "ปิด", onclick: close })),
+    el("div", { class: "ss-form" },
+      f("sceName", "ชื่อร้าน", name), f("sceSeq", "ลำดับในสาย (ร้านที่ลำดับนี้และหลังจากนี้เลื่อนลงหนึ่ง)", seq), f("sceBins", "ถัง", bins),
+      el("div", { class: "ss-f" }, el("span", { class: "small muted", text: "ราคาต่อหน่วย (บาท) — ใส่เฉพาะที่ขาย" }),
+        el("div", { class: "ss-prices" }, ...P.map((p, i) => el("label", {}, el("span", { class: "small", text: p.label }), prices[i])))),
+      el("label", { class: "ss-check" }, invoice, " วางบิล (ห้าง / ร้านสาขา ไม่เก็บเงินสด)"),
+      el("label", { class: "ss-check" }, free, " ฟรี (ไม่คิดเงิน)")),
+    el("div", { class: "ss-dlg-foot" },
+      c ? el("button", { class: "btn", type: "button", text: "เลิกส่งร้านนี้", onclick: drop }) : null,
+      el("span", { class: "grow" }),
+      el("button", { class: "btn primary", type: "button", text: c ? "บันทึก" : "เพิ่ม", onclick: save })));
+  document.body.append(dlg);
+  dlg.showModal();
+  name.focus();
+}
+
+// ---- คนขับ / รหัส
+function ssDriverTab() {
+  const r = (ss_.routes || []).find((x) => x.id === ss_.routeId);
+  if (!r) return el("p", { class: "muted", text: "โหลดข้อมูลคนขับไม่สำเร็จ" });
+  return el("div", { class: "card ss-driver" },
+    el("p", {}, el("b", { text: r.driver_name || "—" }), el("span", { class: "muted small", text: r.driver_phone ? ` · ${r.driver_phone}` : "" })),
+    el("p", {}, el("span", { class: `badge ${r.pin_set ? "ok" : ""}`, text: r.pin_set ? "ตั้งรหัสแล้ว" : "ยังไม่ได้ตั้งรหัส — คนขับจะยังไม่เห็นชื่อในโทรศัพท์" })),
+    r.pin_set ? ssPhones(r) : null,
+    el("div", { class: "ss-actions" },
+      el("button", { class: "btn primary", type: "button", text: r.pin_set ? "ตั้งรหัสใหม่" : "ตั้งรหัส", onclick: () => ssSetPin(r) }),
+      r.pin_set ? el("button", { class: "btn", type: "button", text: "ออกจากระบบทุกเครื่อง", onclick: () => ssSignOut(r) }) : null),
+    el("p", { class: "muted small", text: `ลิงก์สำหรับคนขับ: ${ssLink()} · เลือกชื่อ ใส่รหัส 4 หลักครั้งเดียว แล้วโทรศัพท์จะจำไว้` }));
 }
 
 function ssAgo(iso) {
@@ -72,119 +439,16 @@ async function ssSetPin(r) {
   if (pin == null) return;
   if (!/^\d{4}$/.test(pin.trim())) { alert("รหัสต้องเป็นตัวเลข 4 หลัก"); return; }
   try { await api(`/api/sales-routes/${r.id}/pin`, jsonOpts("POST", { pin: pin.trim() })); } catch (err) { alert(err.message); return; }
-  await openSalesSheets();
+  ss_.routes = null;
+  await ssLoadDay();
 }
 
 async function ssSignOut(r) {
   if (!confirm(`ออกจากระบบทุกโทรศัพท์ของ ${r.driver_name}? (ต้องใส่รหัสใหม่ตอนเปิดครั้งหน้า)`)) return;
   try { const x = await api(`/api/sales-routes/${r.id}/signout`, jsonOpts("POST", {})); alert(`ออกจากระบบแล้ว ${x.signed_out} เครื่อง`); } catch (err) { alert(err.message); }
+  ss_.routes = null;
+  await ssLoadDay();
 }
-
-function ssToggle(id) { ss_.open = ss_.open === id ? null : id; renderSalesSheets(); }
-
-async function ssLoadDays(routeId) {
-  let d;
-  try { d = await api(`/api/sales-routes/${routeId}/days`); } catch (err) { fill($("ssDays"), el("p", { class: "error", text: err.message })); return; }
-  if (!d.days.length) { fill($("ssDays"), el("p", { class: "muted small", text: "ยังไม่มีใบขายจากโทรศัพท์" })); return; }
-  const ST = { open: ["กำลังขาย", ""], closed: ["ส่งแล้ว รอตรวจ", "warn"], checked: ["ตรวจแล้ว", "ok"] };
-  fill($("ssDays"), el("div", { class: "ss-days" },
-    el("div", { class: "ss-day head muted small" }, ...["วันที่", "สถานะ", "ขาย", "เงินสด ต้องมี / นับได้", "ค้าง", "วางบิล", "กม.", "ที่ไม่ตรง"].map((t) => el("span", { text: t }))),
-    ...d.days.map((x) => {
-      const t = x.totals || {};
-      const st = x.unsent ? ["ไม่ได้ส่ง", "bad"] : ST[x.status] || [x.status, ""];
-      return el("button", { class: "ss-day", type: "button", onclick: () => ssOpenDay(x.id) },
-        el("span", { text: beDate(x.day) }), el("span", {}, el("span", { class: `badge ${st[1]}`, text: st[0] }),
-          x.reopen_requested_at ? el("span", { class: "badge warn", text: "ขอแก้" }) : null),
-        el("span", { text: `฿${elN(t.amount || 0)}` }),
-        el("span", { class: t.counted != null && Math.abs(t.counted - t.expected_cash) >= 1 ? "warn-text" : "", text: `฿${elN(t.expected_cash || 0)} / ${t.counted != null ? "฿" + elN(t.counted) : "—"}` }),
-        el("span", { text: `฿${elN(t.credit || 0)}` }), el("span", { text: `฿${elN(t.invoiced || 0)}` }),
-        el("span", { text: t.km != null ? elN(t.km) : "—" }),
-        el("span", { class: (t.flags || []).length ? "warn-text" : "muted", text: (t.flags || []).join(" · ") || "ตรง" }));
-    })));
-}
-
-async function ssOpenDay(dayId) {
-  let d;
-  try { d = await api(`/api/sales-routes/day/${dayId}`); } catch (err) { alert(err.message); return; }
-  const day = d.day, t = day.totals || {}, P = d.products;
-  const used = P.filter((p) => (t.loaded || {})[p.key] || (t.sold || {})[p.key]);
-  const dlg = el("dialog", { class: "ss-dialog" },
-    el("div", { class: "ss-dlg-head" }, el("h3", { text: `ใบขาย ${beDate(day.day)}` }),
-      el("span", { class: "ss-dlg-tools" },
-        el("button", { class: "btn small", type: "button", text: "พิมพ์ใบงาน / PDF", onclick: () => ssPrintSheet(day.route_id, day.day) }),
-        el("button", { class: "btn small", type: "button", text: "Excel", onclick: () => ssSheetXlsx(day.route_id, day.day) }),
-        el("button", { class: "btn small", type: "button", text: "ปิด", onclick: () => { dlg.close(); dlg.remove(); } }))),
-    (t.flags || []).length ? el("p", { class: "warn-text", text: `⚠ ${t.flags.join(" · ")}` }) : el("p", { class: "muted small", text: "ทุกอย่างตรง" }),
-    el("div", { class: "ss-stock" },
-      el("div", { class: "ss-srow head muted small" }, el("span", { text: "" }), ...["รับ", "ขาย", "เหลือ", "หน้าโรงนับ"].map((h) => el("span", { text: h }))),
-      ...used.map((p) => el("div", { class: "ss-srow" }, el("b", { text: p.label }),
-        el("span", { text: elN(t.loaded[p.key]) }), el("span", { text: elN(t.sold[p.key]) }), el("span", { text: elN(t.left[p.key]) }),
-        el("input", { class: "ss-ret", type: "number", inputmode: "numeric", min: "0", "data-ret": p.key, "aria-label": `${p.label} ที่คืน`,
-          value: day.returns_foh && day.returns_foh[p.key] != null ? day.returns_foh[p.key] : "", placeholder: elN(Math.max(t.left[p.key], 0)) }))),
-      used.length ? el("div", { class: "ss-retsave" },
-        el("span", { class: "muted small", text: day.returns_at ? `หน้าโรงนับแล้ว ${new Date(day.returns_at).toLocaleString("th-TH")}` : "หน้าโรงยังไม่ได้นับน้ำแข็งที่คืน" }),
-        el("button", { class: "btn small", type: "button", text: "บันทึกน้ำแข็งคืน", onclick: () => ssSaveReturns(dayId, dlg) })) : null),
-    el("div", { class: "ss-lines" },
-      ...d.lines.map((ln) => el("div", { class: "ss-line" },
-        ln.walkin
-          ? el("span", {}, el("span", { class: "badge bad", text: "เพิ่มเอง" }), ` ${ln.name}${ln.phone ? ` · โทร ${ln.phone}` : ""} `,
-              ln.walkin_key ? el("button", { class: "btn small", type: "button", text: "เพิ่มเข้ารายชื่อสาย", title: "ให้ร้านนี้อยู่ในรายชื่อของสายนี้ ราคาตามที่คนขับใส่",
-                onclick: () => ssWalkin(dayId, ln, dlg) }) : null)
-          : el("span", { text: `${ln.seq || ""}. ${ln.name || "?"}` }),
-        el("span", { class: "muted small", text: P.filter((p) => ln.qty[p.key]).map((p) => `${p.label} ${elN(ln.qty[p.key])}`).join(" · ") }),
-        el("b", { text: `฿${elN(ln.amount)}` }),
-        el("span", { class: "small " + (ln.free ? "muted" : ln.billing === "invoice" ? "muted" : ln.paid < ln.amount ? "warn-text" : ""),
-          text: (ln.free ? "ฟรี" : ln.billing === "invoice" ? "วางบิล" : ln.paid < ln.amount ? `ค้าง ฿${elN(ln.amount - ln.paid)}` : "สด") + (Number(ln.discount) ? ` · ลด ฿${elN(ln.discount)}` : "") +
-            (Number(ln.waived) ? (ln.waived_reason === "factory" ? ` · โรงงาน ฿${elN(ln.waived)}` : ` · อื่นๆ ฿${elN(ln.waived)}`) : "") }),
-        el("span", { class: "small muted", text: ln.old_paid ? `+หนี้เก่า ฿${elN(ln.old_paid)}` : "" })))),
-    t.commission_sales != null ? el("p", { class: "small", text: `ยอดคิดค่าคอมคนขับ ฿${elN(t.commission_sales)}${t.factory_waived ? ` (รวมที่ลด / แจกเพราะน้ำแข็งเสีย ฿${elN(t.factory_waived)} — โรงงานรับ ไม่หักคนขับ)` : ""}` }) : null,
-    el("p", { class: "muted small", text: `${t.discount ? `ส่วนลด ฿${elN(t.discount)} · ` : ""}ขาย ฿${elN(t.amount)} · เงินสด ฿${elN(t.cash_sales)} + หนี้เก่า ฿${elN(t.old_paid)} = ต้องมี ฿${elN(t.expected_cash)} · นับได้ ${t.counted != null ? "฿" + elN(t.counted) : "—"} · ค้าง ฿${elN(t.credit)} · วางบิล ฿${elN(t.invoiced)}${t.km != null ? ` · วิ่ง ${elN(t.km)} กม.` : ""}` }),
-    day.reopen_requested_at ? el("p", { class: "warn-text", text: `คนขับขอแก้ใบขายนี้ (${new Date(day.reopen_requested_at).toLocaleString("th-TH")})` }) : null,
-    (day.reopen_log || []).length ? el("p", { class: "muted small", text: "ประวัติ: " + day.reopen_log.map((x) => `${x.what === "reopened" ? "ออฟฟิศเปิดให้แก้" : "คนขับขอแก้"} ${new Date(x.at).toLocaleString("th-TH")}`).join(" · ") }) : null,
-    el("div", { class: "ss-dlg-foot" },
-      day.status !== "open" ? el("button", { class: "btn", type: "button", text: "เปิดให้คนขับแก้", onclick: () => ssReopen(dayId, dlg) })
-        : el("span", { class: day.unsent ? "warn-text small" : "muted small", text: day.unsent ? "คนขับไม่ได้กดส่ง — ตัวเลขตามที่โทรศัพท์บันทึกไว้ล่าสุด (ยังไม่ได้นับเงิน / ไมล์)" : "คนขับยังไม่ได้ส่ง" }),
-      day.status === "checked"
-        ? el("button", { class: "btn", type: "button", text: "ยกเลิกการตรวจ", onclick: () => ssCheck(dayId, false, dlg) })
-        : day.status === "closed" || day.unsent ? el("button", { class: "btn primary", type: "button", text: "ตรวจแล้ว ✓", onclick: () => ssCheck(dayId, true, dlg) }) : null));
-  document.body.append(dlg);
-  dlg.showModal();
-}
-
-async function ssWalkin(dayId, ln, dlg) {
-  const P = { lod: "ใหญ่", lek: "เล็ก", mo: "บด" };
-  const price = Object.entries(ln.prices || {}).map(([k, v]) => `${P[k] || k} ฿${elN(v)}`).join(" · ");
-  if (!confirm(`เพิ่ม "${ln.name}" เข้ารายชื่อสายนี้ (ต่อท้ายสาย)
-ราคา: ${price || "—"}
-แก้ราคา / ลำดับได้ทีหลัง`)) return;
-  try { await api(`/api/sales-routes/day/${dayId}/walkin`, jsonOpts("POST", { key: ln.walkin_key })); } catch (err) { alert(err.message); return; }
-  dlg.close(); dlg.remove();
-  ssOpenDay(dayId);
-}
-
-async function ssCheck(dayId, checked, dlg) {
-  try { await api(`/api/sales-routes/day/${dayId}/check`, jsonOpts("POST", { checked })); } catch (err) { alert(err.message); return; }
-  dlg.close(); dlg.remove();
-  if (ss_.open) ssLoadDays(ss_.open);
-  if (typeof loadSalesAttention === "function") loadSalesAttention();
-}
-
-async function ssReopen(dayId, dlg) {
-  if (!confirm("เปิดใบขายนี้ให้คนขับแก้? คนขับต้องแก้แล้วกดส่งใหม่")) return;
-  try { await api(`/api/sales-routes/day/${dayId}/reopen`, jsonOpts("POST", {})); } catch (err) { alert(err.message); return; }
-  dlg.close(); dlg.remove();
-  await openSalesSheets();
-}
-
-async function ssSaveReturns(dayId, dlg) {
-  const back = {};
-  dlg.querySelectorAll("input[data-ret]").forEach((i) => { if (i.value !== "") back[i.getAttribute("data-ret")] = Number(i.value); });
-  try { await api(`/api/sales-routes/day/${dayId}/returns`, jsonOpts("POST", { returns: back })); } catch (err) { alert(err.message); return; }
-  dlg.close(); dlg.remove();
-  ssOpenDay(dayId);
-  if (ss_.open) ssLoadDays(ss_.open);
-}
-
 
 // ------------------------------------------------------------------ ใบงานคนขับ: the paper sheet, from IceBox (app/route_sheet.py)
 async function ssSheetXlsx(routeId, day) {

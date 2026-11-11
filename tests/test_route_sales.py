@@ -138,3 +138,12 @@ def test_clean_walkins_drops_junk():
     assert rs.clean_walkins([{"key": "x", "name": "a"}, {"key": "new:2", "name": ""}, "junk", {"key": "new:3", "name": "b"},
                              {"key": "new:3", "name": "dup"}]) == [{"key": "new:3", "name": "b", "phone": "", "prices": {}}]
     assert rs.clean_walkins(None) == []
+
+
+def test_the_office_sheet_is_tidied_to_the_phone_shape():
+    d = rs.clean_doc({"sales": {"5": {"q": {"lod": "2", "bad": 3, "lek": 0}, "paid": "70", "old_paid": ""}, "6": {"q": {}}, "7": "junk"},
+                      "loads": [{"q": {"lod": 10}}, {"q": {}}], "cash": {"100": "3", "7": 1, "coins": 2}, "km_end": "1200"})
+    assert d["sales"] == {"5": {"q": {"lod": 2.0}, "paid": 70.0}}
+    assert d["loads"] == [{"q": {"lod": 10.0}}] and d["cash"] == {"100": 3.0, "coins": 2.0} and d["km_end"] == 1200.0
+    t = rs.compute(d, {"5": {"prices": {"lod": 40}}})
+    assert t["amount"] == 80 and t["cash_sales"] == 70 and t["credit"] == 10

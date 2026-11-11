@@ -631,6 +631,164 @@ def attention() -> dict:
             "unsent": sum(r["unsent"] for r in rows)}
 
 
+# --------------------------------------------------------------------------------------------- the office edits a day itself
+OFFICE_REV_STEP = 1000      # the office's save always wins over a phone's copy: the phone sees it is behind and takes the office's
+
+
+def clean_doc(doc: dict) -> dict:
+    """A day's sheet from the office page, tidied to the phone's shape (the same compute() reads both)."""
+    if not isinstance(doc, dict) or len(str(doc)) > 400_000:
+        raise RouteSalesError("ข้อมูลไม่ถูกต้อง")
+    q = lambda d: {k: _num(v) for k, v in (d or {}).items() if k in KEYS and _num(v)}           # noqa: E731
+    sales = {}
+    for cid, s in (doc.get("sales") or {}).items():
+        if not isinstance(s, dict):
+            continue
+        line = {"q": q(s.get("q"))}
+        for k in ("paid", "old_paid", "discount"):
+            if s.get(k) not in (None, ""):
+                line[k] = max(_num(s.get(k)), 0.0)
+        for k in ("free",):
+            if s.get(k):
+                line[k] = True
+        if s.get("pay") in ("cash", "credit", "part"):
+            line["pay"] = s["pay"]
+        if s.get("reason") in ("factory", "other"):
+            line["reason"] = s["reason"]
+        if s.get("t"):
+            line["t"] = str(s["t"])[:5]
+        if line["q"] or line.get("old_paid"):
+            sales[str(cid)] = line
+    loads = [{"q": q(ld.get("q")), **({"t": str(ld["t"])[:5]} if ld.get("t") else {})} for ld in doc.get("loads") or [] if isinstance(ld, dict)]
+    cash = {k: _num(v) for k, v in (doc.get("cash") or {}).items() if (k in [str(n) for n in NOTES] or k == "coins") and _num(v)}
+    out = {"sales": sales, "loads": [ld for ld in loads if ld["q"]], "new_customers": clean_walkins(doc.get("new_customers")),
+           "cash": cash or None, "km_end": _num(doc.get("km_end")) or None, "closed": bool(doc.get("closed"))}
+    return out
+
+
+def office_day(route_id: int, day: date) -> dict:
+    """Everything the office day page shows: the route's customers (prices, bins, what each owed before this day), the sheet, and the
+    days around it that have a sheet (for ‹ ›)."""
+    from app import supabase
+    r = supabase.select("sale_routes", {"select": "id,truck_no,name,driver_name,driver_phone,branch", "id": f"eq.{int(route_id)}", "limit": "1"})
+    if not r:
+        raise RouteSalesError("ไม่พบสายนี้")
+    d = _day(r[0]["id"], day)
+    before: dict = {}
+    for ln in supabase.select_all("sale_lines", {"select": "customer_id,amount,paid,old_paid,billing", "route_id": f"eq.{r[0]['id']}",
+                                                 "day": f"lt.{day.isoformat()}", "order": "id.asc"}):
+        if ln["customer_id"] and ln["billing"] != "invoice":
+            k = str(ln["customer_id"])
+            before[k] = round(before.get(k, 0.0) + _num(ln["amount"]) - _num(ln["paid"]) - _num(ln["old_paid"]), 2)
+    days = [x["day"] for x in supabase.select_all("sale_days", {"select": "day", "route_id": f"eq.{r[0]['id']}", "order": "day.asc"})]
+    now = datetime.now(BANGKOK)
+    sheet = None
+    if d:
+        sheet = {"id": d["id"], "doc": d["doc"], "rev": d["rev"], "status": d["status"], "totals": _public(d["totals"]),
+                 "returns_foh": d.get("returns_foh"), "closed_at": d.get("closed_at"), "reopen_requested_at": d.get("reopen_requested_at"),
+                 "reopen_log": d.get("reopen_log") or [], "unsent": unsent(day, d["status"], now)}
+    return {"route": r[0], "day": day.isoformat(), "today": now.date().isoformat(), "customers": _customers(r[0]["id"]),
+            "owed_before": {k: v for k, v in before.items() if abs(v) >= 1}, "sheet": sheet, "days_with_sheet": days,
+            "products": [{"key": k, "label": lab, "short": SHORT[k]} for k, lab in PRODUCTS], "notes": NOTES,
+            "km_start": _last_km(r[0]["id"], day), "driver_selling": bool(d and d["status"] == "open" and day == now.date())}
+
+
+def office_save_day(route_id: int, day: date, doc: dict, returns: Optional[dict] = None, who: str = "office") -> dict:
+    """The owner / bookkeeper saves a day straight away (owner, 11 Nov 2026: no more ask the driver -> reopen -> the driver fixes).
+    Works for a day the phone never sent, a sent one, and a day only on paper (created here). The status stays as it was (a new
+    day is 'closed': it is a finished paper sheet); every save is written in reopen_log."""
+    from app import supabase
+    doc = clean_doc(doc)
+    current = _day(int(route_id), day)
+    customers = {**{str(c["id"]): c for c in _customers(int(route_id))}, **walkin_customers(doc)}
+    doc["sales"] = {k: v for k, v in doc["sales"].items() if k in customers}
+    back = {k: _num(v) for k, v in (returns or {}).items() if k in KEYS and str(v).strip() != ""} if returns is not None \
+        else (current or {}).get("returns_foh")
+    totals = compute(doc, customers, back or None, _last_km(int(route_id), day))
+    status = current["status"] if current else "closed"
+    doc["closed"] = status != "open"
+    now = datetime.now(timezone.utc).isoformat()
+    row = {"route_id": int(route_id), "day": day.isoformat(), "doc": doc, "rev": int((current or {}).get("rev") or 0) + OFFICE_REV_STEP,
+           "status": status, "totals": _public(totals), "updated_at": now, "returns_foh": back or None,
+           "reopen_log": ((current or {}).get("reopen_log") or []) + [{"at": now, "what": "office_edit", "who": who}]}
+    if not current:
+        row["closed_at"] = now
+    if returns is not None:
+        row["returns_at"] = now
+    saved = supabase.insert("sale_days", [row], on_conflict="route_id,day")[0]
+    supabase.delete("sale_lines", {"day_id": f"eq.{saved['id']}"})
+    lines = [{"day_id": saved["id"], "route_id": int(route_id), "day": day.isoformat(), **_line_who(ln["customer"], customers), "qty": ln["qty"],
+              "amount": ln["amount"], "paid": ln["paid"], "old_paid": ln["old_paid"], "billing": ln["billing"], "discount": ln["discount"],
+              "free": ln["free"], "waived": ln["waived"], "waived_reason": ln["waived_reason"]} for ln in totals["lines"]]
+    for i in range(0, len(lines), 500):
+        supabase.insert("sale_lines", lines[i:i + 500])
+    return {"id": saved["id"], "rev": saved["rev"], "status": status, "totals": _public(totals)}
+
+
+# --------------------------------------------------------------------------------------------- the office keeps the route's customers
+def _clean_customer(body: dict) -> dict:
+    out = {}
+    if "name" in body:
+        name = re.sub(r"\s+", " ", str(body.get("name") or "")).strip()[:120]
+        if not name:
+            raise RouteSalesError("ใส่ชื่อร้าน")
+        out["name"] = name
+    if "bins" in body:
+        out["bins"] = re.sub(r"\s+", " ", str(body.get("bins") or "")).strip()[:300] or None
+    if "prices" in body:
+        out["prices"] = {k: _num(v) for k, v in (body.get("prices") or {}).items() if k in KEYS and _num(v) > 0}
+    if "billing" in body:
+        out["billing"] = "invoice" if body.get("billing") == "invoice" else "cash"
+    if "free" in body:
+        out["free"] = bool(body.get("free"))
+    if "active" in body:
+        out["active"] = bool(body.get("active"))
+    return out
+
+
+def _make_room(route_id: int, seq: int, skip_id: Optional[int] = None) -> None:
+    """Customer `seq` is taken: everyone from there on moves down one (the route order is the paper's numbering)."""
+    from app import supabase
+    rows = supabase.select_all("sale_route_customers", {"select": "id,seq", "route_id": f"eq.{int(route_id)}", "active": "eq.true",
+                                                        "seq": f"gte.{int(seq)}", "order": "seq.desc"})
+    if not any(r["seq"] == seq and r["id"] != skip_id for r in rows):
+        return
+    for r in rows:
+        if r["id"] != skip_id:
+            supabase.update("sale_route_customers", {"id": f"eq.{r['id']}"}, {"seq": r["seq"] + 1})
+
+
+def add_customer(route_id: int, body: dict) -> dict:
+    """The owner / bookkeeper adds a customer to a route (drivers cannot -- owner, 10 Nov 2026)."""
+    from app import supabase
+    values = _clean_customer({**body, "name": body.get("name")})
+    existing = _customers(int(route_id))
+    last = max([c["seq"] for c in existing] or [0])
+    seq = int(_num(body.get("seq"))) or last + 1
+    seq = min(max(seq, 1), last + 1)
+    _make_room(int(route_id), seq)
+    row = supabase.insert("sale_route_customers", [{"route_id": int(route_id), "seq": seq, "prices": {}, "billing": "cash",
+                                                    "added_by_driver": False, "approved": True, **values}])[0]
+    return {"id": row["id"], "seq": seq}
+
+
+def update_customer(customer_id: int, body: dict) -> dict:
+    from app import supabase
+    c = supabase.select("sale_route_customers", {"select": "id,route_id,seq", "id": f"eq.{int(customer_id)}", "limit": "1"})
+    if not c:
+        raise RouteSalesError("ไม่พบลูกค้านี้")
+    values = _clean_customer(body)
+    if body.get("seq") not in (None, "") and int(_num(body["seq"])) != c[0]["seq"]:
+        seq = max(int(_num(body["seq"])), 1)
+        _make_room(c[0]["route_id"], seq, skip_id=c[0]["id"])
+        values["seq"] = seq
+    if not values:
+        raise RouteSalesError("ไม่มีอะไรเปลี่ยน")
+    values["approved"] = True
+    supabase.update("sale_route_customers", {"id": f"eq.{int(customer_id)}"}, values)
+    return {"ok": True}
+
+
 def check_day(day_id: int, checked: bool = True) -> dict:
     from app import supabase
     now = datetime.now(timezone.utc).isoformat()
