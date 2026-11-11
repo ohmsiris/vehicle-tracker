@@ -262,8 +262,26 @@ def _roster() -> list[dict]:
     return load_roster()
 
 
+MAX_PDF_PAGES = 30
+
+
+def pdf_pages(raw: bytes) -> list[bytes]:
+    """A PDF (a scan of several รายการเบิก pages) -> one JPEG per page, so each page is read, checked and confirmed on its own
+    (owner, 11 Nov 2026: a PDF of many pages did not work)."""
+    import pymupdf
+    doc = pymupdf.open(stream=raw, filetype="pdf")
+    if doc.page_count > MAX_PDF_PAGES:
+        raise CashFuelError(f"PDF มี {doc.page_count} หน้า — ได้ไม่เกิน {MAX_PDF_PAGES} หน้าต่อไฟล์")
+    out = []
+    for page in doc:
+        zoom = min(2000 / max(page.rect.width, page.rect.height, 1), 200 / 72)       # about 2000 px on the long side
+        out.append(page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), colorspace=pymupdf.csRGB).tobytes("jpeg", jpg_quality=85))
+    return out
+
+
 def add_pages(files: list[tuple[str, bytes]], branch: str, by_name: str) -> dict:
-    """Photos of รายการเบิก pages -> read, fuel lines kept. A photo already uploaded is refused (never read twice)."""
+    """Photos (or PDFs, split into their pages) of รายการเบิก pages -> read, fuel lines kept. A page already uploaded is refused
+    (never read twice)."""
     import mimetypes
 
     from app import customers, supabase
@@ -275,12 +293,26 @@ def add_pages(files: list[tuple[str, bytes]], branch: str, by_name: str) -> dict
         if mime not in ("image/jpeg", "image/png", "image/webp", "application/pdf"):
             refused.append(f"{name}: รับเฉพาะรูป หรือ PDF")
             continue
-        h = hashlib.sha256(raw).hexdigest()
-        if supabase.select("cash_fuel_pages", {"select": "id", "image_hash": f"eq.{h}", "limit": "1"}):
-            refused.append(f"{name}: อัปโหลดรูปนี้ไปแล้ว — ไม่อ่านซ้ำ")
-            continue
-        data, out_mime, ext = customers.shrink(raw, mime) if mime != "application/pdf" else (raw, mime, "pdf")
-        todo.append((name, h, data, out_mime, ext))
+        if mime == "application/pdf":
+            try:
+                pages = pdf_pages(raw)
+            except CashFuelError as exc:
+                refused.append(f"{name}: {exc}")
+                continue
+            except Exception:                          # noqa: BLE001
+                refused.append(f"{name}: เปิด PDF นี้ไม่ได้")
+                continue
+            whole = hashlib.sha256(raw).hexdigest()
+            items = [(f"{name} หน้า {i + 1}" if len(pages) > 1 else name, hashlib.sha256(f"{whole}:{i}".encode()).hexdigest(), jpg)
+                     for i, jpg in enumerate(pages)]
+        else:
+            items = [(name, hashlib.sha256(raw).hexdigest(), raw)]
+        for nm, h, data in items:
+            if supabase.select("cash_fuel_pages", {"select": "id", "image_hash": f"eq.{h}", "limit": "1"}):
+                refused.append(f"{nm}: อัปโหลดรูปนี้ไปแล้ว — ไม่อ่านซ้ำ")
+                continue
+            data, out_mime, ext = customers.shrink(data, "image/jpeg" if mime == "application/pdf" else mime)
+            todo.append((nm, h, data, out_mime, ext))
 
     def work(item):
         name, h, data, out_mime, ext = item
@@ -290,7 +322,7 @@ def add_pages(files: list[tuple[str, bytes]], branch: str, by_name: str) -> dict
             return item, None, str(exc)
 
     added, lines_n = [], 0
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=6) as pool:
         results = list(pool.map(work, todo))
     for (name, h, data, out_mime, ext), read, err in results:
         path = f"cashfuel/{h[:2]}/{h}.{ext}"

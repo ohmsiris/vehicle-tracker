@@ -53,8 +53,8 @@ function cfUploadCard() {
   input.addEventListener("change", () => { add(input.files); input.value = ""; });
   const drop = el("div", { class: "drop cf-drop", tabindex: "0", role: "button", onclick: () => input.click(),
     onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } } },
-    el("b", { text: "ลากรูปรายการเบิกมาวางที่นี่ หรือแตะเพื่อเลือกรูป" }),
-    el("span", { class: "muted small", text: "ถ่ายให้เห็นทั้งหน้า · หลายรูปได้ · ระบบอ่านแต่ละรูป 2 รอบ ประมาณครึ่งนาทีต่อรูป" }), input);
+    el("b", { text: "ลากรูปหรือ PDF รายการเบิกมาวางที่นี่ หรือแตะเพื่อเลือก" }),
+    el("span", { class: "muted small", text: "ถ่ายให้เห็นทั้งหน้า · หลายรูปได้ · PDF หลายหน้าจะแยกเป็นหน้าละรูป · อ่านแต่ละหน้า 2 รอบ" }), input);
   ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
   drop.addEventListener("drop", (e) => add(e.dataTransfer.files));
@@ -66,16 +66,21 @@ async function cfRead(list, go) {
   const todo = cf_.files.filter((f) => !f.state);
   go.disabled = true;
   const one = async (f) => {
-    f.state = "busy"; f.msg = "กำลังอ่าน (2 รอบ)…"; cfPaintFiles(list);
+    f.state = "busy"; f.msg = /\.pdf$/i.test(f.file.name) ? "กำลังอ่านทุกหน้า (หน้าละ 2 รอบ)… PDF หลายหน้าใช้เวลาหลายนาที" : "กำลังอ่าน (2 รอบ)…"; cfPaintFiles(list);
     const fd = new FormData();
     fd.append("files", f.file);
     try {
       const res = await fetch("/api/cash-fuel/pages", { method: "POST", body: fd, headers: { "X-App-Token": state.token } });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.detail || `HTTP ${res.status}`);
-      if (j.refused.length) { f.state = "bad"; f.msg = j.refused[0].replace(/^[^:]*:\s*/, ""); }
-      else if (j.added[0] && j.added[0].error) { f.state = "bad"; f.msg = `อ่านไม่สำเร็จ: ${j.added[0].error}`; }
-      else { f.state = "ok"; f.msg = `อ่านแล้ว · ${j.lines} รายการเติมน้ำมัน`; f.page = j.added[0] && j.added[0].page_id; }
+      const pages = j.added.length, bad = j.added.filter((a) => a.error).length;
+      if (!pages && j.refused.length) { f.state = "bad"; f.msg = j.refused[0].replace(/^[^:]*:\s*/, ""); }
+      else if (pages && bad === pages) { f.state = "bad"; f.msg = `อ่านไม่สำเร็จ: ${j.added[0].error}`; }
+      else {
+        f.state = "ok";
+        f.msg = `อ่านแล้ว${pages > 1 ? ` ${pages} หน้า` : ""} · ${j.lines} รายการเติมน้ำมัน${bad ? ` · อ่านไม่ได้ ${bad} หน้า` : ""}${j.refused.length ? ` · ข้าม ${j.refused.length} หน้าที่อัปโหลดแล้ว` : ""}`;
+        f.page = (j.added.find((a) => !a.error) || j.added[0]).page_id;
+      }
     } catch (err) { f.state = "bad"; f.msg = err.message; }
     cfPaintFiles(list);
   };

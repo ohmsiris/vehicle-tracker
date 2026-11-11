@@ -101,3 +101,24 @@ def test_no_plate_written_takes_the_truck_the_requester_drives():
     a, b = cf.fuel_lines(read, ROSTER, "สระบุรี", ppl)
     assert a["vehicle_id"] == "a" and a["driver_name"] == "มานัส ใจดี" and "ไม่ได้เขียนทะเบียน" in a["note"]
     assert b["vehicle_id"] is None and b["note"] == "ไม่พบรถ"
+
+
+def test_a_pdf_of_several_pages_is_split_into_one_picture_per_page(monkeypatch):
+    import pymupdf
+    from app import supabase
+    doc = pymupdf.open()
+    for i in range(3):
+        doc.new_page(width=595, height=842).insert_text((72, 72), f"page {i + 1}")
+    raw = doc.tobytes()
+    pages = cf.pdf_pages(raw)
+    assert len(pages) == 3 and all(p[:2] == b"\xff\xd8" for p in pages)          # JPEGs
+    seen, inserted = [], []
+    monkeypatch.setattr(cf, "_roster", lambda: [])
+    monkeypatch.setattr(cf, "people", lambda branch, roster: {})
+    monkeypatch.setattr(cf, "read_twice", lambda data, mime: (seen.append(mime), {"lines": [], "second": []})[1])
+    monkeypatch.setattr(supabase, "select", lambda table, params=None: [])
+    monkeypatch.setattr(supabase, "storage_upload", lambda *a, **k: None)
+    monkeypatch.setattr(supabase, "insert", lambda table, rows: (inserted.extend(rows), [{"id": len(inserted)}])[1])
+    out = cf.add_pages([("scan.pdf", raw)], "สระบุรี", "test")
+    assert [a["name"] for a in out["added"]] == ["scan.pdf หน้า 1", "scan.pdf หน้า 2", "scan.pdf หน้า 3"]
+    assert seen == ["image/jpeg"] * 3 and len({r["image_hash"] for r in inserted}) == 3
