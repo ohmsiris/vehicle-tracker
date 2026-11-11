@@ -2184,6 +2184,35 @@ def api_driver_day(body: dict = Body(...), x_driver_token: str = Header(default=
     return _route_call(route_sales.save_day, driver, str(body.get("day") or ""), rev, body.get("doc") or {})
 
 
+@app.put("/api/d/order")
+def api_driver_order(body: dict = Body(...), x_driver_token: str = Header(default="")) -> dict:
+    """The driver orders ice for tomorrow (or today)."""
+    from app import route_sales
+    driver = _route_call(route_sales.driver_for_token, x_driver_token)
+    return _route_call(route_sales.driver_order, driver, str(body.get("day") or ""), body.get("q") or {})
+
+
+@app.get("/api/ice-orders")
+def api_ice_orders(day: str = "", branch: str = "สระบุรี", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """ยอดสั่งน้ำแข็ง: every truck's order for a day (tomorrow without one)."""
+    from datetime import timedelta
+
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.orders_for, _sheet_day(day) or route_sales.today() + timedelta(days=1), branch)
+
+
+@app.put("/api/ice-orders/{route_id}")
+def api_ice_order_save(route_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The office writes a truck's order (taken on paper / by phone)."""
+    from app import route_sales
+    _check_token(x_app_token, token)
+    day = _sheet_day(str(body.get("day") or ""))
+    if not day:
+        raise HTTPException(400, "วันที่ไม่ถูกต้อง")
+    return _route_call(route_sales.save_order, route_id, day, body.get("q") or {}, _who(x_app_token or token), body.get("note"))
+
+
 @app.post("/api/d/reopen-request")
 def api_driver_reopen_request(body: dict = Body(...), x_driver_token: str = Header(default="")) -> dict:
     from app import route_sales

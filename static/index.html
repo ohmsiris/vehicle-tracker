@@ -58,6 +58,7 @@
       <button id="navRoutes" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></svg><span>รถสาย · กำไรต่อคัน</span></button>
       <button id="navSalesSheets" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg><span>ใบขายรถสาย (มือถือ)</span></button>
       <button id="navCustomers" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16c.6-1.6 2-2.5 3.5-2.5s2.9.9 3.5 2.5M15 10h4M15 13h3"/></svg><span>ทะเบียนลูกค้า</span></button>
+      <button id="navIceOrders" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 2v4M16 2v4M4 10h16M9 15h6"/></svg><span>ยอดสั่งน้ำแข็ง</span></button>
     </nav>
   </div>
 
@@ -998,6 +999,16 @@
     <div id="usBody"></div>
   </section>
 
+  <!-- ============ ยอดสั่งน้ำแข็ง: every truck's order for tomorrow (iceorders.js) ============ -->
+  <section id="iceOrdersView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">ยอดสั่งน้ำแข็ง</h2>
+      <p class="muted small">คนขับสั่งน้ำแข็งของวันพรุ่งนี้จากโทรศัพท์ · หน้าโรงดูยอดรวมเพื่อเตรียมน้ำแข็ง</p>
+    </div>
+    <p class="error" id="ioError" hidden></p>
+    <div id="ioBody"></div>
+  </section>
+
   <!-- ============ ทะเบียนลูกค้า: the bin-loan register + photos, linked to the route lists (customers.js) ============ -->
   <section id="customersView" hidden>
     <div class="page-head">
@@ -1666,6 +1677,7 @@
 <script src="/static/today.js"></script>
 <script src="/static/users.js"></script>
 <script src="/static/customers.js"></script>
+<script src="/static/iceorders.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/buy.js"></script>
 <script src="/static/manual.js"></script>

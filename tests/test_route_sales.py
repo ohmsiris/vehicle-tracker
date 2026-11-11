@@ -147,3 +147,16 @@ def test_the_office_sheet_is_tidied_to_the_phone_shape():
     assert d["loads"] == [{"q": {"lod": 10.0}}] and d["cash"] == {"100": 3.0, "coins": 2.0} and d["km_end"] == 1200.0
     t = rs.compute(d, {"5": {"prices": {"lod": 40}}})
     assert t["amount"] == 80 and t["cash_sales"] == 70 and t["credit"] == 10
+
+
+def test_an_order_keeps_only_real_products_and_the_phone_orders_today_or_tomorrow(monkeypatch):
+    from datetime import date
+    import pytest
+    assert rs.clean_order({"lod": "90", "lek": 0, "bad": 5, "mo": "x"}) == {"lod": 90.0}
+    monkeypatch.setattr(rs, "today", lambda: date(2026, 11, 11))
+    saved = []
+    monkeypatch.setattr(rs, "save_order", lambda route_id, day, q, by: saved.append((route_id, day, q, by)) or {"order": q})
+    rs.driver_order({"route_id": 30, "name": "ทดสอบ"}, "2026-11-12", {"lod": 5})
+    assert saved == [(30, date(2026, 11, 12), {"lod": 5}, "ทดสอบ")]
+    with pytest.raises(rs.RouteSalesError):
+        rs.driver_order({"route_id": 30, "name": "x"}, "2026-11-14", {"lod": 5})

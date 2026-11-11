@@ -155,3 +155,10 @@ main { padding: 12px 12px calc(92px + env(safe-area-inset-bottom)); max-width: 6
 .foot { text-align: center; padding: 18px 0 4px; }
 .link { color: var(--muted); font-weight: 600; padding: 10px; display: inline-flex; align-items: center; gap: 6px; }
 @media (min-width: 700px) { .pad { grid-template-columns: repeat(3, 96px); } }
+
+/* tomorrow's ice order (driver.js orderCards) */
+.box.order { border: 1px solid var(--blue, #2563eb); }
+.box.order .ordtxt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.box.order .ordtxt small { color: var(--muted); font-size: 14px; }
+.box.order .btn { flex: 0 0 auto; }
+.box.order .btn { white-space: nowrap; min-width: 96px; padding: 10px 14px; }

@@ -11,7 +11,7 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["users", "customers", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
+const FLEET_VIEWS = ["users", "customers", "iceOrders", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 
 // ------------------------------------------------------------------ routing
 function route() {
@@ -19,6 +19,7 @@ function route() {
   if (typeof staffMayOpen === "function" && !staffMayOpen(h)) { if (state.me.home) goHash(state.me.home); return; }   // not one of this person's menus
   if (h === "users") return openUsers();
   if (h === "customers") return openCustomers();
+  if (h === "ice-orders" || h.startsWith("ice-orders/")) return openIceOrders(h.slice(11));
   if (h === "roster") return openRoster();
   if (h === "employees") return openEmployees();
   if (h === "loans") return openLoans();

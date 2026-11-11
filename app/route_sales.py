@@ -371,7 +371,9 @@ def bootstrap(driver: dict, day: Optional[date] = None) -> dict:
             "products": [{"key": k, "label": l, "short": SHORT[k]} for k, l in PRODUCTS], "notes": NOTES,
             "customers": _customers(r["id"]), "balances": _balances(r["id"]), "last_km": _last_km(r["id"], day),
             "sheet": _sheet(d), "pending_yesterday": pending["day"] if pending else None,
-            "editable": edit_refusal(day, d["status"] if d else None, now) is None}
+            "editable": edit_refusal(day, d["status"] if d else None, now) is None,
+            "order_today": _order(r["id"], day), "order_next": _order(r["id"], day + timedelta(days=1)),
+            "next_day": (day + timedelta(days=1)).isoformat()}
 
 
 def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
@@ -629,6 +631,61 @@ def attention() -> dict:
     rows = routes_overview()
     return {"walkins": sum(r["walkins"] for r in rows), "reopen_requests": sum(r["reopen_requests"] for r in rows),
             "unsent": sum(r["unsent"] for r in rows)}
+
+
+# --------------------------------------------------------------------------------------------- tomorrow's ice (owner, 11 Nov 2026)
+def clean_order(q) -> dict:
+    return {k: _num(v) for k, v in (q or {}).items() if k in KEYS and _num(v) > 0}
+
+
+def _order(route_id: int, day: date) -> Optional[dict]:
+    from app import supabase
+    rows = supabase.select("sale_orders", {"select": "day,q,note,by_name,updated_at", "route_id": f"eq.{int(route_id)}",
+                                           "day": f"eq.{day.isoformat()}", "limit": "1"})
+    return rows[0] if rows else None
+
+
+def save_order(route_id: int, day: date, q: dict, by_name: str, note: Optional[str] = None) -> dict:
+    """An order for `day` (empty = no order). The phone may order for today and tomorrow; the office for any day."""
+    from app import supabase
+    q = clean_order(q)
+    if not q:
+        supabase.delete("sale_orders", {"route_id": f"eq.{int(route_id)}", "day": f"eq.{day.isoformat()}"})
+        return {"order": None}
+    row = supabase.insert("sale_orders", [{"route_id": int(route_id), "day": day.isoformat(), "q": q, "by_name": (by_name or "")[:60],
+                                           "note": (note or "")[:200] or None, "updated_at": datetime.now(timezone.utc).isoformat()}],
+                          on_conflict="route_id,day")[0]
+    return {"order": {k: row[k] for k in ("day", "q", "note", "by_name", "updated_at")}}
+
+
+def driver_order(driver: dict, day_text: str, q: dict) -> dict:
+    try:
+        day = date.fromisoformat(day_text)
+    except (TypeError, ValueError):
+        raise RouteSalesError("วันที่ไม่ถูกต้อง")
+    t = today()
+    if day not in (t, t + timedelta(days=1)):
+        raise RouteSalesError("สั่งได้เฉพาะวันนี้และพรุ่งนี้")
+    return save_order(driver["route_id"], day, q, driver["name"])
+
+
+def orders_for(day: date, branch: str = "สระบุรี") -> dict:
+    """ยอดสั่งน้ำแข็ง: every route's order for `day`, the totals, and who has not ordered."""
+    from app import supabase
+    routes = supabase.select_all("sale_routes", {"select": "id,truck_no,name,driver_name,active", "branch": f"eq.{branch}", "order": "id.asc"})
+    got = {o["route_id"]: o for o in supabase.select_all("sale_orders", {"select": "route_id,q,note,by_name,updated_at",
+                                                                         "day": f"eq.{day.isoformat()}", "order": "id.asc"})}
+    rows, total = [], {k: 0.0 for k in KEYS}
+    for r in sorted((x for x in routes if x.get("active", True)), key=lambda x: (len(x["truck_no"]), x["truck_no"])):
+        o = got.get(r["id"])
+        for k, v in ((o or {}).get("q") or {}).items():
+            if k in total:
+                total[k] += _num(v)
+        rows.append({"route_id": r["id"], "truck_no": r["truck_no"], "driver": r.get("driver_name"), "route": r.get("name"),
+                     "q": (o or {}).get("q") or {}, "note": (o or {}).get("note"), "by_name": (o or {}).get("by_name"),
+                     "updated_at": (o or {}).get("updated_at")})
+    return {"day": day.isoformat(), "today": today().isoformat(), "rows": rows, "total": total,
+            "ordered": sum(1 for x in rows if x["q"]), "products": [{"key": k, "label": lab, "short": SHORT[k]} for k, lab in PRODUCTS]}
 
 
 # --------------------------------------------------------------------------------------------- the office edits a day itself

@@ -454,17 +454,66 @@
   }
 
   // ---- loads
+  // ---- tomorrow's ice (owner, 11 Nov 2026): order it today; the next day's sheet offers it as เที่ยว 1
+  function dmy(iso) { var a = String(iso || "").split("-"); return a.length === 3 ? a[2] + "/" + a[1] + "/" + a[0] : ""; }
+  function orderText(o) {
+    var q = (o && o.q) || {};
+    return products().filter(function (p) { return n(q[p.key]); }).map(function (p) { return p.label + " " + fmt(q[p.key]); }).join(" · ");
+  }
+  function orderCards(withToday) {
+    var b = S.boot || {}, html = "";
+    if (withToday && b.order_today && !(S.doc.loads || []).length && !locked()) {
+      html += '<div class="box order"><div class="line"><div class="ordtxt"><b>เมื่อวานสั่งไว้</b><small>' + esc(orderText(b.order_today)) + "</small></div>" +
+        '<button class="btn primary" id="useord">รับตามที่สั่ง</button></div></div>';
+    }
+    if (b.next_day) {
+      html += '<div class="box order"><div class="line"><div class="ordtxt"><b>สั่งน้ำแข็งพรุ่งนี้ ' + dmy(b.next_day) + "</b><small>" +
+        (b.order_next ? esc(orderText(b.order_next)) : "ยังไม่ได้สั่ง") + "</small></div>" +
+        '<button class="btn' + (b.order_next ? "" : " primary") + '" id="ordnext">' + (b.order_next ? "แก้ยอดสั่ง" : "สั่ง") + "</button></div></div>";
+    }
+    return html;
+  }
+  function wireOrderCards() {
+    if ($("useord")) $("useord").onclick = function () {
+      S.doc.loads.push({ q: JSON.parse(JSON.stringify(S.boot.order_today.q || {})), t: nowHM(), from_order: true });
+      changed(); render(); toast("รับตามที่สั่งแล้ว — แตะเที่ยว 1 เพื่อแก้จำนวนได้");
+    };
+    if ($("ordnext")) $("ordnext").onclick = openOrder;
+  }
+  function openOrder() {
+    var o = (S.boot.order_next && S.boot.order_next.q) || {};
+    openSheet('<div class="sheet-head"><button class="back" id="sx" aria-label="กลับ">' + ic("back", "l") + "</button><h2>สั่งน้ำแข็งพรุ่งนี้<small>" + dmy(S.boot.next_day) + "</small></h2></div>" +
+      '<div class="sheet-body" id="ob"><div class="box">' + products().map(function (p) {
+        return '<div class="prow"><div class="pl">' + esc(p.label) + "</div>" + stepper("o_" + p.key, n(o[p.key]), false) + "</div>";
+      }).join("") + '<p class="note">หน้าโรงจะเห็นยอดนี้ · แก้ได้จนถึงวันพรุ่งนี้</p></div></div>' +
+      '<div class="actions"><button class="btn" id="oc">ยกเลิก</button><button class="btn primary" id="os">ส่งยอดสั่ง</button></div>');
+    $("sx").onclick = closeSheet; $("oc").onclick = closeSheet;
+    bindSteppers($("ob"), function () {});
+    $("os").onclick = function () {
+      var q = {};
+      products().forEach(function (p) { var v = n($("o_" + p.key).value); if (v) q[p.key] = v; });
+      var btn = $("os"); btn.disabled = true; btn.textContent = "กำลังส่ง…";
+      api("PUT", "/api/d/order", { day: S.boot.next_day, q: q }).then(function (r) {
+        S.boot.order_next = r.order; store(BOOT_KEY, S.boot);
+        closeSheet(); render(); toast(r.order ? "ส่งยอดสั่งแล้ว ✓" : "ยกเลิกยอดสั่งแล้ว");
+      }).catch(function (e) {
+        btn.disabled = false; btn.textContent = "ส่งยอดสั่ง";
+        if (e.message !== "signin") toast(e.status ? e.message : "ไม่มีสัญญาณ — ลองใหม่อีกครั้ง", true);
+      });
+    };
+  }
+
   function renderLoads() {
     var m = $("main"), loads = S.doc.loads || [];
-    m.innerHTML = banners() + (loads.length ? '<div class="list" id="loads">' + loads.map(function (ld, i) {
+    m.innerHTML = banners() + orderCards(true) + (loads.length ? '<div class="list" id="loads">' + loads.map(function (ld, i) {
       var what = products().filter(function (p) { return n(ld.q && ld.q[p.key]); }).map(function (p) { return p.label + " " + fmt(ld.q[p.key]); }).join(" · ");
-      return '<button class="cust" data-i="' + i + '"><span class="no">' + (i + 1) + '</span><span class="mid"><span class="nm">เที่ยว ' + (i + 1) + " · " + esc(ld.t || "") +
+      return '<button class="cust" data-i="' + i + '"><span class="no">' + (i + 1) + '</span><span class="mid"><span class="nm">เที่ยว ' + (i + 1) + " · " + esc(ld.t || "") + (ld.from_order ? " · ตามที่สั่ง" : "") +
         '</span><span class="trip-what">' + esc(what || "—") + "</span></span></button>";
     }).join("") + "</div>" : '<div class="empty">ยังไม่ได้รับน้ำแข็งวันนี้</div>') +
       (locked() ? "" : '<button class="add" id="addl">' + ic("plus", "s") + "รับน้ำแข็ง" + (loads.length ? "เที่ยวใหม่" : "") + "</button>");
     if ($("loads")) $("loads").onclick = function (e) { var b = e.target.closest(".cust"); if (b) openLoad(+b.getAttribute("data-i")); };
     if ($("addl")) $("addl").onclick = function () { openLoad(-1); };
-    wireBanners();
+    wireBanners(); wireOrderCards();
   }
   function openLoad(i) {
     var ld = i >= 0 ? JSON.parse(JSON.stringify(S.doc.loads[i])) : { q: {}, t: nowHM() };
@@ -482,6 +531,7 @@
     $("ls").onclick = function () {
       ld.q = {};
       products().forEach(function (p) { var v = n($("l_" + p.key).value); if (v) ld.q[p.key] = v; });
+      if (ld.from_order) ld.edited = true;
       if (!Object.keys(ld.q).length) { toast("ใส่จำนวนอย่างน้อย 1 อย่าง", true); return; }
       if (i >= 0) S.doc.loads[i] = ld; else S.doc.loads.push(ld);
       changed(); closeSheet(); render();
@@ -527,7 +577,8 @@
       (t.discount ? "<span>ส่วนลด</span><b>฿" + money(t.discount) + "</b>" : "") + (t.freeShops ? "<span>แจกฟรี</span><b>" + t.freeShops + " ร้าน</b>" : "") + "</div></div>";
     if (!ro) html += '<button class="btn primary big" id="closeday">' + ic("send", "s") + 'ส่งใบขาย · ปิดวัน</button><p class="note" style="text-align:center;margin-top:6px">ส่งแล้วจะล็อก ถ้าต้องแก้ต้องขอออฟฟิศ</p>';
     html += '<div class="foot"><button class="link" id="logout">' + ic("out", "s") + "ออกจากระบบ</button></div>";
-    m.innerHTML = html;
+    m.innerHTML = S.status !== "open" ? html.replace('<div class="foot">', orderCards(false) + '<div class="foot">') : html;   // sent: remind to order tomorrow
+    wireOrderCards();
     wireBanners();
     $("logout").onclick = logout;
     if (ro) { m.onchange = null; return; }

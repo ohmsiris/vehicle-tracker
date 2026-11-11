@@ -24,6 +24,7 @@ PW_TRIES, LOCK_MINUTES, INVITE_DAYS, MIN_PW = 5, 10, 7, 8
 MENUS = {
     "sales_sheets": {"label": "ใบขายรถสาย", "nav": ["navSalesSheets"], "hash": "#sales-sheets", "api": ["/api/sales-routes"]},
     "routes": {"label": "รถสาย · กำไรต่อคัน", "nav": ["navRoutes"], "hash": "#routes", "api": ["/api/routes"]},
+    "orders": {"label": "ยอดสั่งน้ำแข็ง (หน้าโรง)", "nav": ["navIceOrders"], "hash": "#ice-orders", "api": ["/api/ice-orders"]},
     "customers": {"label": "ทะเบียนลูกค้า (รวมบัตรประชาชน)", "nav": ["navCustomers"], "hash": "#customers", "api": ["/api/customers"]},
 }
 ALWAYS = ("/api/meta", "/api/auth/")          # every signed-in person
