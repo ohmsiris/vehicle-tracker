@@ -237,7 +237,7 @@ def fuel_lines(read: dict, roster: list[dict], branch: str, ppl: Optional[dict] 
 
 # --------------------------------------------------------------------------------------------- who took the money (คนเบิก)
 GROUPS = (("route", "พนักงานขับรถสาย", "คนขับรถสาย"), ("foh", "พนักงานขับรถหน้าโรง", "หน้าโรง"), ("mech", None, "ช่าง"))
-MECHANICS = ("SB-FR005",)          # อัฐพล เปรมชื่น (เอ๋), the car mechanic, also takes money for fuel (owner, 11 Nov 2026)
+MECHANICS = ("SB-FR005", "SB-FR001", "SB-FR003")   # ช่าง who take money for fuel: อัฐพล (เอ๋), จรูญ, แหยม (owner, 11 Nov 2026)
 
 
 def people(branch: str, roster: list[dict]) -> dict:
