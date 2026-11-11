@@ -260,12 +260,15 @@ async function cfReview(id) {
 }
 
 // a row still to sort out (orange): the reader was unsure and nobody has looked, or it counts but has no truck / no amount
-const cfMissing = (l) => !!(l.counted && ((!l.vehicle_id && !l.no_truck) || !(Number(l.amount) > 0)));
+// every row needs ทะเบียน (or ไม่มีทะเบียนรถ), a date, ผู้เบิก (or ไม่มีชื่อผู้เบิก) and an amount (owner, 11 Nov 2026)
+const cfMissing = (l) => !((l.vehicle_id || l.no_truck) && l.day && (l.driver_name || l.no_name) && Number(l.amount) > 0);
 const cfDoubt = (l) => cfReasons(l).length > 0;
 function cfReasons(l) {
   const out = [];
-  if (l.counted && !l.vehicle_id && !l.no_truck) out.push("ยังไม่ได้เลือกรถ — เลือกรถ (หรือ “ไม่มีทะเบียนรถ”) หรือลบแถว");
-  if (l.counted && !(Number(l.amount) > 0)) out.push("ยังไม่มียอด");
+  if (!l.vehicle_id && !l.no_truck) out.push("ยังไม่ได้เลือกรถ (หรือ “ไม่มีทะเบียนรถ”)");
+  if (!l.day) out.push("ยังไม่มีวันที่");
+  if (!l.driver_name && !l.no_name) out.push("ยังไม่ได้เลือกผู้เบิก (หรือ “ไม่มีชื่อผู้เบิก”)");
+  if (!(Number(l.amount) > 0)) out.push("ยังไม่มียอด");
   // "ไม่พบรถ" is settled once a truck (or ไม่มีทะเบียนรถ) is chosen; while none is, the line above says so
   if (l.note && !l.checked && !l.dup_of) out.push(...l.note.split(" · ").filter((r) => r && r !== "ไม่พบรถ" && !r.startsWith("ซ้ำกับ")).map(cfPlain));
   return out;
@@ -306,7 +309,7 @@ function cfLineCard(l, d, n, onRemove) {
         el("td", {}, el("select", { onchange: (e) => save(e.target.value === "none" ? { no_truck: true } : { vehicle_id: e.target.value || null, no_truck: false }) },
           el("option", { value: "", text: "— เลือก —", selected: !l.vehicle_id && !l.no_truck }),
           el("option", { value: "none", text: "ไม่มีทะเบียนรถ", selected: !!l.no_truck }), ...vopts.map((v) => el("option", { value: v.id, text: cfVehicleLabel(v), selected: v.id === l.vehicle_id })))),
-        el("td", {}, cfPeopleSelect(d, l.driver_name, (v) => save({ driver_name: v }))),
+        el("td", {}, cfPeopleSelect(d, l.driver_name, (v) => save(v === "none" ? { no_name: true } : { driver_name: v, no_name: false }), l.no_name)),
         el("td", { class: "cf-amount" }, el("input", { type: "text", inputmode: "decimal", value: String(Number(l.amount)), onchange: (e) => save({ amount: e.target.value }) })),
         el("td", { class: "cf-acts" },
           doubt && !cfMissing(l) ? el("button", { class: "btn small primary", type: "button", text: "ถูกแล้ว", title: "ดูกับรูปแล้ว ถูกต้อง", onclick: () => save({ checked: true }) })
@@ -334,14 +337,15 @@ function cfPlain(r) {   // the reader's notes in plain words
 function cfVehicleLabel(v) { return v ? `${v.truck_number ? `${v.truck_number} · ` : ""}${v.plate || ""}${v.branch && v.branch !== "สระบุรี" ? ` (${v.branch})` : ""}` : ""; }
 
 // คนเบิก: the drivers, คนขับรถสาย and หน้าโรง in their own groups (owner, 11 Nov 2026)
-function cfPeopleSelect(d, value, onChange) {
+function cfPeopleSelect(d, value, onChange, noName = false) {
   const known = new Set();
   const groups = (d.groups || []).map((g) => el("optgroup", { label: g.label }, ...(d.people[g.key] || []).map((p) => {
     known.add(p.name);
     return el("option", { value: p.name, text: `${p.name}${p.nickname && !p.name.startsWith(p.nickname) ? ` (${p.nickname})` : ""}${p.truck ? ` · รถ ${p.truck}` : ""}`, selected: p.name === value });
   })));
   const extra = value && !known.has(value) ? el("option", { value, text: `${value} (ไม่อยู่ในรายชื่อ)`, selected: true }) : null;
-  return el("select", { onchange: (e) => onChange(e.target.value || null) }, el("option", { value: "", text: "— เลือก —", selected: !value }), extra, ...groups);
+  return el("select", { onchange: (e) => onChange(e.target.value || null) }, el("option", { value: "", text: "— เลือก —", selected: !value && !noName }),
+    el("option", { value: "none", text: "ไม่มีชื่อผู้เบิก", selected: !!noName }), extra, ...groups);
 }
 
 async function cfAddLine() {

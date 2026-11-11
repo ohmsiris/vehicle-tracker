@@ -80,7 +80,8 @@ def test_only_confirmed_pages_and_typed_lines_count(monkeypatch):
 def test_a_page_with_doubtful_lines_cannot_be_confirmed(monkeypatch):
     import pytest
     from app import supabase
-    rows = [{"id": 1, "note": "ลายมือไม่ชัด", "checked": False, "counted": True, "vehicle_id": "a", "amount": 1000}, {"id": 2, "note": "x", "checked": False, "counted": False, "dup_of": 5}]
+    rows = [{"id": 1, "note": "ลายมือไม่ชัด", "checked": False, "counted": True, "vehicle_id": "a", "amount": 1000, "day": "2026-11-03", "driver_name": "มานัส ใจดี"},
+            {"id": 2, "note": "x", "checked": False, "counted": False, "dup_of": 5, "vehicle_id": "a", "amount": 500, "day": "2026-11-03", "no_name": True}]
     writes = []
     monkeypatch.setattr(supabase, "select_all", lambda table, params=None: rows)
     monkeypatch.setattr(supabase, "update", lambda table, match, body: writes.append((table, body)))
@@ -135,23 +136,27 @@ def test_a_front_of_house_requester_is_kept_but_not_sent_to_hq():
     assert route["counted"] is True
 
 
-def test_confirm_needs_a_truck_and_an_amount_on_every_counted_row(monkeypatch):
+def test_confirm_needs_every_field_on_every_row(monkeypatch):
     import pytest
     from app import supabase
-    rows = [{"id": 1, "note": None, "checked": True, "counted": True, "vehicle_id": None, "amount": 0},
-            {"id": 2, "note": None, "checked": True, "counted": False, "vehicle_id": None, "amount": 0}]
+    rows = [{"id": 1, "note": None, "checked": True, "counted": True, "vehicle_id": None, "amount": 0, "day": "2026-11-03", "driver_name": "ก"},
+            {"id": 2, "note": None, "checked": True, "counted": False, "vehicle_id": "a", "amount": 500, "day": "2026-11-03", "driver_name": None}]
     monkeypatch.setattr(supabase, "select_all", lambda table, params=None: rows)
     monkeypatch.setattr(supabase, "update", lambda *a: None)
     with pytest.raises(cf.CashFuelError):
         cf.confirm_page(1, "x")
     rows[0].update({"vehicle_id": "a", "amount": 500})
+    with pytest.raises(cf.CashFuelError):                               # a หน้าโรง row needs its name too
+        cf.confirm_page(1, "x")
+    rows[1]["no_name"] = True                                            # ไม่มีชื่อผู้เบิก
     assert cf.confirm_page(1, "x") == {"ok": True}
 
 
 def test_no_truck_written_can_be_confirmed_as_such(monkeypatch):
     import pytest
     from app import supabase
-    rows = [{"id": 1, "note": "ไม่พบรถ", "checked": False, "counted": True, "vehicle_id": None, "no_truck": False, "amount": 1000}]
+    rows = [{"id": 1, "note": "ไม่พบรถ", "checked": False, "counted": True, "vehicle_id": None, "no_truck": False, "amount": 1000,
+             "day": "2026-11-02", "driver_name": "มานัส ใจดี"}]
     monkeypatch.setattr(supabase, "select_all", lambda table, params=None: rows)
     monkeypatch.setattr(supabase, "update", lambda *a: None)
     with pytest.raises(cf.CashFuelError):

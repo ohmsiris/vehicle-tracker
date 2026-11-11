@@ -236,7 +236,8 @@ def fuel_lines(read: dict, roster: list[dict], branch: str, ppl: Optional[dict] 
 
 
 # --------------------------------------------------------------------------------------------- who took the money (คนเบิก)
-GROUPS = (("route", "พนักงานขับรถสาย", "คนขับรถสาย"), ("foh", "พนักงานขับรถหน้าโรง", "หน้าโรง"))
+GROUPS = (("route", "พนักงานขับรถสาย", "คนขับรถสาย"), ("foh", "พนักงานขับรถหน้าโรง", "หน้าโรง"), ("mech", None, "ช่างซ่อมรถ"))
+MECHANICS = ("SB-FR005",)          # อัฐพล เปรมชื่น (เอ๋), the car mechanic, also takes money for fuel (owner, 11 Nov 2026)
 
 
 def people(branch: str, roster: list[dict]) -> dict:
@@ -246,8 +247,11 @@ def people(branch: str, roster: list[dict]) -> dict:
     out = {k: [] for k, _, _ in GROUPS}
     pos = {p: k for k, p, _ in GROUPS}
     for e in supabase.select_all("employees", {"select": "full_name,nickname,position", "branch": f"eq.{branch}", "status": "eq.active",
-                                               "position": f"in.({','.join(p for _, p, _ in GROUPS)})", "order": "full_name.asc"}):
+                                               "position": f"in.({','.join(p for _, p, _ in GROUPS if p)})", "order": "full_name.asc"}):
         out[pos[e["position"]]].append({"name": e["full_name"], "nickname": e.get("nickname") or "", "truck": truck_of.get((e["full_name"] or "").strip())})
+    for e in supabase.select_all("employees", {"select": "full_name,nickname", "code": f"in.({','.join(MECHANICS)})", "status": "eq.active",
+                                               "branch": f"eq.{branch}", "order": "full_name.asc"}):
+        out["mech"].append({"name": e["full_name"], "nickname": e.get("nickname") or "", "truck": None})
     out["route"].sort(key=lambda x: (int(x["truck"]) if str(x["truck"] or "").isdigit() else 999, x["name"]))
     return out
 
@@ -406,14 +410,13 @@ def pending(branch: str) -> list[dict]:
                                                     "order": "id.asc"})
     if not pages:
         return []
-    lines = supabase.select_all("cash_fuel_lines", {"select": "page_id,day,amount,note,checked,counted,vehicle_id,no_truck",
+    lines = supabase.select_all("cash_fuel_lines", {"select": "page_id,day,amount,note,checked,counted,dup_of,vehicle_id,no_truck,driver_name,no_name",
                                                     "page_id": f"in.({','.join(str(p['id']) for p in pages)})", "order": "id.asc"})
     for p in pages:
         mine = [ln for ln in lines if ln["page_id"] == p["id"]]
         days = sorted(ln["day"] for ln in mine)
-        p.update({"lines": len(mine), "to_check": sum(1 for ln in mine if ln.get("counted") and (
-                      (ln.get("note") and not ln.get("checked")) or (not ln.get("vehicle_id") and not ln.get("no_truck"))
-                      or float(ln.get("amount") or 0) <= 0)),
+        p.update({"lines": len(mine), "to_check": sum(1 for ln in mine if not row_complete(ln) or (
+                      ln.get("note") and not ln.get("checked") and not ln.get("dup_of"))),
                   "from": days[0] if days else None, "to": days[-1] if days else None,
                   "total": round(sum(float(ln["amount"] or 0) for ln in mine if ln.get("counted")), 2)})
     return pages
@@ -434,18 +437,25 @@ def page_detail(page_id: int, branch: str = "สระบุรี") -> dict:
     return {"page": p[0], "lines": lines, "queue": queue, **_choices(p[0]["branch"])}
 
 
+def row_complete(ln: dict) -> bool:
+    """Every row has ทะเบียน (or ไม่มีทะเบียนรถ), a date, ผู้เบิก (or ไม่มีชื่อผู้เบิก) and an amount (owner, 11 Nov 2026)."""
+    return bool((ln.get("vehicle_id") or ln.get("no_truck")) and ln.get("day") and (ln.get("driver_name") or ln.get("no_name"))
+                and float(ln.get("amount") or 0) > 0)
+
+
 def confirm_page(page_id: int, who: str, confirmed: bool = True) -> dict:
     """ยืนยันหน้านี้: the page has been checked against the photo; its lines now count. Every doubtful line must be ticked first."""
     from app import supabase
-    lines = supabase.select_all("cash_fuel_lines", {"select": "id,note,checked,counted,dup_of,vehicle_id,no_truck,amount", "page_id": f"eq.{int(page_id)}", "order": "id.asc"})
+    lines = supabase.select_all("cash_fuel_lines", {"select": "id,note,checked,counted,dup_of,vehicle_id,no_truck,amount,day,driver_name,no_name",
+                                                    "page_id": f"eq.{int(page_id)}", "order": "id.asc"})
     if confirmed:
         open_ = [ln for ln in lines if ln.get("note") and not ln.get("checked") and not ln.get("dup_of")
                  and [r for r in ln["note"].split(" · ") if r and r != "ไม่พบรถ" and not r.startswith("ซ้ำกับ")]]
         if open_:
             raise CashFuelError(f"ยังมี {len(open_)} รายการที่ต้องดูกับรูป — กด “ถูกแล้ว” หรือแก้ / ลบแถว ก่อนยืนยัน")
-        empty = [ln for ln in lines if ln.get("counted") and ((not ln.get("vehicle_id") and not ln.get("no_truck")) or float(ln.get("amount") or 0) <= 0)]
+        empty = [ln for ln in lines if not row_complete(ln)]
         if empty:
-            raise CashFuelError(f"ยังมี {len(empty)} แถวที่ยังไม่ได้เลือกรถหรือไม่มียอด — ใส่ให้ครบ หรือลบแถว ก่อนยืนยัน")
+            raise CashFuelError(f"ยังมี {len(empty)} แถวที่ยังกรอกไม่ครบ (ทะเบียน วันที่ ชื่อผู้เบิก ยอด) — ใส่ให้ครบ หรือลบแถว ก่อนยืนยัน")
         supabase.update("cash_fuel_lines", {"page_id": f"eq.{int(page_id)}"}, {"checked": True})
     now = datetime.now(timezone.utc).isoformat()
     supabase.update("cash_fuel_pages", {"id": f"eq.{int(page_id)}"},
@@ -482,6 +492,12 @@ def update_line(line_id: int, body: dict) -> dict:
     for k in ("driver_name", "note"):
         if k in body:
             values[k] = (str(body[k] or "").strip()[:100]) or None
+    if "no_name" in body:                           # ไม่มีชื่อผู้เบิก (owner, 11 Nov 2026)
+        values["no_name"] = bool(body["no_name"])
+        if values["no_name"]:
+            values["driver_name"] = None
+    elif values.get("driver_name"):
+        values["no_name"] = False
     if "amount" in body:
         try:
             values["amount"] = round(float(str(body["amount"]).replace(",", "")), 2)
