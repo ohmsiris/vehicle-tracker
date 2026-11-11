@@ -235,7 +235,7 @@ async function cfReview(id) {
       el("td", { colspan: "3" }, el("div", { text: `รวมทั้งหน้า ${d.lines.length} รายการ` }),
         w == null ? null : el("div", { class: `small ${Math.abs(gap) < 1 ? "ok-text" : "warn-text"}`,
           text: `ยอดรวมที่เขียนในรูป ฿${elN(w)}${other ? ` (มีรายการอื่นที่ไม่ใช่น้ำมัน ฿${elN(other)})` : ""} · ${Math.abs(gap) < 1 ? "ตรง" : `ไม่ตรง ต่าง ฿${elN(Math.abs(gap))}`}` }),
-        foh ? el("div", { class: "small muted", text: `ส่ง HQ ฿${elN(total())} · ไม่รวมหน้าโรง ฿${elN(foh)}` }) : null),
+        foh ? el("div", { class: "small muted", text: `รถสาย ฿${elN(total())} · หน้าโรง ฿${elN(foh)}` }) : null),
       el("td", { class: "cf-amount", text: `฿${elN(all)}` }), el("td", {}));
     confirmBtn.textContent = d.page.confirmed ? "ยืนยันแล้ว" : "ยืนยันหน้านี้";
     confirmBtn.disabled = !!openNo.length || d.page.confirmed;
