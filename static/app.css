@@ -2049,3 +2049,5 @@ body.signed-out .shell { display: block; }
 /* the checking screen uses a big screen's width (owner, 11 Nov 2026: 1920 x 1080) */
 main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 @media (min-width: 1400px) { .cf-review { grid-template-columns: minmax(0, 1fr) minmax(640px, 1fr); } }
+.cf-ltable td.cf-acts { text-align: right; }      /* ลบ always at the same place, whatever comes before it */
+.cf-ltable td.cf-acts .cf-del { margin-left: 4px; }
