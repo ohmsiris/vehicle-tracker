@@ -184,3 +184,13 @@ def test_a_product_not_on_the_shops_list_sells_at_the_drivers_price_and_is_flagg
     assert rs.extra_prices({"xp": {"lek": "-3", "mo": "abc"}}, {}) == {}
     d = rs.clean_doc({"sales": {"1": {"q": {"lek": 3}, "xp": {"lek": "35", "bad": 2, "mo": 0}}}})
     assert d["sales"]["1"]["xp"] == {"lek": 35.0}
+
+
+def test_filling_in_a_missing_price_reworks_only_the_days_it_was_sold_without_one():
+    """Owner, 12 Nov 2026: CJ ไผ่ต่ำ was sold เล็ก with no price; the office then gave เล็ก a price -- the warning must go."""
+    assert rs.newly_priced({"pack": 50}, {"pack": 55, "lek": 50}) == {"lek"}
+    assert rs.newly_priced({"lek": 40}, {"lek": 45}) == set()                       # a changed price does not rewrite the past
+    days = [{"id": 1, "doc": {"sales": {"675": {"q": {"lek": 4, "pack": 1}}}}},
+            {"id": 2, "doc": {"sales": {"675": {"q": {"pack": 2}}}}},
+            {"id": 3, "doc": {"sales": {"9": {"q": {"lek": 1}}}}}, {"id": 4, "doc": None}]
+    assert [d["id"] for d in rs.days_to_reprice(days, 675, {"lek"})] == [1]

@@ -879,9 +879,49 @@ def _set_bins(customer_id: int, route_id: int, body: dict, who: str = "office") 
         raise RouteSalesError(str(exc))
 
 
+def newly_priced(old: dict, new: dict) -> set:
+    """Products that had no price and now have one."""
+    return {k for k in KEYS if _num((old or {}).get(k)) <= 0 < _num((new or {}).get(k))}
+
+
+def days_to_reprice(days: list[dict], customer_id: int, products: set) -> list[dict]:
+    """The sheets where this customer bought one of `products` (sold while it had no price on the list)."""
+    out = []
+    for d in days:
+        q = ((((d.get("doc") or {}).get("sales") or {}).get(str(customer_id)) or {}).get("q")) or {}
+        if any(_num(q.get(k)) for k in products):
+            out.append(d)
+    return out
+
+
+def _reprice(route_id: int, customer_id: int, products: set) -> int:
+    """A price was just filled in for products this customer was sold without one (owner, 12 Nov 2026: CJ ไผ่ต่ำ's เล็ก): those days'
+    totals, warnings and lines are worked out again, so the "ไม่มีราคา" warning goes and the debts use the price. Days where the
+    product had a price already are left alone (a changed price does not rewrite the past)."""
+    from app import supabase
+    since = (today() - timedelta(days=120)).isoformat()
+    days = supabase.select_all("sale_days", {"select": "id,route_id,day,doc,returns_foh", "route_id": f"eq.{int(route_id)}",
+                                             "day": f"gte.{since}", "order": "day.asc"})
+    hit = days_to_reprice(days, customer_id, products)
+    if not hit:
+        return 0
+    base = {str(c["id"]): c for c in _customers(int(route_id))}
+    for d in hit:
+        customers = {**base, **walkin_customers(d["doc"] or {})}
+        totals = compute(d["doc"] or {}, customers, d.get("returns_foh"), _last_km(int(route_id), date.fromisoformat(d["day"])))
+        supabase.update("sale_days", {"id": f"eq.{d['id']}"}, {"totals": _public(totals)})
+        supabase.delete("sale_lines", {"day_id": f"eq.{d['id']}"})
+        lines = [{"day_id": d["id"], "route_id": int(route_id), "day": d["day"], **_line_who(ln["customer"], customers), "qty": ln["qty"],
+                  "amount": ln["amount"], "paid": ln["paid"], "old_paid": ln["old_paid"], "billing": ln["billing"], "discount": ln["discount"],
+                  "free": ln["free"], "waived": ln["waived"], "waived_reason": ln["waived_reason"]} for ln in totals["lines"]]
+        for i in range(0, len(lines), 500):
+            supabase.insert("sale_lines", lines[i:i + 500])
+    return len(hit)
+
+
 def update_customer(customer_id: int, body: dict) -> dict:
     from app import supabase
-    c = supabase.select("sale_route_customers", {"select": "id,route_id,seq", "id": f"eq.{int(customer_id)}", "limit": "1"})
+    c = supabase.select("sale_route_customers", {"select": "id,route_id,seq,prices", "id": f"eq.{int(customer_id)}", "limit": "1"})
     if not c:
         raise RouteSalesError("ไม่พบลูกค้านี้")
     values = _clean_customer(body)
@@ -892,10 +932,15 @@ def update_customer(customer_id: int, body: dict) -> dict:
     moved = _set_bins(c[0]["id"], c[0]["route_id"], body)
     if not values and "bins_list" not in body:
         raise RouteSalesError("ไม่มีอะไรเปลี่ยน")
+    repriced = 0
     if values:
         values["approved"] = True
         supabase.update("sale_route_customers", {"id": f"eq.{int(customer_id)}"}, values)
-    return {"ok": True, "moved": moved}
+        if "prices" in values:
+            new = newly_priced(c[0].get("prices") or {}, values["prices"])
+            if new:
+                repriced = _reprice(c[0]["route_id"], c[0]["id"], new)
+    return {"ok": True, "moved": moved, "repriced_days": repriced}
 
 
 def check_day(day_id: int, checked: bool = True) -> dict:
