@@ -2058,3 +2058,4 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .cf-ptot { display: flex; flex-direction: column; gap: 2px; }
 .cf-pick .segbtn { padding: 6px 16px; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.25; }
 .cf-segsub { font-size: 11px; font-weight: 400; color: var(--muted); }
+.cf-summary tr.cf-sechead td { padding-top: 22px; font-weight: 600; color: var(--text-2); background: transparent; }

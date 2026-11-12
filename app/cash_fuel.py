@@ -393,11 +393,13 @@ def month_view(branch: str, month: str) -> dict:
     lines = _confirmed_lines(supabase.select_all("cash_fuel_lines", {"select": "*", "branch": f"eq.{branch}", "month": f"eq.{month}",
                                                                      "order": "day.asc,page_id.asc,seq.asc"}))
     ch = _choices(branch)
+    route_names = {p["name"].strip() for p in ch["people"].get("route") or []}
     periods = []
     for b in (0, 1, 2):                 # 0 = the whole month: what goes to HQ at the month's end (owner, 12 Nov 2026); 1, 2 = the halves
         s, e = period(month, b or None)
-        sm = summary(lines, ch["vehicles"], b or None)
+        sm = summary(lines, ch["vehicles"], b or None, route_names)
         periods.append({"batch": b, "from": s.isoformat(), "to": e.isoformat(), "total": sm["total"] + sm["other_total"],
+                        "route_total": sm["total"], "other_total": sm["other_total"],
                         "fills": sm["fills"] + sm["other_fills"], "trucks": len(sm["trucks"]) + len(sm["other"])})
     s, e = period(month)
     return {"branch": branch, "month": month, "from": s.isoformat(), "to": e.isoformat(), "lines": lines, "periods": periods,
@@ -573,19 +575,23 @@ def _truck_key(v: Optional[dict]):
     return (0, int(n), "") if n.isdigit() else (1, 0, n) if v else (2, 0, "")
 
 
-def is_route_truck(v: Optional[dict]) -> bool:
-    """A รถสาย (or a truck whose use is not set). รถหน้าโรง and the like, and a fill with no truck, go on their own sheet
-    (owner, 12 Nov 2026)."""
-    return bool(v) and (v.get("usage") or "รถสาย") == "รถสาย"
+def is_dup(ln: dict) -> bool:
+    """The same fill read on two pages, and not marked ไม่ซ้ำ นับด้วย."""
+    return bool(ln.get("dup_of")) and not ln.get("counted")
 
 
-def summary(lines: list[dict], roster: list[dict], batch: Optional[int] = None) -> dict:
-    """รายการค่าน้ำมัน: per truck (by its number) its plate, driver, every counted fill and its total; the grand total.
-    Only รถสาย; the other trucks' fills (and fills with no truck) are under "other", with their own total."""
+def summary(lines: list[dict], roster: list[dict], batch: Optional[int] = None, route_names: Optional[set] = None) -> dict:
+    """รายการค่าน้ำมัน: per truck (by its number) its plate, driver, every fill and its total; the grand total.
+    It goes by WHO took the money, not by the truck (owner, 12 Nov 2026): a คนขับรถสาย's fill counts as his even in a รถหน้าโรง
+    (his own truck was broken). Everyone else's (หน้าโรง, ช่าง, no name written) is under "other", with its own total.
+    Without route_names (the คนขับรถสาย's full names), the lines' own counted flag decides."""
     by_id = {v["id"]: v for v in roster}
-    mine = [ln for ln in lines if ln.get("counted") and not (batch and ln.get("batch") != batch)]
-    route = [ln for ln in mine if is_route_truck(by_id.get(ln.get("vehicle_id")))]
-    rest = [ln for ln in mine if not is_route_truck(by_id.get(ln.get("vehicle_id")))]
+    mine = [ln for ln in lines if not is_dup(ln) and not (batch and ln.get("batch") != batch)]
+    if route_names is None:
+        route, rest = [ln for ln in mine if ln.get("counted")], []
+    else:
+        route = [ln for ln in mine if (ln.get("driver_name") or "").strip() in route_names]
+        rest = [ln for ln in mine if (ln.get("driver_name") or "").strip() not in route_names]
     s, o = _summary(route, by_id), _summary(rest, by_id)
     return {**s, "other": o["trucks"], "other_total": o["total"], "other_fills": o["fills"]}
 
@@ -615,9 +621,9 @@ def _summary(lines: list[dict], by_id: dict) -> dict:
 
 
 def to_xlsx(month: str, s: dict, batch: Optional[int] = None) -> bytes:
-    """The รายการค่าน้ำมัน as the bookkeeper's, รถสาย only, two sheets: by date (one row per fill, in date order) and by truck (number, plate
+    """The รายการค่าน้ำมัน as the bookkeeper's, คนขับรถสาย only, two sheets: by date (one row per fill, in date order) and by truck (number, plate
     and driver over all its fills, its total). Grand total at the end of each. TH Sarabun New, A4, black and white.
-    The other trucks (รถหน้าโรง, no truck written) on a third sheet laid out like the second, with their own total (owner, 12 Nov 2026)."""
+    Everyone else's fills (หน้าโรง, ช่าง, no name) on a third sheet laid out like the second, with their own total (owner, 12 Nov 2026)."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, Side
     start, end = period(month, batch)
@@ -689,8 +695,8 @@ def to_xlsx(month: str, s: dict, batch: Optional[int] = None) -> bytes:
         r += 1
     foot(ws, r, 6)
 
-    # 2. by truck: รถเบอร์ ทะเบียนรถ พนักงานขับรถ วัน/เดือน/ปี จำนวน รวม -- รถสาย; 3. the same for the other trucks
-    for title, trucks, total in (("ตามรถ", s["trucks"], s["total"]), ("รถอื่น (ไม่ใช่รถสาย)", s.get("other") or [], s.get("other_total") or 0)):
+    # 2. by truck: รถเบอร์ ทะเบียนรถ พนักงานขับรถ วัน/เดือน/ปี จำนวน รวม -- คนขับรถสาย; 3. the same for everyone else
+    for title, trucks, total in (("ตามรถ", s["trucks"], s["total"]), ("ไม่ใช่คนขับรถสาย", s.get("other") or [], s.get("other_total") or 0)):
         if title != "ตามรถ" and not trucks:
             continue
         ws = wb.create_sheet()
@@ -703,8 +709,9 @@ def to_xlsx(month: str, s: dict, batch: Optional[int] = None) -> bytes:
 def summary_file(branch: str, month: str, batch: Optional[int], kind: str) -> tuple[bytes, str, str]:
     from app import supabase
     lines = _confirmed_lines(supabase.select_all("cash_fuel_lines", {"select": "*", "branch": f"eq.{branch}", "month": f"eq.{month}", "order": "day.asc"}))
-    roster = [{"id": v["id"], "truck_number": v.get("truck_number"), "plate": v.get("plate"), "usage": v.get("usage")} for v in _roster()]
-    s = summary(lines, roster, batch)
+    full = _roster()
+    roster = [{"id": v["id"], "truck_number": v.get("truck_number"), "plate": v.get("plate")} for v in full]
+    s = summary(lines, roster, batch, {p["name"].strip() for p in people(branch, full).get("route") or []})
     data = to_xlsx(month, s, batch)
     start, end = period(month, batch)
     name = f"รายการค่าน้ำมัน {branch} {start.day}-{start.month}-{start.year + 543} ถึง {end.day}-{end.month}-{end.year + 543}"

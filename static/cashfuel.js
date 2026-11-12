@@ -122,7 +122,8 @@ function cfMonthCard() {
   const label = (p) => p.batch === 0 ? "ทั้งเดือน" : p.batch === 1 ? "ครึ่งแรก" : "ครึ่งหลัง";
   const cards = el("div", { class: "cf-pick" },
     el("div", { class: "cf-ptot" }, el("span", { class: "cf-ptotal", text: `฿${elN(cur.total)}` }),
-      el("span", { class: "muted small", text: cur.fills ? `${label(cur)} · ${cur.fills} ครั้ง · ${cur.trucks} คัน` : "ยังไม่มีรายการที่ยืนยัน" })),
+      el("span", { class: "muted small", text: cur.fills ? `${label(cur)} · ${cur.fills} ครั้ง · ${cur.trucks} คัน` : "ยังไม่มีรายการที่ยืนยัน" }),
+      cur.other_total ? el("span", { class: "small", text: `คนขับรถสาย ฿${elN(cur.route_total)} · ไม่ใช่คนขับรถสาย ฿${elN(cur.other_total)}` }) : null),
     el("div", { class: "seg" }, ...d.periods.map((p) => el("button", { type: "button", class: `segbtn${cf_.batch === p.batch ? " active" : ""}`,
       title: `${cfRange(p.from, p.to)} · ฿${elN(p.total)}`, onclick: () => { cf_.batch = p.batch; cfHome(); } },
       label(p), p.batch ? el("span", { class: "cf-segsub", text: cfRange(p.from, p.to) }) : null))));
@@ -133,33 +134,42 @@ function cfMonthCard() {
 function cfSummary() {
   const d = cf_.data, p = d.periods.find((x) => x.batch === cf_.batch);
   const byId = Object.fromEntries(d.vehicles.map((v) => [v.id, v]));
+  // by who took the money (owner, 12 Nov 2026): คนขับรถสาย first, even in a รถหน้าโรง; everyone else below, as in the file
+  const routeNames = new Set(((d.people || {}).route || []).map((p) => p.name.trim()));
+  const isRoute = (l) => routeNames.has((l.driver_name || "").trim());
   const groups = new Map();
-  d.lines.filter((l) => l.counted && (!cf_.batch || l.batch === cf_.batch)).forEach((l) => {
-    const k = l.vehicle_id || "?";
-    if (!groups.has(k)) groups.set(k, { v: byId[l.vehicle_id], fills: [], drivers: {} });
+  d.lines.filter((l) => !(l.dup_of && !l.counted) && (!cf_.batch || l.batch === cf_.batch)).forEach((l) => {
+    const k = `${isRoute(l) ? 0 : 1}:${l.vehicle_id || "?"}`;
+    if (!groups.has(k)) groups.set(k, { v: byId[l.vehicle_id], route: isRoute(l), fills: [], drivers: {} });
     const g = groups.get(k);
     g.fills.push(l);
     const n = (l.driver_name || "").split(" ")[0];
     if (n) g.drivers[n] = (g.drivers[n] || 0) + 1;
   });
-  const rows = [...groups.values()].sort((a, b) => (Number((a.v || {}).truck_number) || 999) - (Number((b.v || {}).truck_number) || 999));
-  const q = `month=${cf_.month}&batch=${cf_.batch}`;
-  return el("div", { class: "cf-summary" },
-    el("div", { class: "ss-custbar" }, el("b", { text: `${cf_.batch ? (cf_.batch === 1 ? "ครึ่งแรก " : "ครึ่งหลัง ") : "ทั้งเดือน "}${cfRange(p.from, p.to)}` }), el("span", { class: "muted small", text: "ไฟล์ส่ง HQ: ตามวันที่ และ ตามรถ (รถสาย) · รถอื่นแยกอีกแผ่น" }), el("span", { class: "grow" }),
-      el("button", { class: "btn small", type: "button", text: "+ เพิ่มรายการเอง", onclick: cfAddLine }),
-      el("button", { class: "btn", type: "button", text: "PDF (พิมพ์)", title: "ตามวันที่ และ ตามรถ (รถสาย) · รถอื่นแยกอีกหน้า", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.pdf?${q}`, "pdf") }),
-      el("button", { class: "btn", type: "button", text: "Excel", title: "แผ่นงาน ตามวันที่ และ ตามรถ (รถสาย) · รถอื่นแยกอีกแผ่น", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.xlsx?${q}`, "xlsx") })),
-    rows.length ? el("div", { class: "ss-tablewrap soft" }, el("table", { class: "ss-table" },
-      el("thead", {}, el("tr", {}, ...["รถเบอร์", "ทะเบียนรถ", "พนักงานขับรถ", "วันที่ · จำนวน", "รวม"].map((h) => el("th", { text: h })))),
-      el("tbody", {}, ...rows.map((g) => el("tr", {},
+  const rows = [...groups.values()].sort((a, b) => (a.route ? 0 : 1) - (b.route ? 0 : 1)
+    || (Number((a.v || {}).truck_number) || 999) - (Number((b.v || {}).truck_number) || 999));
+  const sum = (gs) => gs.reduce((x, g) => x + g.fills.reduce((y, l) => y + Number(l.amount || 0), 0), 0);
+  const truckRow = (g) => el("tr", {},
         el("td", {}, el("b", { text: (g.v || {}).truck_number || "" })),
         el("td", { text: g.v ? g.v.plate : "ไม่มีทะเบียนรถ" }),
         el("td", { text: Object.entries(g.drivers).sort((a, b) => b[1] - a[1]).map(([n]) => n).slice(0, 2).join(", ") }),
         el("td", { class: "small" }, ...g.fills.slice().sort((a, b) => a.day.localeCompare(b.day)).map((l) =>
           el("button", { class: "cf-fill", type: "button", title: l.page_id ? "เปิดรูปที่อ่านรายการนี้" : "เพิ่มเอง",
             text: `${cfShort(l.day)} ${elN(l.amount)}`, onclick: () => l.page_id && goHash(`#cash-fuel/review/${l.page_id}`) }))),
-        el("td", { class: "r" }, el("b", { text: elN(g.fills.reduce((x, l) => x + Number(l.amount || 0), 0)) })))),
-        el("tr", { class: "tot" }, el("td", { colspan: "4", class: "r", text: "รวม" }), el("td", { class: "r" }, el("b", { text: elN(p.total) }))))))
+        el("td", { class: "r" }, el("b", { text: elN(g.fills.reduce((x, l) => x + Number(l.amount || 0), 0)) })));
+  const route = rows.filter((g) => g.route), other = rows.filter((g) => !g.route);
+  const totRow = (label, gs) => el("tr", { class: "tot" }, el("td", { colspan: "4", class: "r", text: label }), el("td", { class: "r" }, el("b", { text: elN(sum(gs)) })));
+  const q = `month=${cf_.month}&batch=${cf_.batch}`;
+  return el("div", { class: "cf-summary" },
+    el("div", { class: "ss-custbar" }, el("b", { text: `${cf_.batch ? (cf_.batch === 1 ? "ครึ่งแรก " : "ครึ่งหลัง ") : "ทั้งเดือน "}${cfRange(p.from, p.to)}` }), el("span", { class: "muted small", text: "ไฟล์ส่ง HQ: ตามวันที่ และ ตามรถ (คนขับรถสาย) · คนอื่นแยกอีกแผ่น" }), el("span", { class: "grow" }),
+      el("button", { class: "btn small", type: "button", text: "+ เพิ่มรายการเอง", onclick: cfAddLine }),
+      el("button", { class: "btn", type: "button", text: "PDF (พิมพ์)", title: "ตามวันที่ และ ตามรถ (คนขับรถสาย) · คนอื่นแยกอีกหน้า", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.pdf?${q}`, "pdf") }),
+      el("button", { class: "btn", type: "button", text: "Excel", title: "แผ่นงาน ตามวันที่ และ ตามรถ (คนขับรถสาย) · คนอื่นแยกอีกแผ่น", disabled: !rows.length, onclick: () => ssSheetFile(`/api/cash-fuel/summary.xlsx?${q}`, "xlsx") })),
+    rows.length ? el("div", { class: "ss-tablewrap soft" }, el("table", { class: "ss-table" },
+      el("thead", {}, el("tr", {}, ...["รถเบอร์", "ทะเบียนรถ", "พนักงานขับรถ", "วันที่ · จำนวน", "รวม"].map((h) => el("th", { text: h })))),
+      el("tbody", {}, ...route.map(truckRow), totRow(other.length ? "รวม คนขับรถสาย (ส่ง HQ)" : "รวม", route),
+        ...(other.length ? [el("tr", { class: "cf-sechead" }, el("td", { colspan: "5", text: "ไม่ใช่คนขับรถสาย (หน้าโรง ช่าง ไม่มีชื่อ) — แผ่นแยกในไฟล์" })),
+          ...other.map(truckRow), totRow("รวม ไม่ใช่คนขับรถสาย", other)] : []))))
       : el("p", { class: "muted", text: "ยังไม่มีรายการที่ยืนยันในงวดนี้" }));
 }
 
