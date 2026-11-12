@@ -704,3 +704,18 @@ def test_bulk_readings_refuse_a_figure_lower_than_the_last_one():
     rows = [{"vehicle_id": "v1", "km": 414_000}, {"vehicle_id": "v2", "km": 99_000}, {"vehicle_id": "v3", "km": 5}]
     errs = sp.check_bulk_readings(rows, last, date(2026, 11, 16))
     assert len(errs) == 1 and errs[0].startswith("#2:")
+
+
+def test_one_bill_line_can_be_several_jobs_and_the_shops_own_words():
+    """Owner, 12 Nov 2026: truck 16's "(พร้อม Fushing Oil)" is the flush; truck 4's "เช็ควาล์ว" is the valve job."""
+    assert sp.classify_items("เปลี่ยนน้ำมันเครื่อง, กรองเครื่อง (พร้อม Fushing Oil)") == ["engine_oil", "engine_filter", "engine_flush"]
+    assert sp.classify_items("น้ำมันเครื่อง+กรองเครื่อง") == ["engine_oil", "engine_filter"]
+    assert sp.classify_items("ค่าแรงเช็คเบรค +จารบีล้อ") == ["wheel_grease"]
+    assert sp.classify_items("เช็ควาล์ว") == ["valve_adjust"] and sp.classify_items("ตรวจเช็คระยะวาล์ว") == ["valve_adjust"]
+    for part in ("เช็ควาล์วน้ำมันโซล่า", "เช็ควาล์วหม้อลมเบรค", "ตรวจสอบวาล์ว EGR", "เช็ควาล์วลม"):
+        assert "valve_adjust" not in sp.classify_items(part), part                     # a valve that is a part
+    assert sp.classify_items("เติมน้ำมันเครื่อง, กรองเครื่อง") == []                     # a top-up line stays nothing
+    assert sp.classify_items("เปลี่ยนซีลลูกปืน และ/หรือ จาระบีลูกปืนล้อหน้า", sp.SMALL) == ["wheel_grease"]
+    events = [{"vehicle_id": "t16", "event_date": "2026-11-10", "mileage": 396357, "source": "bill",
+               "bill_line_items": [{"description": "เปลี่ยนน้ำมันเครื่อง, กรองเครื่อง (พร้อม Fushing Oil)"}, {"description": "ไส้กรองน้ำมันเครื่อง"}]}]
+    assert sorted(h["item_key"] for h in sp.bill_hits(events)) == ["engine_filter", "engine_flush", "engine_oil"]

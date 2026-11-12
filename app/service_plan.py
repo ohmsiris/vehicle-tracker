@@ -254,7 +254,8 @@ _LINE_RULES = [
     ("power_steering", r"น้ำมัน(?:พาวเวอร์|เพาเวอร์|พาวเวอ|เพาเวอ)"),
     ("coolant", r"น้ำยา(?:หล่อเย็น|หม้อน้ำ)"),
     ("wheel_grease", r"จา(?:ร|ระ)บี\s*(?:ลูกปืน)?ล้อ"),
-    ("valve_adjust", r"(?:ปรับ)?ตั้งวาล์ว|ปรับวาล์ว"),
+    ("valve_adjust", r"(?:ปรับ)?ตั้งวาล์ว|ปรับวาล์ว|(?:เช็[คก]|ตรวจ(?:เช็[คก]|สอบ)?)\s*(?:ระยะ(?:ห่าง)?\s*)?วาล์ว"
+                     r"(?!\s*(?:น้ำ|โซ|ดีเซล|ลม|เบร|หม้อ|อีจี|egr|EGR|แอร์|PCV|pcv|ทางเดียว|กันกลับ|ระบาย|ไฟ|ยาง))"),
     ("valve_cover_seal", r"(?:ปะ|ประ)เก็นฝา(?:วาล์ว|ครอบวาล์ว)|ซีลฝาครอบหัวฉีด"),
 ]
 _COMPILED = [(key, re.compile(_PREFIX + pat)) for key, pat in _LINE_RULES]
@@ -269,7 +270,7 @@ _COMPILED.append(("intake_manifold", re.compile(r"^\s*(?:ค่า)?(?:\s*ถอ
 # These are found ANYWHERE in the line (the owner's own words): a flush; any suspension work (leaf springs, king pins, arms, shocks) counts
 # as the chassis having been looked at.
 _ANYWHERE = [
-    ("engine_flush", re.compile(r"ฟลัช(?:ชิ่ง|ชิง)|flush|ล้างภายในเครื่อง|ล้างระบบหล่อลื่น", re.I)),
+    ("engine_flush", re.compile(r"ฟลั[ชซ](?:ชิ่ง|ชิง|ซิ่ง)?|fl?ushing|flush|ล้างภายในเครื่อง|ล้างระบบหล่อลื่น", re.I)),
     # the injector washers, however a shop writes them: แหวนรองหัวฉีด, แหวนปลายหัวฉีด (ช่างเก่ง), (ปะเก็น)แหวนทองแดงรองหัวฉีด, แหวนรองหน้าหัวฉีด, ซีลแหวนหัวฉีด --
     # also inside the dealer's note ("เปลี่ยน หรือ ถอด-ใส่หัวฉีด... ; 4J** **เปลี่ยนแหวนรองหัวฉีดทั้งหมด**"). "หัวฉีด" must be in it: a bare "แหวนรอง" is any washer
     # (the drain plug's แหวนรองน๊อตถ่าย, the shock's แหวนรองโช้คอัพ).
@@ -311,6 +312,26 @@ def classify_line(description: Optional[str], rule_set: Optional[str] = None) ->
     return None
 
 
+# One bill line can be several jobs: "เปลี่ยนน้ำมันเครื่อง, กรองเครื่อง (พร้อม Fushing Oil)", "น้ำมันเครื่อง+กรองเครื่อง" (owner, 12 Nov 2026).
+# The line is cut at "," "+" and "และ" (not "และ/หรือ") and each piece read on its own; the "anywhere" words (a flush ...) are looked for in the whole line.
+_SPLIT = re.compile(r"\s*(?:,|\+|และ(?!\s*/))\s*")
+
+
+def classify_items(description: Optional[str], rule_set: Optional[str] = None) -> list[str]:
+    """Every service item a bill line is (usually one, sometimes several), in plan order."""
+    text = re.sub(r"\s+", " ", strip_type_word(description)[0]).strip()
+    found = []
+    first = classify_line(description, rule_set)
+    if first:
+        found.append(first)
+    if text and (_COOLANT_CHANGE.match(text) or not _TOP_UP.search(text)):
+        parts = [p for p in _SPLIT.split(text) if p]
+        if len(parts) > 1:
+            found += [k for k in (classify_line(p, rule_set) for p in parts) if k]
+        found += [key for key, pattern in _ANYWHERE if pattern.search(text)]
+    return [k for k in ITEMS if k in found]
+
+
 def bill_hits(events: list[dict], rule_sets: Optional[dict] = None) -> list[dict]:
     """Confirmed events (each {vehicle_id, event_date, mileage, source, bill_line_items: [{description}]}) -> one hit per
     (truck, item, day): {vehicle_id, item_key, done_date, odometer_km, source: 'bill' or 'manual', event_id}.
@@ -318,10 +339,11 @@ def bill_hits(events: list[dict], rule_sets: Optional[dict] = None) -> list[dict
     one kind of truck."""
     seen, out = {}, []
     for ev in events:
-        for line in ev.get("bill_line_items") or []:
-            key = classify_line(line.get("description"), (rule_sets or {}).get(ev.get("vehicle_id")))
-            if not key or not ev.get("vehicle_id") or not ev.get("event_date"):
-                continue
+        if not ev.get("vehicle_id") or not ev.get("event_date"):
+            continue
+        keys = [k for line in ev.get("bill_line_items") or []
+                for k in classify_items(line.get("description"), (rule_sets or {}).get(ev.get("vehicle_id")))]
+        for key in keys:
             ident = (ev["vehicle_id"], key, ev["event_date"])
             if ident in seen:                          # the same job twice that day (a tick and the shop's bill): keep one, with the km if either has it
                 if seen[ident]["odometer_km"] is None and ev.get("mileage") is not None:
