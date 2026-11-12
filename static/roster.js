@@ -285,6 +285,8 @@ function editCards() {
       state.fleetV8 ? field("ชื่อเรียกรถ (ชื่อเล่นรถ)", "nickname", { maxlength: 40, placeholder: "เช่น หัวขาว" }) : null,
       selectField("สาขา", "branch", (state.branches || []).map((b) => [b, b]), { blank: "— เลือกสาขา —" }),
       state.fleetV7 ? selectField("ประเภทรถ (ขนาด)", "vehicle_class", (state.vehicleClasses || []).map((c) => [c, c])) : null,
+      selectField("จำนวนล้อ", "wheels", [["4", "4 ล้อ"], ["6", "6 ล้อ"], ["10", "10 ล้อ"]],
+        { blank: "— ตามประเภทรถ —" }),
       field("การใช้งาน", "usage", { list: "tkUsageList", maxlength: 40, placeholder: "เช่น รถสาย / รถหน้าโรง" }),
       field("ยี่ห้อ", "make", { maxlength: 40, placeholder: "เช่น ISUZU" }),
       field("รุ่น", "model", { maxlength: 40, placeholder: "เช่น D-Max 2.5" }),
@@ -311,6 +313,12 @@ function editCards() {
 function startTruckEdit() {
   tk.editing = true;
   tk.draft = draftFrom(tk.v);
+  tk.wheelsWas = "";
+  if (tk.v) api(`/api/vehicles/${tk.v.vehicle_id}/tyres`).then((t) => {          // the truck's wheel count, from its tyre setting
+    if (!t || !t.spec || !t.spec.saved || !tk.editing) return;
+    tk.wheelsWas = tk.draft.wheels = String(t.wheels);
+    const sel = $("tk_wheels"); if (sel) sel.value = tk.draft.wheels;
+  }).catch(() => {});
   tk.dirty = false;
   showErr("tkError", "");
   renderTruck();
@@ -328,11 +336,17 @@ function cancelTruckEdit() {
 async function saveTruck() {
   showErr("tkError", "");
   const v = tk.v, body = { ...tk.draft };
+  const wheels = body.wheels || "";
+  delete body.wheels;
   if (!state.fleetV7) for (const k of ["vehicle_class", "color", ...PAPER_KEYS]) delete body[k];
   if (!state.fleetV8) delete body.nickname;
   if (!v) { delete body.active; delete body.history_current; }        // a new truck is simply active, its history not marked yet
   try {
     const res = v ? await api(`/api/vehicles/${v.vehicle_id}`, jsonOpts("PATCH", body)) : await api("/api/vehicles", jsonOpts("POST", body));
+    if (wheels && wheels !== (v ? tk.wheelsWas : "")) {
+      try { await api(`/api/vehicles/${v ? v.vehicle_id : res.vehicle_id}/tyre-spec`, jsonOpts("PUT", { wheels })); }
+      catch (err) { alert(`บันทึกรถแล้ว แต่บันทึกจำนวนล้อไม่สำเร็จ: ${err.message} — แก้ได้ที่ส่วน ยาง ของรถ`); }
+    }
     tk.lastBranch = body.branch;
     tk.dirty = false;
     const structural = !v || (v.active !== false) !== body.active;

@@ -58,24 +58,27 @@ function drawTyres() {
 function tyreChassis(d) {
   const NS = "http://www.w3.org/2000/svg";
   const sv = (tag, attrs, text) => { const n = document.createElementNS(NS, tag); for (const [k, val] of Object.entries(attrs)) n.setAttribute(k, val); if (text != null) n.textContent = text; return n; };
-  const six = d.wheels === 6;
+  const ten = d.wheels === 10, six = d.wheels === 6 || ten;    // six = the rear wheels are pairs (6 and 10 wheels)
   const W = 26, H = 54, L = 70, R = 264, IN = 30;              // wheel size, x of the left / right outer wheels, inner wheel offset
-  const FY = 52, RY = 214;                                      // y of the front / rear axle
-  const x = { FL: L, FR: R, RL: L, RR: R, RLO: L, RRO: R, RLI: L + IN, RRI: R - IN };
-  const svg = sv("svg", { viewBox: "0 0 360 300", class: "ty-svg", role: "img", "aria-label": "ผังล้อรถ มองจากด้านบน หน้ารถอยู่ด้านบน" });
+  const FY = 52, MY = 196, RY = ten ? 276 : 214;                // y of the front / middle (10 wheels) / rear axle
+  const x = { FL: L, FR: R, RL: L, RR: R, RLO: L, RRO: R, RLI: L + IN, RRI: R - IN, MLO: L, MRO: R, MLI: L + IN, MRI: R - IN };
+  const svg = sv("svg", { viewBox: `0 0 360 ${ten ? 362 : 300}`, class: "ty-svg", role: "img", "aria-label": "ผังล้อรถ มองจากด้านบน หน้ารถอยู่ด้านบน" });
   svg.append(sv("text", { x: 180, y: 14, class: "ty-front" }, "หน้ารถ"));
   svg.append(sv("line", { x1: 180, y1: FY, x2: 180, y2: RY + 10, class: "ty-frame" }));
   svg.append(sv("line", { x1: L + W, y1: FY + H / 2, x2: R, y2: FY + H / 2, class: "ty-axle" }));
-  svg.append(sv("line", { x1: (six ? L + IN : L) + W, y1: RY + H / 2, x2: six ? R - IN : R, y2: RY + H / 2, class: "ty-axle" }));
-  svg.append(sv("rect", { x: 160, y: RY + 10, width: 40, height: 34, rx: 6, class: "ty-diff" }));
+  for (const y of ten ? [MY, RY] : [RY]) {
+    svg.append(sv("line", { x1: (six ? L + IN : L) + W, y1: y + H / 2, x2: six ? R - IN : R, y2: y + H / 2, class: "ty-axle" }));
+    svg.append(sv("rect", { x: 160, y: y + 10, width: 40, height: 34, rx: 6, class: "ty-diff" }));
+  }
+  const inner = (p) => six && /^[MR][LR]I$/.test(p);
   for (const w of d.positions) {
-    const px = x[w.position], py = w.axle === "front" ? FY : RY;
+    const px = x[w.position], py = w.axle === "front" ? FY : w.row === "mid" ? MY : RY;
     const g = sv("g", { class: `ty-wheel ${w.state}${ty.sel === w.position ? " on" : ""}`, tabindex: "0", role: "button", "aria-label": `${w.label}: ${w.tyre ? `${w.tyre.brand || ""} ${w.tyre.size || ""} ใส่มา ${tyAge(w.months)}` : "ยังไม่มีข้อมูล"}` });
     g.append(sv("rect", { x: px, y: py, width: W, height: H, rx: 6 }));
     const left = px < 180;
-    const tx = six && (w.position === "RLI" || w.position === "RRI") ? px + W / 2 : left ? px - 8 : px + W + 8;
-    const ty_ = six && (w.position === "RLI" || w.position === "RRI") ? py + H + 16 : py + H / 2 + 4;
-    g.append(sv("text", { x: tx, y: ty_, class: "ty-age", "text-anchor": six && (w.position === "RLI" || w.position === "RRI") ? "middle" : left ? "end" : "start" }, w.tyre ? tyAge(w.months) : "–"));
+    const tx = inner(w.position) ? px + W / 2 : left ? px - 8 : px + W + 8;
+    const ty_ = inner(w.position) ? py + H + 16 : py + H / 2 + 4;
+    g.append(sv("text", { x: tx, y: ty_, class: "ty-age", "text-anchor": inner(w.position) ? "middle" : left ? "end" : "start" }, w.tyre ? tyAge(w.months) : "–"));
     const pick = () => { ty.sel = ty.sel === w.position ? null : w.position; drawTyres(); };
     g.addEventListener("click", pick);
     g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
@@ -334,7 +337,8 @@ function openTyreRotate() {
 function openTyreSpec() {
   const s = ty.d.spec;
   const front = tyInput(s.front_size, { placeholder: "เช่น 205/70R15" }), rear = tyInput(s.rear_size, { placeholder: "เช่น 225/75R14" });
-  const wheels = el("select", {}, el("option", { value: "4", text: "4 ล้อ" }), el("option", { value: "6", text: "6 ล้อ (หลังคู่)" }));
+  const wheels = el("select", {}, el("option", { value: "4", text: "4 ล้อ" }), el("option", { value: "6", text: "6 ล้อ (หลังคู่)" }),
+    el("option", { value: "10", text: "10 ล้อ (หลังคู่ 2 เพลา)" }));
   wheels.value = String(s.wheels);
   const radial = el("input", { type: "checkbox", checked: !!s.radial }), tubeless = el("input", { type: "checkbox", checked: !!s.tubeless });
   const notes = tyInput(s.notes, { maxlength: "300" });

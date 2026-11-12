@@ -2,7 +2,8 @@
 Tyres on the truck page: a chassis drawing with the tyre on each wheel (brand, size, since when, at what km) and the wheel's history.
 Needs schema_v36.sql (vehicle_tyre_specs, tyres).
 
-A truck has 4 wheels (FL FR RL RR) or 6 (dual rear: FL FR RLO RLI RRI RRO, the front wheels in line with the OUTER rear ones). A tyre bill
+A truck has 4 wheels (FL FR RL RR), 6 (dual rear: FL FR RLO RLI RRI RRO, the front wheels in line with the OUTER rear ones) or 10 (two dual
+rear axles: the middle one MLO MLI MRI MRO, then RLO RLI RRI RRO -- แก่งคอย's 1, 2, 4, 5, owner 12 Nov 2026). A tyre bill
 already saved on the truck shows up as "not placed yet" until its tyres are put on wheels; a tyre whose wheel isn't known (an old bill)
 can sit at position '?'. Changing a wheel's tyre closes the old one (removed_on) and adds the new one, so nothing is overwritten.
 """
@@ -16,9 +17,12 @@ from app import supabase
 
 FOUR = ("FL", "FR", "RL", "RR")
 SIX = ("FL", "FR", "RLO", "RLI", "RRI", "RRO")
+TEN = ("FL", "FR", "MLO", "MLI", "MRI", "MRO", "RLO", "RLI", "RRI", "RRO")
+WHEEL_COUNTS = (4, 6, 10)
 UNKNOWN = "?"
 LABELS = {"FL": "หน้าซ้าย", "FR": "หน้าขวา", "RL": "หลังซ้าย", "RR": "หลังขวา", "RLO": "หลังซ้ายนอก", "RLI": "หลังซ้ายใน",
-          "RRI": "หลังขวาใน", "RRO": "หลังขวานอก", UNKNOWN: "ไม่ทราบตำแหน่ง"}
+          "RRI": "หลังขวาใน", "RRO": "หลังขวานอก", "MLO": "กลางซ้ายนอก", "MLI": "กลางซ้ายใน", "MRI": "กลางขวาใน", "MRO": "กลางขวานอก",
+          UNKNOWN: "ไม่ทราบตำแหน่ง"}
 NEEDS_V36 = "ต้องรัน schema_v36.sql ใน Supabase ก่อน จึงจะบันทึกยางได้"
 SIZE_RE = re.compile(r"\b(\d{3})\s*/\s*(\d{2})\s*(?:Z?R|-)?\s*(\d{2}(?:\.\d)?)\b", re.I)
 RADIAL_SIZE = re.compile(r"(?<!\d)\d{3}\s*/\s*\d{2}\s*Z?R\s*\d{2}", re.I)
@@ -51,7 +55,7 @@ def has_v36() -> bool:
 
 # ------------------------------------------------------------------ pure
 def positions(wheels: int) -> tuple:
-    return SIX if wheels == 6 else FOUR
+    return TEN if wheels == 10 else SIX if wheels == 6 else FOUR
 
 
 def default_wheels(vehicle: dict) -> int:
@@ -130,8 +134,8 @@ def clean_spec(data: dict) -> dict:
             out[key] = (norm_size(raw) or raw) if raw else None
     if "wheels" in data:
         w = _int(data.get("wheels"), "จำนวนล้อ")
-        if w not in (4, 6):
-            raise InvalidTyre("จำนวนล้อต้องเป็น 4 หรือ 6")
+        if w not in WHEEL_COUNTS:
+            raise InvalidTyre("จำนวนล้อต้องเป็น 4, 6 หรือ 10")
         out["wheels"] = w
     for key in ("radial", "tubeless"):
         if key in data:
@@ -236,7 +240,8 @@ def wheel_view(spec: Optional[dict], vehicle: dict, rows: list[dict], today: dat
         if t and t.get("fitted_km") is not None and km_now is not None and km_now >= t["fitted_km"]:
             km_used = km_now - t["fitted_km"]
         history = sorted([r for r in rows if r["position"] == p and r.get("removed_on")], key=lambda r: str(r.get("fitted_on") or ""), reverse=True)
-        out_wheels.append({"position": p, "label": LABELS[p], "axle": "front" if p in ("FL", "FR") else "rear", "tyre": t, "months": months, "km_used": km_used,
+        out_wheels.append({"position": p, "label": LABELS[p], "axle": "front" if p in ("FL", "FR") else "rear",
+                           "row": "front" if p in ("FL", "FR") else "mid" if p.startswith("M") else "rear", "tyre": t, "months": months, "km_used": km_used,
                            "state": "none" if not t else "unknown" if months is None else "ok" if months < 12 else "warn" if months < 24 else "old",
                            "history": history})
     loose = [r for r in rows if r["position"] == UNKNOWN and not r.get("removed_on")]

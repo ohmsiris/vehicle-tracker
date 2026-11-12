@@ -109,3 +109,14 @@ def test_rotation_keeps_each_size_on_its_own_axle():
     assert ty.clean_rotation({"RL": "RR", "RR": "RL"}, current, 4, spec) == {"RL": "RR", "RR": "RL"}
     with pytest.raises(ty.InvalidTyre):
         ty.clean_rotation({"RL": "FR"}, current, 4, spec)
+
+
+def test_a_ten_wheeler_has_two_dual_rear_axles():
+    from app import tyres
+    assert len(tyres.positions(10)) == 10 and tyres.positions(10)[2:6] == ("MLO", "MLI", "MRI", "MRO")
+    assert tyres.clean_spec({"wheels": "10"})["wheels"] == 10
+    import pytest
+    with pytest.raises(tyres.InvalidTyre):
+        tyres.clean_spec({"wheels": "8"})
+    v = tyres.wheel_view({"wheels": 10}, {"vehicle_class": "รถใหญ่"}, [], __import__("datetime").date(2026, 11, 12), None)
+    assert [w["row"] for w in v["positions"]].count("mid") == 4 and v["positions"][2]["label"] == "กลางซ้ายนอก"
