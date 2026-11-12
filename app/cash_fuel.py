@@ -394,9 +394,9 @@ def month_view(branch: str, month: str) -> dict:
                                                                      "order": "day.asc,page_id.asc,seq.asc"}))
     ch = _choices(branch)
     periods = []
-    for b in (1, 2):
-        s, e = period(month, b)
-        sm = summary(lines, ch["vehicles"], b)
+    for b in (0, 1, 2):                 # 0 = the whole month: what goes to HQ at the month's end (owner, 12 Nov 2026); 1, 2 = the halves
+        s, e = period(month, b or None)
+        sm = summary(lines, ch["vehicles"], b or None)
         periods.append({"batch": b, "from": s.isoformat(), "to": e.isoformat(), "total": sm["total"] + sm["other_total"],
                         "fills": sm["fills"] + sm["other_fills"], "trucks": len(sm["trucks"]) + len(sm["other"])})
     s, e = period(month)
