@@ -397,7 +397,8 @@ def month_view(branch: str, month: str) -> dict:
     for b in (1, 2):
         s, e = period(month, b)
         sm = summary(lines, ch["vehicles"], b)
-        periods.append({"batch": b, "from": s.isoformat(), "to": e.isoformat(), "total": sm["total"], "fills": sm["fills"], "trucks": len(sm["trucks"])})
+        periods.append({"batch": b, "from": s.isoformat(), "to": e.isoformat(), "total": sm["total"] + sm["other_total"],
+                        "fills": sm["fills"] + sm["other_fills"], "trucks": len(sm["trucks"]) + len(sm["other"])})
     s, e = period(month)
     return {"branch": branch, "month": month, "from": s.isoformat(), "to": e.isoformat(), "lines": lines, "periods": periods,
             "pending": pending(branch), **ch}
@@ -572,13 +573,26 @@ def _truck_key(v: Optional[dict]):
     return (0, int(n), "") if n.isdigit() else (1, 0, n) if v else (2, 0, "")
 
 
+def is_route_truck(v: Optional[dict]) -> bool:
+    """A รถสาย (or a truck whose use is not set). รถหน้าโรง and the like, and a fill with no truck, go on their own sheet
+    (owner, 12 Nov 2026)."""
+    return bool(v) and (v.get("usage") or "รถสาย") == "รถสาย"
+
+
 def summary(lines: list[dict], roster: list[dict], batch: Optional[int] = None) -> dict:
-    """รายการค่าน้ำมัน: per truck (by its number) its plate, driver, every counted fill and its total; the grand total."""
+    """รายการค่าน้ำมัน: per truck (by its number) its plate, driver, every counted fill and its total; the grand total.
+    Only รถสาย; the other trucks' fills (and fills with no truck) are under "other", with their own total."""
     by_id = {v["id"]: v for v in roster}
+    mine = [ln for ln in lines if ln.get("counted") and not (batch and ln.get("batch") != batch)]
+    route = [ln for ln in mine if is_route_truck(by_id.get(ln.get("vehicle_id")))]
+    rest = [ln for ln in mine if not is_route_truck(by_id.get(ln.get("vehicle_id")))]
+    s, o = _summary(route, by_id), _summary(rest, by_id)
+    return {**s, "other": o["trucks"], "other_total": o["total"], "other_fills": o["fills"]}
+
+
+def _summary(lines: list[dict], by_id: dict) -> dict:
     groups: dict = {}
     for ln in lines:
-        if not ln.get("counted") or (batch and ln.get("batch") != batch):
-            continue
         key = ln.get("vehicle_id") or "?"
         g = groups.setdefault(key, {"vehicle": by_id.get(ln.get("vehicle_id")), "fills": [], "drivers": Counter()})
         g["fills"].append({"day": ln["day"], "amount": float(ln.get("amount") or 0)})
@@ -592,8 +606,6 @@ def summary(lines: list[dict], roster: list[dict], batch: Optional[int] = None) 
                        "fills": fills, "total": round(sum(f["amount"] for f in fills), 2)})
     rows = []                                                           # by date (owner, 11 Nov: HQ gets both lists)
     for ln in lines:
-        if not ln.get("counted") or (batch and ln.get("batch") != batch):
-            continue
         v = by_id.get(ln.get("vehicle_id")) or {}
         rows.append({"day": ln["day"], "truck_no": v.get("truck_number") or "", "plate": v.get("plate") or "ไม่มีทะเบียนรถ",
                      "driver": short_name(ln["driver_name"]) if ln.get("driver_name") else "", "amount": float(ln.get("amount") or 0),
@@ -603,8 +615,9 @@ def summary(lines: list[dict], roster: list[dict], batch: Optional[int] = None) 
 
 
 def to_xlsx(month: str, s: dict, batch: Optional[int] = None) -> bytes:
-    """The รายการค่าน้ำมัน as the bookkeeper's, two sheets: by date (one row per fill, in date order) and by truck (number, plate
-    and driver over all its fills, its total). Grand total at the end of each. TH Sarabun New, A4, black and white."""
+    """The รายการค่าน้ำมัน as the bookkeeper's, รถสาย only, two sheets: by date (one row per fill, in date order) and by truck (number, plate
+    and driver over all its fills, its total). Grand total at the end of each. TH Sarabun New, A4, black and white.
+    The other trucks (รถหน้าโรง, no truck written) on a third sheet laid out like the second, with their own total (owner, 12 Nov 2026)."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, Side
     start, end = period(month, batch)
@@ -636,17 +649,34 @@ def to_xlsx(month: str, s: dict, batch: Optional[int] = None) -> bytes:
             cell.number_format = "#,##0.##"
         return cell
 
-    def foot(ws, r, ncols):
+    def foot(ws, r, ncols, total=None):
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols - 1)
         for col in range(1, ncols + 1):
             ws.cell(row=r, column=col).border = box
         put(ws, r, 1, "รวม", 15, True)
-        put(ws, r, ncols, s["total"], 15, True, True)
+        put(ws, r, ncols, s["total"] if total is None else total, 15, True, True)
         ws.print_title_rows = "4:4"
         ws.page_setup.paperSize, ws.page_setup.orientation = ws.PAPERSIZE_A4, "portrait"
         ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
         ws.sheet_properties.pageSetUpPr.fitToPage = True
         ws.oddFooter.center.text = "หน้า &P / &N"
+
+    def by_truck(ws, title, trucks, total):
+        head(ws, title, ("รถเบอร์", "ทะเบียนรถ", "พนักงานขับรถ", "วัน/เดือน/ปี", "จำนวน", "รวม"), (9, 16, 21, 18, 12, 13))
+        r = 5
+        for t in trucks:
+            n = max(1, len(t["fills"]))
+            for j, f in enumerate(t["fills"]):
+                put(ws, r + j, 4, th_day(f["day"]), bold=True)
+                put(ws, r + j, 5, f["amount"], bold=True, money=True)
+            for col, val in ((1, t["truck_no"]), (2, t["plate"]), (3, t["driver"]), (6, t["total"])):
+                if n > 1:
+                    ws.merge_cells(start_row=r, start_column=col, end_row=r + n - 1, end_column=col)
+                put(ws, r, col, val, 15, col in (1, 6), col == 6)
+                for k in range(n):
+                    ws.cell(row=r + k, column=col).border = box
+            r += n
+        foot(ws, r, 6, total)
 
     wb = Workbook()
     # 1. by date: ลำดับ วันที่ เบอร์รถ ทะเบียนรถ พนักงานขับรถ จำนวน
@@ -659,23 +689,12 @@ def to_xlsx(month: str, s: dict, batch: Optional[int] = None) -> bytes:
         r += 1
     foot(ws, r, 6)
 
-    # 2. by truck: รถเบอร์ ทะเบียนรถ พนักงานขับรถ วัน/เดือน/ปี จำนวน รวม
-    ws = wb.create_sheet()
-    head(ws, "ตามรถ", ("รถเบอร์", "ทะเบียนรถ", "พนักงานขับรถ", "วัน/เดือน/ปี", "จำนวน", "รวม"), (9, 16, 21, 18, 12, 13))
-    r = 5
-    for t in s["trucks"]:
-        n = max(1, len(t["fills"]))
-        for j, f in enumerate(t["fills"]):
-            put(ws, r + j, 4, th_day(f["day"]), bold=True)
-            put(ws, r + j, 5, f["amount"], bold=True, money=True)
-        for col, val in ((1, t["truck_no"]), (2, t["plate"]), (3, t["driver"]), (6, t["total"])):
-            if n > 1:
-                ws.merge_cells(start_row=r, start_column=col, end_row=r + n - 1, end_column=col)
-            put(ws, r, col, val, 15, col in (1, 6), col == 6)
-            for k in range(n):
-                ws.cell(row=r + k, column=col).border = box
-        r += n
-    foot(ws, r, 6)
+    # 2. by truck: รถเบอร์ ทะเบียนรถ พนักงานขับรถ วัน/เดือน/ปี จำนวน รวม -- รถสาย; 3. the same for the other trucks
+    for title, trucks, total in (("ตามรถ", s["trucks"], s["total"]), ("รถอื่น (ไม่ใช่รถสาย)", s.get("other") or [], s.get("other_total") or 0)):
+        if title != "ตามรถ" and not trucks:
+            continue
+        ws = wb.create_sheet()
+        by_truck(ws, title, trucks, total)
     out = BytesIO()
     wb.save(out)
     return out.getvalue()
@@ -684,7 +703,7 @@ def to_xlsx(month: str, s: dict, batch: Optional[int] = None) -> bytes:
 def summary_file(branch: str, month: str, batch: Optional[int], kind: str) -> tuple[bytes, str, str]:
     from app import supabase
     lines = _confirmed_lines(supabase.select_all("cash_fuel_lines", {"select": "*", "branch": f"eq.{branch}", "month": f"eq.{month}", "order": "day.asc"}))
-    roster = [{"id": v["id"], "truck_number": v.get("truck_number"), "plate": v.get("plate")} for v in _roster()]
+    roster = [{"id": v["id"], "truck_number": v.get("truck_number"), "plate": v.get("plate"), "usage": v.get("usage")} for v in _roster()]
     s = summary(lines, roster, batch)
     data = to_xlsx(month, s, batch)
     start, end = period(month, batch)

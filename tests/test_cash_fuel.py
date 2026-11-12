@@ -164,4 +164,24 @@ def test_no_truck_written_can_be_confirmed_as_such(monkeypatch):
     rows[0]["no_truck"] = True                                           # ไม่มีทะเบียนรถ
     assert cf.confirm_page(1, "x") == {"ok": True}
     s = cf.summary([{"vehicle_id": None, "day": "2026-11-02", "amount": 1000, "counted": True, "batch": 1, "driver_name": None}], ROSTER)
-    assert s["trucks"][0]["plate"] == "ไม่มีทะเบียนรถ" and s["by_date"][0]["plate"] == "ไม่มีทะเบียนรถ"
+    assert s["trucks"] == [] and s["other"][0]["plate"] == "ไม่มีทะเบียนรถ" and s["other_total"] == 1000
+
+
+def test_the_other_trucks_get_their_own_sheet():
+    """Only รถสาย on the by-date and by-truck sheets; รถหน้าโรง and fills with no truck on a third (owner, 12 Nov 2026)."""
+    roster = [{**ROSTER[0], "usage": "รถสาย"}, {**ROSTER[1], "usage": "รถหน้าโรง"}, {**ROSTER[3], "usage": ""}]
+    lines = [{"vehicle_id": "a", "day": "2026-11-01", "amount": 1000, "counted": True, "batch": 1, "driver_name": "มานัส ใจดี"},
+             {"vehicle_id": "b", "day": "2026-11-02", "amount": 1500, "counted": True, "batch": 1, "driver_name": "ประเสริฐ ดี"},
+             {"vehicle_id": None, "day": "2026-11-03", "amount": 700, "counted": True, "batch": 1, "driver_name": None},
+             {"vehicle_id": "d", "day": "2026-11-04", "amount": 300, "counted": True, "batch": 1, "driver_name": None}]
+    s = cf.summary(lines, roster)
+    assert [t["plate"] for t in s["trucks"]] == ["2ฒค 3332", "มพ 1093"] and s["total"] == 1300       # use not set: kept as รถสาย
+    assert [x["plate"] for x in s["by_date"]] == ["2ฒค 3332", "มพ 1093"]
+    assert [t["plate"] for t in s["other"]] == ["84-4764", "ไม่มีทะเบียนรถ"] and s["other_total"] == 2200
+    wb = load_workbook(BytesIO(cf.to_xlsx("2026-11", s)))
+    assert wb.sheetnames == ["ตามวันที่", "ตามรถ", "รถอื่น (ไม่ใช่รถสาย)"]
+    ws = wb["รถอื่น (ไม่ใช่รถสาย)"]
+    assert ws.cell(row=5, column=1).value == "34" and ws.cell(row=7, column=1).value == "รวม" and ws.cell(row=7, column=6).value == 2200
+    assert wb["ตามรถ"].cell(row=7, column=6).value == 1300
+    only_route = cf.summary(lines[:1], roster)
+    assert load_workbook(BytesIO(cf.to_xlsx("2026-11", only_route))).sheetnames == ["ตามวันที่", "ตามรถ"]
