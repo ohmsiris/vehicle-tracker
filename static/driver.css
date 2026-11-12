@@ -162,3 +162,9 @@ main { padding: 12px 12px calc(92px + env(safe-area-inset-bottom)); max-width: 6
 .box.order .ordtxt small { color: var(--muted); font-size: 14px; }
 .box.order .btn { flex: 0 0 auto; }
 .box.order .btn { white-space: nowrap; min-width: 96px; padding: 10px 14px; }
+
+/* a product not on the shop's list (owner, 12 Nov 2026) */
+.xpp { display: flex; align-items: center; gap: 4px; }
+.num.xpin { width: 88px; height: 40px; font-size: 18px; }
+.xpick { display: grid; gap: 6px; }
+.xpick .quick button { color: var(--blue); border-color: var(--line); min-width: 64px; }

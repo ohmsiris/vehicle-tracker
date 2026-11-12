@@ -116,6 +116,13 @@ def line_amount(qty: dict, price: dict) -> float:
     return round(sum(_num(qty.get(k)) * _num(price.get(k)) for k in KEYS), 2)
 
 
+def extra_prices(sale: dict, listed: dict) -> dict:
+    """A sale line's "xp": {product: baht} -- what the driver typed for a product NOT on the shop's list (owner, 12 Nov 2026: route 35's
+    CJ ไผ่ต่ำ also takes เล็ก). Never overrides a listed price."""
+    xp = sale.get("xp") if isinstance(sale.get("xp"), dict) else {}
+    return {k: round(_num(xp.get(k)), 2) for k in KEYS if 0 < _num(xp.get(k)) < 100_000 and _num(listed.get(k)) <= 0}
+
+
 def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start: Optional[float] = None) -> dict:
     """doc = what the phone sent; customers = {customer id (str): {"prices", "billing", "free"}}. -> the day's totals and what does
     not add up. A sale line: {"q": {product: n}, "paid": baht (prices come from the route list only),
@@ -141,8 +148,13 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
             continue
         cust = customers.get(str(cid)) or {}
         free = bool(cust.get("free") or s.get("free"))
-        price = cust.get("prices") or {}                 # the route list's price only: the phone cannot change a price (owner, 10 Nov 2026)
+        price = dict(cust.get("prices") or {})           # the route list's price: the phone cannot change a price (owner, 10 Nov 2026)
+        extra = extra_prices(s, price)                   # ...but may sell a product not on the shop's list, at a price it types (12 Nov)
+        price.update(extra)
         set_by_office = s.get("office_amount") not in (None, "")          # the office typed the line's total itself (owner, 11 Nov 2026)
+        if extra and not cust.get("free") and not set_by_office and any(q[k] for k in extra):
+            flags_extra.append(f"{cust.get('name') or cid}: ขายนอกรายการ "
+                               + " ".join(f"{lab} ฿{extra[k]:g}" for k, lab in PRODUCTS if k in extra and q[k]) + " (คนขับใส่ราคา)")
         if not cust.get("free") and not set_by_office:
             unpriced = [lab for k, lab in PRODUCTS if q[k] and _num(price.get(k)) <= 0]
             if unpriced:
@@ -713,6 +725,10 @@ def clean_doc(doc: dict) -> dict:
         for k in ("free",):
             if s.get(k):
                 line[k] = True
+        if isinstance(s.get("xp"), dict):                # the driver's price for a product not on the shop's list
+            xp = {k: round(_num(v), 2) for k, v in s["xp"].items() if k in KEYS and _num(v) > 0}
+            if xp:
+                line["xp"] = xp
         if s.get("pay") in ("cash", "credit", "part"):
             line["pay"] = s["pay"]
         if s.get("reason") in ("factory", "other"):

@@ -116,9 +116,10 @@ function ssLine(c) {             // one customer's line, worked out like the ser
   const s = ss_.doc.sales[String(c.id)] || {};
   const q = s.q || {};
   const free = !!(c.free || s.free);
-  const byPrice = Object.entries(q).reduce((a, [k, v]) => a + ssN(v) * ssN((c.prices || {})[k]), 0);
+  const pr = (k) => ssN((c.prices || {})[k]) || ssN((s.xp || {})[k]);       // the list's price, else the driver's for a product not on it
+  const byPrice = Object.entries(q).reduce((a, [k, v]) => a + ssN(v) * pr(k), 0);
   const set = s.office_amount != null && s.office_amount !== "";            // the office typed the line's total (owner, 11 Nov 2026)
-  const unpriced = !c.free && !set && Object.entries(q).some(([k, v]) => ssN(v) && !ssN((c.prices || {})[k]));
+  const unpriced = !c.free && !set && Object.entries(q).some(([k, v]) => ssN(v) && !pr(k));
   const full = c.free ? 0 : set ? Math.max(ssN(s.office_amount), 0) : byPrice;
   const gross = free ? 0 : full;
   const amount = Math.max(gross - Math.min(Math.max(ssN(s.discount), 0), gross), 0);

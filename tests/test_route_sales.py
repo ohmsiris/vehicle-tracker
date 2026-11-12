@@ -169,3 +169,18 @@ def test_the_office_can_set_a_line_total():
     t = rs.compute({"sales": {"1": {"q": {"lod": 1, "lek": 4}, "office_amount": 250}}}, customers)
     assert t["amount"] == 250 and not any("ไม่มีราคา" in f for f in t["flags"])
     assert rs.clean_doc({"sales": {"1": {"q": {"lod": 1}, "office_amount": "250"}}})["sales"]["1"]["office_amount"] == 250
+
+
+def test_a_product_not_on_the_shops_list_sells_at_the_drivers_price_and_is_flagged():
+    """Owner, 12 Nov 2026: route 35's CJ ไผ่ต่ำ (แพ็ค on the list) also takes เล็ก -- the driver adds it and types its price."""
+    customers = {"1": {"name": "ร้านเอ", "prices": {"lod": 40}}, "2": {"name": "CJ", "prices": {"pack": 50}, "billing": "invoice"}}
+    doc = {"sales": {"1": {"q": {"lod": 2, "lek": 3}, "xp": {"lek": 35, "lod": 1, "bad": 9}},          # a listed price is never overridden
+                     "2": {"q": {"pack": 4, "lek": 5}}}}                                               # วางบิล: no price typed
+    t = rs.compute(doc, customers)
+    line = {x["customer"]: x for x in t["lines"]}
+    assert line["1"]["amount"] == 2 * 40 + 3 * 35 and t["cash_sales"] == 185
+    assert any("ร้านเอ" in f and "นอกรายการ" in f and "เล็ก ฿35" in f for f in t["flags"])
+    assert line["2"]["amount"] == 200 and any("CJ" in f and "ไม่มีราคา" in f for f in t["flags"])  # the office prices it
+    assert rs.extra_prices({"xp": {"lek": "-3", "mo": "abc"}}, {}) == {}
+    d = rs.clean_doc({"sales": {"1": {"q": {"lek": 3}, "xp": {"lek": "35", "bad": 2, "mo": 0}}}})
+    assert d["sales"]["1"]["xp"] == {"lek": 35.0}

@@ -68,7 +68,12 @@
     return list;
   }
   function custById(id) { return customers().filter(function (c) { return String(c.id) === String(id); })[0]; }
-  function priceOf(c, sale, k) { var p = (c && c.prices) || {}; return p[k] != null ? n(p[k]) : null; }   // the route list's price only
+  function priceOf(c, sale, k) {        // the route list's price; for a product not on the shop's list, the price the driver typed
+    var p = (c && c.prices) || {};
+    if (p[k] != null) return n(p[k]);
+    var x = sale && sale.xp && n(sale.xp[k]);
+    return x > 0 ? x : null;
+  }
   function shortOf(k) { var p = products().filter(function (x) { return x.key === k; })[0]; return p && p.short ? p.short : label(k); }
   function sellable(c) {               // what this customer can be sold: the products with a price (free customers: the bag ices)
     if (c.free) return products().filter(function (p) { return ["lod", "lek", "mo"].indexOf(p.key) >= 0; });
@@ -347,9 +352,14 @@
     var s = JSON.parse(JSON.stringify(S.doc.sales[String(id)] || { q: {}, pay: "cash" }));
     if (!s.q) s.q = {};
     if (!s.pay) s.pay = "cash";
-    var ro = locked(), showExtra = !!(n(s.discount) || s.free);
+    var ro = locked(), showExtra = !!(n(s.discount) || s.free), pickOther = false;
+    var added = Object.keys(s.q).filter(function (k) { return n(s.q[k]); }).concat(Object.keys(s.xp || {}));
     function draw() {
-      var list = sellable(c);
+      var list = sellable(c), listed = list.map(function (p) { return p.key; });
+      // products not on this shop's list (owner, 12 Nov 2026): the driver adds one and types its price; the office sees it
+      var others = c.free ? [] : products().filter(function (p) { return listed.indexOf(p.key) < 0; });
+      var shown = others.filter(function (p) { return added.indexOf(p.key) >= 0; });
+      var left = others.filter(function (p) { return added.indexOf(p.key) < 0; });
       var bal = balanceOf(c.id), invoice = c.billing === "invoice", dis = ro ? " disabled" : "";
       var html = '<div class="sheet-head"><button class="back" id="sx" aria-label="กลับ">' + ic("back", "l") + "</button><h2>" + (c.fresh ? "" : c.seq + ". ") + esc(c.name) + "<small>" + esc(c.bins || "") + "</small></h2></div>" +
         '<div class="sheet-body" id="sb">';
@@ -360,7 +370,20 @@
         var price = priceOf(c, s, p.key);
         return '<div class="prow"><div><div class="pl">' + esc(p.label) + '</div><div class="pp">' + (isFree(c, s) ? "ฟรี" : "฿" + money(price) + " / หน่วย") + "</div></div>" +
           stepper("q_" + p.key, n(s.q[p.key]), ro) + "</div>";
-      }).join("") : '<p class="note">ร้านนี้ยังไม่มีราคา — ติดต่อออฟฟิศ</p>');
+      }).join("") : shown.length ? "" : '<p class="note">ร้านนี้ยังไม่มีราคา — กด “+ สินค้าอื่น” หรือติดต่อออฟฟิศ</p>');
+      html += shown.map(function (p) {
+        var xp = s.xp && n(s.xp[p.key]);
+        return '<div class="prow xrow"><div><div class="pl">' + esc(p.label) + ' <span class="chip warn">นอกรายการ</span></div>' +
+          '<div class="pp xpp">฿<input class="num xpin" id="xp_' + p.key + '" inputmode="decimal" value="' + (xp || "") + '" placeholder="' + (invoice ? "ราคา" : "ใส่ราคา") + '"' + dis + "></div></div>" +
+          stepper("q_" + p.key, n(s.q[p.key]), ro) + "</div>";
+      }).join("");
+      if (!ro && left.length) {
+        html += pickOther
+          ? '<div class="xpick"><p class="note">ขายอะไรเพิ่ม (ไม่มีในรายการของร้านนี้)</p><div class="quick">' +
+            left.map(function (p) { return '<button data-addp="' + p.key + '">' + esc(p.label) + "</button>"; }).join("") + "</div></div>"
+          : '<button class="more" id="addp">+ สินค้าอื่น</button>';
+      }
+      if (shown.length) html += '<p class="note">สินค้านอกรายการ: ' + (invoice ? "ใส่ราคาถ้ารู้ ถ้าไม่รู้ ออฟฟิศใส่ให้" : "ใส่ราคาที่เก็บจริง") + " · ออฟฟิศจะเห็นทุกครั้ง</p>";
       html += '<div class="total"><span>รวม</span><b id="amt">' + (isFree(c, s) ? "ฟรี" : "฿" + money(amountOf(c, s))) + "</b></div>";
       if (!ro && S.doc.sales[String(c.id)]) html += '<button class="clear-link" id="sclear">ล้างรายการร้านนี้</button>';
       if (!c.free && !ro) {
@@ -393,12 +416,19 @@
       $("sx").onclick = closeSheet;
       if (ro) { $("sclose").onclick = closeSheet; return; }
       if ($("extra")) $("extra").onclick = function () { readInputs(); showExtra = true; draw(); };
+      if ($("addp")) $("addp").onclick = function () { readInputs(); pickOther = true; draw(); };
       bindSteppers($("sb"), function () { readInputs(); $("amt").textContent = isFree(c, s) ? "ฟรี" : "฿" + money(amountOf(c, s)); });
       $("sb").addEventListener("click", function (e) {
         var pay = e.target.closest("button[data-pay]");
         if (pay) { readInputs(); s.pay = pay.getAttribute("data-pay"); draw(); return; }
         var fr = e.target.closest("button[data-free]");
         if (fr) { readInputs(); if (fr.getAttribute("data-free") === "1") s.free = true; else delete s.free; draw(); return; }
+        var ap = e.target.closest("button[data-addp]");
+        if (ap) {
+          readInputs(); added.push(ap.getAttribute("data-addp")); pickOther = false; draw();
+          var inp = $("xp_" + ap.getAttribute("data-addp")); if (inp && !inp.value && c.billing !== "invoice") inp.focus();
+          return;
+        }
         var rs = e.target.closest("button[data-reason]");
         if (rs) { readInputs(); s.reason = rs.getAttribute("data-reason"); draw(); }
       });
@@ -415,10 +445,19 @@
       if ($("paid")) s.paid = n($("paid").value);
       if ($("oldp")) s.old_paid = n($("oldp").value);
       if ($("disc")) { var dv = n($("disc").value); if (dv) s.discount = dv; else delete s.discount; }
+      products().forEach(function (p) {
+        var el = $("xp_" + p.key); if (!el) return;
+        var v = n(el.value); s.xp = s.xp || {};
+        if (v > 0) s.xp[p.key] = v; else delete s.xp[p.key];
+      });
+      if (s.xp && !Object.keys(s.xp).length) delete s.xp;
     }
     function save() {
       var any = Object.keys(s.q).some(function (k) { return n(s.q[k]); }) || n(s.old_paid);
       if (!c.free && (s.free || n(s.discount)) && !s.reason) { toast("เลือกเหตุผลของส่วนลด / แจกฟรี", true); return; }
+      var noPrice = c.billing === "invoice" || isFree(c, s) ? [] : Object.keys(s.q).filter(function (k) { return n(s.q[k]) && priceOf(c, s, k) == null; });
+      if (noPrice.length) { toast("ใส่ราคาของ " + noPrice.map(label).join(" ") + " ก่อนบันทึก", true); return; }
+      if (s.xp) { Object.keys(s.xp).forEach(function (k) { if (!n(s.q[k])) delete s.xp[k]; }); if (!Object.keys(s.xp).length) delete s.xp; }
       if (!s.free && !n(s.discount)) delete s.reason;
       if (any) { delete s.price; s.t = s.t || nowHM(); s.paid = paidOf(c, s); S.doc.sales[String(c.id)] = s; } else delete S.doc.sales[String(c.id)];
       changed(); afterSale();
