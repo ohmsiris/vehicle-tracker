@@ -90,6 +90,15 @@ function drawMachinery(d) {
   return out;
 }
 
+function drawLicences(d) {
+  const out = [hStats(hStat(d.expired, "หมดแล้ว", d.expired ? "bad" : ""), hStat(d.soon, "ใกล้หมด", d.soon ? "warn" : ""))];
+  const dd = (iso) => { const [y, m, x] = iso.split("-"); return `${x}/${m}/${y}`; };
+  if (d.next.length) out.push(hList(d.next.map((x) => hRow(`${x.title}${x.person ? " · " + x.person : ""}${x.place ? " · " + x.place : ""}`,
+    x.state === "submitted" ? "ยื่นแล้ว รอใบใหม่" : x.days < 0 ? `หมดแล้ว ${-x.days} วัน` : `${dd(x.expires_on)} · อีก ${x.days} วัน`, x.days < 0 ? "bad" : x.state === "submitted" ? "" : "warn"))));
+  else out.push(hEmpty("ไม่มีเอกสารที่ต้องต่อในช่วงนี้"));
+  return out;
+}
+
 // key -> title, where the link goes, how to draw it. The page shows them in this order.
 const HOME_CARDS = [
   { key: "today", title: "วันนี้ต้องดู", wide: true, go: ["บอร์ดของฉัน", () => goHash("#mgr")], draw: drawToday },
@@ -97,6 +106,7 @@ const HOME_CARDS = [
   { key: "spend", title: "ค่าใช้จ่าย", go: ["ภาพรวม", () => { showView("dash"); loadDashboard(); }], draw: drawSpend },
   { key: "stock", title: "สต็อก — ของใกล้หมด", go: ["สต็อก", () => goHash("#stock")], draw: drawStock },
   { key: "machinery", title: "เครื่องจักร", go: ["บันทึกซ่อมบำรุง", () => goHash("#machine-log")], draw: drawMachinery },
+  { key: "licences", title: "ใบอนุญาต · เอกสาร", go: ["ใบอนุญาต · เอกสาร", () => goHash("#licences")], draw: drawLicences },
 ];
 
 function homeCard(spec, data) {

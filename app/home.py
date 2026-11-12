@@ -32,7 +32,7 @@ HOME_SOON = [
     {"key": "money", "title": "สลิป / การเงิน", "blurb": "เงินเข้า-ออกวันนี้ ค่าซ่อม+ค่าอะไหล่รวมเป็นต้นทุนต่อเดือน", "needs": "ระบบอ่านสลิป (ยังไม่ได้สร้าง)"},
     {"key": "gmp", "title": "ตรวจโรงงาน / GMP", "blurb": "รายการตรวจประจำวัน-สัปดาห์ ที่ยังไม่ได้ทำ และใบรับรองที่ใกล้หมดอายุ", "needs": "รายการตรวจและวันหมดอายุ"},
     {"key": "docs", "title": "เอกสารรถ", "blurb": "ภาษี · พ.ร.บ. · ประกัน ใกล้ครบกำหนดกี่คัน", "needs": "วันครบกำหนดของแต่ละคัน (ใส่ที่ทะเบียนรถ)"},
-    {"key": "drivers", "title": "พนักงานขับรถ", "blurb": "ใบขับขี่ใกล้หมดอายุ รถที่ยังไม่มีคนขับประจำ", "needs": "วันหมดอายุใบขับขี่ (มีตารางคนขับแล้ว)"},
+    {"key": "drivers", "title": "พนักงานขับรถ", "blurb": "รถที่ยังไม่มีคนขับประจำ", "needs": "ตารางคนขับ (มีแล้ว)"},
     {"key": "orders", "title": "ใบสั่งซื้อ", "blurb": "ของที่สั่งแล้วยังไม่มา เทียบกับสต็อกที่ต่ำ", "needs": "ใบสั่งซื้อ (ยังไม่ได้สร้าง)"},
 ]
 
@@ -156,12 +156,17 @@ def _machinery(today: date) -> dict:
     return build_machinery(machines, events, today)
 
 
+def _licences(today: date) -> dict:
+    from app import licences
+    return licences.summary(today)
+
+
 def _today(today: date) -> dict:
     return mgr_jobs.today_summary()
 
 
 # name -> loader. The page draws what it finds under the same names.
-CARDS: dict[str, Callable[[date], dict]] = {"today": _today, "repairs": _repairs, "spend": _spend, "stock": _stock, "machinery": _machinery}
+CARDS: dict[str, Callable[[date], dict]] = {"today": _today, "repairs": _repairs, "spend": _spend, "stock": _stock, "machinery": _machinery, "licences": _licences}
 
 _cache: dict = {"at": 0.0, "value": None}
 _lock = threading.Lock()

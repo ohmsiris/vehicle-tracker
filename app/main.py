@@ -2297,6 +2297,89 @@ def api_cash_fuel_line_delete(line_id: int, x_app_token: str = Header(default=""
     return _fuel_call(cash_fuel.delete_line, line_id)
 
 
+# --------------------------------------------------------------------------------------------- ใบอนุญาต · เอกสาร (owner only, 12 Nov 2026)
+def _lic_call(fn, *args, **kwargs):
+    from app import licences
+    if not supabase.configured():
+        raise HTTPException(503, "ระบบยังไม่พร้อม")
+    try:
+        return fn(*args, **kwargs)
+    except licences.LicenceError as exc:
+        raise HTTPException(400, str(exc))
+    except supabase.SupabaseError:
+        logger.exception("licences")
+        raise HTTPException(502, "บันทึก / โหลดไม่สำเร็จ ลองใหม่อีกครั้ง")
+
+
+@app.get("/api/licences")
+def api_licences(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import licences, mgr
+    _check_owner(x_app_token, token)
+    out = _lic_call(licences.load, mgr.today_th())
+    out["feed_path"] = f"/api/licences/calendar.ics?k={licences.feed_key(settings.app_token)}"
+    return out
+
+
+@app.post("/api/licences")
+def api_licence_new(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import licences
+    _check_owner(x_app_token, token)
+    return _lic_call(licences.create, body)
+
+
+@app.patch("/api/licences/{doc_id}")
+def api_licence_edit(doc_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import licences
+    _check_owner(x_app_token, token)
+    return _lic_call(licences.update, doc_id, body)
+
+
+@app.delete("/api/licences/{doc_id}")
+def api_licence_remove(doc_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import licences
+    _check_owner(x_app_token, token)
+    return _lic_call(licences.remove, doc_id)
+
+
+@app.post("/api/licences/{doc_id}/files")
+def api_licence_file(doc_id: int, file: UploadFile = File(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """A new copy (scan / photo / PDF): kept as the current one, the old one as history, and read for its dates."""
+    from app import licences
+    _check_owner(x_app_token, token)
+    data = file.file.read(licences.MAX_FILE + 1)
+    return _lic_call(licences.add_file, doc_id, file.filename or "file", data, _who(x_app_token or token))
+
+
+@app.get("/api/licences/files/{file_id}")
+def api_licence_file_get(file_id: int, download: int = 0, x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    from urllib.parse import quote
+
+    from app import licences
+    _check_owner(x_app_token, token)
+    data, mime, name = _lic_call(licences.file_data, file_id)
+    disp = "attachment" if download else "inline"
+    return Response(content=data, media_type=mime, headers={"Content-Disposition": f"{disp}; filename=file; filename*=UTF-8''{quote(name)}",
+                                                            "Cache-Control": "private, max-age=600"})
+
+
+@app.get("/api/licences/employee/{employee_id}")
+def api_licences_of(employee_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import licences, mgr
+    _check_owner(x_app_token, token)
+    return {"docs": _lic_call(licences.for_employee, employee_id, mgr.today_th())}
+
+
+@app.get("/api/licences/calendar.ics")
+def api_licences_ics(k: str = Query(default="")) -> Response:
+    """The owner's Google Calendar subscribes to this (a secret link, no sign-in): every expiry / due date and its reminder."""
+    from app import licences
+    if not settings.app_token or not hmac.compare_digest((k or "").encode(), licences.feed_key(settings.app_token).encode()):
+        raise HTTPException(404, "ไม่พบ")
+    from datetime import datetime, timezone
+    body = _lic_call(licences.calendar_feed, datetime.now(timezone.utc))
+    return Response(content=body, media_type="text/calendar; charset=utf-8", headers={"Cache-Control": "private, max-age=600"})
+
+
 @app.get("/api/cash-fuel/summary.{kind}")
 def api_cash_fuel_summary(kind: str, month: str, batch: int = 0, branch: str = "สระบุรี", x_app_token: str = Header(default=""),
                           token: str = Query(default="")) -> Response:

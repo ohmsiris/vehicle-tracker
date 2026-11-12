@@ -239,10 +239,12 @@ function renderEmployee() {
     el("section", { class: "card tkcard" }, el("h3", { text: "ค่าจ้าง / ทดลองงาน" }), el("div", { id: "empRatesBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     el("section", { class: "card tkcard" }, el("h3", { text: "เงินกู้ / หักเงินเดือน" }), el("div", { id: "empLoansBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     el("section", { class: "card tkcard" }, el("h3", { text: "ใบเตือน / บันทึกข้อความ" }), el("div", { id: "empDocsBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
+    /ขับรถ/.test(e.position || "") ? el("section", { class: "card tkcard" }, el("h3", { text: "ใบขับขี่" }), el("div", { id: "empLicBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))) : null,
     soon("ตรวจสลิปเงินเดือน", "อ่านสลิปแล้วตรวจกับค่าแรง เงินกู้ และเงินสะสมของคนนี้"));
   renderEmployeeLoans(e);
   renderEmployeeDocs(e);
   renderEmployeeRates(e);
+  if (typeof lcEmployeeBox === "function") lcEmployeeBox(e);
 }
 
 // ------------------------------------------------------------------ the daily wage, its history and the probation period

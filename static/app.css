@@ -2059,3 +2059,40 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .cf-pick .segbtn { padding: 6px 16px; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.25; }
 .cf-segsub { font-size: 11px; font-weight: 400; color: var(--muted); }
 .cf-summary tr.cf-sechead td { padding-top: 22px; font-weight: 600; color: var(--text-2); background: transparent; }
+
+/* ใบอนุญาต · เอกสาร (owner, 12 Nov 2026): soft striped rows, no grid lines */
+.lc-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.lc-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.lc-tile { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+.lc-tile b { display: block; font-size: 26px; font-weight: 700; }
+.lc-tile.bad b { color: var(--bad); } .lc-tile.warn b { color: var(--warn); }
+.lc-h { margin: 22px 0 8px; font-size: 16px; }
+.lc-wrap { overflow-x: auto; }
+.lc-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.lc-table td { padding: 9px 10px; border: 0; vertical-align: middle; }
+.lc-table tr:nth-child(odd) td { background: var(--surface-2); }
+.lc-table tr td:first-child { border-radius: 8px 0 0 8px; } .lc-table tr td:last-child { border-radius: 0 8px 8px 0; }
+.lc-name { font-weight: 600; } .lc-name a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
+.lc-date { width: 110px; white-space: nowrap; }
+.lc-acts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
+.lc-state { width: 150px; text-align: right; }
+.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.linkish:hover { text-decoration: underline; }
+.lc-badge { display: inline-block; font-size: 12.5px; padding: 2px 10px; border-radius: 999px; white-space: nowrap; background: var(--surface-2); color: var(--muted); }
+.lc-badge.ok { background: var(--ok-soft); color: var(--ok); } .lc-badge.warn { background: var(--warn-soft); color: var(--warn); }
+.lc-badge.bad { background: var(--bad-soft); color: var(--bad); font-weight: 600; } .lc-badge.info { background: var(--accent-soft); color: var(--accent); }
+.lc-table tr:nth-child(odd) .lc-badge.gr { background: var(--surface); }
+.lc-form { margin: 12px 0; }
+.lc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 14px; margin: 10px 0; }
+.lc-field { display: flex; flex-direction: column; gap: 4px; }
+.lc-formbar { display: flex; gap: 8px; align-items: center; }
+.lc-urlrow { display: flex; gap: 8px; } .lc-url { flex: 1; min-width: 0; font-size: 13px; }
+.lc-emprow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 4px 0; }
+@media (max-width: 700px) {
+  .lc-table, .lc-table tbody { display: block; }
+  .lc-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; margin-bottom: 6px; border-radius: 8px; }
+  .lc-table tr:nth-child(odd) { background: var(--surface-2); }
+  .lc-table td { background: transparent !important; border-radius: 0 !important; padding: 4px 10px; }
+  .lc-table td:first-child { grid-column: 1 / -1; padding-top: 9px; }
+  .lc-date, .lc-state { width: auto; } .lc-state { padding-bottom: 9px; }
+}
