@@ -1078,7 +1078,8 @@ def vehicle_detail(vehicle_id: str, *, today: Optional[date] = None) -> dict:
         pass
     history = sorted(history, key=lambda r: (str(r["done_date"]), r["item_key"]), reverse=True)
     choices = [{**g, "months": group_months(g)} for g in sorted(groups.values(), key=lambda g: g.get("sort_order", 99))]
-    return {"as_of": today.isoformat(), "simulated": today != real_today, "ready": ready, "vehicle": {k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "odometer_broken")},
+    return {"as_of": today.isoformat(), "simulated": today != real_today, "ready": ready, "vehicle": {k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "odometer_broken",
+                                                                                                       "history_current_on")},
             **plan, "group_code": code, "groups": choices, "history": history, "readings": readings}
 
 

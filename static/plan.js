@@ -168,6 +168,7 @@ function planCard(v) {
       shop ? el("span", { class: "badge shop", title: "อยู่ในบอร์ดซ่อมว่า “อยู่ที่อู่” — รอให้กลับมาก่อนค่อยดูแผน", text: `🔧 อยู่ที่อู่${shop.shop ? ` · ${shop.shop}` : ""}${shop.since ? ` · ตั้งแต่ ${beDate(shop.since)}` : ""}` }) : null,
       el("span", { class: "badge", title: v.group ? v.group.label : "", text: v.group ? `${v.group.code} · ${plMonths(v.group.months)} ต่อ ${baht(v.group.step_km)} กม.` : "ยังไม่ได้เลือกกลุ่มแผน" }),
       el("span", { class: "grow" }),
+      el("button", { class: "btn small", type: "button", text: "ข้อความส่งอู่", onclick: () => openShopText(v) }),
       v.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, attention.map((i) => i.key)) }) : null),
     !v.has_plan ? el("p", { class: "muted small" }, "ยังไม่ได้เลือกกลุ่มแผน — เลือกได้ที่ ", el("a", { href: "#plan-settings", text: "ตั้งค่าระยะ › รถแต่ละคันใช้กลุ่มไหน" }), " (หรือปล่อยว่างถ้าไม่ต้องทำตาราง)")
       : attention.length || never.length ? el("div", { class: "pl-chips" }, ...attention.map((i) => plChip(i, v)), ...never.map(plNeverChip))
@@ -364,8 +365,10 @@ async function renderTruckPlan(v, editing) {
 const plRefreshTruck = () => (tk.v ? renderTruckPlan(tk.v, tk.editing) : null);
 
 function truckPlanNodes(d) {
-  const v = { id: d.vehicle.id, plate_number: d.vehicle.plate_number, vehicle_number: d.vehicle.vehicle_number, items: d.items };
+  const v = { id: d.vehicle.id, plate_number: d.vehicle.plate_number, vehicle_number: d.vehicle.vehicle_number, nickname: d.vehicle.nickname,
+    history_current_on: d.vehicle.history_current_on, items: d.items };
   const head = el("div", { class: "mchead" }, el("h3", { class: "section-title", text: "แผนซ่อมบำรุง" }), el("span", { class: "grow" }),
+    el("button", { class: "btn small", type: "button", text: "ข้อความส่งอู่", onclick: () => openShopText(v) }),
     d.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, []) }) : null,
     el("button", { class: "btn small", type: "button", text: "+ ระยะทาง (GPS / เลขไมล์)", onclick: () => openReadingDialog(v) }));
   // The group decides every interval of this truck: shown here, changed on the plan's settings (all trucks in one place, with a confirmation).
@@ -528,6 +531,7 @@ async function clearSnooze(v, i) {
 }
 
 function plOpenDialog(title, saveText) {
+  $("pdlgSave").hidden = false;                      // the shop message hides it (nothing to save there)
   $("pdlgTitle").textContent = title;
   $("pdlgSave").textContent = saveText;
   $("pdlgSave").disabled = false;
@@ -622,6 +626,74 @@ async function savePlanDialog() {
     return;
   }
   await plAfterSave();
+}
+
+// ================================================================== the message to the shop (owner, 13 Nov 2026)
+// Tick what the truck needs; the text the owner sends the shop on LINE is written as they write it ("รายการเบอร์ 16 / 1ฒถ 2091 / น้ำมันเครื่อง
+// กรองเครื่อง / ... / เช็คลูกปืนล้อ / เช็คช่วงล่าง / เช็คต้องฟลัชชิ่งไหม"), then copied. What is due (and, on a truck with the whole history in, what was
+// never done) is ticked to start with; nothing is saved.
+const PL_SHOP_LINES = [                      // one line each; a pair on one line when both are ticked, as the owner writes it
+  [["engine_oil", "น้ำมันเครื่อง"], ["engine_filter", "กรองเครื่อง"]],
+  [["fuel_filter", "กรองโซล่า"], ["air_filter", "กรองอากาศ"]],
+  [["gearbox_oil", "น้ำมันเกียร์"], ["diff_oil", "เฟืองท้าย"]],
+  [["brake_clutch_fluid", "น้ำมันเบรก"], ["power_steering", "พาวเวอร์"]],
+  [["coolant", "น้ำยาหล่อเย็น"]],
+  [["injector_washers", "เปลี่ยนแหวนรองหัวฉีด"]],
+  [["valve_adjust", "ตั้งวาล์ว"]],
+  [["valve_cover_seal", "เปลี่ยนประเก็นฝาวาล์ว"]],
+  [["intake_manifold", "ล้างท่อร่วมไอดี"]],
+];
+const PL_SHOP_CHECKS = [["wheel_grease", null], ["chassis_check", "เช็คช่วงล่าง"]];     // the second paragraph
+const PL_SHOP_ASK = [["engine_flush", "เช็คต้องฟลัชชิ่งไหม"]];                            // the last line: the shop decides
+
+function plShopTitle(v) {
+  const num = v.vehicle_number && v.vehicle_number !== v.plate_number ? v.vehicle_number : null;
+  return [num ? `รายการเบอร์ ${num}` : `รายการ ${v.nickname || v.plate_number || ""}`.trim(), num || v.nickname ? v.plate_number : null].filter(Boolean).join("\n");
+}
+
+function plShopText(v, picked, extra) {
+  const items = v.items || [];
+  const grease = (items.find((i) => i.key === "wheel_grease") || {}).label || "";
+  const name = (key, text) => (key === "wheel_grease" ? (/ลูกปืน/.test(grease) ? "เช็คลูกปืนล้อ" : "อัดจารบีทุกจุด") : text);
+  const lines = PL_SHOP_LINES.map((pair) => pair.filter(([k]) => picked.has(k)).map(([k, t]) => name(k, t)).join(" ")).filter(Boolean);
+  const checks = PL_SHOP_CHECKS.filter(([k]) => picked.has(k)).map(([k, t]) => name(k, t));
+  const ask = PL_SHOP_ASK.filter(([k]) => picked.has(k)).map(([, t]) => t);
+  const more = String(extra || "").split("\n").map((x) => x.trim()).filter(Boolean);
+  return [plShopTitle(v), lines.join("\n"), [...checks, ...more].join("\n"), ask.join("\n")].filter(Boolean).join("\n\n");
+}
+
+function openShopText(v) {
+  const items = v.items || [];
+  const state = Object.fromEntries(items.map((i) => [i.key, i.state]));
+  const due = (k) => plNeedsAttention({ state: state[k] }) || (v.history_current_on && state[k] === "unknown");
+  const all = [...PL_SHOP_LINES.flat(), ...PL_SHOP_CHECKS, ...PL_SHOP_ASK];
+  const picked = new Set(all.map(([k]) => k).filter((k) => (items.length ? due(k) : false)));
+  pl.dlg = { kind: "shoptext", vehicle: v, draft: {} };
+  let extra = "";
+  const out = el("textarea", { class: "pl-shoptext", rows: 14, "aria-label": "ข้อความส่งอู่" });
+  const redo = () => { out.value = plShopText(v, picked, extra); };
+  const box = ([k, t]) => {
+    const i = items.find((x) => x.key === k);
+    const label = k === "wheel_grease" ? (i && /ลูกปืน/.test(i.label) ? "เช็คลูกปืนล้อ" : "อัดจารบีทุกจุด") : t;
+    const cb = el("input", { type: "checkbox", checked: picked.has(k), onchange: (e) => { if (e.target.checked) picked.add(k); else picked.delete(k); redo(); } });
+    return el("label", { class: "pl-pick" }, cb, el("span", { text: label }),
+      i && (plNeedsAttention(i) || (v.history_current_on && i.state === "unknown"))
+        ? el("span", { class: `badge ${PL_BADGE[i.state] || ""}`, text: i.state === "unknown" ? "ไม่เคยทำ" : PL_STATE_TEXT[i.state] }) : null);
+  };
+  const copy = el("button", { class: "btn primary", type: "button", text: "คัดลอกข้อความ", onclick: async () => {
+    try { await navigator.clipboard.writeText(out.value); } catch (_) { out.select(); document.execCommand("copy"); }
+    copy.textContent = "คัดลอกแล้ว ✓"; setTimeout(() => { copy.textContent = "คัดลอกข้อความ"; }, 1800);
+  } });
+  fill($("pdlgBody"),
+    el("p", { class: "muted small", text: `${plLabel(v)} — ติ๊กรายการ ข้อความด้านล่างจะเขียนให้ แล้วกดคัดลอกไปวางใน LINE ของอู่ (ไม่ได้บันทึกอะไร)` }),
+    el("div", { class: "pl-shopgrid" },
+      el("div", { class: "pl-picks" }, ...all.map(box),
+        el("label", { class: "lc-field" }, el("span", { class: "small muted", text: "เพิ่มเติม (บรรทัดละรายการ)" }),
+          el("textarea", { rows: 3, placeholder: "เช่น เช็คแอร์", oninput: (e) => { extra = e.target.value; redo(); } }))),
+      el("div", { class: "pl-shopout" }, out, copy)));
+  redo();
+  plOpenDialog("ข้อความส่งอู่", "ปิด");
+  $("pdlgSave").hidden = true;
 }
 
 // ================================================================== init
