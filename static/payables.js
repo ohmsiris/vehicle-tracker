@@ -43,7 +43,7 @@ function pyHome() {
       el("span", { class: "py-bar-val", text: `฿${pyBaht(s.owed)}` })))) : null;
   const list = py_.showAll ? d.shops : owing;
   const rows = list.map((s) => el("tr", { class: "py-row", onclick: () => goHash(`#payables/${encodeURIComponent(s.shop)}`) },
-    el("td", {}, el("div", { class: "lc-name", text: s.shop }), s.pays_now ? el("div", { class: "small muted", text: "จ่ายสด / โอนทันที" }) : null),
+    el("td", {}, el("div", { class: "lc-name", text: s.shop }), s.pays_now ? el("div", { class: "small muted", text: "ไม่นับในหน้านี้" }) : null),
     el("td", { class: "r" }, el("b", { text: s.owed ? `฿${pyBaht(s.owed)}` : "—" }), s.due_count ? el("div", { class: "small muted", text: `${s.due_count} บิล` }) : null),
     el("td", { class: "small", text: s.oldest ? `ค้างตั้งแต่ ${pyDate(s.oldest)} (${s.oldest_age} วัน)` : "" }),
     el("td", { class: "small", text: s.last_payment ? `จ่ายล่าสุด ${pyDate(s.last_payment.paid_on)} · ฿${pyBaht(s.last_payment.amount)}` : "ยังไม่มีการจ่ายในระบบ" }),
@@ -70,7 +70,7 @@ function pyShop() {
     el("h2", { class: "page-title", text: s.shop }),
     el("span", { class: "grow" }),
     el("label", { class: "small py-now" }, el("input", { type: "checkbox", checked: s.pays_now, onchange: (e) => pyPaysNow(s.shop, e.target.checked) }),
-      el("span", { text: " ร้านนี้จ่ายสด / โอนทันที (ไม่นับเป็นค้างจ่าย)" })));
+      el("span", { text: " ไม่นับร้านนี้ในหน้านี้ (จ่ายสด / โอน / จ่ายทางอื่น)" })));
   const tiles = el("div", { class: "lc-tiles" },
     pyTile("ค้างจ่าย", `฿${pyBaht(s.owed)}`, `${s.due_count} บิล`, s.owed ? "warn" : ""),
     pyTile("ค้างตั้งแต่", s.oldest ? pyDate(s.oldest) : "—", s.oldest ? `${s.oldest_age} วัน` : ""),
