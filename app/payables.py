@@ -29,6 +29,21 @@ def _money(x) -> float:
         return 0.0
 
 
+# One shop, two companies that each send their own invoice and get their own cheque (owner, 13 Nov 2026): the page shows them apart,
+# by the company name printed on the bill. ยางโชคพัฒนา ปากเพรียว = บจก. โชคพัฒนาสระบุรี เซอร์วิส ("สระบุรี เซอร์วิส" on the bills),
+# ดาวเรือง = บจก. โชคพัฒนาไทร์เซอร์วิส. A bill whose printed name says neither is shown as "ไม่ระบุสาขา" to sort out.
+SPLIT = {"โชคพัฒนา": [("ไทร์", "โชคพัฒนา ดาวเรือง (โชคพัฒนาไทร์เซอร์วิส)"), ("ดาวเรือง", "โชคพัฒนา ดาวเรือง (โชคพัฒนาไทร์เซอร์วิส)"),
+                       ("ปากเพรียว", "โชคพัฒนา ปากเพรียว (โชคพัฒนาสระบุรี เซอร์วิส)"), ("สระบุรี", "โชคพัฒนา ปากเพรียว (โชคพัฒนาสระบุรี เซอร์วิส)")]}
+
+
+def payee(shop: Optional[str], printed: Optional[str]) -> Optional[str]:
+    """Which of a shop's companies a bill is from (SPLIT), by the name printed on it; other shops are themselves."""
+    if shop not in SPLIT:
+        return shop
+    text = "".join(str(printed or "").split())
+    return next((name for word, name in SPLIT[shop] if word in text), f"{shop} (ไม่ระบุสาขา)")
+
+
 # --------------------------------------------------------------------------------------------- the bills, by shop (pure)
 def truck_bill(ev: dict, lines_total: float, vehicle: Optional[dict], shop: Optional[str]) -> Optional[dict]:
     amount = _money(ev.get("total_cost")) or round(lines_total, 2)
@@ -137,16 +152,24 @@ def _bills() -> list[dict]:
             return None
         hit = shops.explain(raw, snap)
         return hit["shop"] if hit["matched"] else (shops.similar_shop(raw, snap) or " ".join(str(raw).split()))
+    printed: dict = {}                                 # the shop name as the reader saw it on the bill, for the shops in SPLIT
+    split_ids = [e["id"] for e in events if shop_of(e.get("vendor")) in SPLIT]
+    for i in range(0, len(split_ids), 100):
+        for a in supabase.select_all("event_attachments", {"select": "event_id,shop:extraction->>shop_name", "event_id": f"in.({','.join(split_ids[i:i + 100])})",
+                                                           "order": "id.asc"}):
+            if a.get("shop"):
+                printed[a["event_id"]] = printed.get(a["event_id"], "") + " " + a["shop"]
     out = []
     for e in events:
         name = shop_of(e.get("vendor"))                    # a job with no shop on it is the in-house mechanic's
         if name == shops.IN_HOUSE:
             continue
+        name = payee(name, printed.get(e["id"]))
         b = truck_bill(e, sums.get(e["id"], 0.0), vehicles.get(e["vehicle_id"]), name)
         if b:
             out.append(b)
     for p in supabase.select_all("purchase_bills", {"select": "id,vendor_id,vendor_name,bill_date,bill_no,branch,total,purpose,notes", "order": "id.asc"}):
-        name = by_id.get(p.get("vendor_id")) or shop_of(p.get("vendor_name"))
+        name = payee(by_id.get(p.get("vendor_id")) or shop_of(p.get("vendor_name")), p.get("vendor_name"))
         b = purchase_bill(p, name)
         if b:
             out.append(b)

@@ -70,3 +70,12 @@ def test_review_fixes_edited_bill_moved_payment_and_month_tile():
     t = pb.check_payment({"method": "transfer", "amount": 500.5, "paid_on": "2026-11-10", "cheque_no": "9", "book": "HQ",
                           "bills": [{"source": "truck", "id": "e2"}]}, {("truck", "e2"): 500.5})
     assert t["payment"]["cheque_no"] is None and t["payment"]["book"] == "HQ"
+
+
+def test_one_shop_two_companies_each_with_its_own_invoices():
+    """Owner, 13 Nov 2026: ยางโชคพัฒนา has two branches, two companies, two invoices -- by the name printed on the bill."""
+    assert pb.payee("โชคพัฒนา", "สระบุรี เซอร์วิส จำกัด").startswith("โชคพัฒนา ปากเพรียว")
+    assert pb.payee("โชคพัฒนา", "บริษัท โชคพัฒนาสระบุรี เซอร์วิส จำกัด").startswith("โชคพัฒนา ปากเพรียว")
+    assert pb.payee("โชคพัฒนา", "บริษัท โชคพัฒนาไทร์ เซอร์วิส จำกัด").startswith("โชคพัฒนา ดาวเรือง")
+    assert pb.payee("โชคพัฒนา", None) == "โชคพัฒนา (ไม่ระบุสาขา)"
+    assert pb.payee("วิศวภัณฑ์", "anything") == "วิศวภัณฑ์"
