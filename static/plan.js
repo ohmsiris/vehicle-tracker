@@ -649,7 +649,7 @@ const PL_SHOP = [               // [tick id, the plan item it follows, the words
   ["intake_manifold", "intake_manifold", "ล้างท่อร่วมไอดี", "job"],
   ["wheel_grease", "wheel_grease", null, "check"],
   ["chassis_check", "chassis_check", "เช็คช่วงล่าง", "check"],
-  ["engine_flush", "engine_flush", "เช็คต้องฟลัชชิ่งไหม", "ask"],
+  ["engine_flush", "engine_flush", "เช็คฟลัชชิ่งน้ำมันเครื่อง", "ask"],
 ];
 
 function plShopTitle(v) {
