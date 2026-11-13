@@ -20,13 +20,67 @@ from typing import Optional
 
 PW_TRIES, LOCK_MINUTES, INVITE_DAYS, MIN_PW = 5, 10, 7, 8
 
-# What a person can be given. `nav` = the menu buttons shown, `hash` = the page opened, `api` = the server paths allowed.
+# What a person can be given. `nav` = the menu buttons shown, `hash` = the page opened (and `also`: the other pages it links to -- a
+# prefix ending in "=" is a page of one thing, "#truck=<id>"), `api` = the server paths allowed, `group` = the sidebar section it is in.
+# EVERY page of the app can be given (owner, 13 Nov 2026: "just in case I need to share with someone"); the five first ones keep their
+# keys and order, so the people who already have them keep exactly what they had. A menu opens its page for viewing AND changing what is
+# on it -- the same as the owner. Mapped page by page (13 Nov 2026) from each page's own calls to the server.
+GROUPS = ["หน้าแรก", "บัญชี", "รถสาย", "ผู้จัดการ", "พนักงาน", "รถ", "เครื่องจักร"]
+_BILL = ['/api/events', '/api/categorize', '/api/summarize']
+_TRUCK = ['/api/vehicles', '/api/drivers', '/api/tyres', '/api/plan/']
 MENUS = {
-    "sales_sheets": {"label": "ใบขายรถสาย", "nav": ["navSalesSheets"], "hash": "#sales-sheets", "api": ["/api/sales-routes"]},
-    "routes": {"label": "รถสาย · กำไรต่อคัน", "nav": ["navRoutes"], "hash": "#routes", "api": ["/api/routes"]},
-    "cash_fuel": {"label": "น้ำมันเงินสด (รายการค่าน้ำมัน)", "nav": ["navCashFuel"], "hash": "#cash-fuel", "api": ["/api/cash-fuel"]},
-    "orders": {"label": "ยอดสั่งน้ำแข็ง (หน้าโรง)", "nav": ["navIceOrders"], "hash": "#ice-orders", "api": ["/api/ice-orders"]},
-    "customers": {"label": "ทะเบียนลูกค้า (รวมบัตรประชาชน)", "nav": ["navCustomers"], "hash": "#customers", "api": ["/api/customers"]},
+    "sales_sheets": {"label": "ใบขายรถสาย (มือถือ)", "group": "รถสาย", "pos": 2, "nav": ["navSalesSheets"], "hash": "#sales-sheets", "api": ["/api/sales-routes"]},
+    "routes": {"label": "รถสาย · กำไรต่อคัน", "group": "รถสาย", "pos": 1, "nav": ["navRoutes"], "hash": "#routes", "api": ["/api/routes"]},
+    "cash_fuel": {"label": "น้ำมันเงินสด (รายการค่าน้ำมัน)", "group": "บัญชี", "pos": 3, "nav": ["navCashFuel"], "hash": "#cash-fuel", "api": ["/api/cash-fuel"]},
+    "orders": {"label": "ยอดสั่งน้ำแข็ง (หน้าโรง)", "group": "รถสาย", "pos": 4, "nav": ["navIceOrders"], "hash": "#ice-orders", "api": ["/api/ice-orders"]},
+    "customers": {"label": "ทะเบียนลูกค้า (รวมบัตรประชาชน)", "group": "รถสาย", "pos": 3, "nav": ["navCustomers"], "hash": "#customers", "api": ["/api/customers"]},
+    # ---- every other page (13 Nov 2026)
+    "home": {"label": "หน้าแรก (สรุปทุกส่วน)", "group": "หน้าแรก", "pos": 1, "nav": ["navHome"], "hash": "#home", "api": ["/api/home"]},
+    "accounts_in": {"label": "ลงข้อมูล / แนบไฟล์", "group": "บัญชี", "pos": 1, "nav": ["navAccountsIn"], "hash": "#accounts-in", "also": ["#event="],
+                    "api": ["/api/accounts/", *_BILL]},
+    "electricity": {"label": "ค่าไฟฟ้า", "group": "บัญชี", "pos": 2, "nav": ["navElectricity"], "hash": "#electricity", "api": ["/api/electricity"]},
+    "payables": {"label": "เจ้าหนี้ร้านค้า", "group": "บัญชี", "pos": 4, "nav": ["navPayables"], "hash": "#payables", "also": ["#event=", "#purchase-new"],
+                 "api": ["/api/payables", "/api/purchases", *_BILL]},
+    "accounts": {"label": "งบกำไรขาดทุน", "group": "บัญชี", "pos": 5, "nav": ["navAccounts"], "hash": "#accounts", "also": ["#event="], "api": ["/api/accounts/", *_BILL]},
+    "licences": {"label": "ใบอนุญาต · เอกสาร", "group": "ผู้จัดการ", "pos": 1, "nav": ["navLicences"], "hash": "#licences", "api": ["/api/licences"]},
+    "mgr_board": {"label": "บอร์ดของฉัน", "group": "ผู้จัดการ", "pos": 2, "nav": ["navMgr"], "hash": "#mgr", "api": ["/api/mgr/board", "/api/mgr/tickets", "/api/today"]},
+    "mgr_calendar": {"label": "ปฏิทิน", "group": "ผู้จัดการ", "pos": 3, "nav": ["navMgrCal"], "hash": "#mgr-calendar",
+                     "api": ["/api/mgr/calendar", "/api/mgr/board", "/api/mgr/tickets", "/api/today"]},
+    "mgr_recurring": {"label": "งานประจำ", "group": "ผู้จัดการ", "pos": 4, "nav": ["navMgrRecurring"], "hash": "#mgr-recurring", "api": ["/api/mgr/recurring", "/api/mgr/board"]},
+    "mgr_settings": {"label": "ตั้งค่าบอร์ด", "group": "ผู้จัดการ", "pos": 5, "nav": ["navMgrSettings"], "hash": "#mgr-settings",
+                     "api": ["/api/mgr/settings", "/api/mgr/types", "/api/mgr/places", "/api/today"]},
+    "employees": {"label": "รายชื่อพนักงาน (รวมค่าจ้าง)", "group": "พนักงาน", "pos": 1, "nav": ["navEmployees"], "hash": "#employees", "also": ["#employee="],
+                  "api": ["/api/employees", "/api/rates/", "/api/hr/"]},
+    "loans": {"label": "เงินกู้", "group": "พนักงาน", "pos": 2, "nav": ["navLoans"], "hash": "#loans", "also": ["#loan="], "api": ["/api/loans", "/api/employees"]},
+    "attendance": {"label": "เวลาทำงาน", "group": "พนักงาน", "pos": 3, "nav": ["navAttendance"], "hash": "#attendance", "api": ["/api/attendance"]},
+    "documents": {"label": "ใบเตือน / บันทึกข้อความ", "group": "พนักงาน", "pos": 4, "nav": ["navDocs"], "hash": "#documents", "also": ["#document="],
+                  "api": ["/api/documents", "/api/employees"]},
+    "dashboard": {"label": "ภาพรวม (รถ)", "group": "รถ", "pos": 1, "nav": ["navDash"], "hash": "#dash", "api": ["/api/dashboard"]},
+    "repair_board": {"label": "สถานะงานซ่อม", "group": "รถ", "pos": 2, "nav": ["navBoard"], "hash": "#board", "also": ["#truck="],
+                     "api": ["/api/requests", "/api/extract", *_BILL, *_TRUCK]},
+    "repair_bills": {"label": "บันทึกงานซ่อม (อ่านบิล)", "group": "รถ", "pos": 3, "nav": ["navBills"], "hash": "#bills",
+                     "api": ["/api/extract", "/api/requests", "/api/vehicles", *_BILL]},
+    "where_trucks": {"label": "รถอยู่ที่ไหน", "group": "รถ", "pos": 4, "nav": ["navWhere"], "hash": "#where", "api": ["/api/requests", "/api/vehicles"]},
+    "repair_log": {"label": "สมุดงานซ่อม", "group": "รถ", "pos": 5, "nav": ["navLog"], "hash": "#log", "also": ["#event=", "#vehicle="],
+                   "api": ["/api/log", "/api/vehicles", *_BILL]},
+    "truck_roster": {"label": "ทะเบียนรถ", "group": "รถ", "pos": 6, "nav": ["navRoster"], "hash": "#roster", "also": ["#truck="], "api": [*_TRUCK]},
+    "odometers": {"label": "จดเลขไมล์", "group": "รถ", "pos": 7, "nav": ["navOdometers"], "hash": "#odometers", "api": ["/api/plan/odometer-sheet", "/api/plan/readings"]},
+    "tyre_stock": {"label": "ยางสำรอง", "group": "รถ", "pos": 8, "nav": ["navTyreStock"], "hash": "#tyre-stock", "api": ["/api/tyre-stock"]},
+    "maintenance_plan": {"label": "แผนซ่อมบำรุงรถ", "group": "รถ", "pos": 9, "nav": ["navPlan"], "hash": "#plan", "also": ["#plan-settings"],
+                         "api": ["/api/plan/", "/api/vehicles"]},
+    "app_settings": {"label": "ตั้งค่า (ร้าน / อู่)", "group": "รถ", "pos": 10, "nav": ["navSettings"], "hash": "#settings", "api": ["/api/settings/shops"]},
+    "machinery": {"label": "ภาพรวมเครื่องจักร", "group": "เครื่องจักร", "pos": 1, "nav": ["navMachIndex"], "hash": "#machinery", "also": ["#machine="],
+                  "api": ["/api/machinery", "/api/machines", "/api/machine-mechanics", "/api/machine-parts", "/api/machine-events", "/api/machine-readings"]},
+    "machine_parts": {"label": "อะไหล่และสเปค", "group": "เครื่องจักร", "pos": 2, "nav": ["navMachParts"], "hash": "#machine-parts",
+                      "api": ["/api/machinery/options", "/api/machines", "/api/machine-mechanics", "/api/machine-parts"]},
+    "machine_plan": {"label": "แผนซ่อมบำรุงเครื่องจักร", "group": "เครื่องจักร", "pos": 3, "nav": ["navMachPlan"], "hash": "#machine-plan",
+                     "api": ["/api/machine-program", "/api/machine-mechanics", "/api/machine-files"]},
+    "machine_log": {"label": "บันทึกซ่อมบำรุงเครื่องจักร", "group": "เครื่องจักร", "pos": 4, "nav": ["navMachLog"], "hash": "#machine-log",
+                    "api": ["/api/machinery/options", "/api/machines", "/api/machine-mechanics", "/api/machine-events"]},
+    "purchases": {"label": "บิลซื้อของ", "group": "เครื่องจักร", "pos": 5, "nav": ["navPurchases"], "hash": "#purchases", "also": ["#purchase-new"], "api": ["/api/purchases"]},
+    "prices": {"label": "เทียบราคา", "group": "เครื่องจักร", "pos": 6, "nav": ["navPrices"], "hash": "#prices", "also": ["#price="],
+               "api": ["/api/prices", "/api/purchases/options", "/api/purchases/lines"]},
+    "stock": {"label": "สต็อก", "group": "เครื่องจักร", "pos": 7, "nav": ["navStock"], "hash": "#stock", "also": ["#stock-sheet"], "api": ["/api/stock"]},
 }
 ALWAYS = ("/api/meta", "/api/auth/")          # every signed-in person
 
@@ -76,7 +130,9 @@ def allowed(menus: list[str], path: str) -> bool:
 
 
 def menu_options() -> list[dict]:
-    return [{"key": k, "label": v["label"]} for k, v in MENUS.items()]
+    """Every menu, in the sidebar's order, with its section."""
+    order = sorted(MENUS, key=lambda k: (GROUPS.index(MENUS[k]["group"]), MENUS[k]["pos"]))
+    return [{"key": k, "label": MENUS[k]["label"], "group": MENUS[k]["group"]} for k in order]
 
 
 def me_for(user: Optional[dict]) -> dict:
@@ -86,7 +142,7 @@ def me_for(user: Optional[dict]) -> dict:
                 "menus": list(MENUS), "nav": None, "hashes": None, "home": None}
     menus = clean_menus(user.get("menus"))
     return {"role": "staff", "name": user["name"], "username": user.get("username"), "menus": menus,
-            "nav": [n for m in menus for n in MENUS[m]["nav"]], "hashes": [MENUS[m]["hash"] for m in menus],
+            "nav": [n for m in menus for n in MENUS[m]["nav"]], "hashes": [h for m in menus for h in [MENUS[m]["hash"], *MENUS[m].get("also", [])]],
             "home": MENUS[menus[0]]["hash"] if menus else None}
 
 

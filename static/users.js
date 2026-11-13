@@ -11,7 +11,8 @@ const isStaff = () => !!(state.me && state.me.role === "staff");
 
 function staffMayOpen(hash) {
   if (!isStaff()) return true;
-  return (state.me.hashes || []).some((a) => `#${hash}` === a || `#${hash}`.startsWith(`${a}/`));      // a menu's own sub-pages too
+  return (state.me.hashes || []).some((a) => `#${hash}` === a || `#${hash}`.startsWith(`${a}/`)          // a menu's own sub-pages too
+    || (a.endsWith("=") && `#${hash}`.startsWith(a)));                                                    // a page of one thing: #truck=<id>
 }
 
 // a person with their own sign-in sees only their menus; everyone sees who is signed in and can sign out
@@ -126,9 +127,18 @@ function usShowLink(name, code) {
   dlg.showModal();
 }
 
+// every page, by sidebar section (owner, 13 Nov 2026); a section's own tick ticks / unticks all of its menus
 function usMenuBoxes(selected, prefix) {
-  return el("div", { class: "us-menus" }, ...us_.data.menus.map((m) => el("label", { class: "us-menu" },
-    el("input", { type: "checkbox", value: m.key, "data-menu": prefix, checked: selected.includes(m.key) }), ` ${m.label}`)));
+  const groups = [];
+  us_.data.menus.forEach((m) => { const g = groups.find((x) => x.name === m.group); if (g) g.menus.push(m); else groups.push({ name: m.group || "", menus: [m] }); });
+  return el("div", { class: "us-groups" }, ...groups.map((g) => {
+    const boxes = g.menus.map((m) => el("input", { type: "checkbox", value: m.key, "data-menu": prefix, checked: selected.includes(m.key),
+      onchange: () => { all.checked = boxes.every((b) => b.checked); } }));
+    const all = el("input", { type: "checkbox", checked: boxes.every((b) => b.checked), onchange: (e) => boxes.forEach((b) => { b.checked = e.target.checked; }) });
+    return el("div", { class: "us-group" },
+      el("label", { class: "us-ghead" }, all, el("strong", { text: ` ${g.name}` })),
+      el("div", { class: "us-menus" }, ...g.menus.map((m, i) => el("label", { class: "us-menu" }, boxes[i], ` ${m.label}`))));
+  }));
 }
 const usPicked = (root, prefix) => [...root.querySelectorAll(`input[data-menu="${prefix}"]:checked`)].map((x) => x.value);
 

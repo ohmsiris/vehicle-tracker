@@ -18,6 +18,10 @@ function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
   if (typeof staffMayOpen === "function" && !staffMayOpen(h)) { if (state.me.home) goHash(state.me.home); return; }   // not one of this person's menus
   if (h === "users") return openUsers();
+  if (h === "home") { showView("home"); return loadHome(); }                       // pages without their own hash before (13 Nov 2026: menus for people)
+  if (h === "dash") { showView("dash"); return loadDashboard(); }
+  if (h === "board") { showView("board"); return loadDueStrip(); }
+  if (h === "bills") return showView(lastBillView);
   if (h === "customers") return openCustomers();
   if (h === "ice-orders" || h.startsWith("ice-orders/")) return openIceOrders(h.slice(11));
   if (h === "cash-fuel" || h.startsWith("cash-fuel/")) return openCashFuel(h.slice(10));

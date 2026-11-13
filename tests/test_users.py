@@ -78,3 +78,17 @@ def test_the_register_is_its_own_menu():
     assert not users.allowed(["sales_sheets"], "/api/customers")
     assert not users.allowed(["sales_sheets"], "/api/customers/photo/1")
     assert users.allowed(["customers"], "/api/customers/12")
+
+
+def test_every_page_can_be_given_and_the_old_menus_stay():
+    """Owner, 13 Nov 2026: every menu with its sections; the five old keys keep their order (people who have them keep exactly that)."""
+    assert list(users.MENUS)[:5] == ["sales_sheets", "routes", "cash_fuel", "orders", "customers"]
+    opts = users.menu_options()
+    assert len(opts) == len(users.MENUS) >= 35 and opts[0]["key"] == "home"
+    assert all(o["group"] in users.GROUPS for o in opts)
+    navs = [n for m in users.MENUS.values() for n in m["nav"]]
+    assert len(navs) == len(set(navs))                                              # each sidebar button in one menu
+    assert not any(p in ("/api/", "/api/users") or p.startswith("/api/users") for m in users.MENUS.values() for p in m["api"])
+    me = users.me_for({"name": "x", "menus": ["truck_roster", "sales_sheets"]})
+    assert "#truck=" in me["hashes"] and me["home"] == "#sales-sheets"
+    assert users.allowed(["licences"], "/api/licences/3") and not users.allowed(["sales_sheets"], "/api/licences")

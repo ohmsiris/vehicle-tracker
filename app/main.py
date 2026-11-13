@@ -2348,7 +2348,7 @@ def api_payables_pays_now(body: dict = Body(...), x_app_token: str = Header(defa
     return _pay_call(payables.set_pays_now, shop, bool(body.get("on")))
 
 
-# --------------------------------------------------------------------------------------------- ใบอนุญาต · เอกสาร (owner only, 12 Nov 2026)
+# --------------------------------------------------------------------------------------------- ใบอนุญาต · เอกสาร (12 Nov 2026; a person's own menu since 13 Nov)
 def _lic_call(fn, *args, **kwargs):
     from app import licences
     if not supabase.configured():
@@ -2365,7 +2365,7 @@ def _lic_call(fn, *args, **kwargs):
 @app.get("/api/licences")
 def api_licences(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import licences, mgr
-    _check_owner(x_app_token, token)
+    _check_token(x_app_token, token)
     out = _lic_call(licences.load, mgr.today_th())
     out["feed_path"] = f"/api/licences/calendar.ics?k={licences.feed_key(settings.app_token)}"
     return out
@@ -2374,21 +2374,21 @@ def api_licences(x_app_token: str = Header(default=""), token: str = Query(defau
 @app.post("/api/licences")
 def api_licence_new(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import licences
-    _check_owner(x_app_token, token)
+    _check_token(x_app_token, token)
     return _lic_call(licences.create, body)
 
 
 @app.patch("/api/licences/{doc_id}")
 def api_licence_edit(doc_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import licences
-    _check_owner(x_app_token, token)
+    _check_token(x_app_token, token)
     return _lic_call(licences.update, doc_id, body)
 
 
 @app.delete("/api/licences/{doc_id}")
 def api_licence_remove(doc_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import licences
-    _check_owner(x_app_token, token)
+    _check_token(x_app_token, token)
     return _lic_call(licences.remove, doc_id)
 
 
@@ -2396,7 +2396,7 @@ def api_licence_remove(doc_id: int, x_app_token: str = Header(default=""), token
 def api_licence_file(doc_id: int, file: UploadFile = File(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """A new copy (scan / photo / PDF): kept as the current one, the old one as history, and read for its dates."""
     from app import licences
-    _check_owner(x_app_token, token)
+    _check_token(x_app_token, token)
     data = file.file.read(licences.MAX_FILE + 1)
     return _lic_call(licences.add_file, doc_id, file.filename or "file", data, _who(x_app_token or token))
 
@@ -2406,7 +2406,7 @@ def api_licence_file_get(file_id: int, download: int = 0, x_app_token: str = Hea
     from urllib.parse import quote
 
     from app import licences
-    _check_owner(x_app_token, token)
+    _check_token(x_app_token, token)
     data, mime, name = _lic_call(licences.file_data, file_id)
     disp = "attachment" if download else "inline"
     return Response(content=data, media_type=mime, headers={"Content-Disposition": f"{disp}; filename=file; filename*=UTF-8''{quote(name)}",
@@ -2416,7 +2416,7 @@ def api_licence_file_get(file_id: int, download: int = 0, x_app_token: str = Hea
 @app.get("/api/licences/employee/{employee_id}")
 def api_licences_of(employee_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import licences, mgr
-    _check_owner(x_app_token, token)
+    _check_token(x_app_token, token)
     return {"docs": _lic_call(licences.for_employee, employee_id, mgr.today_th())}
 
 
