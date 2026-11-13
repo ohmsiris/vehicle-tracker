@@ -62,7 +62,7 @@ function pyShop() {
   document.querySelector("#payablesView .page-head").hidden = true;
   const s = d.shops.find((x) => x.shop === py_.shop);
   if (!s) { fill($("pyBody"), el("p", { class: "muted", text: "ไม่พบร้านนี้" }), el("a", { href: "#payables", text: "← ทุกร้าน" })); return; }
-  const open = s.bills.filter((b) => b.state === "due" || b.state === "now");
+  const open = s.bills.filter((b) => b.state === "due" || b.state === "now").reverse();          // the latest first (owner, 13 Nov 2026)
   const picked = open.filter((b) => py_.picked.has(pyKey(b)));
   const pickedSum = picked.reduce((a, b) => a + b.amount, 0);
   const head = el("div", { class: "py-head" },
@@ -100,7 +100,7 @@ function pyShop() {
   parts.push(el("h3", { class: "lc-h", text: `จ่ายแล้ว (${s.payments.length})` }));
   if (!s.payments.length) parts.push(el("p", { class: "muted small", text: "ยังไม่มีการจ่ายที่บันทึกในระบบ" }));
   s.payments.forEach((p) => {
-    const bills = s.bills.filter((b) => b.payment_id === p.id);
+    const bills = s.bills.filter((b) => b.payment_id === p.id).reverse();
     const off = Math.abs(p.diff) > 1;
     parts.push(el("section", { class: "card py-pay" },
       el("div", { class: "py-pay-head" },
