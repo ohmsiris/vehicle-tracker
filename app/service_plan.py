@@ -315,6 +315,9 @@ def classify_line(description: Optional[str], rule_set: Optional[str] = None) ->
 # One bill line can be several jobs: "เปลี่ยนน้ำมันเครื่อง, กรองเครื่อง (พร้อม Fushing Oil)", "น้ำมันเครื่อง+กรองเครื่อง" (owner, 12 Nov 2026).
 # The line is cut at "," "+" and "และ" (not "และ/หรือ") and each piece read on its own; the "anywhere" words (a flush ...) are looked for in the whole line.
 _SPLIT = re.compile(r"\s*(?:,|\+|และ(?!\s*/))\s*")
+# A bare filter next to the oil or the flush is the engine oil filter: "น้ำมันเครื่อง+ไส้กรอง", "ฟลัชชิ่งออยล์ +กรอง" (อู่ช่างเก่ง; owner, 13 Nov 2026).
+# On its own ("ไส้กรอง 1 ลูก") it says nothing about which filter, so it stays unread.
+_BARE_FILTER = re.compile(r"^\s*(?:ค่า)?\s*(?:เปลี่ยน\s*)?(?:ไส้\s*)?กรอง\s*$")
 
 
 def classify_items(description: Optional[str], rule_set: Optional[str] = None) -> list[str]:
@@ -329,6 +332,8 @@ def classify_items(description: Optional[str], rule_set: Optional[str] = None) -
         if len(parts) > 1:
             found += [k for k in (classify_line(p, rule_set) for p in parts) if k]
         found += [key for key, pattern in _ANYWHERE if pattern.search(text)]
+        if len(parts) > 1 and any(_BARE_FILTER.match(p) for p in parts) and ({"engine_oil", "engine_flush"} & set(found)):
+            found.append("engine_filter")
     return [k for k in ITEMS if k in found]
 
 
@@ -624,16 +629,31 @@ def item_status_by_time(item: dict, last: Optional[dict], kmpd: Optional[float],
 STATE_ORDER = {"overdue": 0, "check": 1, "soon": 2, "ok": 3, "unknown": 4}
 
 
-def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odometer: Optional[int], today: date) -> Optional[dict]:
+def _km_months(km: Optional[float], kmpd: Optional[float], cap: Optional[float]) -> Optional[float]:
+    """How many months `km` takes at this truck's real pace, never more than the time limit `cap`."""
+    if not km or not kmpd:
+        return None
+    m = km / kmpd / DAYS_PER_MONTH
+    return min(m, cap) if cap else m
+
+
+def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odometer: Optional[int], today: date,
+                kmpd: Optional[float] = None) -> Optional[dict]:
     """The Isuzu-style chart for one truck. Columns: the latest event (what it did), then the next rounds, one base
     step of km / months apart. Rows: the items, with a cell per column: 'done' (done at the latest event), 'due' (falls
     due by that round), 'overdue' (already past due -- shown in the first round), 'unknown' (never recorded).
     A truck with no history still gets its chart: counting starts today, every item of the first column is '?' (nobody
-    knows when it was last done) and the next rounds show what falls due when -- so what to do for the truck is on the page."""
+    knows when it was last done) and the next rounds show what falls due when -- so what to do for the truck is on the page.
+    KM FIRST (owner, 13 Nov 2026): when the truck's km per day is known from real readings (`kmpd`), the due dates come from km, so the
+    rounds do too -- one base step of km at the truck's pace (10,000 km at 118 km/day = every 85 days, not every 2 months), never longer than
+    the time limit -- and each item repeats every its-own km at that pace. Without it (no readings, broken odometer) the group's months.
+    An item falls in the first round that reaches its due date, with a few days' grace (a quarter of a round)."""
     dated = [parse_date(s["last_date"]) for s in statuses if s["last_date"]]
     no_history = not dated
     t0 = max(dated) if dated else today
-    months = group_months(group)
+    step_cap = (group["step_km"] / CAP_STEP_KM[group["rule_set"]] * CAP_MONTHS_PER_STEP) if group.get("rule_set") in CAP_STEP_KM and group.get("step_km") else None
+    km_months = _km_months(group.get("step_km"), kmpd, step_cap)
+    months = km_months or group_months(group)
     same_round = max(SAME_EVENT_DAYS, int(months * DAYS_PER_MONTH / 4))      # a round is a few weeks of work (oil on the 22nd, gear oil on the 28th): a quarter of the step counts as one
     rounds = CHART_ROUNDS.get(group["rule_set"], 8)
     visits = [add_months_f(t0, n * months) for n in range(1, rounds + 1)]
@@ -659,12 +679,14 @@ def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odom
         elif s["state"] == "unknown":
             cells[1] = "unknown"
         elif s["due_date"] and item.get("interval_months"):
+            every = (_km_months(item.get("interval_km"), kmpd, item.get("cap_months")) if km_months else None) or item["interval_months"]
             due, first = parse_date(s["due_date"]), True
-            while due <= visits[-1]:
-                n = next(i for i, v in enumerate(visits, 1) if v >= due)
+            grace = timedelta(days=same_round)
+            while due - grace <= visits[-1]:
+                n = next(i for i, v in enumerate(visits, 1) if v >= due - grace)
                 if cells[n] is None:
                     cells[n] = "overdue" if first and due < today else "due"
-                due, first = add_months_f(due, item["interval_months"]), False
+                due, first = add_months_f(due, every), False
         rows.append({"key": s["key"], "label": s["label"], "last_date": s["last_date"], "last_source": s["last_source"], "state": s["state"],
                      "due_date": s["due_date"], "interval_km": s["interval_km"], "interval_months": s["interval_months"], "cells": cells})
     return {"columns": columns, "rows": rows, "no_history": no_history}
@@ -704,7 +726,7 @@ def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], r
                 anchor = next((r["odometer_km"] for r in records if r.get("odometer_km") is not None and parse_date(r.get("done_date")) == t0), None)
             elif odo:
                 anchor = odo["km"]                      # no history: the km columns count up from the latest reading
-        out["chart"] = build_chart(group, plan, statuses, anchor, today) if plan else None
+        out["chart"] = build_chart(group, plan, statuses, anchor, today, measured if km_first else None) if plan else None
     return out
 
 

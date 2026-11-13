@@ -314,7 +314,8 @@ def test_an_item_already_past_due_shows_overdue_in_the_next_round():
     chart = _chart(S2, [rec("engine_oil", "2026-10-22"), rec("coolant", "2026-01-01")])
     row = _row(chart, "coolant")
     assert row["cells"][1] == "overdue" and row["state"] == "overdue"
-    assert [i for i, c in enumerate(row["cells"]) if c == "due"] == [4, 8]                               # then every 8 months after it was due
+    # then every 8 months after it was due (1 May 2027, 1 Jan 2028): each falls in the round a few days before it (22 Apr, 22 Dec), not weeks after
+    assert [i for i, c in enumerate(row["cells"]) if c == "due"] == [3, 7]
 
 
 def test_things_done_within_a_few_days_count_as_the_same_event():
@@ -710,6 +711,9 @@ def test_one_bill_line_can_be_several_jobs_and_the_shops_own_words():
     """Owner, 12 Nov 2026: truck 16's "(พร้อม Fushing Oil)" is the flush; truck 4's "เช็ควาล์ว" is the valve job."""
     assert sp.classify_items("เปลี่ยนน้ำมันเครื่อง, กรองเครื่อง (พร้อม Fushing Oil)") == ["engine_oil", "engine_filter", "engine_flush"]
     assert sp.classify_items("น้ำมันเครื่อง+กรองเครื่อง") == ["engine_oil", "engine_filter"]
+    assert sp.classify_items("น้ำมันเครื่อง+ไส้กรอง") == ["engine_oil", "engine_filter"]                # a bare filter next to the oil is the oil filter
+    assert sp.classify_items("ฟลัชชิ่งออยล์ +กรอง") == ["engine_filter", "engine_flush"]
+    assert sp.classify_items("ไส้กรอง") == [] and sp.classify_items("น้ำมันเกียร์+ไส้กรอง") == ["gearbox_oil"]   # alone / next to something else: not known
     assert sp.classify_items("ค่าแรงเช็คเบรค +จารบีล้อ") == ["wheel_grease"]
     assert sp.classify_items("เช็ควาล์ว") == ["valve_adjust"] and sp.classify_items("ตรวจเช็คระยะวาล์ว") == ["valve_adjust"]
     for part in ("เช็ควาล์วน้ำมันโซล่า", "เช็ควาล์วหม้อลมเบรค", "ตรวจสอบวาล์ว EGR", "เช็ควาล์วลม"):
@@ -719,3 +723,19 @@ def test_one_bill_line_can_be_several_jobs_and_the_shops_own_words():
     events = [{"vehicle_id": "t16", "event_date": "2026-11-10", "mileage": 396357, "source": "bill",
                "bill_line_items": [{"description": "เปลี่ยนน้ำมันเครื่อง, กรองเครื่อง (พร้อม Fushing Oil)"}, {"description": "ไส้กรองน้ำมันเครื่อง"}]}]
     assert sorted(h["item_key"] for h in sp.bill_hits(events)) == ["engine_filter", "engine_flush", "engine_oil"]
+
+
+
+def test_km_first_truck_rounds_follow_its_km_per_day_so_the_next_round_has_the_oil():
+    """#44 (owner, 13 Nov 2026): oil every 10,000 km, done 2 Oct, the truck runs ~118 km a day -> due about 26-27 Dec. The rounds used to be every 2
+    months (2 Dec, 2 Feb ...) so the next column was empty and the oil sat in February. Now the rounds are 10,000 km at the truck's pace."""
+    truck = {"id": VID, "odometer_broken": False}
+    readings = [{"kind": "odometer", "end_date": "2026-06-01", "km": 400_000}, {"kind": "odometer", "end_date": "2026-09-09", "km": 411_800}]   # 118 km/day
+    plan = sp.vehicle_plan(truck, group=S2, records=[rec("engine_oil", "2026-10-02"), rec("engine_filter", "2026-10-02"), rec("gearbox_oil", "2026-10-02")],
+                           readings=readings, overrides=[], today=date(2026, 11, 13), with_chart=True)
+    chart = plan["chart"]
+    first = date.fromisoformat(chart["columns"][1]["date"])
+    assert date(2026, 12, 20) <= first <= date(2026, 12, 30)                                  # ~85 days after 2 Oct, not 2 Dec
+    oil, filt, gear = _row(chart, "engine_oil"), _row(chart, "engine_filter"), _row(chart, "gearbox_oil")
+    assert oil["cells"][1] == "due" and filt["cells"][1] == "due" and oil["cells"][2] == "due"   # every round, starting with the next one
+    assert [i for i, c in enumerate(gear["cells"]) if c == "due"][:1] == [4]                     # 40,000 km = the 4th round
