@@ -2096,3 +2096,8 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
   .lc-table td:first-child { grid-column: 1 / -1; padding-top: 9px; }
   .lc-date, .lc-state { width: auto; } .lc-state { padding-bottom: 9px; }
 }
+
+/* big screens (owner, 13 Nov 2026: 2560 x 1440): the pages use more of the width -- 1120 px left half a 2560 screen empty.
+   Grids add columns on their own; forms keep their own widths. A 1920 screen is unchanged (below 2000 px of window). */
+@media (min-width: 2000px) { main { max-width: 1560px; } }
+@media (min-width: 2300px) { main { max-width: 1900px; } main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 2200px; } }
