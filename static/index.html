@@ -46,6 +46,7 @@
       <button id="navAccountsIn" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg><span>ลงข้อมูล / แนบไฟล์</span></button>
       <button id="navElectricity" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg><span>ค่าไฟฟ้า</span></button>
       <button id="navCashFuel" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16"/><path d="M3 21h13M7 8h5"/><path d="M15 9l3 2v7a1.5 1.5 0 0 0 3 0V8l-3-3"/></svg><span>น้ำมันเงินสด</span></button>
+      <button id="navPayables" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="M4 7l2-3h12l2 3"/><path d="M9 12h6M9 15h4"/></svg><span>เจ้าหนี้ร้านค้า</span></button>
       <button id="navAccounts" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span>งบกำไรขาดทุน</span></button>
     </nav>
   </div>
@@ -1001,6 +1002,16 @@
     <div id="usBody"></div>
   </section>
 
+  <!-- ============ เจ้าหนี้ร้านค้า: what each shop is owed, bills by shop, payments (payables.js) ============ -->
+  <section id="payablesView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">เจ้าหนี้ร้านค้า</h2>
+      <p class="muted small">บิลจากทุกส่วนของโปรแกรม รวมตามร้าน — ค้างจ่ายเท่าไร บิลไหนจ่ายแล้ว (ติ๊กบิลตามเช็คที่จ่าย)</p>
+    </div>
+    <p class="error" id="pyError" hidden></p>
+    <div id="pyBody"></div>
+  </section>
+
   <!-- ============ ใบอนุญาต · เอกสาร: licences, certificates, drivers' licences and their scans (licences.js) ============ -->
   <section id="licencesView" hidden>
     <div class="page-head">
@@ -1702,6 +1713,7 @@
 <script src="/static/iceorders.js"></script>
 <script src="/static/cashfuel.js"></script>
 <script src="/static/licences.js"></script>
+<script src="/static/payables.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/buy.js"></script>
 <script src="/static/manual.js"></script>

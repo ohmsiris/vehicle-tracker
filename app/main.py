@@ -2297,6 +2297,57 @@ def api_cash_fuel_line_delete(line_id: int, x_app_token: str = Header(default=""
     return _fuel_call(cash_fuel.delete_line, line_id)
 
 
+# --------------------------------------------------------------------------------------------- เจ้าหนี้ร้านค้า (13 Nov 2026)
+def _pay_call(fn, *args, **kwargs):
+    from app import payables
+    if not supabase.configured():
+        raise HTTPException(503, "ระบบยังไม่พร้อม")
+    try:
+        return fn(*args, **kwargs)
+    except payables.PayablesError as exc:
+        raise HTTPException(400, str(exc))
+    except supabase.SupabaseError:
+        logger.exception("payables")
+        raise HTTPException(502, "บันทึก / โหลดไม่สำเร็จ ลองใหม่อีกครั้ง")
+
+
+@app.get("/api/payables")
+def api_payables(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Every shop: what it is owed, its bills (wherever they were recorded) and its payments."""
+    from app import mgr, payables
+    _check_token(x_app_token, token)
+    return _pay_call(payables.load, mgr.today_th())
+
+
+@app.post("/api/payables/payments")
+def api_payables_pay(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """A payment to one shop (mum's cheque, a transfer, cash, or "paid before the app") and the bills it pays."""
+    from app import mgr, payables
+    _check_token(x_app_token, token)
+    shop = str(body.get("shop") or "").strip()
+    if not shop:
+        raise HTTPException(400, "ไม่ระบุร้าน")
+    return _pay_call(payables.add_payment, shop, body, _who(x_app_token or token), mgr.today_th())
+
+
+@app.delete("/api/payables/payments/{payment_id}")
+def api_payables_unpay(payment_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import payables
+    _check_token(x_app_token, token)
+    return _pay_call(payables.delete_payment, payment_id)
+
+
+@app.post("/api/payables/pays-now")
+def api_payables_pays_now(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """A shop paid in cash / by transfer on the day: its bills are never owed."""
+    from app import payables
+    _check_token(x_app_token, token)
+    shop = str(body.get("shop") or "").strip()
+    if not shop:
+        raise HTTPException(400, "ไม่ระบุร้าน")
+    return _pay_call(payables.set_pays_now, shop, bool(body.get("on")))
+
+
 # --------------------------------------------------------------------------------------------- ใบอนุญาต · เอกสาร (owner only, 12 Nov 2026)
 def _lic_call(fn, *args, **kwargs):
     from app import licences

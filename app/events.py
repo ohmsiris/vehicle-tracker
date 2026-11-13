@@ -352,6 +352,9 @@ def delete_event(event_id: str) -> None:
         raise EventNotFound()
     if rows[0]["source"] != "manual":
         raise InvalidEvent("ลบได้เฉพาะรายการที่กรอกเอง — บิลลบไม่ได้ แต่แก้ไขได้")
+    from app import payables
+    if payables.paid_by("truck", eid):
+        raise InvalidEvent("รายการนี้จ่ายแล้วในหน้าเจ้าหนี้ร้านค้า — ยกเลิกการจ่ายนั้นก่อน แล้วค่อยลบ")
     closed = supabase.select("repair_requests", {"select": "seq", "fixed_event_id": f"eq.{eid}", "order": "seq.asc"})
     if closed:
         raise InvalidEvent("รายการนี้ปิดงานซ่อมไว้ (" + ", ".join(f"#{r['seq']}" for r in closed) + ") ลบไม่ได้")

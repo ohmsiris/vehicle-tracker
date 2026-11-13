@@ -11,7 +11,7 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["users", "customers", "iceOrders", "cashFuel", "licences", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
+const FLEET_VIEWS = ["users", "customers", "iceOrders", "cashFuel", "licences", "payables", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 
 // ------------------------------------------------------------------ routing
 function route() {
@@ -22,6 +22,7 @@ function route() {
   if (h === "ice-orders" || h.startsWith("ice-orders/")) return openIceOrders(h.slice(11));
   if (h === "cash-fuel" || h.startsWith("cash-fuel/")) return openCashFuel(h.slice(10));
   if (h === "licences") return openLicences();
+  if (h === "payables" || h.startsWith("payables/")) return openPayables(h.slice(9));
   if (h === "roster") return openRoster();
   if (h === "employees") return openEmployees();
   if (h === "loans") return openLoans();

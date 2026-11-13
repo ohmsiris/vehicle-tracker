@@ -668,6 +668,9 @@ def machine_prices(machine_id: str) -> dict:
 def delete_bill(bill_id: str) -> None:
     _require()
     _uuid_or_none(bill_id, "บิล")
+    from app import payables
+    if payables.paid_by("purchase", bill_id):            # a paid bill: cancel the payment first, so nothing is paid twice
+        raise InvalidPurchase("บิลนี้จ่ายแล้วในหน้าเจ้าหนี้ร้านค้า — ยกเลิกการจ่ายนั้นก่อน แล้วค่อยลบบิล")
     atts = supabase.select_all("purchase_attachments", {"select": "storage_path", "bill_id": f"eq.{bill_id}", "order": "sort_order.asc"})
     lines = supabase.select_all("purchase_lines", {"select": "id", "bill_id": f"eq.{bill_id}", "order": "line_number.asc"})
     if lines:                                                       # what this bill put on the shelf comes off again

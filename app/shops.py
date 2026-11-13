@@ -387,6 +387,8 @@ def update(shop_id: str, data: dict) -> dict:
         if not any(_norm(a) == _norm(old) for a in aliases) and _norm(old) != _norm(values["name"]):
             values["aliases"] = [*aliases, old]
         supabase.update("repair_requests", {"shop": f"eq.{old}"}, {"shop": values["name"]})
+        from app import payables
+        payables.rename_shop(old, values["name"])                # เจ้าหนี้ร้านค้า: the payments follow the name
         try:
             supabase.update("mgr_tickets", {"place": f"eq.{old}"}, {"place": values["name"]})
         except supabase.SupabaseError:

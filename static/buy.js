@@ -78,9 +78,9 @@ function renderPurchases() {
     : [el("p", { class: "muted empty", text: bu.bills.length ? "ไม่พบบิลที่ตรงกับตัวกรอง" : "ยังไม่มีบิลซื้อของ — กด “+ บิลซื้อของใหม่”" })]));
 }
 
-async function openPurchaseBill(id) {
+async function openPurchaseBill(id, errId = "buError") {
   let b;
-  try { b = await api(`/api/purchases/${id}`); } catch (err) { showErr("buError", err.message); return; }
+  try { b = await api(`/api/purchases/${id}`); } catch (err) { showErr(errId, err.message); return; }
   const files = b.attachments.map((a, i) => el("button", { class: "btn small", type: "button", onclick: () => buView(a.url, a.mime_type, `${b.vendor || "บิล"} · ${a.mime_type === "application/pdf" ? "ไฟล์" : "รูป"} ${i + 1}`), text: a.mime_type === "application/pdf" ? `📄 ไฟล์ ${i + 1}` : `🧾 รูป ${i + 1}` }));
   const vat = (BU_VAT.find(([k]) => k === b.vat_mode) || [, ""])[1];
   buOpenDialog(`${b.vendor || "ไม่ระบุร้าน"} · ${beDate(b.bill_date)}`, [
