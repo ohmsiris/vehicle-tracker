@@ -44,12 +44,15 @@ NAMED = [("ปัญจบวร", PANJA), ("สระบุรีอะไห�
 
 def payee(shop: Optional[str], printed: Optional[str], vat: Optional[bool] = None) -> Optional[str]:
     """Which of a shop's companies a bill is from (SPLIT / NAMED), by the name printed on it; other shops are themselves."""
-    text = "".join(str(printed or "").split()) + "".join(str(shop or "").split())
-    named = next((name for word, name in NAMED if word in text), None)
+    on_bill = "".join(str(printed or "").split())
+    named = next((name for word, name in NAMED if word in on_bill), None)          # the name printed on the bill first
     if named:
         return named
-    if shop and "ปัญจบวร" in shop and vat is not None:
+    in_shop = [name for word, name in NAMED if word in "".join(str(shop or "").split())]
+    if len(in_shop) > 1 and vat is not None:                                       # the two names kept as one shop: by the VAT
         return PANJA if vat else SRB_PARTS
+    if in_shop:
+        return in_shop[0]
     if shop not in SPLIT:
         return shop
     text = "".join(str(printed or "").split())
