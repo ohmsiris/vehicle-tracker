@@ -83,7 +83,6 @@ ITEMS = {
     "air_filter": ("กรองอากาศ", "เครื่องยนต์"),
     "coolant": ("น้ำยาหล่อเย็น", "เครื่องยนต์"),
     "valve_adjust": ("ปรับตั้งวาล์ว", "เครื่องยนต์"),
-    "valve_cover_seal": ("ประเก็นฝาวาล์ว + ซีลฝาครอบหัวฉีด", "เครื่องยนต์"),
     "injector_washers": ("แหวนรองหัวฉีด", "เครื่องยนต์"),
     "intake_manifold": ("ล้างท่อร่วมไอดี", "เครื่องยนต์"),
     "engine_flush": ("ฟลัชชิ่งน้ำมันเครื่อง", "เครื่องยนต์"),
@@ -101,7 +100,7 @@ LABEL_FOR = {(SMALL, "wheel_grease"): "ตรวจเช็คลูกปื�
 
 # The category each item gets when it is recorded as a repair (the names of the categories table).
 ITEM_CATEGORY = {key: "ไส้กรองและของเหลว" for key in ITEMS}
-ITEM_CATEGORY.update(valve_adjust="เครื่องยนต์", valve_cover_seal="เครื่องยนต์", injector_washers="เครื่องยนต์", intake_manifold="เครื่องยนต์",
+ITEM_CATEGORY.update(valve_adjust="เครื่องยนต์", injector_washers="เครื่องยนต์", intake_manifold="เครื่องยนต์",
                      chassis_check="ช่วงล่าง")
 
 # rule set -> key -> km. The dealership's rules as the owner settled them (see Maintenance_Plan.xlsx):
@@ -130,8 +129,7 @@ DEFAULT_KM = {
         "fuel_filter": 20_000,             # with the water trap
         "air_filter": 80_000,
         "coolant": 40_000,
-        "valve_adjust": 80_000,
-        "valve_cover_seal": 80_000,
+        "valve_adjust": 80_000,            # the valve-cover gasket + injector seals go with it (owner, 13 Nov 2026: no item of their own)
         "gearbox_oil": 40_000,
         "diff_oil": 40_000,
         "brake_clutch_fluid": 40_000,
@@ -256,7 +254,6 @@ _LINE_RULES = [
     ("wheel_grease", r"จา(?:ร|ระ)บี\s*(?:ลูกปืน)?ล้อ"),
     ("valve_adjust", r"(?:ปรับ)?ตั้งวาล์ว|ปรับวาล์ว|(?:เช็[คก]|ตรวจ(?:เช็[คก]|สอบ)?)\s*(?:ระยะ(?:ห่าง)?\s*)?วาล์ว"
                      r"(?!\s*(?:น้ำ|โซ|ดีเซล|ลม|เบร|หม้อ|อีจี|egr|EGR|แอร์|PCV|pcv|ทางเดียว|กันกลับ|ระบาย|ไฟ|ยาง))"),
-    ("valve_cover_seal", r"(?:ปะ|ประ)เก็นฝา(?:วาล์ว|ครอบวาล์ว)|ซีลฝาครอบหัวฉีด"),
 ]
 _COMPILED = [(key, re.compile(_PREFIX + pat)) for key, pat in _LINE_RULES]
 # "อัดจารบี" on its own (no "ล้อ"): the mechanic greases everything in one go, so it counts as the wheel-bearing grease.

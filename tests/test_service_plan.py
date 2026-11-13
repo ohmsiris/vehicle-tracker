@@ -32,7 +32,7 @@ def test_the_dealership_km_for_small_and_big():
         assert small[key] == 40_000 and big[key] == 40_000
     assert small["valve_adjust"] == 100_000 and big["valve_adjust"] == 80_000      # small: only the Isuzu 2.5 gets it (ONLY_FOR)
     assert small["injector_washers"] == 100_000 and "injector_washers" not in big
-    assert big["valve_cover_seal"] == 80_000 and "valve_cover_seal" not in small
+    assert "valve_cover_seal" not in big and "valve_cover_seal" not in small        # done with the valve adjustment (owner, 13 Nov 2026)
 
 
 def test_every_default_item_exists():
@@ -93,7 +93,7 @@ def test_saved_group_rows_win_over_the_defaults():
     ("น้ำมันเบรคใหญ่", "brake_clutch_fluid"), ("น้ำมันเบรค + คลัช", "brake_clutch_fluid"), ("น้ำมันคลัช", "brake_clutch_fluid"),
     ("น้ำมันพาวเวอร์", "power_steering"), ("น้ำมันเพาเวอร์", "power_steering"),
     ("น้ำยาหล่อเย็นหม้อน้ำ", "coolant"), ("น้ำยาหม้อน้ำ", "coolant"), ("น้ำยาหล่อเย็น(สูตรผสมน้ำพร้อมใช้) 5 ลิตร(ตรีเพชร)(ใหม่)-BP", "coolant"),
-    ("จาระบีล้อ", "wheel_grease"), ("ตั้งวาล์ว", "valve_adjust"), ("ประเก็นฝาวาล์ว", "valve_cover_seal"), ("ซีลฝาครอบหัวฉีด", "valve_cover_seal"),
+    ("จาระบีล้อ", "wheel_grease"), ("ตั้งวาล์ว", "valve_adjust"), 
     ("แหวนรองหัวฉีด", "injector_washers"),
 ])
 def test_bill_lines_that_are_a_service(text, key):
@@ -753,3 +753,10 @@ def test_every_round_is_an_oil_change_and_a_lone_late_item_waits_for_it():
     fuel = _row(chart, "fuel_filter")
     assert fuel["cells"][1] == "overdue"                               # late: it waits for the oil change, red
     assert {"engine_oil", "engine_filter", "fuel_filter"} <= set(plan["next_visit"]) and plan["next_visit_date"] == chart["columns"][1]["date"]
+
+
+def test_the_valve_cover_gasket_is_not_an_item_of_its_own():
+    """Owner, 13 Nov 2026: it goes with the valve adjustment -- keep it simple."""
+    assert "valve_cover_seal" not in sp.ITEMS
+    assert sp.classify_items("ปะเก็นฝาครอบวาล์ว 4JJ3(อีซูซุ)(ใหม่)-AC") == []          # a part, not a job
+    assert sp.classify_items("ปรับตั้งวาล์ว4J**") == ["valve_adjust"]
