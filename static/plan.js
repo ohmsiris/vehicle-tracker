@@ -629,56 +629,63 @@ async function savePlanDialog() {
 }
 
 // ================================================================== the message to the shop (owner, 13 Nov 2026)
-// Tick what the truck needs; the text the owner sends the shop on LINE is written as they write it ("รายการเบอร์ 16 / 1ฒถ 2091 / น้ำมันเครื่อง
-// กรองเครื่อง / ... / เช็คลูกปืนล้อ / เช็คช่วงล่าง / เช็คต้องฟลัชชิ่งไหม"), then copied. What is due (and, on a truck with the whole history in, what was
-// never done) is ticked to start with; nothing is saved.
-const PL_SHOP_LINES = [                      // one line each; a pair on one line when both are ticked, as the owner writes it
-  [["engine_oil", "น้ำมันเครื่อง"], ["engine_filter", "กรองเครื่อง"]],
-  [["fuel_filter", "กรองโซล่า"], ["air_filter", "กรองอากาศ"]],
-  [["gearbox_oil", "น้ำมันเกียร์"], ["diff_oil", "เฟืองท้าย"]],
-  [["brake_clutch_fluid", "น้ำมันเบรก"], ["power_steering", "พาวเวอร์"]],
-  [["coolant", "น้ำยาหล่อเย็น"]],
-  [["injector_washers", "เปลี่ยนแหวนรองหัวฉีด"]],
-  [["valve_adjust", "ตั้งวาล์ว"]],
-  [["valve_cover_seal", "เปลี่ยนประเก็นฝาวาล์ว"]],
-  [["intake_manifold", "ล้างท่อร่วมไอดี"]],
+// Tick what the truck needs; the text the owner sends the shop on LINE is written for them -- the truck, the jobs one per line by their
+// proper names (owner: "don't take my format completely": น้ำมันพาวเวอร์, not พาวเวอร์), the checks, and "เช็คต้องฟลัชชิ่งไหม" last -- then
+// copied. The next oil change and what goes with it (and, on a truck with the whole history in, what was never done) start ticked; only
+// the truck's own jobs are listed; nothing is saved. กรองโซล่า and กรองดักน้ำ are two lines, both from the plan's one fuel-filter item.
+const PL_SHOP = [               // [tick id, the plan item it follows, the words; part: job / check / ask]
+  ["engine_oil", "engine_oil", "น้ำมันเครื่อง", "job"],
+  ["engine_filter", "engine_filter", "กรองน้ำมันเครื่อง", "job"],
+  ["fuel_filter", "fuel_filter", "กรองโซล่า", "job"],
+  ["fuel_trap", "fuel_filter", "กรองดักน้ำ", "job"],
+  ["air_filter", "air_filter", "กรองอากาศ", "job"],
+  ["gearbox_oil", "gearbox_oil", "น้ำมันเกียร์", "job"],
+  ["diff_oil", "diff_oil", "น้ำมันเฟืองท้าย", "job"],
+  ["brake_clutch_fluid", "brake_clutch_fluid", "น้ำมันเบรก / คลัตช์", "job"],
+  ["power_steering", "power_steering", "น้ำมันพาวเวอร์", "job"],
+  ["coolant", "coolant", "น้ำยาหล่อเย็น", "job"],
+  ["injector_washers", "injector_washers", "เปลี่ยนแหวนรองหัวฉีด", "job"],
+  ["valve_adjust", "valve_adjust", "ปรับตั้งวาล์ว", "job"],
+  ["valve_cover_seal", "valve_cover_seal", "เปลี่ยนประเก็นฝาวาล์ว + ซีลฝาครอบหัวฉีด", "job"],
+  ["intake_manifold", "intake_manifold", "ล้างท่อร่วมไอดี", "job"],
+  ["wheel_grease", "wheel_grease", null, "check"],
+  ["chassis_check", "chassis_check", "เช็คช่วงล่าง", "check"],
+  ["engine_flush", "engine_flush", "เช็คต้องฟลัชชิ่งไหม", "ask"],
 ];
-const PL_SHOP_CHECKS = [["wheel_grease", null], ["chassis_check", "เช็คช่วงล่าง"]];     // the second paragraph
-const PL_SHOP_ASK = [["engine_flush", "เช็คต้องฟลัชชิ่งไหม"]];                            // the last line: the shop decides
 
 function plShopTitle(v) {
   const num = v.vehicle_number && v.vehicle_number !== v.plate_number ? v.vehicle_number : null;
   return [num ? `รายการเบอร์ ${num}` : `รายการ ${v.nickname || v.plate_number || ""}`.trim(), num || v.nickname ? v.plate_number : null].filter(Boolean).join("\n");
 }
 
+function plShopWords(v, row) {
+  if (row[1] !== "wheel_grease") return row[2];
+  const g = ((v.items || []).find((i) => i.key === "wheel_grease") || {}).label || "";
+  return /ลูกปืน/.test(g) ? "ตรวจเช็คลูกปืนล้อ" : "อัดจารบีทุกจุด";
+}
+
 function plShopText(v, picked, extra) {
-  const items = v.items || [];
-  const grease = (items.find((i) => i.key === "wheel_grease") || {}).label || "";
-  const name = (key, text) => (key === "wheel_grease" ? (/ลูกปืน/.test(grease) ? "เช็คลูกปืนล้อ" : "อัดจารบีทุกจุด") : text);
-  const lines = PL_SHOP_LINES.map((pair) => pair.filter(([k]) => picked.has(k)).map(([k, t]) => name(k, t)).join(" ")).filter(Boolean);
-  const checks = PL_SHOP_CHECKS.filter(([k]) => picked.has(k)).map(([k, t]) => name(k, t));
-  const ask = PL_SHOP_ASK.filter(([k]) => picked.has(k)).map(([, t]) => t);
+  const part = (p) => PL_SHOP.filter((r) => r[3] === p && picked.has(r[0])).map((r) => plShopWords(v, r));
   const more = String(extra || "").split("\n").map((x) => x.trim()).filter(Boolean);
-  return [plShopTitle(v), lines.join("\n"), [...checks, ...more].join("\n"), ask.join("\n")].filter(Boolean).join("\n\n");
+  return [plShopTitle(v), part("job").join("\n"), [...part("check"), ...more].join("\n"), part("ask").join("\n")].filter(Boolean).join("\n\n");
 }
 
 function openShopText(v) {
   const items = v.items || [];
-  const state = Object.fromEntries(items.map((i) => [i.key, i.state]));
-  const due = (k) => plNeedsAttention({ state: state[k] }) || (v.history_current_on && state[k] === "unknown");
+  const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+  const due = (k) => plNeedsAttention({ state: (byKey[k] || {}).state }) || (v.history_current_on && (byKey[k] || {}).state === "unknown");
   const has = new Set(items.map((i) => i.key));                           // only this truck's own jobs (a big truck has no แหวนรองหัวฉีด ...)
-  const all = [...PL_SHOP_LINES.flat(), ...PL_SHOP_CHECKS, ...PL_SHOP_ASK].filter(([k]) => !has.size || has.has(k));
+  const rows = PL_SHOP.filter((r) => !has.size || has.has(r[1]));
   const visit = new Set(v.next_visit || []);                                  // the next oil change and everything that goes with it
-  const picked = new Set(all.map(([k]) => k).filter((k) => (items.length ? visit.has(k) || due(k) : false)));
+  const picked = new Set(rows.filter((r) => items.length && (visit.has(r[1]) || due(r[1]))).map((r) => r[0]));
   pl.dlg = { kind: "shoptext", vehicle: v, draft: {} };
   let extra = "";
   const out = el("textarea", { class: "pl-shoptext", rows: 14, "aria-label": "ข้อความส่งอู่" });
   const redo = () => { out.value = plShopText(v, picked, extra); };
-  const box = ([k, t]) => {
-    const i = items.find((x) => x.key === k);
-    const label = k === "wheel_grease" ? (i && /ลูกปืน/.test(i.label) ? "เช็คลูกปืนล้อ" : "อัดจารบีทุกจุด") : t;
-    const cb = el("input", { type: "checkbox", checked: picked.has(k), onchange: (e) => { if (e.target.checked) picked.add(k); else picked.delete(k); redo(); } });
-    return el("label", { class: "pl-pick" }, cb, el("span", { text: label }),
+  const box = (r) => {
+    const i = byKey[r[1]];
+    const cb = el("input", { type: "checkbox", checked: picked.has(r[0]), onchange: (e) => { if (e.target.checked) picked.add(r[0]); else picked.delete(r[0]); redo(); } });
+    return el("label", { class: "pl-pick" }, cb, el("span", { text: plShopWords(v, r) }),
       i && (plNeedsAttention(i) || (v.history_current_on && i.state === "unknown"))
         ? el("span", { class: `badge ${PL_BADGE[i.state] || ""}`, text: i.state === "unknown" ? "ไม่เคยทำ" : PL_STATE_TEXT[i.state] }) : null);
   };
@@ -689,7 +696,7 @@ function openShopText(v) {
   fill($("pdlgBody"),
     el("p", { class: "muted small", text: `${plLabel(v)}${v.next_visit_date ? ` — รอบเปลี่ยนน้ำมันเครื่องถัดไป ${beDate(v.next_visit_date)} ติ๊กไว้ให้แล้ว` : ""} — ติ๊กรายการ ข้อความด้านล่างจะเขียนให้ แล้วกดคัดลอกไปวางใน LINE ของอู่ (ไม่ได้บันทึกอะไร)` }),
     el("div", { class: "pl-shopgrid" },
-      el("div", { class: "pl-picks" }, ...all.map(box),
+      el("div", { class: "pl-picks" }, ...rows.map(box),
         el("label", { class: "lc-field" }, el("span", { class: "small muted", text: "เพิ่มเติม (บรรทัดละรายการ)" }),
           el("textarea", { rows: 3, placeholder: "เช่น เช็คแอร์", oninput: (e) => { extra = e.target.value; redo(); } }))),
       el("div", { class: "pl-shopout" }, out, copy)));
