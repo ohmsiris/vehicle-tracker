@@ -240,10 +240,11 @@ function renderEmployee() {
     el("section", { class: "card tkcard" }, el("h3", { text: "เงินกู้ / หักเงินเดือน" }), el("div", { id: "empLoansBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     el("section", { class: "card tkcard" }, el("h3", { text: "ใบเตือน / บันทึกข้อความ" }), el("div", { id: "empDocsBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     /ขับรถ/.test(e.position || "") ? el("section", { class: "card tkcard" }, el("h3", { text: "ใบขับขี่" }), el("div", { id: "empLicBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))) : null,
-    soon("ตรวจสลิปเงินเดือน", "อ่านสลิปแล้วตรวจกับค่าแรง เงินกู้ และเงินสะสมของคนนี้"));
+    el("section", { class: "card tkcard emp-pay" }, el("h3", { text: "เงินเดือนรายเดือน" }), el("div", { id: "empPayBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))));
   renderEmployeeLoans(e);
   renderEmployeeDocs(e);
   renderEmployeeRates(e);
+  if (typeof renderEmployeePay === "function") renderEmployeePay(e);
   if (typeof lcEmployeeBox === "function") lcEmployeeBox(e);
 }
 

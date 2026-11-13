@@ -666,6 +666,14 @@ def api_employees(x_app_token: str = Header(default=""), token: str = Query(defa
     return _hr_call(x_hr_pin, employees.list_employees)
 
 
+@app.get("/api/employees/{employee_id}/pay")
+def api_employee_pay(employee_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    """เงินเดือนรายเดือน: this person's pay month by month, from HQ's payroll sheets (app/payroll_people.py)."""
+    from app import payroll_people
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, payroll_people.for_employee, employee_id)
+
+
 @app.get("/api/employees/{employee_id}/rates")
 def api_employee_rates(employee_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
     _check_token(x_app_token, token)
