@@ -79,3 +79,12 @@ def test_one_shop_two_companies_each_with_its_own_invoices():
     assert pb.payee("โชคพัฒนา", "บริษัท โชคพัฒนาไทร์ เซอร์วิส จำกัด").startswith("โชคพัฒนา ดาวเรือง")
     assert pb.payee("โชคพัฒนา", None) == "โชคพัฒนา (ไม่ระบุสาขา)"
     assert pb.payee("วิศวภัณฑ์", "anything") == "วิศวภัณฑ์"
+
+
+def test_one_shop_two_names_vat_and_no_vat():
+    """Owner, 13 Nov 2026: ปัญจบวร (VAT) and สระบุรีอะไหล่ (no VAT) are the same shop with different bills -- two payees, every spelling one."""
+    assert pb.payee("หจก. ปัญจบวรอะไหล่", "หจก. ปัญจบวรอะไหล่") == pb.PANJA
+    assert pb.payee("ห้างหุ้นส่วนจำกัด ปัญจบวร อะไหล่", None) == pb.PANJA
+    assert pb.payee("ร้าน สระบุรี อะไหล่", "ร้าน สระบุรี อะไหล่") == pb.SRB_PARTS
+    assert pb.payee("ปัญจบวร / สระบุรีอะไหล่", None, vat=False) == pb.SRB_PARTS     # both names in one shop: the earlier word wins
+    assert pb.payee("หจก. สระบุรีวิบูลย์เจริญการไฟฟ้า", None) == "หจก. สระบุรีวิบูลย์เจริญการไฟฟ้า"   # not สระบุรีอะไหล่

@@ -36,8 +36,20 @@ SPLIT = {"โชคพัฒนา": [("ไทร์", "โชคพัฒนา
                        ("ปากเพรียว", "โชคพัฒนา ปากเพรียว (โชคพัฒนาสระบุรี เซอร์วิส)"), ("สระบุรี", "โชคพัฒนา ปากเพรียว (โชคพัฒนาสระบุรี เซอร์วิส)")]}
 
 
-def payee(shop: Optional[str], printed: Optional[str]) -> Optional[str]:
-    """Which of a shop's companies a bill is from (SPLIT), by the name printed on it; other shops are themselves."""
+# One shop that bills under two names (owner, 13 Nov 2026): หจก. ปัญจบวรอะไหล่ (with VAT) and สระบุรีอะไหล่ (no VAT) -- each its own
+# invoices and its own cheque. Every spelling of each name is one payee; a bill that says neither but is from this shop goes by its VAT.
+PANJA, SRB_PARTS = "หจก. ปัญจบวรอะไหล่ (มี VAT)", "สระบุรีอะไหล่ (ไม่มี VAT)"
+NAMED = [("ปัญจบวร", PANJA), ("สระบุรีอะไหล่", SRB_PARTS)]
+
+
+def payee(shop: Optional[str], printed: Optional[str], vat: Optional[bool] = None) -> Optional[str]:
+    """Which of a shop's companies a bill is from (SPLIT / NAMED), by the name printed on it; other shops are themselves."""
+    text = "".join(str(printed or "").split()) + "".join(str(shop or "").split())
+    named = next((name for word, name in NAMED if word in text), None)
+    if named:
+        return named
+    if shop and "ปัญจบวร" in shop and vat is not None:
+        return PANJA if vat else SRB_PARTS
     if shop not in SPLIT:
         return shop
     text = "".join(str(printed or "").split())
@@ -168,8 +180,9 @@ def _bills() -> list[dict]:
         b = truck_bill(e, sums.get(e["id"], 0.0), vehicles.get(e["vehicle_id"]), name)
         if b:
             out.append(b)
-    for p in supabase.select_all("purchase_bills", {"select": "id,vendor_id,vendor_name,bill_date,bill_no,branch,total,purpose,notes", "order": "id.asc"}):
-        name = payee(by_id.get(p.get("vendor_id")) or shop_of(p.get("vendor_name")), p.get("vendor_name"))
+    for p in supabase.select_all("purchase_bills", {"select": "id,vendor_id,vendor_name,bill_date,bill_no,branch,total,purpose,notes,vat_mode", "order": "id.asc"}):
+        name = payee(by_id.get(p.get("vendor_id")) or shop_of(p.get("vendor_name")), p.get("vendor_name"),
+                     (p.get("vat_mode") or "none") != "none")
         b = purchase_bill(p, name)
         if b:
             out.append(b)
