@@ -637,6 +637,16 @@ def _km_months(km: Optional[float], kmpd: Optional[float], cap: Optional[float])
     return min(m, cap) if cap else m
 
 
+def chart_start(statuses: list[dict]) -> Optional[date]:
+    """Where the chart counts from: the last oil change when it is known (every visit is an oil change -- owner, 13 Nov 2026),
+    else the latest thing done."""
+    oil = next((s for s in statuses if s["key"] == "engine_oil"), None)
+    if oil and oil.get("last_date") and oil.get("due_date"):
+        return parse_date(oil["last_date"])
+    dated = [parse_date(s["last_date"]) for s in statuses if s["last_date"]]
+    return max(dated) if dated else None
+
+
 def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odometer: Optional[int], today: date,
                 kmpd: Optional[float] = None) -> Optional[dict]:
     """The Isuzu-style chart for one truck. Columns: the latest event (what it did), then the next rounds, one base
@@ -647,16 +657,27 @@ def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odom
     KM FIRST (owner, 13 Nov 2026): when the truck's km per day is known from real readings (`kmpd`), the due dates come from km, so the
     rounds do too -- one base step of km at the truck's pace (10,000 km at 118 km/day = every 85 days, not every 2 months), never longer than
     the time limit -- and each item repeats every its-own km at that pace. Without it (no readings, broken odometer) the group's months.
-    An item falls in the first round that reaches its due date, with a few days' grace (a quarter of a round)."""
-    dated = [parse_date(s["last_date"]) for s in statuses if s["last_date"]]
-    no_history = not dated
-    t0 = max(dated) if dated else today
+    An item falls in the first round that reaches its due date, with a few days' grace (a quarter of a round).
+    EVERY ROUND IS AN OIL CHANGE (owner, 13 Nov 2026): when the oil change is known, the rounds are its due date and every step after it, so
+    nothing stands on its own -- an item that falls due between two oil changes goes with the next one; if that makes it late it is a red
+    dot ('overdue': late, done with that oil change -- better late than a trip to the shop for one item). The oil date is never moved for
+    it. After it is done at a round the item counts again from that round."""
+    start = chart_start(statuses)
+    no_history = start is None
+    t0 = start or today
+    oil = next((s for s in statuses if s["key"] == "engine_oil"), None)
+    oil_due = parse_date(oil["due_date"]) if oil and oil.get("last_date") and oil.get("due_date") else None
     step_cap = (group["step_km"] / CAP_STEP_KM[group["rule_set"]] * CAP_MONTHS_PER_STEP) if group.get("rule_set") in CAP_STEP_KM and group.get("step_km") else None
     km_months = _km_months(group.get("step_km"), kmpd, step_cap)
     months = km_months or group_months(group)
     same_round = max(SAME_EVENT_DAYS, int(months * DAYS_PER_MONTH / 4))      # a round is a few weeks of work (oil on the 22nd, gear oil on the 28th): a quarter of the step counts as one
     rounds = CHART_ROUNDS.get(group["rule_set"], 8)
-    visits = [add_months_f(t0, n * months) for n in range(1, rounds + 1)]
+    if oil_due:
+        first = max(oil_due, today)                       # an oil change already late is the next round, today
+        shift = first - add_months_f(t0, months)          # the steps as before, moved so the first round is the oil change itself
+        visits = [add_months_f(t0, n * months) + shift for n in range(1, rounds + 1)]
+    else:
+        visits = [add_months_f(t0, n * months) for n in range(1, rounds + 1)]
     columns = [{"n": 0, "label": "ตอนนี้ (ไม่ทราบประวัติ)" if no_history else "ครั้งล่าสุด", "date": t0.isoformat(), "km": anchor_odometer}]
     for n, v in enumerate(visits, 1):
         columns.append({"n": n, "label": "ครั้งถัดไป" if n == 1 else f"{n} ครั้งถัดไป", "date": v.isoformat(),
@@ -684,9 +705,10 @@ def build_chart(group: dict, plan: list[dict], statuses: list[dict], anchor_odom
             grace = timedelta(days=same_round)
             while due - grace <= visits[-1]:
                 n = next(i for i, v in enumerate(visits, 1) if v >= due - grace)
+                late = due < today or (oil_due is not None and due < visits[n - 1] - grace)      # waits for the oil change: late
                 if cells[n] is None:
-                    cells[n] = "overdue" if first and due < today else "due"
-                due, first = add_months_f(due, every), False
+                    cells[n] = "overdue" if late else "due"
+                due, first = add_months_f(visits[n - 1] if oil_due else due, every), False        # done at that oil change: counts from it
         rows.append({"key": s["key"], "label": s["label"], "last_date": s["last_date"], "last_source": s["last_source"], "state": s["state"],
                      "due_date": s["due_date"], "interval_km": s["interval_km"], "interval_months": s["interval_months"], "cells": cells})
     return {"columns": columns, "rows": rows, "no_history": no_history}
@@ -717,16 +739,19 @@ def vehicle_plan(vehicle: dict, *, group: Optional[dict], records: list[dict], r
     out = {"vehicle_id": vehicle["id"], "group": ({**group, "months": group_months(group)} if group else None), "km_per_day": est,
            "odometer": ({"date": odo["date"].isoformat(), "km": odo["km"]} if odo else None), "km_first": km_first, "odometer_anomaly": anomaly,
            "items": items, "counts": counts, "worst": worst, "has_plan": bool(plan), "soon_days": soon_days}
+    anchor = None
+    if statuses:
+        t0 = chart_start(statuses)
+        if t0:
+            anchor = next((r["odometer_km"] for r in records if r.get("odometer_km") is not None and parse_date(r.get("done_date")) == t0), None)
+        elif odo:
+            anchor = odo["km"]                          # no history: the km columns count up from the latest reading
+    chart = build_chart(group, plan, statuses, anchor, today, measured if km_first else None) if plan else None
+    # the next oil change and what goes with it (the message to the shop starts with these ticked -- never a trip for one item)
+    out["next_visit"] = [r["key"] for r in chart["rows"] if r["cells"][1] in ("due", "overdue")] if chart and not chart["no_history"] else []
+    out["next_visit_date"] = chart["columns"][1]["date"] if chart and len(chart["columns"]) > 1 else None
     if with_chart:
-        anchor = None
-        if statuses:
-            dated = [parse_date(s["last_date"]) for s in statuses if s["last_date"]]
-            if dated:
-                t0 = max(dated)
-                anchor = next((r["odometer_km"] for r in records if r.get("odometer_km") is not None and parse_date(r.get("done_date")) == t0), None)
-            elif odo:
-                anchor = odo["km"]                      # no history: the km columns count up from the latest reading
-        out["chart"] = build_chart(group, plan, statuses, anchor, today, measured if km_first else None) if plan else None
+        out["chart"] = chart
     return out
 
 

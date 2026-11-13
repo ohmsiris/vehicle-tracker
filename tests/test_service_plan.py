@@ -314,8 +314,8 @@ def test_an_item_already_past_due_shows_overdue_in_the_next_round():
     chart = _chart(S2, [rec("engine_oil", "2026-10-22"), rec("coolant", "2026-01-01")])
     row = _row(chart, "coolant")
     assert row["cells"][1] == "overdue" and row["state"] == "overdue"
-    # then every 8 months after it was due (1 May 2027, 1 Jan 2028): each falls in the round a few days before it (22 Apr, 22 Dec), not weeks after
-    assert [i for i, c in enumerate(row["cells"]) if c == "due"] == [3, 7]
+    # done late with that oil change (owner, 13 Nov 2026: it waits for the oil change), it counts again from there: every 8 months = 4 rounds later
+    assert [i for i, c in enumerate(row["cells"]) if c == "due"] == [5, 9]
 
 
 def test_things_done_within_a_few_days_count_as_the_same_event():
@@ -739,3 +739,17 @@ def test_km_first_truck_rounds_follow_its_km_per_day_so_the_next_round_has_the_o
     oil, filt, gear = _row(chart, "engine_oil"), _row(chart, "engine_filter"), _row(chart, "gearbox_oil")
     assert oil["cells"][1] == "due" and filt["cells"][1] == "due" and oil["cells"][2] == "due"   # every round, starting with the next one
     assert [i for i, c in enumerate(gear["cells"]) if c == "due"][:1] == [4]                     # 40,000 km = the 4th round
+
+
+def test_every_round_is_an_oil_change_and_a_lone_late_item_waits_for_it():
+    """Owner, 13 Nov 2026 (option B): keep the oil date; an item due between oil changes goes with the next one, a red dot if that is late,
+    so the message to the shop is never one item."""
+    recs = [rec("engine_oil", "2026-10-22"), rec("engine_filter", "2026-10-22"), rec("fuel_filter", "2026-03-01")]
+    plan = sp.vehicle_plan(TRUCK, group=S2, records=recs, readings=[], overrides=[], today=TODAY, with_chart=True)
+    chart = plan["chart"]
+    oil = _row(chart, "engine_oil")
+    assert chart["columns"][1]["date"] == next(i["due_date"] for i in plan["items"] if i["key"] == "engine_oil")   # round 1 = the oil change
+    assert oil["cells"][1] == "due"
+    fuel = _row(chart, "fuel_filter")
+    assert fuel["cells"][1] == "overdue"                               # late: it waits for the oil change, red
+    assert {"engine_oil", "engine_filter", "fuel_filter"} <= set(plan["next_visit"]) and plan["next_visit_date"] == chart["columns"][1]["date"]

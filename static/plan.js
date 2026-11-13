@@ -366,7 +366,7 @@ const plRefreshTruck = () => (tk.v ? renderTruckPlan(tk.v, tk.editing) : null);
 
 function truckPlanNodes(d) {
   const v = { id: d.vehicle.id, plate_number: d.vehicle.plate_number, vehicle_number: d.vehicle.vehicle_number, nickname: d.vehicle.nickname,
-    history_current_on: d.vehicle.history_current_on, items: d.items };
+    history_current_on: d.vehicle.history_current_on, items: d.items, next_visit: d.next_visit, next_visit_date: d.next_visit_date };
   const head = el("div", { class: "mchead" }, el("h3", { class: "section-title", text: "แผนซ่อมบำรุง" }), el("span", { class: "grow" }),
     el("button", { class: "btn small", type: "button", text: "ข้อความส่งอู่", onclick: () => openShopText(v) }),
     d.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, []) }) : null,
@@ -421,7 +421,7 @@ async function plSetOdometerBroken(id, on, box) {
 }
 
 // The Isuzu-style chart: columns = the latest event, then the next rounds; rows = the items.
-const PL_CELL = { done: ["✓", "pl-done", "ทำไปแล้วในครั้งล่าสุด"], due: ["●", "pl-due", "ถึงกำหนดในรอบนี้"], overdue: ["●", "pl-over", "เลยกำหนดแล้ว ควรทำในครั้งถัดไป"], unknown: ["?", "pl-unk", "ไม่ทราบว่าเคยทำเมื่อไหร่ ควรตรวจ"] };
+const PL_CELL = { done: ["✓", "pl-done", "ทำไปแล้วในครั้งล่าสุด"], due: ["●", "pl-due", "ถึงกำหนดในรอบนี้"], overdue: ["●", "pl-over", "เลยกำหนด — ทำพร้อมเปลี่ยนน้ำมันเครื่องรอบนี้ (ช้ากว่ากำหนด)"], unknown: ["?", "pl-unk", "ไม่ทราบว่าเคยทำเมื่อไหร่ ควรตรวจ"] };
 
 function planChart(d) {
   const c = d.chart;
@@ -451,9 +451,9 @@ function planChart(d) {
     el("div", { class: "pl-legend small muted" },
       el("span", {}, el("b", { class: "pl-done", text: "✓" }), " ทำในครั้งล่าสุด"),
       el("span", {}, el("b", { class: "pl-due", text: "●" }), " ถึงกำหนดในรอบนั้น"),
-      el("span", {}, el("b", { class: "pl-over", text: "●" }), " เลยกำหนดแล้ว"),
+      el("span", {}, el("b", { class: "pl-over", text: "●" }), " เลยกำหนด (ทำพร้อมรอบนั้น)"),
       el("span", {}, el("b", { class: "pl-unk", text: "?" }), " ไม่ทราบประวัติ"),
-      el("span", { text: "แต่ละรอบห่างกันตามกลุ่มของรถ · พอใส่เลขไมล์ จะขึ้นกม. ของแต่ละรอบให้" })));
+      el("span", { text: "ทุกรอบคือรอบเปลี่ยนน้ำมันเครื่อง — รายการที่ถึงกำหนดระหว่างรอบ ไปทำพร้อมรอบถัดไป · พอใส่เลขไมล์ จะขึ้นกม. ของแต่ละรอบให้" })));
 }
 
 async function deleteRecord(h) {
@@ -667,7 +667,8 @@ function openShopText(v) {
   const state = Object.fromEntries(items.map((i) => [i.key, i.state]));
   const due = (k) => plNeedsAttention({ state: state[k] }) || (v.history_current_on && state[k] === "unknown");
   const all = [...PL_SHOP_LINES.flat(), ...PL_SHOP_CHECKS, ...PL_SHOP_ASK];
-  const picked = new Set(all.map(([k]) => k).filter((k) => (items.length ? due(k) : false)));
+  const visit = new Set(v.next_visit || []);                                  // the next oil change and everything that goes with it
+  const picked = new Set(all.map(([k]) => k).filter((k) => (items.length ? visit.has(k) || due(k) : false)));
   pl.dlg = { kind: "shoptext", vehicle: v, draft: {} };
   let extra = "";
   const out = el("textarea", { class: "pl-shoptext", rows: 14, "aria-label": "ข้อความส่งอู่" });
@@ -685,7 +686,7 @@ function openShopText(v) {
     copy.textContent = "คัดลอกแล้ว ✓"; setTimeout(() => { copy.textContent = "คัดลอกข้อความ"; }, 1800);
   } });
   fill($("pdlgBody"),
-    el("p", { class: "muted small", text: `${plLabel(v)} — ติ๊กรายการ ข้อความด้านล่างจะเขียนให้ แล้วกดคัดลอกไปวางใน LINE ของอู่ (ไม่ได้บันทึกอะไร)` }),
+    el("p", { class: "muted small", text: `${plLabel(v)}${v.next_visit_date ? ` — รอบเปลี่ยนน้ำมันเครื่องถัดไป ${beDate(v.next_visit_date)} ติ๊กไว้ให้แล้ว` : ""} — ติ๊กรายการ ข้อความด้านล่างจะเขียนให้ แล้วกดคัดลอกไปวางใน LINE ของอู่ (ไม่ได้บันทึกอะไร)` }),
     el("div", { class: "pl-shopgrid" },
       el("div", { class: "pl-picks" }, ...all.map(box),
         el("label", { class: "lc-field" }, el("span", { class: "small muted", text: "เพิ่มเติม (บรรทัดละรายการ)" }),
