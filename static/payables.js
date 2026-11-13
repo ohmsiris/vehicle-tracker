@@ -129,7 +129,7 @@ function pyPayForm(s, picked, pickedSum) {
   };
   const status = el("span", { class: "py-status" }, statusOf());
   const field = (label, ctl) => el("label", { class: "lc-field" }, el("span", { class: "small muted", text: label }), ctl);
-  const inp = (key, attrs = {}) => el("input", { value: f[key], oninput: (e) => { f[key] = e.target.value; if (key === "amount") fill(status, statusOf()); }, onchange: (e) => { f[key] = e.target.value; }, ...attrs });
+  const inp = (key, attrs = {}) => el("input", { type: "text", value: f[key], oninput: (e) => { f[key] = e.target.value; if (key === "amount") fill(status, statusOf()); }, onchange: (e) => { f[key] = e.target.value; }, ...attrs });
   const before = el("input", { type: "date", value: f.before, onchange: (e) => { f.before = e.target.value; } });
   return el("section", { class: "card lc-form py-form" }, el("h3", { text: "บันทึกการจ่าย" }),
     el("div", { class: "lc-grid" },
@@ -142,7 +142,7 @@ function pyPayForm(s, picked, pickedSum) {
       f.method === "cheque" ? field("เลขที่เช็ค", inp("cheque_no")) : null,
       field("หมายเหตุ", inp("note", { placeholder: "เช่น บิลที่แม่เขียนไว้" }))),
     f.method === "before" ? el("p", { class: "small muted", text: "ใช้กับบิลเก่าที่จ่ายไปแล้วก่อนเริ่มบันทึกในระบบ — ยอดเท่ากับบิลที่ติ๊ก" }) : null,
-    el("div", { class: "lc-formbar" },
+    el("div", { class: "lc-formbar py-before" },
       el("span", { class: "small muted", text: "ติ๊กบิลทั้งหมดก่อนวันที่" }), before,
       el("button", { class: "btn small", type: "button", text: "ติ๊ก", onclick: () => {
         if (!f.before) return;

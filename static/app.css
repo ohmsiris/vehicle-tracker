@@ -2124,3 +2124,4 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .py-form { margin-top: 12px; }
 .py-pay { margin: 8px 0; } .py-pay-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 700px) { .py-bar { grid-template-columns: minmax(0, 1fr) 110px; } .py-bar-track { grid-column: 1 / -1; grid-row: 2; } }
+.py-before { flex-wrap: wrap; margin-top: 4px; } .py-before .small { white-space: nowrap; } .py-before .dtf { width: 190px; flex: 0 0 auto; }

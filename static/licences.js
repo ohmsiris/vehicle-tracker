@@ -124,7 +124,7 @@ function lcDrawEdit() {
   if (!e) { fill(box, null); return; }
   if (e.reading) { fill(box, el("section", { class: "card lc-form" }, el("p", { text: `กำลังเก็บไฟล์และอ่านวันที่จาก ${e.file}… (ประมาณ 10–30 วินาที)` }))); box.scrollIntoView({ block: "nearest" }); return; }
   const d = lc_.data, v = e.values, r = e.row;
-  const input = (key, attrs = {}) => el("input", { value: v[key] == null ? "" : v[key], oninput: (ev) => { v[key] = ev.target.value; }, onchange: (ev) => { v[key] = ev.target.value; }, ...attrs });
+  const input = (key, attrs = {}) => el("input", { type: "text", value: v[key] == null ? "" : v[key], oninput: (ev) => { v[key] = ev.target.value; }, onchange: (ev) => { v[key] = ev.target.value; }, ...attrs });
   const field = (label, ctl) => el("label", { class: "lc-field" }, el("span", { class: "small muted", text: label }), ctl);
   const kind = el("select", { onchange: (ev) => { v.kind = ev.target.value; lcDrawEdit(); } },
     ...d.kinds.map((k) => el("option", { value: k.key, text: k.label, selected: k.key === v.kind })));
@@ -178,7 +178,7 @@ function lcCalendar() {
   const box = $("lcCal");
   if (box.childNodes.length) { fill(box, null); return; }
   const url = `${location.origin}${lc_.data.feed_path}`;
-  const inp = el("input", { value: url, readonly: true, class: "lc-url", onclick: (e) => e.target.select() });
+  const inp = el("input", { type: "text", value: url, readonly: true, class: "lc-url", onclick: (e) => e.target.select() });
   fill(box, el("section", { class: "card lc-form" }, el("h3", { text: "ส่งวันที่เข้า Google Calendar" }),
     el("p", { class: "small", text: "ทำครั้งเดียว: เปิด Google Calendar บนคอมพิวเตอร์ › ปฏิทินอื่นๆ (+) › จาก URL › วางลิงก์นี้ › เพิ่มปฏิทิน" }),
     el("div", { class: "lc-urlrow" }, inp, el("button", { class: "btn", type: "button", text: "คัดลอก",
