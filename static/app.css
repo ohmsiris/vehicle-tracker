@@ -1810,7 +1810,10 @@ button.ss-day:hover { background: var(--surface-2); }
 .cu-tiles > div { display: flex; flex-direction: column; gap: 2px; }
 .cu-big { font-size: 26px; line-height: 1.1; }
 .cu-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
-.cu-search { flex: 1; min-width: 220px; }
+.cu-tools .seg { margin: 0; }
+.cu-search { flex: 1; min-width: 220px; font: inherit; font-size: 16px; padding: 11px 14px; color: var(--text); background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.cu-search:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 .cu-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cu-table th, .cu-table td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .cu-table tbody tr { cursor: pointer; }
