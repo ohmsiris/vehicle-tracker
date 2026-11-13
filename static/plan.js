@@ -666,7 +666,8 @@ function openShopText(v) {
   const items = v.items || [];
   const state = Object.fromEntries(items.map((i) => [i.key, i.state]));
   const due = (k) => plNeedsAttention({ state: state[k] }) || (v.history_current_on && state[k] === "unknown");
-  const all = [...PL_SHOP_LINES.flat(), ...PL_SHOP_CHECKS, ...PL_SHOP_ASK];
+  const has = new Set(items.map((i) => i.key));                           // only this truck's own jobs (a big truck has no แหวนรองหัวฉีด ...)
+  const all = [...PL_SHOP_LINES.flat(), ...PL_SHOP_CHECKS, ...PL_SHOP_ASK].filter(([k]) => !has.size || has.has(k));
   const visit = new Set(v.next_visit || []);                                  // the next oil change and everything that goes with it
   const picked = new Set(all.map(([k]) => k).filter((k) => (items.length ? visit.has(k) || due(k) : false)));
   pl.dlg = { kind: "shoptext", vehicle: v, draft: {} };
