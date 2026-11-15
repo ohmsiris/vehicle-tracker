@@ -234,8 +234,21 @@ const hasOilLine = (container) => [...document.querySelectorAll(`${container} [d
 function bindVehicleAutofill({ vehicleSel, branchEl, mileageEl, nextEl, hintEl, fillBranchNow = false, hasOil = null }) {
   const veh = () => selectedVehicle(vehicleSel);
   const hint = (text) => { if (hintEl) hintEl.textContent = text; };
-  nextEl.dataset.auto = nextEl.value === "" ? "1" : "";
+  nextEl.dataset.auto = nextEl.value === "" ? "1" : "follow";
+  // A next-mileage already there (read off the bill, or filled in when the bill was first saved) follows a CORRECTED mileage too
+  // (owner, 15 Nov 2026: fixing a misread odometer left the old next-mileage behind): it keeps the bill's own distance when that is a
+  // round figure (the shop's 7,000 / 10,000 …), else -- a distance like 20,002 means one of the two was misread -- the truck's oil distance.
+  // Until the mileage is changed it is left exactly as it was; typing in the box yourself stops all of this.
+  const m0 = num(mileageEl.value), n0 = nextEl.value, gap0 = num(n0) - m0;
+  const keepGap = m0 > 0 && gap0 > 0 && gap0 % 500 === 0 ? gap0 : null;
   const suggest = () => {
+    if (nextEl.dataset.auto === "follow") {
+      const v = veh(), mileage = num(mileageEl.value), step = keepGap || (v && v.oil_km);
+      if (!(mileage > 0) || mileage === m0 || !step) { nextEl.value = n0; hint(""); return; }
+      nextEl.value = String(Math.round(mileage + step));
+      hint(`= เลขไมล์ใหม่ + ${baht(step)} (${keepGap ? "ระยะตามบิลเดิม" : "รอบน้ำมันเครื่องของรถคันนี้"}) — แก้ได้`);
+      return;
+    }
     if (nextEl.dataset.auto !== "1") return;
     const v = veh(), km = v && v.oil_km, mileage = num(mileageEl.value);
     if (hasOil && !hasOil()) { nextEl.value = ""; hint(mileage > 0 ? "ไม่มีรายการน้ำมันเครื่องในบิลนี้ — ไม่ต้องใส่ (เลขไมล์ยังใช้เป็นเลขไมล์ล่าสุดของรถ)" : ""); return; }
