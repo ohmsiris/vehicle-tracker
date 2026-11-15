@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Optional
 
-from app.extraction import MODEL, _client_lazy, _content_block
+from app.extraction import FALLBACK, MODEL, _client_lazy, _content_block
 
 logger = logging.getLogger("vehicle_tracker.purchase_extraction")
 
@@ -97,9 +97,10 @@ def read_bill(files: list[tuple[bytes, str]]) -> tuple[dict, dict]:
     last: Optional[Exception] = None
     for attempt in range(1, MAX_PARSE_ATTEMPTS + 1):
         try:
-            response = _client_lazy().messages.create(
+            response = _client_lazy().beta.messages.create(
                 model=MODEL,
                 max_tokens=16000,
+                **FALLBACK,
                 system=[{"type": "text", "text": SYSTEM_PROMPT}],
                 messages=[{"role": "user", "content": content}],
                 output_config={"effort": "high", "format": {"type": "json_schema", "schema": SCHEMA}},

@@ -42,9 +42,10 @@ def get_client() -> Anthropic:
 _client_lazy = get_client
 
 
-# Same stronger/pricier model the NongTick bot uses for bills -- OCR on
-# messy handwriting benefits meaningfully from it.
-MODEL = "claude-opus-5"
+# The most capable Opus (owner, 15 Nov 2026: "more accurate"), the same as the cash-fuel reader -- OCR on messy handwriting benefits
+# meaningfully from it. A declined read is picked up by another model on Anthropic's side (FALLBACK), so a bill is not lost to a refusal.
+MODEL = "claude-opus-5-5"
+FALLBACK = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
 MAX_PARSE_ATTEMPTS = 2
 # The model's thinking AND the JSON both count here: a long bill (45+ lines, ~150 tokens each) overran the old 8000 and the
 # answer was cut off mid-way -- shown to the user only as "could not read". 16000 is the most a non-streaming call allows with margin.
@@ -426,9 +427,10 @@ def extract_file(file_bytes: bytes, media_type: str, roster_text: str = "") -> t
     last_error: Optional[Exception] = None
     for attempt in range(1, MAX_PARSE_ATTEMPTS + 1):
         try:
-            response = _client_lazy().messages.create(
+            response = _client_lazy().beta.messages.create(
                 model=MODEL,
                 max_tokens=MAX_OUTPUT_TOKENS,
+                **FALLBACK,
                 system=system_blocks,
                 messages=[
                     {
@@ -444,6 +446,8 @@ def extract_file(file_bytes: bytes, media_type: str, roster_text: str = "") -> t
                     "format": {"type": "json_schema", "schema": EXTRACTION_SCHEMA},
                 },
             )
+            if response.stop_reason == "refusal":
+                raise ValueError("the model declined this file")
             if response.stop_reason == "max_tokens":
                 raise ValueError(f"the answer was cut off at {MAX_OUTPUT_TOKENS} tokens (bill too long to read in one go)")
             text_block = next(b.text for b in response.content if b.type == "text")
