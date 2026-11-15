@@ -236,17 +236,23 @@ function bindVehicleAutofill({ vehicleSel, branchEl, mileageEl, nextEl, hintEl, 
   const hint = (text) => { if (hintEl) hintEl.textContent = text; };
   nextEl.dataset.auto = nextEl.value === "" ? "1" : "follow";
   // A next-mileage already there (read off the bill, or filled in when the bill was first saved) follows a CORRECTED mileage too
-  // (owner, 15 Nov 2026: fixing a misread odometer left the old next-mileage behind): it keeps the bill's own distance when that is a
-  // round figure (the shop's 7,000 / 10,000 …), else -- a distance like 20,002 means one of the two was misread -- the truck's oil distance.
-  // Until the mileage is changed it is left exactly as it was; typing in the box yourself stops all of this.
-  const m0 = num(mileageEl.value), n0 = nextEl.value, gap0 = num(n0) - m0;
-  const keepGap = m0 > 0 && gap0 > 0 && gap0 % 500 === 0 ? gap0 : null;
+  // (owner, 15 Nov 2026: fixing a misread odometer left the old next-mileage behind) -- always by the truck's own oil distance from the
+  // plan (10,000 small / 20,000 big), never the shop's: truck 32 (รถใหญ่) came with the shop's +10,000. Until the mileage is changed
+  // the figure is left as it was, but when it is not the plan's distance a note says so, with a button to use the plan's figure.
+  // Typing in the box yourself stops all of this.
+  const m0 = num(mileageEl.value), n0 = nextEl.value;
+  const planNote = () => {
+    const v = veh(), km = v && v.oil_km, gap = num(n0) - m0;
+    if (!hintEl || !km || !(m0 > 0) || !(num(n0) > 0) || gap === km) { hint(""); return; }
+    fill(hintEl, el("span", { text: `ในบิลคือเลขไมล์ ${gap >= 0 ? "+" : "−"} ${baht(Math.abs(gap))} — รอบน้ำมันเครื่องของรถคันนี้คือ ${baht(km)} ` }),
+      el("button", { class: "linkbtn", type: "button", text: `ใช้ ${baht(m0 + km)}`, onclick: () => { nextEl.value = String(m0 + km); nextEl.dataset.auto = ""; hint(""); } }));
+  };
   const suggest = () => {
     if (nextEl.dataset.auto === "follow") {
-      const v = veh(), mileage = num(mileageEl.value), step = keepGap || (v && v.oil_km);
-      if (!(mileage > 0) || mileage === m0 || !step) { nextEl.value = n0; hint(""); return; }
-      nextEl.value = String(Math.round(mileage + step));
-      hint(`= เลขไมล์ใหม่ + ${baht(step)} (${keepGap ? "ระยะตามบิลเดิม" : "รอบน้ำมันเครื่องของรถคันนี้"}) — แก้ได้`);
+      const v = veh(), mileage = num(mileageEl.value), km = v && v.oil_km;
+      if (!(mileage > 0) || mileage === m0 || !km) { nextEl.value = n0; planNote(); return; }
+      nextEl.value = String(Math.round(mileage + km));
+      hint(`= เลขไมล์ใหม่ + ${baht(km)} (รอบน้ำมันเครื่องของรถคันนี้) — แก้ได้`);
       return;
     }
     if (nextEl.dataset.auto !== "1") return;
