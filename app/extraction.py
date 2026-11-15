@@ -19,6 +19,8 @@ tests/test_categories.py checks that.
 import base64
 import json
 import logging
+import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from anthropic import Anthropic
@@ -408,7 +410,89 @@ def _validate(bill: dict) -> None:
         raise ValueError("line_items is not a list")
 
 
+# ---------------------------------------------------------------- read twice (owner, 15 Nov 2026)
+# Every truck repair bill is read twice, independently and at the same time; the first reading is kept and everything the second one
+# saw differently is added to the fields to check (low_confidence_fields), so the ตรวจสอบบิล queue highlights exactly where the two
+# readings disagree. If only one of the two readings works, that one is used as it is.
+READS = 2
+HEADER_COMPARE = ["shop_name", "date", "vehicle_license", "vehicle_number", "mileage", "next_service_mileage", "total_cost"]
+
+
+def _same_text(a, b) -> bool:
+    norm = lambda v: re.sub(r"[\s\-.,()]", "", str(v or "")).lower()          # noqa: E731 -- "1ฒถ 2091" = "1ฒถ-2091"
+    return norm(a) == norm(b)
+
+
+def _same_number(a, b, tolerance: float = 0.5) -> bool:
+    try:
+        return abs(float(a or 0) - float(b or 0)) < tolerance
+    except (TypeError, ValueError):
+        return _same_text(a, b)
+
+
+def compare_reads(first: dict, second: dict) -> dict:
+    """The first reading, with every header field and line field the second reading saw differently added to its low_confidence_fields.
+    Lines are compared in order; when the two readings found a different number of lines, the total and the lines past the shorter list
+    are marked too. `second_read` records what was compared."""
+    out = json.loads(json.dumps(first))
+    header = set(out.get("low_confidence_fields") or [])
+    differ = []
+    for f in HEADER_COMPARE:
+        a, b = first.get(f), second.get(f)
+        same = _same_number(a, b, 1.0) if f in ("mileage", "next_service_mileage", "total_cost") else _same_text(a, b)
+        if not same:
+            header.add(f)
+            differ.append(f)
+    la, lb = out.get("line_items") or [], second.get("line_items") or []
+    lines_differ = 0
+    for i, line in enumerate(la):
+        flags = set(line.get("low_confidence_fields") or [])
+        other = lb[i] if i < len(lb) else None
+        if other is None:
+            flags.update(("description", "cost"))
+        else:
+            if not _same_number(line.get("cost"), other.get("cost")):
+                flags.add("cost")
+            if not _same_number(line.get("quantity"), other.get("quantity")):
+                flags.add("quantity")
+            if not _same_text(line.get("description"), other.get("description")):
+                flags.add("description")
+        if flags - set(line.get("low_confidence_fields") or []):
+            lines_differ += 1
+        line["low_confidence_fields"] = [f for f in LINE_CONFIDENCE_FIELDS if f in flags]
+    if len(la) != len(lb):
+        header.add("total_cost")
+    out["low_confidence_fields"] = [f for f in HEADER_CONFIDENCE_FIELDS if f in header]
+    out["second_read"] = {"agree": not differ and not lines_differ and len(la) == len(lb), "header_differs": differ,
+                          "lines_differ": lines_differ, "line_count": [len(la), len(lb)]}
+    return out
+
+
+def _add_usage(a: dict, b: dict) -> dict:
+    return {k: (a.get(k) or 0) + (b.get(k) or 0) for k in set(a) | set(b)}
+
+
 def extract_file(file_bytes: bytes, media_type: str, roster_text: str = "") -> tuple[dict, dict]:
+    """Reads one truck repair bill READS (2) times at once and compares the readings (compare_reads). Returns (extraction, usage summed
+    over both). If one reading fails the other is used alone; if both fail, the error is raised for the batch to show per file."""
+    with ThreadPoolExecutor(max_workers=READS) as pool:
+        futures = [pool.submit(_read_once, file_bytes, media_type, roster_text) for _ in range(READS)]
+        results, errors = [], []
+        for f in futures:
+            try:
+                results.append(f.result())
+            except Exception as exc:                  # noqa: BLE001 -- one reading failing still leaves the other
+                errors.append(exc)
+    if not results:
+        raise errors[0]
+    if len(results) == 1:
+        bill, usage = results[0]
+        return {**bill, "second_read": {"agree": None, "note": "อ่านได้ครั้งเดียว (อีกครั้งไม่สำเร็จ)"}}, usage
+    (a, ua), (b, ub) = results
+    return compare_reads(a, b), _add_usage(ua, ub)
+
+
+def _read_once(file_bytes: bytes, media_type: str, roster_text: str = "") -> tuple[dict, dict]:
     """
     Sends one bill file to Claude. Returns (extraction_dict, usage_dict).
     Raises on failure after MAX_PARSE_ATTEMPTS -- the caller (batch endpoint)
