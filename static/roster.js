@@ -199,9 +199,12 @@ function renderTruck() {
     fill($("tkHead"), el("h2", { class: "tk-title", text: "เพิ่มรถใหม่" }), el("p", { class: "muted small", text: "กรอกข้อมูลแล้วกด “บันทึก” — ข้อมูลทะเบียนและคนขับเพิ่มทีหลังได้" }));
   } else {
     fill($("tkHead"),
-      el("div", { class: "req-head tk-title" }, ...truckHead(v), v.branch ? el("span", { class: "muted", text: v.branch }) : null),
-      el("div", { class: "muted", text: [`${v.make} ${v.model}`.trim(), v.color, v.province].filter(Boolean).join(" · ") }),
+      // the title is the truck alone (number, plate, nickname): the branch as big grey text beside the nickname read as part of its
+      // name ("สต๊อคน้ำแข็ง สระบุรี", owner 15 Nov 2026) -- it is a badge now, and the province is said to be the plate's
+      el("div", { class: "req-head tk-title" }, ...truckHead(v)),
+      el("div", { class: "muted", text: [v.province ? `ป้ายทะเบียน${v.province}` : "", `${v.make} ${v.model}`.trim(), v.color].filter(Boolean).join(" · ") }),
       el("div", { class: "rr-badges" },
+        v.branch ? el("span", { class: "badge", text: `สาขา${v.branch}` }) : null,
         v.usage ? el("span", { class: "badge shop", text: v.usage }) : null,
         v.vehicle_class ? el("span", { class: "badge", text: v.vehicle_class }) : null,
         v.active === false ? el("span", { class: "badge", text: "เลิกใช้แล้ว" }) : null,
