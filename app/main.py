@@ -539,6 +539,14 @@ def request_delete_update(update_id: str, x_app_token: str = Header(default=""),
 
 
 # --------------------------------------------------------------- dashboard
+def _vehicles_with_oil_due() -> list[dict]:
+    """v_vehicle_status with "ครบกำหนดที่" filled from the latest oil change + the plan's interval where the bill wrote none."""
+    rows = supabase.select_all("v_vehicle_status", {"select": "*", "order": "vehicle_id.asc"})
+    status = {r["vehicle_id"]: r for r in rows}
+    history.fill_oil_due(status, history._oil_km(supabase.select_all("vehicles", {"select": "id,vehicle_class", "active": "eq.true", "order": "id.asc"})))
+    return rows
+
+
 @app.get("/api/dashboard")
 def get_dashboard(
     months: int = 12,
@@ -564,7 +572,7 @@ def get_dashboard(
                     "order": "event_date.desc,event_id.asc"}),
                 "lines": supabase.select_all("v_line_items", {
                     "select": "line_item_id,event_month,category,category_en,line_total,vehicle_branch", "order": "line_item_id.asc"}),
-                "vehicles": supabase.select_all("v_vehicle_status", {"select": "*", "order": "vehicle_id.asc"}),
+                "vehicles": _vehicles_with_oil_due(),
                 "requests": supabase.select_all("v_requests", {
                     "select": "request_id,status,branch,days_in_status,days_to_fix,fixed_date,no_bill,has_record,status_changed_date", "order": "request_no.asc"}),
             }

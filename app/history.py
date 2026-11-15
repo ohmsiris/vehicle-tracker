@@ -132,6 +132,7 @@ def vehicle_rows(vehicles: list[dict], status: dict[str, dict], events: list[dic
             "at_shop_requests": int(st.get("at_shop_requests") or 0),
             "last_service_date": st.get("last_service_date"), "days_since_service": st.get("days_since_service"),
             "last_known_mileage": st.get("last_known_mileage"), "next_service_mileage": st.get("next_service_mileage"),
+            "next_service_from_plan": bool(st.get("next_service_from_plan")),
             "repairs_total": n, "spend_total": round(total, 2),
         })
     return out
@@ -168,12 +169,32 @@ def list_vehicles(include_inactive: bool = False) -> list[dict]:
         params["active"] = "eq.true"
     vehicles = supabase.select_all("vehicles", params)
     status = {r["vehicle_id"]: r for r in supabase.select_all("v_vehicle_status", {
-        "select": "vehicle_id,open_requests,awaiting_bill_requests,last_service_date,days_since_service,last_known_mileage,next_service_mileage"
+        "select": "vehicle_id,open_requests,awaiting_bill_requests,last_service_date,days_since_service,last_known_mileage,next_service_mileage,last_oil_mileage"
                   + (",at_shop_requests" if repair_requests.has_v5() else ""),
         "order": "vehicle_id.asc"})}
     events = supabase.select_all("v_events", {"select": "vehicle_id,total_cost", "order": "event_id.asc"})
     _merge_odometer_readings(status)
+    fill_oil_due(status, _oil_km(vehicles))
     return vehicle_rows(vehicles, status, events, fleet.drivers_by_id() if v6 else None)
+
+
+def fill_oil_due(status: dict, oil_km: dict) -> None:
+    """"ครบกำหนดที่" when the latest oil change has no "ไมล์ครั้งต่อไป" written on its bill (schema_v77): that change's odometer plus
+    the plan's oil interval for the truck (10,000 small / 20,000 big, or what the plan settings say) -- the same figure the plan page
+    shows. Never an older bill's written figure: a newer oil change replaces it (truck 56, 15 Nov 2026)."""
+    for vid, st in status.items():
+        if st.get("next_service_mileage") is None and st.get("last_oil_mileage") and oil_km.get(vid):
+            st["next_service_mileage"] = int(st["last_oil_mileage"]) + int(oil_km[vid])
+            st["next_service_from_plan"] = True
+
+
+def _oil_km(vehicles: list[dict]) -> dict:
+    try:
+        from app import service_plan
+        return service_plan.oil_km_by_vehicle(vehicles)
+    except Exception:                                  # noqa: BLE001 -- the card then simply shows no due figure
+        __import__("logging").getLogger(__name__).exception("could not work out the oil intervals")
+        return {}
 
 
 def latest_odometer(status: dict, readings: list[dict]) -> None:

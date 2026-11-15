@@ -166,6 +166,7 @@ def build_dashboard(*, events: list[dict], lines: list[dict], vehicles: list[dic
             "at_shop_requests": int(_num(v.get("at_shop_requests"))),
             "last_service_date": last.isoformat() if last else None, "days_since_service": days,
             "last_known_mileage": v.get("last_known_mileage"), "next_service_mileage": v.get("next_service_mileage"),
+            "next_service_from_plan": bool(v.get("next_service_from_plan")),
             "spend_period": _money(s["amount"]), "repairs_period": s["count"], "flags": flags,
         })
     # open work first, then bills outstanding, then staleness; quiet trucks last
