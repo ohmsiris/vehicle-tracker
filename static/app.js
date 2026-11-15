@@ -399,8 +399,7 @@ function vatToggle(tbody) {
     const existing = vatRowOf(tbody);
     if (!box.checked) { if (existing) existing.remove(); renumber(); linesChanged(); return; }
     if (existing) return;
-    const base = [...tbody.querySelectorAll("tr")].reduce((s, tr) => s + rowTotal(tr), 0);
-    const tr = lineRow({ description: "VAT 7%", category: "อื่นๆ", line_total: round2(base * 0.07) });
+    const tr = lineRow({ description: "VAT 7%", category: "อื่นๆ", line_total: round2(vatBase(tbody) * 0.07) });
     tr.dataset.vat = "auto";
     tr.dataset.catManual = "1";                         // not for the automatic category sorting
     tr.addEventListener("input", (e) => { if (e.target.dataset.f === "line_total") tr.dataset.vat = "manual"; }, true);     // typed by hand: stop following the lines
@@ -408,16 +407,28 @@ function vatToggle(tbody) {
     renumber();
     linesChanged();
   });
-  return el("label", { class: "mgcheck vat-toggle" }, box, "บิลนี้ยังไม่รวม VAT — เพิ่มบรรทัด VAT 7% ให้ (คิดจากรายการข้างบน)");
+  return el("label", { class: "mgcheck vat-toggle" }, box, "บิลนี้ยังไม่รวม VAT — เพิ่มบรรทัด VAT 7% ให้ (คิดจากรายการทุกรูปของบิลนี้)");
 }
 
-// keeps the automatic VAT lines at 7 % of their bill's other lines, and each tick in step with its table
+// What the VAT of this photo's VAT line is 7 % of (owner, 15 Nov 2026): a bill over several photos has its VAT once, on one page, so
+// it is every photo's lines -- this photo and the photos either side of it up to (not including) another photo that has its own
+// VAT line (a separate receipt with its VAT already on it). With one VAT line on the review, that is all the photos.
+function vatBase(tbody) {
+  const all = [...document.querySelectorAll("#billBlocks tbody")];
+  const i = all.indexOf(tbody);
+  if (i < 0) return [...tbody.querySelectorAll("tr")].filter((tr) => !tr.dataset.vat).reduce((s, tr) => s + rowTotal(tr), 0);
+  let a = i, b = i;
+  while (a > 0 && !vatRowOf(all[a - 1])) a--;
+  while (b < all.length - 1 && !vatRowOf(all[b + 1])) b++;
+  return all.slice(a, b + 1).flatMap((t) => [...t.querySelectorAll("tr")]).filter((tr) => !tr.dataset.vat).reduce((s, tr) => s + rowTotal(tr), 0);
+}
+
+// keeps the automatic VAT lines at 7 % of their bill's other lines (on every photo of it), and each tick in step with its table
 function syncVat() {
   document.querySelectorAll("#billBlocks tbody").forEach((tbody) => {
     const row = vatRowOf(tbody);
     if (row && row.dataset.vat === "auto") {
-      const base = [...tbody.querySelectorAll("tr")].filter((tr) => tr !== row).reduce((s, tr) => s + rowTotal(tr), 0);
-      row.querySelector("[data-f=line_total]").value = String(round2(base * 0.07));
+      row.querySelector("[data-f=line_total]").value = String(round2(vatBase(tbody) * 0.07));
     }
     if (tbody._vatBox) tbody._vatBox.checked = !!row;
   });
