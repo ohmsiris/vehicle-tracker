@@ -386,23 +386,50 @@ def _month_end(month: str) -> date:
 
 
 def bills_workbook(rows: list[dict], path) -> bytes:
-    """The bills as her Excel file: one tab per bill, copied from her own last bill of that customer (same page, fonts, columns, margins,
-    print area, formulas); only the number, the date, the item, the kg and the price change -- and the amount in words (BAHTTEXT's text)."""
+    """The bills as her Excel file, all on ONE tab (owner, 16 Nov 2026: one print prints them all): her own bill (same page set-up, fonts,
+    columns, margins, print area width and centring -- so it lands on the 9 x 5.5" paper exactly where it does now) repeated down the
+    sheet, one bill per printed page (a page break after each). Only the number, the date, the item, the kg and the price change -- and
+    the amount in words (BAHTTEXT's text)."""
+    from copy import copy
+    from openpyxl.formula.translate import Translator
+    from openpyxl.utils import column_index_from_string
+    from openpyxl.worksheet.pagebreak import Break
     from app.bahttext import bahttext
-    wb, tpl = _workbook(path)
-    area = (tpl.print_area or "A1:M20").split("!")[-1].replace("$", "")
-    for r in sorted(rows, key=lambda x: x["doc_no"]):
-        ws = wb.copy_worksheet(tpl)
-        ws.title = sheet_title(r["doc_no"])
-        ws.print_area = area
+    wb, ws = _workbook(path)
+    area = (ws.print_area or "A1:M20").split("!")[-1].replace("$", "")
+    m = re.fullmatch(r"([A-Z]+)1:([A-Z]+)(\d+)", area)
+    last_col, block = (m.group(2), int(m.group(3))) if m else ("M", 20)
+    ncol = column_index_from_string(last_col)
+    snap = {(r, c): (ws.cell(r, c).value, copy(ws.cell(r, c).font), copy(ws.cell(r, c).border), copy(ws.cell(r, c).fill),
+                     ws.cell(r, c).number_format, copy(ws.cell(r, c).alignment), copy(ws.cell(r, c).protection))
+            for r in range(1, block + 1) for c in range(1, ncol + 1)}
+    heights = {r: ws.row_dimensions[r].height for r in range(1, block + 1)}
+    merges = [(mg.min_row, mg.min_col, mg.max_row, mg.max_col) for mg in ws.merged_cells.ranges if mg.max_row <= block]
+    bills = sorted(rows, key=lambda x: x["doc_no"])
+    for k, r in enumerate(bills):
+        off = k * block
+        if k:                                                    # her bill again, under the last one
+            for (rr, c), (v, font, border, fill, fmt, align, prot) in snap.items():
+                cell = ws.cell(rr + off, c)
+                if isinstance(v, str) and v.startswith("="):
+                    v = Translator(v, origin=f"{cell.column_letter}{rr}").translate_formula(f"{cell.column_letter}{rr + off}")
+                cell.value = v
+                cell.font, cell.border, cell.fill, cell.number_format, cell.alignment, cell.protection = font, border, fill, fmt, align, prot
+            for rr, h in heights.items():
+                ws.row_dimensions[rr + off].height = h
+            for r0, c0, r1, c1 in merges:
+                ws.merge_cells(start_row=r0 + off, start_column=c0, end_row=r1 + off, end_column=c1)
+            ws.row_breaks.append(Break(id=off))                 # each bill starts a new page
         d = date.fromisoformat(r["doc_date"])
-        ws["E6"] = f"เลขที่   {r['doc_no']}"
-        ws["E7"] = f"วันที่  {d.day:02d}/{d.month:02d}/{d.year + 543}"
-        ws["B10"] = r.get("item") or ws["B10"].value
-        ws["C10"] = float(r["kg"])
-        ws["E10"] = float(r["price"])
-        ws["A15"] = f"({bahttext(r['total'])})"
-    wb.remove(tpl)
+        ws[f"E{6 + off}"] = f"เลขที่   {r['doc_no']}"
+        ws[f"E{7 + off}"] = f"วันที่  {d.day:02d}/{d.month:02d}/{d.year + 543}"
+        ws[f"B{10 + off}"] = r.get("item") or snap[(10, 2)][0]
+        ws[f"C{10 + off}"] = float(r["kg"])
+        ws[f"E{10 + off}"] = float(r["price"])
+        ws[f"A{15 + off}"] = f"({bahttext(r['total'])})"
+    first, last = bills[0]["doc_no"], bills[-1]["doc_no"]
+    ws.title = sheet_title(first) if len(bills) == 1 else (sheet_title(first) + "-" + last[-3:])[:31]
+    ws.print_area = f"A1:{last_col}{block * len(bills)}"
     return _save(wb)
 
 
@@ -422,6 +449,8 @@ def bills_file(ids: list[int]) -> tuple[bytes, str]:
     bad = [r["doc_no"] for r in rows if r["kind"] != "invoice" or not r.get("doc_date") or r.get("kg") is None or r.get("price") is None]
     if bad:
         raise TaxInvoiceError(f"ทำไฟล์บิลได้เฉพาะใบกำกับที่มีวันที่ น้ำหนัก และราคา — {', '.join(bad[:5])}")
+    if len(rows) > 400:
+        raise TaxInvoiceError("เลือกได้ครั้งละไม่เกิน 400 บิล")
     name = (_customers().get(code) or {}).get("name") or code
     days = sorted({r["doc_date"] for r in rows})
     return bills_workbook(rows, path), f"บิล {name} {days[0]}" + (f" ถึง {days[-1]}" if len(days) > 1 else "") + ".xlsx"
@@ -627,3 +656,15 @@ def monthly_file(invoice_id: int) -> tuple[bytes, str]:
     if not rows:
         raise TaxInvoiceError("ใบวางบิลนี้ไม่มีรายการส่งของ")
     return monthly_workbook(inv, rows, path), f"ใบวางบิล {inv.get('customer_name') or ''} {inv['month']}.xlsx"
+
+
+def set_printed(ids: list, printed: bool) -> dict:
+    """Tick (or untick) "พิมพ์แล้ว" on these bills."""
+    from datetime import datetime as _dt, timezone as _tz
+    ids = [int(x) for x in ids or []]
+    if not ids:
+        raise TaxInvoiceError("ยังไม่ได้เลือกบิล")
+    when = _dt.now(_tz.utc).isoformat() if printed else None
+    for i in range(0, len(ids), 200):
+        supabase.update("tax_invoices", {"id": f"in.({','.join(map(str, ids[i:i + 200]))})"}, {"printed_at": when})
+    return {"ids": ids, "printed_at": when}

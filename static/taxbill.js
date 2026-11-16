@@ -91,7 +91,7 @@ function tbBill(c) {
   btn.onclick = save;
   const box = el("div", {},
     el("div", { class: "ti-fields", onkeydown: (e) => { if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); save(); } } },
-      f("วันที่ (ตามใบชั่ง)", date),
+      f("วันที่", date),
       f(byBags ? `จำนวน${bagWord}` : "น้ำหนักสุทธิ (กก.)", qty),
       item ? f("รายการ", item, "ti-wide") : null,
       c.code === "P" ? f("เลขที่บัตรชั่ง", ticket) : null,
@@ -115,18 +115,33 @@ async function tbDayList(c, box, day) {
   catch (err) { if (my === tb_.daySeq) fill(box, el("p", { class: "ti-bad small", text: err.message })); return; }
   if (my !== tb_.daySeq) return;
   if (!rows.length) { fill(box, el("p", { class: "muted small tb-none", text: `ยังไม่มีบิล ${c.name} วันที่ ${tiDMY(day)}` })); return; }
-  const picked = new Set(rows.map((r) => r.id));
+  const picked = new Set(rows.filter((r) => !r.printed_at).map((r) => r.id));
   const sum = rows.reduce((a, r) => a + Number(r.total), 0);
+  const draw = () => tbDayList(c, box, day);
+  const all = el("input", { type: "checkbox", title: "เลือกทั้งหมด", checked: rows.every((r) => picked.has(r.id)),
+    onchange: (e) => { rows.forEach((r) => (e.target.checked ? picked.add(r.id) : picked.delete(r.id))); box.querySelectorAll("input[data-pick]").forEach((x) => { x.checked = e.target.checked; }); bar(); } });
   const body = el("tbody", {}, ...rows.map((r) => el("tr", {},
-    el("td", {}, el("input", { type: "checkbox", checked: true, onchange: (e) => { if (e.target.checked) picked.add(r.id); else picked.delete(r.id); } })),
+    el("td", {}, el("input", { type: "checkbox", "data-pick": "1", checked: picked.has(r.id), onchange: (e) => { if (e.target.checked) picked.add(r.id); else picked.delete(r.id); bar(); } })),
     el("td", { class: "nowrap", text: r.doc_no }), el("td", { text: r.item || "" }), el("td", { class: "r", text: tiB(r.kg, 0) }),
-    el("td", { class: "r", text: tiB(r.total) }), el("td", { class: "small muted", text: r.ticket_no ? `บัตรชั่ง ${r.ticket_no}` : "" }))));
-  const dl = el("button", { class: "btn primary", type: "button", text: "ดาวน์โหลดไฟล์บิล (Excel) เพื่อพิมพ์",
-    onclick: () => tbDownload(`/api/tax-invoices/bills.xlsx?ids=${[...picked].join(",")}`, `บิล ${c.name} ${day}.xlsx`, dl) });
+    el("td", { class: "r", text: tiB(r.total) }), el("td", { class: "small muted", text: r.ticket_no ? `บัตรชั่ง ${r.ticket_no}` : "" }),
+    el("td", { class: "ti-printed" }, el("label", { class: "small" }, el("input", { type: "checkbox", checked: !!r.printed_at,
+      onchange: async (e) => { await api("/api/tax-invoices/printed", jsonOpts("POST", { ids: [r.id], printed: e.target.checked })); draw(); } }), " พิมพ์แล้ว")))));
+  const actions = el("span", { class: "ti-pickbar" });
+  const bar = () => {
+    const ids = [...picked];
+    const dl = el("button", { class: "btn primary", type: "button", text: `ดาวน์โหลดเพื่อพิมพ์ (${ids.length} ใบ)`, disabled: !ids.length,
+      onclick: async () => {
+        await tbDownload(`/api/tax-invoices/bills.xlsx?ids=${ids.join(",")}`, `บิล ${c.name} ${day}.xlsx`, dl);
+        fill(actions, dl, el("button", { class: "btn small", type: "button", text: `ติ๊กพิมพ์แล้ว ${ids.length} ใบนี้`, onclick: async () => {
+          try { await api("/api/tax-invoices/printed", jsonOpts("POST", { ids, printed: true })); draw(); tiReloadQuiet(); } catch (err) { showErr("tiError", err.message); } } }));
+      } });
+    fill(actions, dl);
+  };
+  bar();
   fill(box, el("div", { class: "tb-day" },
-    el("div", { class: "ti-listhead" }, el("b", { text: `บิล ${c.name} วันที่ ${tiDMY(day)} — ${rows.length} ใบ · ${tiB(sum)} บาท` }), dl),
-    el("div", { class: "lc-wrap" }, el("table", { class: "lc-table ti-list" }, body)),
-    el("p", { class: "small muted", text: "ไฟล์เป็นแบบฟอร์มบิลเดิมของลูกค้านี้ หนึ่งแท็บต่อหนึ่งบิล — เปิดใน Excel แล้วพิมพ์ทุกแท็บเหมือนเดิม" })));
+    el("div", { class: "ti-listhead" }, el("b", { text: `บิล ${c.name} วันที่ ${tiDMY(day)} — ${rows.length} ใบ · ${tiB(sum)} บาท` }), actions),
+    el("div", { class: "lc-wrap" }, el("table", { class: "lc-table ti-list" }, el("thead", {}, el("tr", {}, el("th", {}, all), ...["เลขที่", "รายการ", "น้ำหนัก", "สุทธิ", "", ""].map((h) => el("th", { text: h })))), body)),
+    el("p", { class: "small muted", text: "ติ๊กไว้ให้แล้วเฉพาะบิลที่ยังไม่พิมพ์ — ทุกบิลที่เลือกอยู่ในแท็บเดียว (บิลละหน้า) เปิดใน Excel แล้วพิมพ์ครั้งเดียว" })));
 }
 
 async function tbDownload(url, name, btn) {

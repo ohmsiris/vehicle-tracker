@@ -2359,6 +2359,14 @@ def api_tax_invoices_bills(ids: str = Query(...), x_app_token: str = Header(defa
     return Response(content=body, media_type=XLSX, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
 
+@app.post("/api/tax-invoices/printed")
+def api_tax_invoices_printed(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """พิมพ์แล้ว: tick or untick these bills."""
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.set_printed, body.get("ids") or [], bool(body.get("printed", True)))
+
+
 @app.get("/api/tax-invoices/deliveries")
 def api_tax_deliveries(code: str = Query(...), month: str = Query(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """A monthly customer's deliveries: not yet on a ใบวางบิล, and on this month's."""

@@ -64,5 +64,19 @@ def test_the_monthly_bill_file_has_one_row_per_delivery_and_her_totals():
     ws = wb.worksheets[0]
     assert ws["H2"].value == "เลขที่ใบวางบิล : SRI-2569-1011011" and ws["B2"].value.endswith("1-30 พฤศจิกายน  2569")
     assert ws["B5"].value.year == 2569 and ws["C14"].value == "4733/236610" and ws["F14"].value == "=E14*20" and ws["I14"].value == "=F14*H14"
-    assert ws["E15"].value == "=SUM(E5:E14)" and ws["I15"].value == "=SUM(I5:I14)" and ws["J17"].value == "=SUM(J15:J16)"
+    assert ws["E15"].value == "=SUM(E5:E14)" and ws["I15"].value == "=SUM(I5:I14)" and ws["I16"].value == "=I15*7%" and ws["I17"].value == "=SUM(I15:I16)"
+    assert all(ws.cell(r, 10).value is None for r in range(1, 40))              # nothing outside her table
     assert ws.print_area.endswith("$A$1:$I$24") and ws["A16"].value is None
+
+
+def test_many_bills_on_one_tab_one_page_each_and_nothing_outside_the_box():
+    rows = [{"doc_no": f"SRI-2569-1115{i}", "doc_date": "2026-11-16", "item": "น้ำแข็งซอง 200 ก้อน (ไก่ชิ้นส่วน)", "kg": 7000 + i, "price": 0.51,
+             "total": round((7000 + i) * 0.51 * 1.07, 2)} for i in range(3, 6)]
+    wb = openpyxl.load_workbook(io.BytesIO(ti.bills_workbook(rows, ti.template("P"))))
+    assert len(wb.sheetnames) == 1
+    ws = wb.worksheets[0]
+    assert ws["E6"].value == "เลขที่   SRI-2569-11153" and ws["E26"].value == "เลขที่   SRI-2569-11154" and ws["E46"].value == "เลขที่   SRI-2569-11155"
+    assert ws["C30"].value == 7004 and ws["F30"].value == "=C30*E30" and ws["F33"].value == "=F30" and ws["F35"].value == "=SUM(F33:F34)"
+    assert ws["A21"].value == ws["A1"].value and ws.row_dimensions[30].height == ws.row_dimensions[10].height
+    assert [b.id for b in ws.row_breaks.brk] == [20, 40] and ws.print_area.endswith("$A$1:$M$60")
+    assert all(ws.cell(r, c).value is None for r in range(1, 61) for c in range(7, 14))   # no notes, no helper column G

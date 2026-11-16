@@ -5,7 +5,7 @@
 // another month, missing), and the list -- filtered by customer, every row editable. Server: app/tax_invoices.py.
 // Hash: #tax-invoices/<YYYY-MM>.
 
-const ti_ = { data: null, month: null, to: null, sel: new Set(), q: "", kind: "invoice", editing: null, date: null, showSetup: false };
+const ti_ = { data: null, month: null, to: null, sel: new Set(), pick: new Set(), q: "", kind: "invoice", editing: null, date: null, showSetup: false };
 const tiPicked = (code) => !ti_.sel.size || ti_.sel.has(code || "?");
 const tiB = (v, d = 2) => elN(v, d);
 const tiDMY = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${Number(iso.slice(0, 4)) + 543}` : "–");
@@ -71,7 +71,7 @@ function tiRender(keepEntry = false) {
     el("button", { class: "btn small", type: "button", text: "›", title: "เดือนถัดไป", onclick: () => go(tiShift(d.month, 1)) }),
     range ? el("span", { class: "small muted", text: "ช่องออกบิลใช้เดือนแรก" }) : null);
   const entry = keepEntry && document.getElementById("tbMaker") ? document.getElementById("tbMaker") : tbMaker();
-  fill($("tiBody"), bar, entry, tiSummary(s), tiChecks(s), tiList(), tiSetup());
+  fill($("tiBody"), bar, entry, tiList(), tiSummary(s), tiChecks(s), tiSetup());
 }
 
 // ------------------------------------------------------------------ the fill-in box
@@ -179,7 +179,7 @@ function tiSummary(s) {
   const chips = el("div", { class: "dd-chips" },
     el("button", { type: "button", class: `dd-chip${!ti_.sel.size ? " on" : ""}`, onclick: () => tiToggle("all") }, el("span", { text: "ทุกลูกค้า" })),
     ...s.customers.map((c) => el("button", { type: "button", class: `dd-chip${ti_.sel.has(c.code) ? " on" : ""}`, onclick: () => tiToggle(c.code) },
-      el("span", { text: c.name }), el("span", { class: "dd-count", text: tiB(c.total, 0) }))));
+      el("span", { text: c.name }))));
   const sel = s.customers.filter((c) => tiPicked(c.code));
   const t = { total: 0, amount: 0, vat: 0, kg: 0, invoices: 0, credit_notes: 0 };
   sel.forEach((c) => Object.keys(t).forEach((k) => { t[k] += Number(c[k]) || 0; }));
@@ -226,9 +226,45 @@ function tiList() {
   const q = el("input", { type: "text", class: "ti-search", placeholder: "ค้นหาเลขที่ / หมายเหตุ", value: ti_.q,
     oninput: (e) => { ti_.q = e.target.value; const tb = $("tiRows"); if (tb) tb.replaceWith(tiRows()); } });
   return el("section", { class: "card" }, el("div", { class: "ti-listhead" }, el("h3", { text: "รายการใบกำกับภาษี / ใบลดหนี้" }), q), chips,
+    el("div", { id: "tiPickBar" }, tiPickBar()),
     el("div", { class: "lc-wrap" }, el("table", { class: "lc-table ti-list" },
-      el("thead", {}, el("tr", {}, ...["เลขที่", "วันที่", "ลูกค้า", "น้ำหนัก", "ราคา", "ก่อน VAT", "VAT", "สุทธิ", "หมายเหตุ", ""].map((h, i) => el("th", { class: i >= 3 && i <= 7 ? "r" : "", text: h })))),
+      el("thead", {}, el("tr", {}, ...["", "เลขที่", "วันที่", "ลูกค้า", "น้ำหนัก", "ราคา", "ก่อน VAT", "VAT", "สุทธิ", "หมายเหตุ", "พิมพ์แล้ว", ""].map((h, i) => el("th", { class: i >= 4 && i <= 8 ? "r" : "", text: h })))),
       tiRows())));
+}
+
+const tiPrintable = (r) => r.kind === "invoice" && r.doc_date && r.kg != null && r.price != null && ((ti_.data.templates || {})[r.customer_code] || {}).bill;
+
+// the bar over the list: what is ticked to print, and the buttons (one Excel tab for all of them; then tick พิมพ์แล้ว)
+function tiPickBar() {
+  const rows = ti_.data.rows.filter((r) => ti_.pick.has(r.id));
+  const codes = new Set(rows.map((r) => r.customer_code));
+  const shown = ti_.data.rows.filter((r) => tiPicked(r.customer_code) && tiPrintable(r) && !r.printed_at);
+  const pickUnprinted = el("button", { class: "btn small", type: "button", text: `เลือกบิลที่ยังไม่พิมพ์ (${shown.length})`, disabled: !shown.length,
+    onclick: () => { shown.forEach((r) => ti_.pick.add(r.id)); tiRedrawList(); } });
+  if (!rows.length) return el("div", { class: "ti-pickbar" }, el("span", { class: "small muted", text: "ติ๊กช่องหน้าบิลเพื่อพิมพ์หลายใบในครั้งเดียว" }), pickUnprinted);
+  const dl = el("button", { class: "btn primary", type: "button", text: `ดาวน์โหลดเพื่อพิมพ์ (${rows.length} ใบ)`, disabled: codes.size > 1,
+    onclick: async () => {
+      const name = (tiCust([...codes][0]) || {}).name || "";
+      await tbDownload(`/api/tax-invoices/bills.xlsx?ids=${rows.map((r) => r.id).join(",")}`, `บิล ${name} ${rows.length} ใบ.xlsx`, dl);
+    } });
+  const mark = el("button", { class: "btn small", type: "button", text: "ติ๊กพิมพ์แล้ว", onclick: () => tiSetPrinted(rows.map((r) => r.id), true) });
+  const clear = el("button", { class: "btn small", type: "button", text: "ไม่เลือก", onclick: () => { ti_.pick.clear(); tiRedrawList(); } });
+  return el("div", { class: "ti-pickbar" }, el("b", { text: `เลือก ${rows.length} ใบ` }),
+    codes.size > 1 ? el("span", { class: "ti-bad small", text: "เลือกได้ทีละลูกค้า" }) : null, dl, mark, clear, pickUnprinted);
+}
+
+function tiRedrawList() {
+  const tb = $("tiRows"); if (tb) tb.replaceWith(tiRows());
+  const bar = $("tiPickBar"); if (bar) fill(bar, tiPickBar());
+}
+
+async function tiSetPrinted(ids, printed) {
+  try {
+    const res = await api("/api/tax-invoices/printed", jsonOpts("POST", { ids, printed }));
+    ti_.data.rows.forEach((r) => { if (ids.includes(r.id)) r.printed_at = res.printed_at; });
+    if (printed) ids.forEach((i) => ti_.pick.delete(i));
+    tiRedrawList();
+  } catch (err) { showErr("tiError", err.message); }
 }
 
 function tiRows() {
@@ -238,14 +274,16 @@ function tiRows() {
   const LIMIT = 600, rows = all.slice(0, LIMIT);
   const body = el("tbody", { id: "tiRows" });
   rows.forEach((r) => body.append(ti_.editing === r.id ? tiEditRow(r) : tiRow(r)));
-  if (all.length > LIMIT) body.append(el("tr", {}, el("td", { colspan: "10", class: "muted small", text: `แสดง ${LIMIT} จาก ${all.length} ใบ — เลือกลูกค้าหรือค้นหาเลขที่เพื่อให้แคบลง` })));
-  if (!rows.length) body.append(el("tr", {}, el("td", { colspan: "10", class: "muted", text: "ไม่มีรายการ" })));
+  if (all.length > LIMIT) body.append(el("tr", {}, el("td", { colspan: "12", class: "muted small", text: `แสดง ${LIMIT} จาก ${all.length} ใบ — เลือกลูกค้าหรือค้นหาเลขที่เพื่อให้แคบลง` })));
+  if (!rows.length) body.append(el("tr", {}, el("td", { colspan: "12", class: "muted", text: "ไม่มีรายการ" })));
   return body;
 }
 
 function tiRow(r) {
   const cn = r.kind === "credit_note", sign = cn ? -1 : 1;
   return el("tr", { class: cn ? "ti-cn" : "" },
+    el("td", {}, tiPrintable(r) ? el("input", { type: "checkbox", checked: ti_.pick.has(r.id), title: "เลือกเพื่อพิมพ์",
+      onchange: (e) => { if (e.target.checked) ti_.pick.add(r.id); else ti_.pick.delete(r.id); const bar = $("tiPickBar"); if (bar) fill(bar, tiPickBar()); } }) : null),
     el("td", { class: "nowrap" }, cn ? el("span", { class: "badge", text: "ใบลดหนี้" }) : null, ` ${r.doc_no}`),
     el("td", { class: "nowrap", text: tiDMY(r.doc_date) }),
     el("td", { text: (tiCust(r.customer_code) || {}).name || r.customer_name || "–" }),
@@ -254,6 +292,8 @@ function tiRow(r) {
     el("td", { class: "r", text: tiB(sign * r.amount) }), el("td", { class: "r", text: tiB(sign * r.vat) }),
     el("td", { class: "r" }, el("b", { text: tiB(sign * r.total) })),
     el("td", { class: "small muted", text: r.note || "" }),
+    el("td", { class: "ti-printed" }, r.kind === "invoice" ? el("input", { type: "checkbox", checked: !!r.printed_at, title: r.printed_at ? `พิมพ์แล้ว ${tiDMY(r.printed_at.slice(0, 10))}` : "ยังไม่พิมพ์",
+      onchange: (e) => tiSetPrinted([r.id], e.target.checked) }) : null),
     el("td", {}, el("button", { class: "btn small", type: "button", text: "แก้ไข", onclick: () => { ti_.editing = r.id; $("tiRows").replaceWith(tiRows()); } })));
 }
 
@@ -280,8 +320,8 @@ function tiEditRow(r) {
     catch (err) { showErr("tiError", `ลบไม่สำเร็จ: ${err.message}`); }
   };
   return el("tr", { class: "ti-editrow", onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } if (e.key === "Escape") { ti_.editing = null; $("tiRows").replaceWith(tiRows()); } } },
-    el("td", {}, no), el("td", {}, date), el("td", {}, cust), el("td", { class: "r" }, kg), el("td", { class: "r" }, price),
-    el("td", { class: "r", colspan: "3" }, amount), el("td", {}, note),
+    el("td", {}), el("td", {}, no), el("td", {}, date), el("td", {}, cust), el("td", { class: "r" }, kg), el("td", { class: "r" }, price),
+    el("td", { class: "r", colspan: "3" }, amount), el("td", {}, note), el("td", {}),
     el("td", { class: "nowrap" },
       el("button", { class: "btn small primary", type: "button", text: "บันทึก", onclick: save }), " ",
       el("button", { class: "btn small", type: "button", text: "ยกเลิก", onclick: () => { ti_.editing = null; $("tiRows").replaceWith(tiRows()); } }), " ",
