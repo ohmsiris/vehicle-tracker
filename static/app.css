@@ -2234,3 +2234,5 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 
 .ti-pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 4px; }
 .ti-printed { white-space: nowrap; text-align: center; }
+.ti-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.ti-sortable:hover, .ti-sortable.on { color: var(--accent) !important; }

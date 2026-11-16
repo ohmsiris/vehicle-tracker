@@ -5,7 +5,7 @@
 // another month, missing), and the list -- filtered by customer, every row editable. Server: app/tax_invoices.py.
 // Hash: #tax-invoices/<YYYY-MM>.
 
-const ti_ = { data: null, month: null, to: null, sel: new Set(), pick: new Set(), q: "", kind: "invoice", editing: null, date: null, showSetup: false };
+const ti_ = { data: null, month: null, to: null, sel: new Set(), pick: new Set(), sort: { key: "date", dir: -1 }, q: "", kind: "invoice", editing: null, date: null, showSetup: false };
 const tiPicked = (code) => !ti_.sel.size || ti_.sel.has(code || "?");
 const tiB = (v, d = 2) => elN(v, d);
 const tiDMY = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${Number(iso.slice(0, 4)) + 543}` : "–");
@@ -228,8 +228,24 @@ function tiList() {
   return el("section", { class: "card" }, el("div", { class: "ti-listhead" }, el("h3", { text: "รายการใบกำกับภาษี / ใบลดหนี้" }), q), chips,
     el("div", { id: "tiPickBar" }, tiPickBar()),
     el("div", { class: "lc-wrap" }, el("table", { class: "lc-table ti-list" },
-      el("thead", {}, el("tr", {}, ...["", "เลขที่", "วันที่", "ลูกค้า", "น้ำหนัก", "ราคา", "ก่อน VAT", "VAT", "สุทธิ", "หมายเหตุ", "พิมพ์แล้ว", ""].map((h, i) => el("th", { class: i >= 4 && i <= 8 ? "r" : "", text: h })))),
+      el("thead", { id: "tiHead" }, tiHeadRow()),
       tiRows())));
+}
+
+// the list's order: newest first, or click a heading to sort by it (again = the other way) -- owner, 16 Nov 2026
+const TI_SORT = { doc: (r) => r.doc_no, date: (r) => `${r.doc_date || `${r.month}-00`} ${r.doc_no}`, cust: (r) => (tiCust(r.customer_code) || {}).name || r.customer_name || "",
+  kg: (r) => Number(r.kg) || 0, total: (r) => (r.kind === "credit_note" ? -1 : 1) * Number(r.total), printed: (r) => (r.printed_at ? 1 : 0) };
+function tiHeadRow() {
+  const cols = [["", null], ["เลขที่", "doc"], ["วันที่", "date"], ["ลูกค้า", "cust"], ["น้ำหนัก", "kg"], ["ราคา", null], ["ก่อน VAT", null], ["VAT", null],
+    ["สุทธิ", "total"], ["หมายเหตุ", null], ["พิมพ์แล้ว", "printed"], ["", null]];
+  return el("tr", {}, ...cols.map(([h, key], i) => {
+    const right = i >= 4 && i <= 8;
+    if (!key) return el("th", { class: right ? "r" : "", text: h });
+    const on = ti_.sort.key === key;
+    return el("th", { class: `${right ? "r " : ""}ti-sortable${on ? " on" : ""}`, title: "กดเพื่อเรียง",
+      onclick: () => { ti_.sort = on ? { key, dir: -ti_.sort.dir } : { key, dir: key === "cust" || key === "doc" ? 1 : -1 }; fill($("tiHead"), tiHeadRow()); tiRedrawList(); } },
+      h, on ? (ti_.sort.dir < 0 ? " ▼" : " ▲") : "");
+  }));
 }
 
 const tiPrintable = (r) => r.kind === "invoice" && r.doc_date && r.kg != null && r.price != null && ((ti_.data.templates || {})[r.customer_code] || {}).bill;
@@ -271,6 +287,8 @@ function tiRows() {
   const q = ti_.q.trim().toLowerCase();
   const all = ti_.data.rows.filter((r) => tiPicked(r.customer_code)
     && (!q || r.doc_no.toLowerCase().includes(q) || (r.note || "").toLowerCase().includes(q) || (r.ticket_no || "").toLowerCase().includes(q)));
+  const val = TI_SORT[ti_.sort.key] || TI_SORT.date;
+  all.sort((a, b) => { const x = val(a), y = val(b); return (x < y ? -1 : x > y ? 1 : 0) * ti_.sort.dir || (a.doc_no < b.doc_no ? 1 : -1); });
   const LIMIT = 600, rows = all.slice(0, LIMIT);
   const body = el("tbody", { id: "tiRows" });
   rows.forEach((r) => body.append(ti_.editing === r.id ? tiEditRow(r) : tiRow(r)));
