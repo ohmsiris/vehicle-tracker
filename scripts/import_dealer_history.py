@@ -5,7 +5,8 @@ Load a truck's repair history from the dealership's "ประวัติกา
 
 Needs PyMuPDF in the venv (a local tool, not a server dependency):  .venv/Scripts/python.exe -m pip install pymupdf
 Each report is one truck (matched by its plate). A visit already on the site (same truck, same day AND same odometer) is skipped, so a report can be loaded again; a
-visit whose day is on the site with a DIFFERENT odometer is reported, not added. New visits are saved like a record made by hand (source "manual": it can be deleted one by one),
+visit whose day is on the site with a DIFFERENT odometer is reported, not added. The invoice day counts as the visit day too, and a visit whose odometer is already on the truck is
+skipped whatever its date (a bill photographed by hand is dated on the invoice). New visits are saved like a record made by hand (source "manual": it can be deleted one by one),
 with the shop อิซูซุจึงกงเฮงแก่งคอย (--vendor), the dealer's wording as lines (the explanation in brackets), ค่าแรง for labour and the AI categoriser for parts. Dry run unless --apply.
 """
 import re
@@ -52,10 +53,12 @@ def main(paths: list[str], apply: bool) -> None:
         for e in have:
             by_day.setdefault(str(e["event_date"])[:10], []).append(e)
         add, same, conflicts = [], [], []
+        kms = {e.get("mileage") for e in have if e.get("mileage")}
         for visit in rep["visits"]:
             day = visit["date"].isoformat()
-            hit = by_day.get(day, [])
-            if any(e.get("mileage") == visit["mileage"] for e in hit):
+            # a bill photographed by hand is usually dated on the INVOICE day, not the day the truck went in: check both, and the odometer alone
+            hit = by_day.get(day, []) + (by_day.get(visit["invoice_date"].isoformat(), []) if visit.get("invoice_date") else [])
+            if visit["mileage"] in kms or any(e.get("mileage") == visit["mileage"] for e in hit):
                 same.append(day)
             elif hit:
                 conflicts.append((day, visit["mileage"], [e.get("mileage") for e in hit]))
