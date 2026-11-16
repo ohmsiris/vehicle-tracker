@@ -6,3 +6,6 @@ __pycache__/
 backups/
 Drivers.xlsx
 *.xlsx
+
+# the bookkeeper's bill templates (app/tax_invoices.py) ship with the app
+!app/templates/*.xlsx

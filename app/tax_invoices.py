@@ -69,8 +69,9 @@ def compute(kg, price, amount=None) -> dict:
     if amount is None:
         amount = float(kg or 0) * float(price or 0)
     a = money(amount)
-    v = money(a * VAT_RATE)
-    return {"amount": a, "vat": v, "total": money(a + v)}
+    v = a * VAT_RATE
+    # the total as the bill prints it (her Excel adds the unrounded VAT, then shows two decimals): 7,119.60 + 498.372 = 7,617.97
+    return {"amount": a, "vat": money(v), "total": money(a + v)}
 
 
 def price_on(prices: list[dict], code: Optional[str], on: str) -> Optional[float]:
@@ -119,6 +120,9 @@ def clean(data: dict, customers: dict, prices: list[dict]) -> dict:
         raise TaxInvoiceError("กรุณาเลือกลูกค้า")
     cust = customers.get(code) or {}
     kg = _num(data.get("kg"), "น้ำหนัก")
+    bags = _num(data.get("bags"), "จำนวนก้อน / กระสอบ")
+    if p["kind"] == "invoice" and cust.get("entry") == "bags" and cust.get("kg_per_bag") and bags is not None:
+        kg = bags * float(cust["kg_per_bag"])                    # ศูนย์จำหน่าย 90 ก้อน x 65 = 5,850 kg; โกลบอล 140 กระสอบ x 25 = 3,500 kg
     price = _num(data.get("price"), "ราคาต่อกิโลกรัม")
     typed = _num(data.get("amount"), "ยอดก่อน VAT")
     by_total = cust.get("mode") == "total"
@@ -136,7 +140,10 @@ def clean(data: dict, customers: dict, prices: list[dict]) -> dict:
         sums = compute(kg, price)
     return {"branch": BRANCH, "kind": p["kind"], "doc_no": p["doc_no"], "doc_date": doc_date, "month": month, "customer_code": code or None,
             "customer_name": cust.get("name") or str(data.get("customer_name") or "").strip() or None,
-            "kg": kg, "price": price if not by_total else None, **sums, "note": (str(data.get("note") or "").strip() or None)}
+            "kg": kg, "price": price if not by_total else None, **sums, "note": (str(data.get("note") or "").strip() or None),
+            "item": (item_text(cust, bags if bags is not None else ((kg / float(cust["kg_per_bag"])) if kg and cust.get("kg_per_bag") else None),
+                               str(data.get("item") or "").strip()) if p["kind"] == "invoice" else (str(data.get("item") or "").strip() or None)),
+            "ticket_no": (str(data.get("ticket_no") or "").strip()[:40] or None)}
 
 
 def summarize(rows: list[dict], customers: dict) -> dict:
@@ -183,7 +190,10 @@ def _prices() -> list[dict]:
     return supabase.select_all("tax_invoice_prices", {"select": "id,code,price,from_date,note", "order": "from_date.asc,id.asc"})
 
 
-def _rows(month: str) -> list[dict]:
+def _rows(month: str, to: Optional[str] = None) -> list[dict]:
+    if to and to != month:
+        return supabase.select_all("tax_invoices", {"select": "*", "branch": f"eq.{BRANCH}", "month": f"gte.{month}", "and": f"(month.lte.{to})",
+                                                    "order": "month.asc,doc_no.asc,id.asc"})
     return supabase.select_all("tax_invoices", {"select": "*", "branch": f"eq.{BRANCH}", "month": f"eq.{month}", "order": "doc_no.asc,id.asc"})
 
 
@@ -192,22 +202,27 @@ def months() -> list[str]:
     return sorted(seen)
 
 
-def view(month: str) -> dict:
-    if not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", month or ""):
-        raise TaxInvoiceError("เดือนไม่ถูกต้อง")
+def view(month: str, to: Optional[str] = None) -> dict:
+    """A month (or months `month`..`to`) of invoices: the rows, the summary by customer and its checks, the customers and their prices."""
+    for m in (month, to or month):
+        if not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", m or ""):
+            raise TaxInvoiceError("เดือนไม่ถูกต้อง")
+    if to and to < month:
+        month, to = to, month
     customers, prices = _customers(), _prices()
-    rows = _rows(month)
-    mine = {r["doc_no"] for r in rows}
-    elsewhere = defaultdict(list)                       # this month's numbers that are also in another month
-    for r in supabase.select_all("tax_invoices", {"select": "doc_no,month", "branch": f"eq.{BRANCH}", "month": f"neq.{month}", "order": "id.asc"}):
-        if r["doc_no"] in mine:
-            elsewhere[r["doc_no"]].append(r["month"])
+    rows = _rows(month, to)
     summary = summarize(rows, customers)
+    elsewhere = defaultdict(list)                       # numbers also in a month outside the view
+    if not to or to == month:
+        mine = {r["doc_no"] for r in rows}
+        for r in supabase.select_all("tax_invoices", {"select": "doc_no,month", "branch": f"eq.{BRANCH}", "month": f"neq.{month}", "order": "id.asc"}):
+            if r["doc_no"] in mine:
+                elsewhere[r["doc_no"]].append(r["month"])
     summary["other_months"] = [{"doc_no": n, "months": sorted(set(ms))} for n, ms in sorted(elsewhere.items())]
     last = max(rows, key=lambda r: r.get("created_at") or "", default=None)
-    return {"month": month, "months": months(), "rows": rows, "summary": summary,
+    return {"month": month, "to": to or month, "months": months(), "rows": rows, "summary": summary,
             "customers": list(customers.values()), "prices": prices,
-            "prices_now": {c: price_on(prices, c, f"{month}-28") for c in customers},
+            "templates": {c: {"bill": bool(template(c)), "monthly": bool(template(c, "monthly"))} for c in customers},
             "last": last and {"doc_no": last["doc_no"], "next": next_number(last["doc_no"]), "doc_date": last.get("doc_date")}}
 
 
@@ -273,3 +288,342 @@ def book() -> dict:
         if ch:
             out[r["month"]][ch] += (-1 if r["kind"] == "credit_note" else 1) * float(r["amount"] or 0)
     return {m: dict(v) for m, v in out.items()}
+
+
+# ------------------------------------------------------------------ the next number, and the Excel bills (16 Nov 2026)
+def format_number(fmt: str, day: date, seq: int) -> str:
+    """'SRI-{be}-{mm}{seq:03d}' on 16/11/2026, 153 -> 'SRI-2569-11153'."""
+    return fmt.format(be=day.year + 543, mm=f"{day.month:02d}", seq=seq)
+
+
+def next_for(cust: dict, day: date, used: list[str]) -> Optional[str]:
+    """The number the next bill of this customer on this day gets: one after the highest of this month's (or, for customers whose count
+    runs on through the year, of all of its numbers in that series), skipping none. `used` = this customer's numbers so far."""
+    fmt = cust.get("number_format")
+    if not fmt:
+        return None
+    if "{seq" not in fmt:
+        return format_number(fmt, day, 0)
+    head = fmt.split("{seq")[0]
+    width = int(re.search(r"\{seq:0(\d)d\}", fmt).group(1)) if re.search(r"\{seq:0(\d)d\}", fmt) else 3
+    if cust.get("seq_monthly"):
+        prefix = format_number(head, day, 0)                       # this month's series: SRI-2569-11
+        seqs = [int(n[len(prefix):]) for n in used if n.startswith(prefix) and n[len(prefix):].isdigit() and len(n) - len(prefix) == width]
+    else:
+        prefix = format_number(head.split("{mm}")[0], day, 0)      # the year's series, whatever the month: SRI-2569-06
+        seqs = [int(n[-width:]) for n in used if n.startswith(prefix) and n[-width:].isdigit()]
+    return format_number(fmt, day, (max(seqs) if seqs else 0) + 1)
+
+
+def next_number_for(code: str, day_text: str) -> dict:
+    customers = _customers()
+    cust = customers.get(code)
+    if not cust:
+        raise TaxInvoiceError("ไม่รู้จักลูกค้านี้")
+    try:
+        day = date.fromisoformat(day_text)
+    except ValueError:
+        raise TaxInvoiceError("วันที่ไม่ถูกต้อง")
+    used = [r["doc_no"] for r in supabase.select_all("tax_invoices", {"select": "doc_no", "branch": f"eq.{BRANCH}", "customer_code": f"eq.{code}",
+                                                                     "kind": "eq.invoice", "order": "id.asc"})]
+    return {"code": code, "doc_no": next_for(cust, day, used)}
+
+
+TEMPLATES = __import__("pathlib").Path(__file__).resolve().parent / "templates"
+TH_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
+TH_SHORT = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
+
+
+def template(code: str, kind: str = "bill"):
+    """Her own Excel for this customer: bill_<code>.xlsx (one bill) or monthly_<code>.xlsx (the month's ใบวางบิล); None when there is none
+    (ซันฟู้ด -- done by the owner's father -- and the occasional customers are typed only)."""
+    f = TEMPLATES / f"{'bill' if kind == 'bill' else 'monthly'}_{code}.xlsx"
+    return f if f.exists() else None
+
+
+def item_text(cust: dict, bags=None, chosen: str = "") -> Optional[str]:
+    """What goes in รายการ: the chosen item (CP: 200 / 100 ก้อน), or the customer's wording with the number of bags filled in."""
+    if chosen:
+        return chosen
+    fmt = cust.get("item_format")
+    if fmt:
+        n = "" if bags is None else (int(float(bags)) if float(bags) == int(float(bags)) else bags)
+        return fmt.replace("{bags}", str(n))
+    items = cust.get("items") or []
+    return items[0] if items else None
+
+
+def sheet_title(doc_no: str) -> str:
+    """The tab name the bookkeeper used: SRI-2569-11152 -> CPF01-11152-2026, SRI-2569-0711022 -> CPF0711022-2026."""
+    m = re.fullmatch(r"SRI-(\d{4})-(\d+)", doc_no)
+    if m:
+        tail, year = m.group(2), int(m.group(1)) - 543
+        return f"CPF01-{tail}-{year}" if len(tail) == 5 else f"CPF{tail}-{year}"
+    return re.sub(r"[\\/*?:\[\]]", "-", doc_no)[:31]
+
+
+def _workbook(path):
+    import openpyxl
+    wb = openpyxl.load_workbook(path)
+    for n in list(wb.defined_names):
+        if n.startswith("_xlfn"):
+            del wb.defined_names[n]
+    return wb, wb.worksheets[0]
+
+
+def _save(wb) -> bytes:
+    import io
+    wb.calculation.fullCalcOnLoad = True
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _month_end(month: str) -> date:
+    import datetime as _dt
+    y, m = int(month[:4]), int(month[5:7])
+    return date(y + (m == 12), m % 12 + 1, 1) - _dt.timedelta(days=1)
+
+
+def bills_workbook(rows: list[dict], path) -> bytes:
+    """The bills as her Excel file: one tab per bill, copied from her own last bill of that customer (same page, fonts, columns, margins,
+    print area, formulas); only the number, the date, the item, the kg and the price change -- and the amount in words (BAHTTEXT's text)."""
+    from app.bahttext import bahttext
+    wb, tpl = _workbook(path)
+    area = (tpl.print_area or "A1:M20").split("!")[-1].replace("$", "")
+    for r in sorted(rows, key=lambda x: x["doc_no"]):
+        ws = wb.copy_worksheet(tpl)
+        ws.title = sheet_title(r["doc_no"])
+        ws.print_area = area
+        d = date.fromisoformat(r["doc_date"])
+        ws["E6"] = f"เลขที่   {r['doc_no']}"
+        ws["E7"] = f"วันที่  {d.day:02d}/{d.month:02d}/{d.year + 543}"
+        ws["B10"] = r.get("item") or ws["B10"].value
+        ws["C10"] = float(r["kg"])
+        ws["E10"] = float(r["price"])
+        ws["A15"] = f"({bahttext(r['total'])})"
+    wb.remove(tpl)
+    return _save(wb)
+
+
+def bills_file(ids: list[int]) -> tuple[bytes, str]:
+    if not ids:
+        raise TaxInvoiceError("ยังไม่ได้เลือกบิล")
+    rows = []
+    for i in range(0, len(ids), 100):
+        rows += supabase.select_all("tax_invoices", {"select": "*", "id": f"in.({','.join(str(int(x)) for x in ids[i:i + 100])})", "order": "id.asc"})
+    codes = {r.get("customer_code") for r in rows}
+    if len(codes) != 1:
+        raise TaxInvoiceError("ทำไฟล์บิลได้ทีละลูกค้า")
+    code = codes.pop()
+    path = template(code)
+    if not path:
+        raise TaxInvoiceError("ลูกค้านี้ไม่มีแบบฟอร์มบิลในโปรแกรม")
+    bad = [r["doc_no"] for r in rows if r["kind"] != "invoice" or not r.get("doc_date") or r.get("kg") is None or r.get("price") is None]
+    if bad:
+        raise TaxInvoiceError(f"ทำไฟล์บิลได้เฉพาะใบกำกับที่มีวันที่ น้ำหนัก และราคา — {', '.join(bad[:5])}")
+    name = (_customers().get(code) or {}).get("name") or code
+    days = sorted({r["doc_date"] for r in rows})
+    return bills_workbook(rows, path), f"บิล {name} {days[0]}" + (f" ถึง {days[-1]}" if len(days) > 1 else "") + ".xlsx"
+
+
+# ------------------------------------------------------------------ the monthly customers: deliveries, and the month's ใบวางบิล
+def clean_delivery(data: dict, cust: dict, prices: list[dict]) -> dict:
+    try:
+        day = date.fromisoformat(str(data.get("day") or ""))
+    except ValueError:
+        raise TaxInvoiceError("วันที่ไม่ถูกต้อง")
+    bags = _num(data.get("bags"), "จำนวนกระสอบ")
+    kg = _num(data.get("kg"), "น้ำหนัก")
+    if cust.get("entry") == "bags" and cust.get("kg_per_bag"):
+        if bags is None:
+            raise TaxInvoiceError("กรุณาใส่จำนวนกระสอบ")
+        kg = bags * float(cust["kg_per_bag"])
+    if not kg:
+        raise TaxInvoiceError("กรุณาใส่น้ำหนัก (กก.)")
+    price = _num(data.get("price"), "ราคา") or price_on(prices, cust["code"], day.isoformat())
+    if price is None:
+        raise TaxInvoiceError(f"ยังไม่มีราคาของ {cust['name']}")
+    return {"customer_code": cust["code"], "day": day.isoformat(), "note_no": (str(data.get("note_no") or "").strip()[:40] or None),
+            "item": item_text(cust, bags, str(data.get("item") or "").strip()), "bags": bags, "kg": kg, "price": price,
+            "amount": money(kg * price)}
+
+
+def next_note(notes: list) -> str:
+    """The delivery note after the last one: 4733/236628 -> 4733/236629."""
+    for n in reversed(notes):
+        m = re.fullmatch(r"(.*?)(\d+)", n or "")
+        if m:
+            return f"{m.group(1)}{str(int(m.group(2)) + 1).zfill(len(m.group(2)))}"
+    return ""
+
+
+def deliveries(code: str, month: str) -> dict:
+    """A monthly customer's deliveries not yet on a ใบวางบิล (any month) and those on this month's, with the next delivery-note number."""
+    cust = _customers().get(code)
+    if not cust or cust.get("billing") != "monthly":
+        raise TaxInvoiceError("ลูกค้านี้ไม่ได้วางบิลรายเดือน")
+    if not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", month or ""):
+        raise TaxInvoiceError("เดือนไม่ถูกต้อง")
+    rows = supabase.select_all("tax_invoice_deliveries", {"select": "*", "customer_code": f"eq.{code}", "order": "day.asc,id.asc"})
+    bill = supabase.select("tax_invoices", {"select": "id,doc_no,doc_date,kg,amount,vat,total", "customer_code": f"eq.{code}", "month": f"eq.{month}",
+                                            "kind": "eq.invoice", "order": "id.asc"})
+    bill_ids = {b["id"] for b in bill}
+    return {"code": code, "month": month, "open": [r for r in rows if not r.get("invoice_id")],
+            "billed": [r for r in rows if r.get("invoice_id") in bill_ids], "bill": bill[0] if bill else None,
+            "next_note": next_note([r.get("note_no") for r in rows])}
+
+
+def add_delivery(data: dict, who: str) -> dict:
+    cust = _customers().get(str(data.get("customer_code") or ""))
+    if not cust or cust.get("billing") != "monthly":
+        raise TaxInvoiceError("ลูกค้านี้ไม่ได้วางบิลรายเดือน")
+    row = clean_delivery(data, cust, _prices())
+    row["updated_by"] = who
+    return supabase.insert("tax_invoice_deliveries", [row])[0]
+
+
+def update_delivery(row_id: int, data: dict, who: str) -> dict:
+    old = supabase.select("tax_invoice_deliveries", {"select": "*", "id": f"eq.{int(row_id)}"})
+    if not old:
+        raise TaxInvoiceError("ไม่พบรายการนี้")
+    if old[0].get("invoice_id"):
+        raise TaxInvoiceError("รายการนี้อยู่ในใบวางบิลแล้ว — ยกเลิกใบวางบิลก่อนแก้")
+    cust = _customers()[old[0]["customer_code"]]
+    row = clean_delivery({**old[0], **data}, cust, _prices())
+    row["updated_by"] = who
+    return supabase.update("tax_invoice_deliveries", {"id": f"eq.{int(row_id)}"}, row)[0]
+
+
+def delete_delivery(row_id: int) -> None:
+    old = supabase.select("tax_invoice_deliveries", {"select": "invoice_id", "id": f"eq.{int(row_id)}"})
+    if old and old[0].get("invoice_id"):
+        raise TaxInvoiceError("รายการนี้อยู่ในใบวางบิลแล้ว — ยกเลิกใบวางบิลก่อนลบ")
+    supabase.delete("tax_invoice_deliveries", {"id": f"eq.{int(row_id)}"})
+
+
+def make_monthly(code: str, month: str, delivery_ids: list, who: str) -> dict:
+    """The month's ใบวางบิล: one tax invoice (the next number) for these deliveries, which are then on it."""
+    cust = _customers().get(code)
+    if not cust or cust.get("billing") != "monthly":
+        raise TaxInvoiceError("ลูกค้านี้ไม่ได้วางบิลรายเดือน")
+    if not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", month or ""):
+        raise TaxInvoiceError("เดือนไม่ถูกต้อง")
+    if supabase.select("tax_invoices", {"select": "id", "customer_code": f"eq.{code}", "month": f"eq.{month}", "kind": "eq.invoice"}):
+        raise TaxInvoiceError("เดือนนี้มีใบวางบิลแล้ว")
+    ids = [int(x) for x in delivery_ids or []]
+    if not ids:
+        raise TaxInvoiceError("ยังไม่ได้เลือกรายการส่งของ")
+    rows = supabase.select_all("tax_invoice_deliveries", {"select": "*", "id": f"in.({','.join(map(str, ids))})", "order": "day.asc,id.asc"})
+    if len(rows) != len(set(ids)) or any(r["customer_code"] != code or r.get("invoice_id") for r in rows):
+        raise TaxInvoiceError("มีรายการที่อยู่ในใบวางบิลอื่นแล้ว หรือไม่ใช่ของลูกค้านี้ — โหลดหน้าใหม่แล้วลองอีกครั้ง")
+    last = _month_end(month)
+    used = [r["doc_no"] for r in supabase.select_all("tax_invoices", {"select": "doc_no", "customer_code": f"eq.{code}", "kind": "eq.invoice", "order": "id.asc"})]
+    doc_no = next_for(cust, last, used)
+    sums = compute(None, None, sum(float(r["amount"]) for r in rows))
+    prices = {float(r["price"]) for r in rows}
+    inv = supabase.insert("tax_invoices", [{"branch": BRANCH, "kind": "invoice", "doc_no": doc_no, "doc_date": last.isoformat(), "month": month,
+                                             "customer_code": code, "customer_name": cust["name"], "kg": sum(float(r["kg"]) for r in rows),
+                                             "price": prices.pop() if len(prices) == 1 else None, **sums, "item": cust.get("item_format"),
+                                             "note": f"ใบวางบิล {len(rows)} รายการส่งของ", "source": "app", "updated_by": who}])[0]
+    supabase.update("tax_invoice_deliveries", {"id": f"in.({','.join(map(str, ids))})"}, {"invoice_id": inv["id"]})
+    return inv
+
+
+def undo_monthly(invoice_id: int) -> None:
+    """Take a ใบวางบิล back (its deliveries become open again) -- to fix a delivery and make it again."""
+    supabase.update("tax_invoice_deliveries", {"invoice_id": f"eq.{int(invoice_id)}"}, {"invoice_id": None})
+    supabase.delete("tax_invoices", {"id": f"eq.{int(invoice_id)}"})
+
+
+def shift_formula(f, data_end_old: int, data_end_new: int, block_from: int, delta: int):
+    """A totals-row formula of her sheet, moved: the data range ends on the new last row; a cell of the totals block moves with it.
+    '=SUM(E5:E31)' -> '=SUM(E5:E20)'; '=J32*7%' (J32 in the block) -> '=J21*7%'."""
+    if not isinstance(f, str) or not f.startswith("="):
+        return f
+    f = re.sub(rf"(:\$?[A-Z]+\$?){data_end_old}(?!\d)", lambda m: f"{m.group(1)}{data_end_new}", f)
+    return re.sub(r"(?<![A-Z$])(\$?[A-Z]{1,2}\$?)(\d+)(?!\d)",
+                  lambda m: f"{m.group(1)}{int(m.group(2)) + delta}" if int(m.group(2)) >= block_from else m.group(0), f)
+
+
+def monthly_workbook(inv: dict, rows: list[dict], path) -> bytes:
+    """The month's ใบวางบิล in her own sheet: the heading and number, then one row per delivery (her row 5's look and formulas), then her
+    totals / VAT / net rows and the signatures, moved to sit right under the last delivery. Dates are written as she types them (year 25xx)."""
+    import datetime as _dt
+    from copy import copy
+    from openpyxl.formula.translate import Translator
+    wb, ws = _workbook(path)
+    first = 5
+    end_old = max(r for r in range(first, ws.max_row + 1) if hasattr(ws.cell(r, 2).value, "year"))
+    max_col = max(ws.max_column, 10)
+    style = lambda c: (copy(c.font), copy(c.border), copy(c.fill), c.number_format, copy(c.alignment))  # noqa: E731
+    proto = [(ws.cell(first, c).value, style(ws.cell(first, c))) for c in range(1, max_col + 1)]
+    proto_last = [style(ws.cell(end_old, c)) for c in range(1, max_col + 1)]       # her last row closes the table (its bottom line)
+    proto_h = ws.row_dimensions[first].height
+    tail_from, tail_to = end_old + 1, ws.max_row
+    tail = {(r - tail_from, c): (ws.cell(r, c).value, style(ws.cell(r, c))) for r in range(tail_from, tail_to + 1) for c in range(1, max_col + 1)}
+    tail_h = {r - tail_from: ws.row_dimensions[r].height for r in range(tail_from, tail_to + 1)}
+    tail_merges = [(m.min_row, m.min_col, m.max_row, m.max_col) for m in list(ws.merged_cells.ranges) if m.min_row >= tail_from]
+    for m in list(ws.merged_cells.ranges):
+        if m.min_row >= first:
+            ws.unmerge_cells(str(m))
+    for r in range(first, tail_to + 1):
+        for c in range(1, max_col + 1):
+            ws.cell(r, c).value = None
+    end_new = first + len(rows) - 1
+    delta = end_new - end_old
+
+    def put(cell, st):
+        cell.font, cell.border, cell.fill, cell.number_format, cell.alignment = st
+    for i, d in enumerate(rows):
+        r = first + i
+        day = date.fromisoformat(d["day"])
+        vals = {1: i + 1, 2: _dt.datetime(day.year + 543, day.month, day.day), 3: d.get("note_no"), 4: d.get("item"),
+                5: float(d["bags"]) if d.get("bags") is not None else None, 6: float(d["kg"]), 8: float(d["price"])}
+        for c in range(1, max_col + 1):
+            v0, st = proto[c - 1]
+            cell = ws.cell(r, c)
+            put(cell, proto_last[c - 1] if i == len(rows) - 1 else st)
+            col = cell.column_letter
+            if isinstance(v0, str) and v0.startswith("="):             # her formulas: kg = bags x 20, amount = kg x price
+                cell.value = Translator(v0, origin=f"{col}{first}").translate_formula(f"{col}{r}")
+            elif c in vals:
+                cell.value = vals[c]
+            else:
+                cell.value = v0 if c == 7 else None                     # the unit (Kg)
+        ws.row_dimensions[r].height = proto_h
+    for (dr, c), (v, st) in tail.items():
+        cell = ws.cell(end_new + 1 + dr, c)
+        cell.value = shift_formula(v, end_old, end_new, tail_from, delta)
+        put(cell, st)
+    for dr, h in tail_h.items():
+        ws.row_dimensions[end_new + 1 + dr].height = h
+    for r0, c0, r1, c1 in tail_merges:
+        ws.merge_cells(start_row=r0 + delta, start_column=c0, end_row=r1 + delta, end_column=c1)
+    for r in range(end_new + 1 + (tail_to - tail_from) + 1, ws.max_row + 1):
+        for c in range(1, max_col + 1):
+            ws.cell(r, c).value = None
+    last = _month_end(inv["month"])
+    y, mo = last.year, last.month
+    ws["B2"] = f"ใบวางบิล การจัดส่ง-น้ำแข็ง  วันที่ 1-{last.day} {TH_MONTHS[mo - 1]}  {y + 543}"
+    if ws["H2"].value:
+        ws["H2"] = f"เลขที่ใบวางบิล : {inv['doc_no']}"
+    area = (ws.print_area or "").split("!")[-1].replace("$", "")
+    m = re.fullmatch(r"([A-Z]+)1:([A-Z]+)(\d+)", area)
+    ws.title = f"1-{last.day} {TH_SHORT[mo - 1]}{y + 543}"
+    ws.print_area = f"A1:{m.group(2)}{int(m.group(3)) + delta}" if m else None
+    return _save(wb)
+
+
+def monthly_file(invoice_id: int) -> tuple[bytes, str]:
+    inv = supabase.select("tax_invoices", {"select": "*", "id": f"eq.{int(invoice_id)}"})
+    if not inv:
+        raise TaxInvoiceError("ไม่พบใบวางบิล")
+    inv = inv[0]
+    path = template(inv["customer_code"], "monthly")
+    if not path:
+        raise TaxInvoiceError("ลูกค้านี้ไม่มีแบบฟอร์มใบวางบิลในโปรแกรม")
+    rows = supabase.select_all("tax_invoice_deliveries", {"select": "*", "invoice_id": f"eq.{inv['id']}", "order": "day.asc,id.asc"})
+    if not rows:
+        raise TaxInvoiceError("ใบวางบิลนี้ไม่มีรายการส่งของ")
+    return monthly_workbook(inv, rows, path), f"ใบวางบิล {inv.get('customer_name') or ''} {inv['month']}.xlsx"

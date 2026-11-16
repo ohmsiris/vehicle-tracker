@@ -5,7 +5,8 @@
 // another month, missing), and the list -- filtered by customer, every row editable. Server: app/tax_invoices.py.
 // Hash: #tax-invoices/<YYYY-MM>.
 
-const ti_ = { data: null, month: null, filter: "all", q: "", kind: "invoice", editing: null, date: null, showSetup: false };
+const ti_ = { data: null, month: null, to: null, sel: new Set(), q: "", kind: "invoice", editing: null, date: null, showSetup: false };
+const tiPicked = (code) => !ti_.sel.size || ti_.sel.has(code || "?");
 const tiB = (v, d = 2) => elN(v, d);
 const tiDMY = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${Number(iso.slice(0, 4)) + 543}` : "–");
 const tiMonthTH = (m) => `${ELEC_TH[Number(m.slice(5, 7)) - 1]} ${Number(m.slice(0, 4)) + 543}`;
@@ -39,36 +40,38 @@ const tiCust = (code) => ti_.data.customers.find((c) => c.code === code) || null
 async function openTaxInvoices(sub = "") {
   showView("taxInvoices");
   showErr("tiError", "");
-  const month = /^\d{4}-\d{2}$/.test(sub || "") ? sub : null;
+  const m = (sub || "").match(/^(\d{4}-\d{2})(?:\.\.(\d{4}-\d{2}))?$/);
+  const month = m ? m[1] : null, to = m && m[2] ? m[2] : null;
   if (!ti_.data) fill($("tiBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
-  try { ti_.data = await api(`/api/tax-invoices${month ? `?month=${month}` : ""}`); }
+  try { ti_.data = await api(`/api/tax-invoices${month ? `?month=${month}${to ? `&to=${to}` : ""}` : ""}`); }
   catch (err) { fill($("tiBody"), null); showErr("tiError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
-  if (ti_.month !== ti_.data.month) { ti_.filter = "all"; ti_.q = ""; ti_.editing = null; }
-  ti_.month = ti_.data.month;
-  tiRender();
+  if (ti_.month !== ti_.data.month || ti_.to !== ti_.data.to) { ti_.q = ""; ti_.editing = null; }
+  const keep = ti_.month === ti_.data.month && !!document.getElementById("tbMaker");
+  ti_.month = ti_.data.month; ti_.to = ti_.data.to;
+  tiRender(keep);
 }
 
 async function tiReload() {
-  try { ti_.data = await api(`/api/tax-invoices?month=${ti_.month}`); } catch (err) { showErr("tiError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
+  try { ti_.data = await api(`/api/tax-invoices?month=${ti_.month}${ti_.to && ti_.to !== ti_.month ? `&to=${ti_.to}` : ""}`); } catch (err) { showErr("tiError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
   tiRender(true);
 }
 
 function tiRender(keepEntry = false) {
   const d = ti_.data, s = d.summary;
-  const months = [...new Set([...d.months, d.month])].sort();
+  const months = [...new Set([...d.months, d.month, d.to])].sort();
+  const range = d.to && d.to !== d.month;
+  const go = (m, to) => goHash(`#tax-invoices/${m}${to && to !== m ? `..${to}` : ""}`);
   const bar = el("div", { class: "ti-monthbar" },
-    el("button", { class: "btn small", type: "button", text: "‹", title: "เดือนก่อน", onclick: () => goHash(`#tax-invoices/${tiShift(d.month, -1)}`) }),
-    el("select", { class: "ti-month", "aria-label": "เดือน", onchange: (e) => goHash(`#tax-invoices/${e.target.value}`) },
+    el("button", { class: "btn small", type: "button", text: "‹", title: "เดือนก่อน", onclick: () => go(tiShift(d.month, -1)) }),
+    el("select", { class: "ti-month", "aria-label": "เดือน", onchange: (e) => go(e.target.value, range ? d.to : null) },
       ...months.slice().reverse().map((m) => el("option", { value: m, text: tiMonthTH(m), selected: m === d.month }))),
-    el("button", { class: "btn small", type: "button", text: "›", title: "เดือนถัดไป", onclick: () => goHash(`#tax-invoices/${tiShift(d.month, 1)}`) }));
-  const tile = (label, value, sub) => el("div", { class: "lc-tile" }, el("div", { class: "small muted", text: label }), el("b", { text: value }), sub ? el("div", { class: "small muted", text: sub }) : null);
-  const t = s.totals;
-  const tiles = el("div", { class: "lc-tiles" },
-    tile("ยอดเงินสุทธิ (รวม VAT)", `฿${tiB(t.total)}`, `ก่อน VAT ${tiB(t.amount)} · VAT ${tiB(t.vat)}`),
-    tile("น้ำหนักรวม", `${tiB(t.kg, 0)} กก.`, "ไม่รวมลูกค้าที่คิดเป็นยอดรวม"),
-    tile("จำนวนใบ", `${t.invoices} ใบ`, t.credit_notes ? `ใบลดหนี้ ${t.credit_notes} ใบ` : "ไม่มีใบลดหนี้"));
-  const entry = keepEntry && document.getElementById("tiEntry") ? document.getElementById("tiEntry") : tiEntry();
-  fill($("tiBody"), bar, entry, tiles, tiChecks(s), tiByCustomer(s), tiList(), tiSetup());
+    el("span", { class: "small muted", text: "ถึง" }),
+    el("select", { class: "ti-month", "aria-label": "ถึงเดือน", onchange: (e) => go(d.month, e.target.value) },
+      ...months.slice().reverse().filter((m) => m >= d.month).map((m) => el("option", { value: m, text: tiMonthTH(m), selected: m === d.to }))),
+    el("button", { class: "btn small", type: "button", text: "›", title: "เดือนถัดไป", onclick: () => go(tiShift(d.month, 1)) }),
+    range ? el("span", { class: "small muted", text: "ช่องออกบิลใช้เดือนแรก" }) : null);
+  const entry = keepEntry && document.getElementById("tbMaker") ? document.getElementById("tbMaker") : tbMaker();
+  fill($("tiBody"), bar, entry, tiSummary(s), tiChecks(s), tiList(), tiSetup());
 }
 
 // ------------------------------------------------------------------ the fill-in box
@@ -165,24 +168,50 @@ function tiChecks(s) {
   return el("section", { class: "card ti-checks" }, el("h3", { text: "ควรตรวจสอบ" }), el("ul", {}, ...items));
 }
 
+function tiToggle(code) {
+  if (code === "all") ti_.sel = new Set(); else if (ti_.sel.has(code)) ti_.sel.delete(code); else ti_.sel.add(code);
+  tiRender(true);
+}
+
+// the summary: pick any customers (all, just CP, X + Y + Z) -- the tiles, the table and the list below follow
+function tiSummary(s) {
+  const period = ti_.to && ti_.to !== ti_.month ? `${tiMonthTH(ti_.month)} – ${tiMonthTH(ti_.to)}` : tiMonthTH(ti_.month);
+  const chips = el("div", { class: "dd-chips" },
+    el("button", { type: "button", class: `dd-chip${!ti_.sel.size ? " on" : ""}`, onclick: () => tiToggle("all") }, el("span", { text: "ทุกลูกค้า" })),
+    ...s.customers.map((c) => el("button", { type: "button", class: `dd-chip${ti_.sel.has(c.code) ? " on" : ""}`, onclick: () => tiToggle(c.code) },
+      el("span", { text: c.name }), el("span", { class: "dd-count", text: tiB(c.total, 0) }))));
+  const sel = s.customers.filter((c) => tiPicked(c.code));
+  const t = { total: 0, amount: 0, vat: 0, kg: 0, invoices: 0, credit_notes: 0 };
+  sel.forEach((c) => Object.keys(t).forEach((k) => { t[k] += Number(c[k]) || 0; }));
+  const tile = (label, value, sub) => el("div", { class: "lc-tile" }, el("div", { class: "small muted", text: label }), el("b", { text: value }), sub ? el("div", { class: "small muted", text: sub }) : null);
+  const tiles = el("div", { class: "lc-tiles" },
+    tile("ยอดเงินสุทธิ (รวม VAT)", `฿${tiB(t.total)}`, `ก่อน VAT ${tiB(t.amount)} · VAT ${tiB(t.vat)}`),
+    tile("น้ำหนักรวม", `${tiB(t.kg, 0)} กก.`, "ไม่รวมซันฟู้ด (ยอดรวม)"),
+    tile("จำนวนใบ", `${t.invoices} ใบ`, t.credit_notes ? `ใบลดหนี้ ${t.credit_notes} ใบ` : "ไม่มีใบลดหนี้"));
+  return el("section", { class: "card ti-sumcard" }, el("h3", { text: `สรุป · ${period}` }),
+    el("p", { class: "small muted", text: "เลือกได้หลายลูกค้า — กดอีกครั้งเพื่อเอาออก" }), chips, tiles, tiByCustomer(s));
+}
+
 function tiByCustomer(s) {
-  if (!s.customers.length) return el("p", { class: "muted", text: `ยังไม่มีใบของเดือน ${tiMonthTH(ti_.month)}` });
-  const max = Math.max(1, ...s.customers.map((c) => Math.abs(c.total)));
-  const rows = s.customers.map((c) => el("tr", { class: `ti-crow${ti_.filter === c.code ? " on" : ""}`, onclick: () => { ti_.filter = ti_.filter === c.code ? "all" : c.code; tiRender(true); } },
+  if (!s.customers.length) return el("p", { class: "muted", text: "ยังไม่มีใบในช่วงนี้" });
+  const shown = s.customers.filter((c) => tiPicked(c.code));
+  const max = Math.max(1, ...shown.map((c) => Math.abs(c.total)));
+  const rows = shown.map((c) => el("tr", { class: "ti-crow" },
     el("td", {}, el("b", { text: c.name })),
     el("td", { class: "r", text: `${c.invoices}${c.credit_notes ? ` (−${c.credit_notes})` : ""}` }),
     el("td", { class: "r", text: c.kg ? tiB(c.kg, 0) : "–" }),
     el("td", { class: "r", text: tiB(c.amount) }), el("td", { class: "r", text: tiB(c.vat) }),
     el("td", { class: "r" }, el("b", { text: tiB(c.total) })),
     el("td", { class: "ti-barcell" }, el("div", { class: "ti-bar", style: `width:${Math.round(Math.abs(c.total) / max * 100)}%` }))));
-  const t = s.totals;
-  return el("section", { class: "card" }, el("h3", { text: `สรุปตามลูกค้า · ${tiMonthTH(ti_.month)}` }),
+  const t = { invoices: 0, kg: 0, amount: 0, vat: 0, total: 0 };
+  shown.forEach((c) => Object.keys(t).forEach((k) => { t[k] += Number(c[k]) || 0; }));
+  return el("div", {},
     el("div", { class: "lc-wrap" }, el("table", { class: "lc-table ti-sum" },
       el("thead", {}, el("tr", {}, ...["ลูกค้า", "ใบ", "น้ำหนัก (กก.)", "ก่อน VAT", "VAT 7%", "ยอดเงินสุทธิ", ""].map((h, i) => el("th", { class: i && i < 6 ? "r" : "", text: h })))),
       el("tbody", {}, ...rows),
       el("tfoot", {}, el("tr", {}, el("td", { text: "รวม" }), el("td", { class: "r", text: String(t.invoices) }), el("td", { class: "r", text: tiB(t.kg, 0) }),
         el("td", { class: "r", text: tiB(t.amount) }), el("td", { class: "r", text: tiB(t.vat) }), el("td", { class: "r" }, el("b", { text: tiB(t.total) })), el("td", {}))))),
-    el("p", { class: "small muted", text: "ใบลดหนี้หักออกจากยอดของลูกค้าแล้ว · กดที่ลูกค้าเพื่อดูเฉพาะใบของลูกค้านั้นด้านล่าง" }));
+    el("p", { class: "small muted", text: "ใบลดหนี้หักออกจากยอดของลูกค้าแล้ว" }));
 }
 
 // ------------------------------------------------------------------ the list
@@ -190,7 +219,7 @@ function tiList() {
   const d = ti_.data;
   const counts = {};
   d.rows.forEach((r) => { const k = r.customer_code || "?"; counts[k] = (counts[k] || 0) + 1; });
-  const chip = (key, text) => el("button", { type: "button", class: `dd-chip${ti_.filter === key ? " on" : ""}`, onclick: () => { ti_.filter = key; tiRender(true); } },
+  const chip = (key, text) => el("button", { type: "button", class: `dd-chip${key === "all" ? (!ti_.sel.size ? " on" : "") : (ti_.sel.has(key) ? " on" : "")}`, onclick: () => tiToggle(key) },
     el("span", { text }), el("span", { class: "dd-count", text: String(key === "all" ? d.rows.length : counts[key] || 0) }));
   const chips = el("div", { class: "dd-chips" }, chip("all", "ทั้งหมด"),
     ...Object.keys(counts).sort((a, b) => (counts[b] - counts[a])).map((k) => chip(k, (tiCust(k) || {}).name || "ไม่ระบุลูกค้า")));
@@ -204,10 +233,12 @@ function tiList() {
 
 function tiRows() {
   const q = ti_.q.trim().toLowerCase();
-  const rows = ti_.data.rows.filter((r) => (ti_.filter === "all" || (r.customer_code || "?") === ti_.filter)
-    && (!q || r.doc_no.toLowerCase().includes(q) || (r.note || "").toLowerCase().includes(q)));
+  const all = ti_.data.rows.filter((r) => tiPicked(r.customer_code)
+    && (!q || r.doc_no.toLowerCase().includes(q) || (r.note || "").toLowerCase().includes(q) || (r.ticket_no || "").toLowerCase().includes(q)));
+  const LIMIT = 600, rows = all.slice(0, LIMIT);
   const body = el("tbody", { id: "tiRows" });
   rows.forEach((r) => body.append(ti_.editing === r.id ? tiEditRow(r) : tiRow(r)));
+  if (all.length > LIMIT) body.append(el("tr", {}, el("td", { colspan: "10", class: "muted small", text: `แสดง ${LIMIT} จาก ${all.length} ใบ — เลือกลูกค้าหรือค้นหาเลขที่เพื่อให้แคบลง` })));
   if (!rows.length) body.append(el("tr", {}, el("td", { colspan: "10", class: "muted", text: "ไม่มีรายการ" })));
   return body;
 }

@@ -2341,14 +2341,87 @@ def _ti_call(fn, *args):
         raise HTTPException(502, "บันทึก / โหลดไม่สำเร็จ ลองใหม่อีกครั้ง")
 
 
+@app.get("/api/tax-invoices/next")
+def api_tax_invoices_next(code: str = Query(...), day: str = Query(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The number the next bill of this customer on this day gets (her running number)."""
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.next_number_for, code, day)
+
+
+@app.get("/api/tax-invoices/bills.xlsx")
+def api_tax_invoices_bills(ids: str = Query(...), x_app_token: str = Header(default=""), token: str = Query(default="")):
+    """These bills as her Excel file (one tab each, her own bill), to print."""
+    from urllib.parse import quote
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    body, name = _ti_call(tax_invoices.bills_file, [int(x) for x in ids.split(",") if x.strip().isdigit()])
+    return Response(content=body, media_type=XLSX, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+
+@app.get("/api/tax-invoices/deliveries")
+def api_tax_deliveries(code: str = Query(...), month: str = Query(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """A monthly customer's deliveries: not yet on a ใบวางบิล, and on this month's."""
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.deliveries, code, month)
+
+
+@app.post("/api/tax-invoices/deliveries")
+def api_tax_deliveries_add(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.add_delivery, body, _who(x_app_token or token))
+
+
+@app.put("/api/tax-invoices/deliveries/{row_id}")
+def api_tax_deliveries_update(row_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.update_delivery, row_id, body, _who(x_app_token or token))
+
+
+@app.delete("/api/tax-invoices/deliveries/{row_id}")
+def api_tax_deliveries_delete(row_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    _ti_call(tax_invoices.delete_delivery, row_id)
+    return {"ok": True}
+
+
+@app.post("/api/tax-invoices/monthly")
+def api_tax_monthly(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The month's ใบวางบิล for a monthly customer: the next number, these deliveries on it."""
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.make_monthly, body.get("code"), body.get("month"), body.get("delivery_ids") or [], _who(x_app_token or token))
+
+
+@app.delete("/api/tax-invoices/monthly/{invoice_id}")
+def api_tax_monthly_undo(invoice_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    _ti_call(tax_invoices.undo_monthly, invoice_id)
+    return {"ok": True}
+
+
+@app.get("/api/tax-invoices/monthly/{invoice_id}/file.xlsx")
+def api_tax_monthly_file(invoice_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")):
+    from urllib.parse import quote
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    body, name = _ti_call(tax_invoices.monthly_file, invoice_id)
+    return Response(content=body, media_type=XLSX, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+
 @app.get("/api/tax-invoices")
-def api_tax_invoices(month: str = Query(default=""), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+def api_tax_invoices(month: str = Query(default=""), to: str = Query(default=""), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """A month of Kaeng Khoi's tax invoices: the rows, the summary by customer, the customers and their prices."""
     from app import mgr, tax_invoices
     _check_token(x_app_token, token)
     if not month:
         month = mgr.today_th().strftime("%Y-%m")           # this month: where today's invoices are typed
-    return _ti_call(tax_invoices.view, month)
+    return _ti_call(tax_invoices.view, month, to or None)
 
 
 @app.post("/api/tax-invoices")
