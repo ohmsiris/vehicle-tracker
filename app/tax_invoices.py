@@ -371,12 +371,92 @@ def _workbook(path):
     return wb, wb.worksheets[0]
 
 
+_REF = re.compile(r"\$?([A-Z]{1,3})\$?(\d+)")
+
+
+def _evaluate(ws) -> None:
+    """Her sums and VAT written as numbers (16 Nov 2026): a downloaded file opens in Excel's Protected View, which does not calculate --
+    the amounts were blank. The formulas are the simple ones of her sheets (=C10*E10, =SUM(I5:I31), =I32*7%); anything else is left."""
+    from openpyxl.utils import column_index_from_string
+    cache, busy = {}, set()
+
+    def val(coord):
+        if coord in cache:
+            return cache[coord]
+        if coord in busy:
+            raise ValueError("loop")
+        v = ws[coord].value
+        if isinstance(v, str) and v.startswith("="):
+            busy.add(coord)
+            v = calc(v[1:])
+            busy.discard(coord)
+        cache[coord] = v
+        return v
+
+    def num(v):
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0.0
+
+    def calc(expr):
+        def rng(m):
+            c0, r0, c1, r1 = m.group(1), int(m.group(2)), m.group(3), int(m.group(4))
+            total = 0.0
+            for ci in range(column_index_from_string(c0), column_index_from_string(c1) + 1):
+                for r in range(r0, r1 + 1):
+                    total += num(val(f"{ws.cell(r, ci).column_letter}{r}"))
+            return repr(total)
+        e = re.sub(r"SUM\(\$?([A-Z]{1,3})\$?(\d+):\$?([A-Z]{1,3})\$?(\d+)\)", rng, expr.upper())
+        e = _REF.sub(lambda m: repr(num(val(f"{m.group(1)}{m.group(2)}"))), e).replace("%", "/100")
+        if not re.fullmatch(r"[0-9eE.+\-*/() ]+", e):
+            raise ValueError("not a sum")
+        return eval(e, {"__builtins__": {}}, {})          # digits and + - * / ( ) only (checked just above)
+
+    for row in ws.iter_rows():
+        for cell in row:
+            if isinstance(cell.value, str) and cell.value.startswith("="):
+                try:
+                    cell.value = val(cell.coordinate)
+                except Exception:                            # noqa: BLE001 -- not one of her simple sums: keep the formula
+                    pass
+
+
+def _excel_safe(data: bytes) -> bytes:
+    """Excel (not LibreOffice) calls a file damaged, "repairs" it and drops the column widths, when a cell format points at a style that
+    is not there -- her bills, converted from .xls, point at style 15 of 6. Point those at the plain style."""
+    import io
+    import zipfile
+    src = zipfile.ZipFile(io.BytesIO(data))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for item in src.infolist():
+            body = src.read(item.filename)
+            if item.filename == "xl/styles.xml":
+                xml = body.decode("utf-8")
+                parts = {}
+                for tag in ("fonts", "fills", "borders", "cellStyleXfs"):
+                    m = re.search(rf"<{tag}\b[^>]*>(.*?)</{tag}>", xml, re.S)
+                    child = {"fonts": "font", "fills": "fill", "borders": "border", "cellStyleXfs": "xf"}[tag]
+                    parts[tag] = len(re.findall(rf"<{child}\b", m.group(1))) if m else 0
+                m = re.search(r"(<cellXfs\b[^>]*>)(.*?)(</cellXfs>)", xml, re.S)
+                if m:
+                    def fix(x):
+                        tag = x.group(0)
+                        for attr, limit in (("xfId", parts["cellStyleXfs"]), ("fontId", parts["fonts"]), ("fillId", parts["fills"]), ("borderId", parts["borders"])):
+                            tag = re.sub(rf'{attr}="(\d+)"', lambda a: f'{attr}="{a.group(1) if int(a.group(1)) < max(limit, 1) else 0}"', tag)
+                        return tag
+                    xml = xml[:m.start(2)] + re.sub(r"<xf\b[^>]*>", fix, m.group(2)) + xml[m.end(2):]
+                body = xml.encode("utf-8")
+            z.writestr(item, body)
+    return out.getvalue()
+
+
 def _save(wb) -> bytes:
     import io
+    for ws in wb.worksheets:
+        _evaluate(ws)
     wb.calculation.fullCalcOnLoad = True
     buf = io.BytesIO()
     wb.save(buf)
-    return buf.getvalue()
+    return _excel_safe(buf.getvalue())
 
 
 def _month_end(month: str) -> date:
@@ -427,6 +507,9 @@ def bills_workbook(rows: list[dict], path) -> bytes:
         ws[f"C{10 + off}"] = float(r["kg"])
         ws[f"E{10 + off}"] = float(r["price"])
         ws[f"A{15 + off}"] = f"({bahttext(r['total'])})"
+        for extra in (11, 12):                                  # her two spare item lines: =C11*E11 of nothing -- left empty, not a 0
+            if not ws[f"C{extra + off}"].value:
+                ws[f"F{extra + off}"] = None
     first, last = bills[0]["doc_no"], bills[-1]["doc_no"]
     ws.title = sheet_title(first) if len(bills) == 1 else (sheet_title(first) + "-" + last[-3:])[:31]
     ws.print_area = f"A1:{last_col}{block * len(bills)}"

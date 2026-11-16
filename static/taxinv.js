@@ -255,7 +255,7 @@ function tiPickBar() {
   const rows = ti_.data.rows.filter((r) => ti_.pick.has(r.id));
   const codes = new Set(rows.map((r) => r.customer_code));
   const shown = ti_.data.rows.filter((r) => tiPicked(r.customer_code) && tiPrintable(r) && !r.printed_at);
-  const pickUnprinted = el("button", { class: "btn small", type: "button", text: `เลือกบิลที่ยังไม่พิมพ์ (${shown.length})`, disabled: !shown.length,
+  const pickUnprinted = el("button", { class: "btn", type: "button", text: `เลือกบิลที่ยังไม่พิมพ์ (${shown.length})`, disabled: !shown.length,
     onclick: () => { shown.forEach((r) => ti_.pick.add(r.id)); tiRedrawList(); } });
   if (!rows.length) return el("div", { class: "ti-pickbar" }, el("span", { class: "small muted", text: "ติ๊กช่องหน้าบิลเพื่อพิมพ์หลายใบในครั้งเดียว" }), pickUnprinted);
   const dl = el("button", { class: "btn primary", type: "button", text: `ดาวน์โหลดเพื่อพิมพ์ (${rows.length} ใบ)`, disabled: codes.size > 1,
@@ -263,8 +263,8 @@ function tiPickBar() {
       const name = (tiCust([...codes][0]) || {}).name || "";
       await tbDownload(`/api/tax-invoices/bills.xlsx?ids=${rows.map((r) => r.id).join(",")}`, `บิล ${name} ${rows.length} ใบ.xlsx`, dl);
     } });
-  const mark = el("button", { class: "btn small", type: "button", text: "ติ๊กพิมพ์แล้ว", onclick: () => tiSetPrinted(rows.map((r) => r.id), true) });
-  const clear = el("button", { class: "btn small", type: "button", text: "ไม่เลือก", onclick: () => { ti_.pick.clear(); tiRedrawList(); } });
+  const mark = el("button", { class: "btn", type: "button", text: "ติ๊กพิมพ์แล้ว", onclick: () => tiSetPrinted(rows.map((r) => r.id), true) });
+  const clear = el("button", { class: "btn", type: "button", text: "ไม่เลือก", onclick: () => { ti_.pick.clear(); tiRedrawList(); } });
   return el("div", { class: "ti-pickbar" }, el("b", { text: `เลือก ${rows.length} ใบ` }),
     codes.size > 1 ? el("span", { class: "ti-bad small", text: "เลือกได้ทีละลูกค้า" }) : null, dl, mark, clear, pickUnprinted);
 }

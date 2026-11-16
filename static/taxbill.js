@@ -132,7 +132,7 @@ async function tbDayList(c, box, day) {
     const dl = el("button", { class: "btn primary", type: "button", text: `ดาวน์โหลดเพื่อพิมพ์ (${ids.length} ใบ)`, disabled: !ids.length,
       onclick: async () => {
         await tbDownload(`/api/tax-invoices/bills.xlsx?ids=${ids.join(",")}`, `บิล ${c.name} ${day}.xlsx`, dl);
-        fill(actions, dl, el("button", { class: "btn small", type: "button", text: `ติ๊กพิมพ์แล้ว ${ids.length} ใบนี้`, onclick: async () => {
+        fill(actions, dl, el("button", { class: "btn", type: "button", text: `ติ๊กพิมพ์แล้ว ${ids.length} ใบนี้`, onclick: async () => {
           try { await api("/api/tax-invoices/printed", jsonOpts("POST", { ids, printed: true })); draw(); tiReloadQuiet(); } catch (err) { showErr("tiError", err.message); } } }));
       } });
     fill(actions, dl);

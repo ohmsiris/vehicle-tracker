@@ -50,12 +50,12 @@ def test_the_bill_file_is_her_bill_with_five_cells_changed():
     ws = wb.worksheets[0]
     assert wb.sheetnames == ["CPF01-11153-2026"]
     assert ws["E6"].value == "เลขที่   SRI-2569-11153" and ws["E7"].value == "วันที่  16/11/2569" and ws["C10"].value == 7000
-    assert ws["A15"].value == "(สามพันแปดร้อยสิบเก้าบาทเก้าสิบสตางค์)" and ws["F10"].value == "=C10*E10"
+    assert ws["A15"].value == "(สามพันแปดร้อยสิบเก้าบาทเก้าสิบสตางค์)" and ws["F10"].value == 3570 and abs(ws["F15"].value - 3819.9) < 1e-6
     assert ws.page_setup.paperSize == tpl.page_setup.paperSize and ws.page_setup.scale == tpl.page_setup.scale
     assert ws.page_margins.left == tpl.page_margins.left and ws.column_dimensions["B"].width == tpl.column_dimensions["B"].width
     assert ws.row_dimensions[10].height == tpl.row_dimensions[10].height and ws["B6"].value == tpl["B6"].value
     changed = {c.coordinate for row in tpl.iter_rows() for c in row if ws[c.coordinate].value != c.value}
-    assert changed <= {"E6", "E7", "B10", "C10", "E10", "A15"}
+    assert changed <= {"E6", "E7", "B10", "C10", "E10", "A15", "F10", "F11", "F12", "F13", "F14", "F15"}
 
 
 def test_the_monthly_bill_file_has_one_row_per_delivery_and_her_totals():
@@ -63,8 +63,9 @@ def test_the_monthly_bill_file_has_one_row_per_delivery_and_her_totals():
     wb = openpyxl.load_workbook(io.BytesIO(ti.monthly_workbook({"month": "2026-11", "doc_no": "SRI-2569-1011011"}, dels, ti.template("10", "monthly"))))
     ws = wb.worksheets[0]
     assert ws["H2"].value == "เลขที่ใบวางบิล : SRI-2569-1011011" and ws["B2"].value.endswith("1-30 พฤศจิกายน  2569")
-    assert ws["B5"].value.year == 2569 and ws["C14"].value == "4733/236610" and ws["F14"].value == "=E14*20" and ws["I14"].value == "=F14*H14"
-    assert ws["E15"].value == "=SUM(E5:E14)" and ws["I15"].value == "=SUM(I5:I14)" and ws["I16"].value == "=I15*7%" and ws["I17"].value == "=SUM(I15:I16)"
+    assert ws["B5"].value.year == 2569 and ws["C14"].value == "4733/236610"
+    assert ws["E15"].value == 5000 and ws["I15"].value == 65000 and abs(ws["I16"].value - 4550) < 1e-6 and abs(ws["I17"].value - 69550) < 1e-6
+    assert ws["F14"].value == 10000 and ws["I14"].value == 6500                 # her sums written as numbers (Protected View shows them)
     assert all(ws.cell(r, 10).value is None for r in range(1, 40))              # nothing outside her table
     assert ws.print_area.endswith("$A$1:$I$24") and ws["A16"].value is None
 
@@ -76,7 +77,36 @@ def test_many_bills_on_one_tab_one_page_each_and_nothing_outside_the_box():
     assert len(wb.sheetnames) == 1
     ws = wb.worksheets[0]
     assert ws["E6"].value == "เลขที่   SRI-2569-11153" and ws["E26"].value == "เลขที่   SRI-2569-11154" and ws["E46"].value == "เลขที่   SRI-2569-11155"
-    assert ws["C30"].value == 7004 and ws["F30"].value == "=C30*E30" and ws["F33"].value == "=F30" and ws["F35"].value == "=SUM(F33:F34)"
+    assert ws["C30"].value == 7004 and abs(ws["F30"].value - 7004 * 0.51) < 1e-6 and abs(ws["F35"].value - 7004 * 0.51 * 1.07) < 1e-6
     assert ws["A21"].value == ws["A1"].value and ws.row_dimensions[30].height == ws.row_dimensions[10].height
     assert [b.id for b in ws.row_breaks.brk] == [20, 40] and ws.print_area.endswith("$A$1:$M$60")
     assert all(ws.cell(r, c).value is None for r in range(1, 61) for c in range(7, 14))   # no notes, no helper column G
+
+
+def test_excel_will_not_call_the_file_damaged():
+    """Every cell format points at fonts / fills / borders / styles that are there (Excel "repairs" the file otherwise and drops the
+    column widths -- 16 Nov 2026), and no formula is left that Protected View would show blank."""
+    import re
+    import zipfile
+    rows = [{"doc_no": "SRI-2569-11153", "doc_date": "2026-11-16", "item": "x", "kg": 7000, "price": 0.51, "total": 3819.9}]
+    dels = [{"day": "2026-11-01", "note_no": "1", "item": "x", "bags": 10, "kg": 200, "price": 0.65}]
+    for code in ("P", "07", "03"):
+        files = [ti.bills_workbook(rows, ti.template(code))]
+        for data in files:
+            check(data, re, zipfile)
+    for code in ("10", "06"):
+        check(ti.monthly_workbook({"month": "2026-11", "doc_no": "SRI-2569-1011011"}, dels, ti.template(code, "monthly")), re, zipfile)
+
+
+def check(data, re, zipfile):
+    z = zipfile.ZipFile(io.BytesIO(data))
+    st = z.read("xl/styles.xml").decode("utf-8")
+    count = lambda tag, child: len(re.findall(rf"<{child}\b", re.search(rf"<{tag}\b[^>]*>(.*?)</{tag}>", st, re.S).group(1)))  # noqa: E731
+    limits = {"xfId": count("cellStyleXfs", "xf"), "fontId": count("fonts", "font"), "fillId": count("fills", "fill"), "borderId": count("borders", "border")}
+    xfs = re.findall(r"<xf\b[^>]*>", re.search(r"<cellXfs\b[^>]*>(.*?)</cellXfs>", st, re.S).group(1))
+    for x in xfs:
+        for attr, limit in limits.items():
+            m = re.search(rf'{attr}="(\d+)"', x)
+            assert not m or int(m.group(1)) < limit, (attr, x)
+    sheet = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert "<f>" not in sheet
