@@ -35,6 +35,7 @@ MENUS = {
     "orders": {"label": "ยอดสั่งน้ำแข็ง (หน้าโรง)", "group": "รถสาย", "pos": 4, "nav": ["navIceOrders"], "hash": "#ice-orders", "api": ["/api/ice-orders"]},
     "customers": {"label": "ทะเบียนลูกค้า (รวมบัตรประชาชน)", "group": "รถสาย", "pos": 3, "nav": ["navCustomers"], "hash": "#customers", "api": ["/api/customers"]},
     # ---- every other page (13 Nov 2026)
+    "driver_days": {"label": "ยอดขายรายวัน (คิดเงินเดือน)", "group": "รถสาย", "pos": 5, "nav": ["navDriverDays"], "hash": "#driver-days", "api": ["/api/driver-days"]},
     "home": {"label": "หน้าแรก (สรุปทุกส่วน)", "group": "หน้าแรก", "pos": 1, "nav": ["navHome"], "hash": "#home", "api": ["/api/home"]},
     "accounts_in": {"label": "ลงข้อมูล / แนบไฟล์", "group": "บัญชี", "pos": 1, "nav": ["navAccountsIn"], "hash": "#accounts-in", "also": ["#event="],
                     "api": ["/api/accounts/", *_BILL]},

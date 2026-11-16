@@ -2327,6 +2327,44 @@ def _pay_call(fn, *args, **kwargs):
         raise HTTPException(502, "บันทึก / โหลดไม่สำเร็จ ลองใหม่อีกครั้ง")
 
 
+# ---------------------------------------------------- ยอดขายรายวัน (คิดเงินเดือน) -- app/driver_days.py
+def _dd_call(fn, *args):
+    from app import driver_days
+    if not supabase.configured():
+        raise HTTPException(503, "ระบบยังไม่พร้อม")
+    try:
+        return fn(*args)
+    except driver_days.DriverDaysError as exc:
+        raise HTTPException(400, str(exc))
+    except supabase.SupabaseError:
+        logger.exception("driver days")
+        raise HTTPException(502, "บันทึก / โหลดไม่สำเร็จ ลองใหม่อีกครั้ง")
+
+
+@app.get("/api/driver-days")
+def api_driver_days(month: str = Query(default=""), half: int = Query(default=0), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Every รถสาย driver and how many days of this half-month each has."""
+    from app import driver_days, mgr
+    _check_token(x_app_token, token)
+    if not month or not half:
+        month, half = driver_days.period_of(mgr.today_th())
+    return _dd_call(driver_days.overview, month, half)
+
+
+@app.get("/api/driver-days/{employee_id}")
+def api_driver_days_sheet(employee_id: str, month: str = Query(...), half: int = Query(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import driver_days
+    _check_token(x_app_token, token)
+    return _dd_call(driver_days.sheet, employee_id, month, half)
+
+
+@app.put("/api/driver-days/{employee_id}")
+def api_driver_days_save(employee_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import driver_days
+    _check_token(x_app_token, token)
+    return _dd_call(driver_days.save, employee_id, body.get("month"), body.get("half"), body.get("rows") or [])
+
+
 @app.get("/api/payables")
 def api_payables(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """Every shop: what it is owed, its bills (wherever they were recorded) and its payments."""
