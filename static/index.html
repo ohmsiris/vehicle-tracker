@@ -47,6 +47,7 @@
       <button id="navElectricity" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg><span>ค่าไฟฟ้า</span></button>
       <button id="navCashFuel" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16"/><path d="M3 21h13M7 8h5"/><path d="M15 9l3 2v7a1.5 1.5 0 0 0 3 0V8l-3-3"/></svg><span>น้ำมันเงินสด</span></button>
       <button id="navPayables" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="M4 7l2-3h12l2 3"/><path d="M9 12h6M9 15h4"/></svg><span>เจ้าหนี้ร้านค้า</span></button>
+      <button id="navTaxInvoices" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h9l4 4v16H6z"/><path d="M14 2v5h5M9 12h7M9 16h7M9 8h2"/></svg><span>ใบกำกับภาษี แก่งคอย</span></button>
       <button id="navAccounts" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span>งบกำไรขาดทุน</span></button>
     </nav>
   </div>
@@ -1003,6 +1004,16 @@
     <div id="usBody"></div>
   </section>
 
+  <!-- ============ ใบกำกับภาษี แก่งคอย: tax invoices / credit notes by customer (taxinv.js) ============ -->
+  <section id="taxInvoicesView" hidden>
+    <div class="page-head">
+      <h2 class="page-title">ใบกำกับภาษี แก่งคอย</h2>
+      <p class="muted small">กรอกเลขที่ — ระบบรู้ลูกค้าและราคาจากเลขที่เอง ใส่น้ำหนักแล้วกด Enter · ซันฟู้ดใส่ยอดรวม · ใบลดหนี้เลือกประเภทด้านบน</p>
+    </div>
+    <p class="error" id="tiError" hidden></p>
+    <div id="tiBody"></div>
+  </section>
+
   <!-- ============ ยอดขายรายวัน (คิดเงินเดือน): each รถสาย driver's daily totals and money, by half-month (driverdays.js) ============ -->
   <section id="driverDaysView" hidden>
     <div class="page-head">
@@ -1726,6 +1737,7 @@
 <script src="/static/licences.js"></script>
 <script src="/static/payables.js"></script>
 <script src="/static/driverdays.js"></script>
+<script src="/static/taxinv.js"></script>
 <script src="/static/emppay.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/buy.js"></script>

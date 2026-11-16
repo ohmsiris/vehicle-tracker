@@ -2181,3 +2181,47 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .dd-grid tfoot td { font-weight: 700; padding: 10px 8px 4px; border-top: 1px solid var(--line); }
 .dd-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; }
 .dd-in.dd-money { min-width: 112px; max-width: 150px; }
+
+/* ใบกำกับภาษี แก่งคอย, taxinv.js (16 Nov 2026) */
+.ti-monthbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ti-month { font: inherit; font-weight: 600; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); }
+.ti-entry { margin-bottom: 14px; }
+.ti-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.ti-entry-head h3 { margin: 0; }
+.ti-entry-head .seg { margin: 0; }
+.ti-fields { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; }
+.ti-f { display: flex; flex-direction: column; gap: 4px; min-width: 110px; flex: 1 1 110px; }
+.ti-f.ti-wide { flex: 2 1 190px; }
+.ti-f input, .ti-f select, .ti-editrow input, .ti-editrow select, .ti-addrow input, .ti-addrow select { font: inherit; padding: 7px 9px; border-radius: 7px;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); min-width: 0; width: 100%; }
+.ti-go { display: flex; align-items: flex-end; }
+.ti-info { margin-top: 10px; min-height: 20px; }
+.ti-bad { color: var(--el-peak, #c0392b); font-weight: 600; }
+.ti-ok { color: var(--ok); margin-top: 4px; min-height: 18px; }
+.ti-checks { border-left: 4px solid var(--warn); margin: 14px 0; }
+.ti-checks h3 { margin-top: 0; }
+.ti-checks ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.ti-checks li { margin: 4px 0; word-break: break-word; }
+.ti-sum th.r, .ti-sum td.r, .ti-list th.r, .ti-list td.r { text-align: right; white-space: nowrap; }
+.ti-sum th, .ti-list th { font-size: 12.5px; color: var(--muted); font-weight: 600; text-align: left; padding: 6px 10px; white-space: nowrap; }
+.ti-sum tfoot td { font-weight: 700; border-top: 1px solid var(--line); background: transparent !important; }
+.ti-crow { cursor: pointer; }
+.ti-crow:hover td, .ti-crow.on td { background: var(--accent-soft) !important; }
+.ti-barcell { width: 22%; min-width: 90px; }
+.ti-bar { height: 10px; border-radius: 0 5px 5px 0; background: var(--accent); min-width: 2px; }
+.ti-listhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ti-listhead h3 { margin: 0; }
+.ti-search { font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); min-width: 220px; }
+.ti-list .ti-cn td { color: var(--el-peak, #c0392b); }
+.ti-list td.nowrap { white-space: nowrap; }
+.ti-editrow td { background: var(--accent-soft) !important; padding: 4px 4px; }
+.ti-editrow input, .ti-editrow select { padding: 5px 6px; font-size: 13.5px; }
+.ti-addrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.ti-addrow input, .ti-addrow select { width: auto; }
+.ti-small { max-width: 110px; }
+.ti-price { white-space: nowrap; }
+.ti-month { width: auto; flex: 0 0 auto; }
+.ti-f { box-sizing: border-box; min-width: 140px; flex: 1 1 140px; }
+.ti-f.ti-wide { flex: 2 1 200px; }
+.ti-f input, .ti-f select { box-sizing: border-box; }
+.ti-f input[type="date"] { min-width: 150px; }

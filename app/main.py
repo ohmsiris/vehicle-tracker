@@ -2327,6 +2327,74 @@ def _pay_call(fn, *args, **kwargs):
         raise HTTPException(502, "บันทึก / โหลดไม่สำเร็จ ลองใหม่อีกครั้ง")
 
 
+# ---------------------------------------------------- ใบกำกับภาษี แก่งคอย -- app/tax_invoices.py
+def _ti_call(fn, *args):
+    from app import tax_invoices
+    if not supabase.configured():
+        raise HTTPException(503, "ระบบยังไม่พร้อม")
+    try:
+        return fn(*args)
+    except tax_invoices.TaxInvoiceError as exc:
+        raise HTTPException(400, str(exc))
+    except supabase.SupabaseError:
+        logger.exception("tax invoices")
+        raise HTTPException(502, "บันทึก / โหลดไม่สำเร็จ ลองใหม่อีกครั้ง")
+
+
+@app.get("/api/tax-invoices")
+def api_tax_invoices(month: str = Query(default=""), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """A month of Kaeng Khoi's tax invoices: the rows, the summary by customer, the customers and their prices."""
+    from app import mgr, tax_invoices
+    _check_token(x_app_token, token)
+    if not month:
+        month = mgr.today_th().strftime("%Y-%m")           # this month: where today's invoices are typed
+    return _ti_call(tax_invoices.view, month)
+
+
+@app.post("/api/tax-invoices")
+def api_tax_invoices_add(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.add, body, _who(x_app_token or token))
+
+
+@app.put("/api/tax-invoices/{row_id}")
+def api_tax_invoices_update(row_id: int, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.update, row_id, body, _who(x_app_token or token))
+
+
+@app.delete("/api/tax-invoices/{row_id}")
+def api_tax_invoices_delete(row_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    _ti_call(tax_invoices.delete, row_id)
+    return {"ok": True}
+
+
+@app.post("/api/tax-invoices-setup/customers")
+def api_tax_invoice_customer(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.save_customer, body)
+
+
+@app.post("/api/tax-invoices-setup/prices")
+def api_tax_invoice_price(body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    return _ti_call(tax_invoices.add_price, body)
+
+
+@app.delete("/api/tax-invoices-setup/prices/{price_id}")
+def api_tax_invoice_price_delete(price_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import tax_invoices
+    _check_token(x_app_token, token)
+    _ti_call(tax_invoices.delete_price, price_id)
+    return {"ok": True}
+
+
 # ---------------------------------------------------- ยอดขายรายวัน (คิดเงินเดือน) -- app/driver_days.py
 def _dd_call(fn, *args):
     from app import driver_days

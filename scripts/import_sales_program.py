@@ -1,6 +1,6 @@
 """The ice program's "รายงานสรุปยอดสินค้าต่อลูกค้ารายวัน" PDF -> sales_lines (every line) + the books (app/acc_sales.py).
 
-    python scripts/import_sales_program.py "<report.pdf>" สระบุรี|แก่งคอย 2026-01 2026-10 [--write]
+    python scripts/import_sales_program.py "<report.pdf>" สระบุรี|แก่งคอย 2026-01 2026-10 [--invoices=<sheet.xlsx>|--invoices=app] [--write]
 
 Re-running replaces that branch's program lines and its booked months. The report must read cleanly (every day ties to its total).
 """
@@ -25,7 +25,11 @@ def main() -> None:
     entries = acc_sales.build(branch, sales, (first, last), skip_cp=bool(invoices))
     if invoices:          # Kaeng Khoi: CP / CPF revenue from the tax-invoice book (app/acc_cp_invoice.py)
         from app import acc_cp_invoice
-        book = acc_cp_invoice.read_book(invoices)
+        if invoices == "app":      # the ใบกำกับภาษี แก่งคอย page (app/tax_invoices.py), 16 Nov 2026 -- no sheet file needed
+            from app import tax_invoices
+            book = tax_invoices.book()
+        else:
+            book = acc_cp_invoice.read_book(invoices)
         cp = acc_cp_invoice.build(book, sales, first, last)
         for e in cp:
             print(f"   {e['source_id']:<45} {e['lines'][0]['debit']:>14,.2f}")
