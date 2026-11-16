@@ -77,7 +77,7 @@ def test_many_bills_on_one_tab_one_page_each_and_nothing_outside_the_box():
     assert len(wb.sheetnames) == 1
     ws = wb.worksheets[0]
     assert ws["E6"].value == "เลขที่   SRI-2569-11153" and ws["E26"].value == "เลขที่   SRI-2569-11154" and ws["E46"].value == "เลขที่   SRI-2569-11155"
-    assert ws["C30"].value == 7004 and abs(ws["F30"].value - 7004 * 0.51) < 1e-6 and abs(ws["F35"].value - 7004 * 0.51 * 1.07) < 1e-6
+    assert ws["C30"].value == 7004 and abs(ws["F30"].value - 7004 * 0.51) < 1e-6 and ws["F35"].value == 3822.08
     assert ws["A21"].value == ws["A1"].value and ws.row_dimensions[30].height == ws.row_dimensions[10].height
     assert [b.id for b in ws.row_breaks.brk] == [20, 40] and ws.print_area.endswith("$A$1:$M$60")
     assert all(ws.cell(r, c).value is None for r in range(1, 61) for c in range(7, 14))   # no notes, no helper column G
@@ -110,3 +110,10 @@ def check(data, re, zipfile):
             assert not m or int(m.group(1)) < limit, (attr, x)
     sheet = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
     assert "<f>" not in sheet
+    book = z.read("xl/workbook.xml").decode("utf-8")
+    n = book.count("<sheet ")
+    for attr in ("firstSheet", "activeTab"):                    # a tab index past the last tab: Excel "repairs" the file
+        m = re.search(rf'{attr}="(\d+)"', book)
+        assert not m or int(m.group(1)) < n, (attr, n)
+    for v in re.findall(r"<v>([^<]+)</v>", sheet):
+        assert len(v.split(".")[1]) <= 2 if "." in v and "e" not in v.lower() else True, v

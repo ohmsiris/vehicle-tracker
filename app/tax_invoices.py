@@ -410,13 +410,16 @@ def _evaluate(ws) -> None:
             raise ValueError("not a sum")
         return eval(e, {"__builtins__": {}}, {})          # digits and + - * / ( ) only (checked just above)
 
+    from decimal import ROUND_HALF_UP, Decimal
     for row in ws.iter_rows():
         for cell in row:
             if isinstance(cell.value, str) and cell.value.startswith("="):
                 try:
-                    cell.value = val(cell.coordinate)
+                    v = val(cell.coordinate)
                 except Exception:                            # noqa: BLE001 -- not one of her simple sums: keep the formula
-                    pass
+                    continue
+                # to the satang, as it prints (83.47499999 -> 83.48): the stored figure, the printed one and the words agree
+                cell.value = float(Decimal(repr(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if isinstance(v, float) else v
 
 
 def _excel_safe(data: bytes) -> bytes:
@@ -453,6 +456,9 @@ def _save(wb) -> bytes:
     import io
     for ws in wb.worksheets:
         _evaluate(ws)
+    for v in wb.views:                                         # her workbook had many tabs: "first tab shown" = 1 is past the only one,
+        v.firstSheet = 0                                       # which Excel (not LibreOffice) treats as damage
+        v.activeTab = 0
     wb.calculation.fullCalcOnLoad = True
     buf = io.BytesIO()
     wb.save(buf)
