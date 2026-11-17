@@ -72,18 +72,31 @@ function ddRender() {
 
 function ddSheet() {
   const s = dd_.sheet, prods = s.products;
-  const cols = [...prods.map((p) => ({ key: p.key, label: p.label, whole: true })), { key: "money", label: "เงินที่ได้ (บาท)", whole: false }];
+  // ทวาย สำเริง สะอาด (owner, 17 Nov 2026): ยอดขายซอง + ยอดขายหลอด in baht; เงินที่ได้ is their sum -- worked out, not typed, Tab skips it
+  const split = !!s.split;
+  const cols = [...prods.map((p) => ({ key: p.key, label: p.label, whole: true })),
+    ...(split ? (s.parts || []).map((p) => ({ key: `p_${p.key}`, part: p.key, label: p.label, whole: false })) : []),
+    { key: "money", label: split ? "เงินที่ได้ (บาท) — รวมให้" : "เงินที่ได้ (บาท)", whole: false, auto: split }];
+  const valOf = (r, c) => (c.key === "money" ? r.money : c.part ? (r.parts || {})[c.part] : (r.qty || {})[c.key]);
   const body = el("tbody", {});
   s.rows.forEach((r, ri) => {
     const d = new Date(`${r.day}T00:00:00`);
     const tr = el("tr", { class: `${d.getDay() === 0 ? "dd-sun" : ""}${r.spare ? " dd-spare" : ""}` }, el("td", { class: "dd-date" }, el("span", { class: "muted small", text: DD_DOW[d.getDay()] }), ` ${r.day.slice(8, 10)}/${r.day.slice(5, 7)}`));
     cols.forEach((c, ci) => {
-      const v = c.key === "money" ? r.money : (r.qty || {})[c.key];
-      const inp = el("input", { type: "text", inputmode: c.whole ? "numeric" : "decimal", class: `dd-in${c.key === "money" ? " dd-money" : ""}`, value: v == null ? "" : String(v),
-        "aria-label": `${ddDMY(r.day)} ${c.label}`, autocomplete: "off" });
+      const v = valOf(r, c);
+      const inp = el("input", { type: "text", inputmode: c.whole ? "numeric" : "decimal", class: `dd-in${c.key === "money" || c.part ? " dd-money" : ""}${c.auto ? " dd-auto" : ""}`,
+        value: v == null ? "" : String(v), "aria-label": `${ddDMY(r.day)} ${c.label}`, autocomplete: "off",
+        ...(c.auto ? { readOnly: true, tabindex: "-1", title: "รวมยอดขายซอง + หลอด ให้เอง — แก้ไม่ได้" } : {}) });
       inp.dataset.r = String(ri); inp.dataset.c = String(ci);
       inp.addEventListener("input", () => {
-        if (c.key === "money") r.money = inp.value; else { r.qty = { ...(r.qty || {}) }; r.qty[c.key] = inp.value; }
+        if (c.auto) return;
+        if (c.key === "money") r.money = inp.value;
+        else if (c.part) {
+          r.parts = { ...(r.parts || {}) }; r.parts[c.part] = inp.value;
+          const got = Object.values(r.parts).map(ddNum).filter((x) => x !== null && Number.isFinite(x));
+          r.money = got.length ? String(Math.round(got.reduce((a, x) => a + x, 0) * 100) / 100) : "";
+          const m = inp.closest("tr").querySelector("input.dd-auto"); if (m) m.value = r.money;
+        } else { r.qty = { ...(r.qty || {}) }; r.qty[c.key] = inp.value; }
         inp.classList.toggle("flagged", ddBad(inp.value, c.whole));
         dd_.dirty = true; ddTotals(cols); ddStatus();
       });
@@ -123,11 +136,12 @@ function ddTotals(cols) {
   const rows = dd_.sheet.rows;
   const own = rows.filter((r) => !r.spare), spare = rows.filter((r) => r.spare);
   cols.forEach((c) => {
-    const sumOf = (list) => list.reduce((a, r) => a + (Number(ddNum(c.key === "money" ? r.money : (r.qty || {})[c.key])) || 0), 0);
+    const sumOf = (list) => list.reduce((a, r) => a + (Number(ddNum(c.key === "money" ? r.money : c.part ? (r.parts || {})[c.part] : (r.qty || {})[c.key])) || 0), 0);
     const a = sumOf(own), b = sumOf(spare);
     const cell = $(`ddT_${c.key}`), cell2 = $(`ddS_${c.key}`);
-    if (cell) cell.textContent = elN(a, c.key === "money" && a % 1 ? 2 : 0);
-    if (cell2) cell2.textContent = spare.length ? elN(b, c.key === "money" && b % 1 ? 2 : 0) : "";
+    const dec = (x) => ((c.key === "money" || c.part) && x % 1 ? 2 : 0);
+    if (cell) cell.textContent = elN(a, dec(a));
+    if (cell2) cell2.textContent = spare.length ? elN(b, dec(b)) : "";
   });
   const sr = $("ddSpareRow"); if (sr) sr.hidden = !spare.length;
   const days = rows.filter((r) => ddNum(r.money) !== null || Object.values(r.qty || {}).some((v) => ddNum(v) !== null)).length;
@@ -160,7 +174,8 @@ async function ddSave() {
   if (bad) { showErr("ddError", "มีช่องที่ไม่ใช่ตัวเลข (สีแดง) — แก้ก่อนบันทึก"); bad.focus(); return; }
   showErr("ddError", "");
   const s = dd_.sheet;
-  const rows = s.rows.map((r) => ({ day: r.day, qty: r.qty || {}, money: r.money, spare: !!r.spare, spare_by: r.spare ? r.spare_by || null : null }));
+  const rows = s.rows.map((r) => ({ day: r.day, qty: r.qty || {}, money: r.money, spare: !!r.spare, spare_by: r.spare ? r.spare_by || null : null,
+    ...(s.split ? { parts: r.parts || {} } : {}) }));
   dd_.saving = true; ddStatus();
   const btn = $("ddSave"); if (btn) btn.disabled = true;
   try {

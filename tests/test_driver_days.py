@@ -22,8 +22,8 @@ def test_rows_keep_only_filled_days_and_numbers():
             {"day": "2026-11-12", "qty": {"zong": ""}, "money": ""},                        # nothing typed: no row
             {"day": "2026-11-13", "qty": {}, "money": "0"}]                                  # 0 baht is a figure
     out = dd.clean_rows(rows, "2026-11", 2)
-    assert out == [{"day": "2026-11-11", "qty": {"zong": 12, "lod": 1250}, "money": 18450.5, "spare": False, "spare_by": None},
-                   {"day": "2026-11-13", "qty": {}, "money": 0, "spare": False, "spare_by": None}]
+    assert out == [{"day": "2026-11-11", "qty": {"zong": 12, "lod": 1250}, "money": 18450.5, "spare": False, "spare_by": None, "money_parts": None},
+                   {"day": "2026-11-13", "qty": {}, "money": 0, "spare": False, "spare_by": None, "money_parts": None}]
     assert dd.totals(out) == {"qty": {"zong": 12, "kak": 0, "lod": 1250, "lek": 0, "pack": 0, "mo": 0}, "money": 18450.5, "days": 2}
 
 
@@ -74,6 +74,7 @@ def test_export_has_a_summary_tab_then_a_tab_per_driver(monkeypatch):
             {"employee_id": "A", "day": "2026-11-12", "qty": {"zong": 7}, "money": 700.0, "spare": True}]
     monkeypatch.setattr(dd, "spares", lambda: [{**p, "kind": "สาย"} for p in people])
     monkeypatch.setattr(dd, "_period_rows", lambda a, b: rows)
+    monkeypatch.setattr(dd, "split_ids", lambda: set())
     data, name = dd.export("2026-11", 2)
     wb = openpyxl.load_workbook(io.BytesIO(data))
     assert wb.sheetnames == ["สรุป", "#3 ศักดิ์", "#5 ชาย"] and name.endswith("งวด 2.xlsx")
@@ -101,3 +102,24 @@ def test_who_the_spare_was_is_kept_and_counted_without_sales():
     assert [(r["spare"], r["spare_by"]) for r in kept] == [(True, "F"), (False, None)]        # a name only counts on a สำรองขับ day
     with pytest.raises(dd.DriverDaysError, match="สำรอง"):
         dd.clean_rows([{"day": "2026-11-12", "qty": {}, "spare": True, "spare_by": "A"}], "2026-11", 2, owner="A", spares={"A", "F"})
+
+
+def test_split_drivers_type_two_sales_and_the_money_is_their_sum(monkeypatch):
+    """Owner, 17 Nov 2026: ทวาย, สำเริง, สะอาด -- ยอดขายซอง and ยอดขายหลอด in baht; เงินที่ได้ = their sum, worked out, never typed."""
+    rows = [{"day": "2026-11-11", "qty": {"zong": "10"}, "money": "999", "parts": {"zong": "1,250.50", "lod": "300"}},
+            {"day": "2026-11-12", "qty": {}, "money": "500", "parts": {}}]                # parts empty: no money (the typed 500 is ignored)
+    out = dd.clean_rows(rows, "2026-11", 2, split=True)
+    assert out[0]["money"] == 1550.5 and out[0]["money_parts"] == {"zong": 1250.5, "lod": 300}
+    assert len(out) == 1                                                           # day 2 had nothing but the ignored money
+    plain = dd.clean_rows(rows, "2026-11", 2)
+    assert plain[0]["money"] == 999 and plain[0]["money_parts"] is None
+    import io
+    import openpyxl
+    people = [{"id": "T", "name": "ทวาย กำจันทร์", "nickname": "เฉิ่ม", "truck": "7"}]
+    saved = [{"employee_id": "T", "day": "2026-11-11", "qty": {"zong": 10}, "money": 1550.5, "spare": False, "money_parts": {"zong": 1250.5, "lod": 300}}]
+    monkeypatch.setattr(dd, "spares", lambda: [{**p, "kind": "สาย"} for p in people])
+    monkeypatch.setattr(dd, "_period_rows", lambda a, b: saved)
+    monkeypatch.setattr(dd, "split_ids", lambda: {"T"})
+    ws = openpyxl.load_workbook(io.BytesIO(dd.export("2026-11", 2)[0]))["#7 เฉิ่ม"]
+    assert ws["H4"].value == "ยอดขายซอง (บาท)" and ws["I4"].value == "ยอดขายหลอด (บาท)" and ws["J4"].value == "เงินที่ได้ (บาท)"
+    assert (ws["H5"].value, ws["I5"].value, ws["J5"].value) == (1250.5, 300, 1550.5) and ws["H5"].number_format == "#,##0.00"

@@ -19,6 +19,9 @@ from app.route_sales import PRODUCTS
 BRANCH = "สระบุรี"
 POSITION = "พนักงานขับรถสาย"
 MAX_NUMBER = 1_000_000
+# money split (owner, 17 Nov 2026): for these drivers the day's money is typed as two sales figures in baht, ซอง and หลอด; เงินที่ได้ is their
+# sum, worked out here (route_driver_settings.money_split)
+PARTS = [("zong", "ยอดขายซอง (บาท)"), ("lod", "ยอดขายหลอด (บาท)")]
 
 
 class DriverDaysError(Exception):
@@ -68,7 +71,7 @@ def _number(v, label: str, whole: bool = False) -> Optional[float]:
     return int(n) if n == int(n) else round(n, 2)
 
 
-def clean_rows(rows: list, month: str, half: int, owner: Optional[str] = None, spares: Optional[set] = None) -> list[dict]:
+def clean_rows(rows: list, month: str, half: int, owner: Optional[str] = None, spares: Optional[set] = None, split: bool = False) -> list[dict]:
     """What the page sent -> the rows to keep: [{day, qty, money, spare}], only days with at least one figure or ticked สำรองขับ, only
     days of this half-month."""
     allowed = {d.isoformat() for d in days_of(month, half)}
@@ -88,12 +91,17 @@ def clean_rows(rows: list, month: str, half: int, owner: Optional[str] = None, s
         q = r.get("qty") or {}
         qty = {k: n for k in keys if (n := _number(q.get(k), f"{dd} {labels[k]}", whole=True)) is not None}
         money = _number(r.get("money"), f"{dd} เงินที่ได้")
+        parts = None
+        if split:                                            # ซอง + หลอด in baht; the money is their sum, never typed
+            given = r.get("parts") or {}
+            parts = {k: n for k, label in PARTS if (n := _number(given.get(k), f"{dd} {label}")) is not None} or None
+            money = round(sum(parts.values()), 2) if parts else None
         spare = r.get("spare") is True
         by = (str(r.get("spare_by") or "") or None) if spare else None          # who the spare was (optional)
         if by and (by == owner or (spares is not None and by not in spares)):
             raise DriverDaysError(f"{dd}: เลือกคนขับสำรองไม่ถูกต้อง")
         if qty or money is not None or spare:
-            out.append({"day": day, "qty": qty, "money": money, "spare": spare, "spare_by": by})
+            out.append({"day": day, "qty": qty, "money": money, "spare": spare, "spare_by": by, "money_parts": parts})
     return sorted(out, key=lambda x: x["day"])
 
 
@@ -183,14 +191,22 @@ def _employee(employee_id: str) -> dict:
     return rows[0]
 
 
+def split_ids() -> set:
+    try:
+        return {r["employee_id"] for r in supabase.select_all("route_driver_settings", {"select": "employee_id,money_split", "money_split": "eq.true",
+                                                                                         "order": "employee_id.asc"})}
+    except supabase.SupabaseError:
+        return set()
+
+
 def _saved(employee_id: str, month: str, half: int) -> list[dict]:
     start, end = period_bounds(month, half)
-    return supabase.select_all("route_driver_days", {"select": "day,qty,money,spare,spare_by,updated_at", "employee_id": f"eq.{employee_id}",
+    return supabase.select_all("route_driver_days", {"select": "day,qty,money,spare,spare_by,money_parts,updated_at", "employee_id": f"eq.{employee_id}",
                                                      "day": f"gte.{start.isoformat()}", "and": f"(day.lte.{end.isoformat()})", "order": "day.asc"})
 
 
 def _period_rows(start: date, end: date) -> list[dict]:
-    return supabase.select_all("route_driver_days", {"select": "employee_id,day,qty,money,spare,spare_by", "day": f"gte.{start.isoformat()}",
+    return supabase.select_all("route_driver_days", {"select": "employee_id,day,qty,money,spare,spare_by,money_parts", "day": f"gte.{start.isoformat()}",
                                                      "and": f"(day.lte.{end.isoformat()})", "order": "day.asc,id.asc"})
 
 
@@ -218,10 +234,12 @@ def sheet(employee_id: str, month: str, half) -> dict:
     emp = _employee(employee_id)
     saved = {r["day"]: r for r in _saved(employee_id, month, half)}
     rows = [{"day": d.isoformat(), "qty": (saved.get(d.isoformat()) or {}).get("qty") or {}, "money": (saved.get(d.isoformat()) or {}).get("money"),
-             "spare": bool((saved.get(d.isoformat()) or {}).get("spare")), "spare_by": (saved.get(d.isoformat()) or {}).get("spare_by")}
+             "spare": bool((saved.get(d.isoformat()) or {}).get("spare")), "spare_by": (saved.get(d.isoformat()) or {}).get("spare_by"),
+             "parts": (saved.get(d.isoformat()) or {}).get("money_parts") or {}}
             for d in days_of(month, half)]
     last = max((r["updated_at"] for r in saved.values() if r.get("updated_at")), default=None)
     return {"employee_id": employee_id, "name": emp["full_name"], "nickname": emp.get("nickname") or "", "month": month, "half": half,
+            "split": employee_id in split_ids(), "parts": [{"key": k, "label": lab} for k, lab in PARTS],
             "products": [{"key": k, "label": lab} for k, lab in PRODUCTS], "rows": rows,
             "totals": totals([r for r in saved.values() if not r.get("spare")]), "spare_totals": totals([r for r in saved.values() if r.get("spare")]),
             "saved_at": last}
@@ -231,7 +249,8 @@ def save(employee_id: str, month: str, half, rows: list) -> dict:
     """Replace this driver's half-month with what the page holds (a day emptied on the page is removed)."""
     month, half = _check_period(month, half)
     _employee(employee_id)
-    keep = clean_rows(rows, month, half, owner=employee_id, spares={p["id"] for p in spares() if p["kind"] == "หน้าโรง"})
+    keep = clean_rows(rows, month, half, owner=employee_id, spares={p["id"] for p in spares() if p["kind"] == "หน้าโรง"},
+                      split=employee_id in split_ids())
     start, end = period_bounds(month, half)
     supabase.delete("route_driver_days", {"employee_id": f"eq.{employee_id}", "day": f"gte.{start.isoformat()}", "and": f"(day.lte.{end.isoformat()})"})
     if keep:
@@ -272,6 +291,7 @@ def export(month: str, half) -> tuple[bytes, str]:
     center = Alignment(horizontal="center", vertical="center")
 
     def table(ws, top, header, data, widths, money_col, total=None, faint=()):
+        money_col = set(money_col) if isinstance(money_col, (set, list, tuple)) else {money_col}
         for c, h in enumerate(header, 1):
             cell = ws.cell(top, c, h)
             cell.font, cell.fill, cell.border, cell.alignment = bold, shade, box, center
@@ -280,14 +300,14 @@ def export(month: str, half) -> tuple[bytes, str]:
                 cell = ws.cell(top + i, c, v)
                 cell.font, cell.border = (grey if i - 1 in faint else body), box
                 if isinstance(v, (int, float)):
-                    cell.number_format = "#,##0.00" if c == money_col else "#,##0"
+                    cell.number_format = "#,##0.00" if c in money_col else "#,##0"
         if total:
             r = top + len(data) + 1
             for c, v in enumerate(total, 1):
                 cell = ws.cell(r, c, v)
                 cell.font, cell.border, cell.fill = bold, box, shade
                 if isinstance(v, (int, float)):
-                    cell.number_format = "#,##0.00" if c == money_col else "#,##0"
+                    cell.number_format = "#,##0.00" if c in money_col else "#,##0"
         for c, w in enumerate(widths, 1):
             ws.column_dimensions[ws.cell(1, c).column_letter].width = w
 
@@ -303,6 +323,7 @@ def export(month: str, half) -> tuple[bytes, str]:
     table(ws, 4, header, data, [30, 9, 10, 8, 14, 12, *[10] * len(keys), 16], money_col=len(header), total=tot)
     ws.freeze_panes = "B5"
 
+    split = split_ids()
     by: dict = {}
     for r in rows:
         by.setdefault(r["employee_id"], {})[r["day"]] = r
@@ -327,6 +348,8 @@ def export(month: str, half) -> tuple[bytes, str]:
                     + (f" · ไปเป็นสำรอง {x['as_spare_days']} วัน" if x["as_spare_days"] else ""))
         sh["A1"].font, sh["A2"].font = head_font, body
         data, faint = [], []
+        two = x["id"] in split                                   # ยอดขายซอง / ยอดขายหลอด (บาท) columns
+        pcol = lambda r: [((r.get("money_parts") or {}).get(k) if r else None) for k, _ in PARTS] if two else []  # noqa: E731
         for i, d in enumerate(days):
             r = mine.get(d)
             label = f"{dows[_date.fromisoformat(d).weekday()]} {be(d)}"
@@ -334,19 +357,22 @@ def export(month: str, half) -> tuple[bytes, str]:
             if r and r.get("spare"):
                 faint.append(i)
                 who = names.get(r.get("spare_by")) or {}
-                data.append([label, *[(r.get("qty") or {}).get(k) for k in keys], float(r["money"]) if r.get("money") is not None else None,
+                data.append([label, *[(r.get("qty") or {}).get(k) for k in keys], *pcol(r), float(r["money"]) if r.get("money") is not None else None,
                              f"สำรองขับ{(': ' + (who.get('nickname') or who.get('name') or '')) if who else ''} — ไม่นับ"])
             elif other and not (r and (r.get("qty") or r.get("money") is not None)):
                 faint.append(i)
                 owner = names.get(other["employee_id"]) or {}
-                data.append([label, *[None] * len(keys), None,
+                data.append([label, *[None] * len(keys), *pcol(None), None,
                              f"เป็นสำรองขับ {('#' + str(owner['truck'])) if owner.get('truck') else ''} {owner.get('nickname') or owner.get('name') or ''}".strip()])
             elif r and (r.get("qty") or r.get("money") is not None):
-                data.append([label, *[(r.get("qty") or {}).get(k) for k in keys], float(r["money"]) if r.get("money") is not None else None, ""])
+                data.append([label, *[(r.get("qty") or {}).get(k) for k in keys], *pcol(r), float(r["money"]) if r.get("money") is not None else None, ""])
             else:
-                data.append([label, *[None] * len(keys), None, "หยุด"])
-        table(sh, 4, ["วันที่", *labels, "เงินที่ได้ (บาท)", "หมายเหตุ"], data, [16, *[10] * len(keys), 16, 20], money_col=len(keys) + 2,
-              total=["รวม (ไม่รวมสำรองขับ)", *[x["qty"][k] for k in keys], x["money"], ""], faint=faint)
+                data.append([label, *[None] * len(keys), *pcol(None), None, "หยุด"])
+        part_sums = [round(sum(float((r.get("money_parts") or {}).get(k) or 0) for r in mine.values() if not r.get("spare")), 2) for k, _ in PARTS] if two else []
+        n_parts = len(part_sums)
+        table(sh, 4, ["วันที่", *labels, *([lab for _, lab in PARTS] if two else []), "เงินที่ได้ (บาท)", "หมายเหตุ"], data,
+              [16, *[10] * len(keys), *[16] * n_parts, 16, 20], money_col={len(keys) + 2 + i for i in range(n_parts + 1)},
+              total=["รวม (ไม่รวมสำรองขับ)", *[x["qty"][k] for k in keys], *part_sums, x["money"], ""], faint=faint)
         sh.freeze_panes = "B5"
     buf = io.BytesIO()
     wb.save(buf)
