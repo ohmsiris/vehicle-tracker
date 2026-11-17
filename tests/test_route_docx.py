@@ -40,6 +40,10 @@ def test_a_filled_day_and_several_routes():
     x = _doc(b)
     assert "10/11/2026" in x and rd.MARK in x
     assert len(re.findall(r'<w:sectPr[ >]', x)) == 2                  # route 2 starts on a new sheet (+ the document's own)
+    assert "คืน (คนขับ)" not in x
+    day_row = {**day_row, "doc": {**day_row["doc"], "returns": {"lod": 7}}}          # the driver's count, หน้าโรง has not counted
+    x = _doc(rd.build([rsh.build(ROUTE, _custs(5), "2026-11-10", day_row, lines, {})]))
+    assert "คืน (คนขับ)" in x
 
 
 def test_the_pdf_copy_uses_the_servers_font_scaled():

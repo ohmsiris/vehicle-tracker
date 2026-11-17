@@ -14,7 +14,7 @@ from datetime import date
 from io import BytesIO
 from typing import Optional
 
-from app.route_sales import KEYS, NOTES, PRODUCTS, SHORT, _num, clean_walkins
+from app.route_sales import KEYS, NOTES, PRODUCTS, SHORT, _num, clean_returns, clean_walkins
 
 COLS = ["ลูกค้า", "ถัง", "ราคา", *[lab for _, lab in PRODUCTS], "รวมเงิน", "เก่ายกมา", "จ่ายเก่า", "จ่ายสด", "รวมจ่าย", "ค้าง"]
 
@@ -74,7 +74,10 @@ def build(route: dict, customers: list[dict], day: Optional[str], day_row: Optio
         "old_paid": sum(r["old_paid"] or 0 for r in rows) or None, "paid": sum(r["paid"] or 0 for r in rows) or None,
         "paid_all": sum(r["paid_all"] or 0 for r in rows) or None, "owed_after": sum(r["owed_after"] or 0 for r in rows) or None,
     }
-    returned = (day_row or {}).get("returns_foh")
+    # คืน: what compute() used -- หน้าโรง's count, else the driver's (doc.returns); totals saved before that fall back to the raw counts
+    foh, drv = clean_returns((day_row or {}).get("returns_foh")), clean_returns(doc.get("returns"))
+    returned = t.get("returned") or foh or drv or None
+    returned_by = t.get("returned_by") or ("office" if foh else "driver" if drv else None)
     summary = None
     if day_row:
         km_start, km = t.get("km_start"), t.get("km")
@@ -84,6 +87,8 @@ def build(route: dict, customers: list[dict], day: Optional[str], day_row: Optio
             "returned": {k: _num((returned or {}).get(k)) or None for k in KEYS} if returned else None,
             "sold": {k: _num((t.get("sold") or {}).get(k)) or None for k in KEYS},
             "diff": {k: _num((t.get("diff") or {}).get(k)) or None for k in KEYS} if returned else None,
+            "returned_by": returned_by if returned else None,
+            "returned_label": "คืน (คนขับ)" if returned and returned_by == "driver" else "คืน",
             "amount": t.get("amount"), "invoiced": t.get("invoiced"), "credit": t.get("credit"), "cash_sales": t.get("cash_sales"),
             "old_paid": t.get("old_paid"), "expected_cash": t.get("expected_cash"), "counted": t.get("counted"),
             "owed_before": totals["owed_before"], "owed_after": totals["owed_after"],
@@ -219,7 +224,7 @@ def to_xlsx(s: dict) -> bytes:
     notes = [(f"{n:,} =", (sm.get("notes") or {}).get(str(n))) for n in NOTES] + [("เหรียญ =", sm.get("coins")), ("รวมเงิน", sm.get("counted"))]
     loads = sm.get("loads") or []
     stock = [(str(i + 1), ld) for i, ld in enumerate(loads)] or [("1", {}), ("2", {}), ("3", {})]
-    stock += [("รวม", sm.get("loaded") or {}), ("คืน", sm.get("returned") or {}), ("ขายได้", sm.get("sold") or {}),
+    stock += [("รวม", sm.get("loaded") or {}), (sm.get("returned_label") or "คืน", sm.get("returned") or {}), ("ขายได้", sm.get("sold") or {}),
               ("ขาด(-) / เกิน(+)", sm.get("diff") or {})]
     top = r
     for j in range(1, max(len(stock), len(money), len(notes)) + 1):

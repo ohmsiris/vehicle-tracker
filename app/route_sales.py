@@ -218,7 +218,10 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
     back = office_back or driver_back or None           # หน้าโรง's count wins; else the driver's
     returned = {k: _num((back or {}).get(k)) for k in KEYS}
     left = {k: loaded[k] - sold[k] for k in KEYS}
-    diff = {k: returned[k] - left[k] for k in KEYS} if back else {k: 0.0 for k in KEYS}   # + เกิน / - ขาด
+    # + เกิน / - ขาด. หน้าโรง counts the whole truck; the driver's count covers only the products the driver typed (a blank is
+    # no answer, so no ขาด is made up for it)
+    counted_k = set(KEYS) if office_back else set(driver_back)
+    diff = {k: returned[k] - left[k] if back and k in counted_k else 0.0 for k in KEYS}
     counted = sum(_num((doc.get("cash") or {}).get(str(n))) * n for n in NOTES) + _num((doc.get("cash") or {}).get("coins"))
     expected_cash = cash_sales + old_paid
     start = km_start if km_start is not None else _num(doc.get("km_start"))
@@ -226,14 +229,15 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
     km = km_end - start if start and km_end else None
     flags = []
     for k, label in PRODUCTS:
-        if back and diff[k]:
+        if diff[k]:
             flags.append(f"{label} {'เกิน' if diff[k] > 0 else 'ขาด'} {abs(diff[k]):g}")
         if left[k] < 0:
             flags.append(f"{label} ขายมากกว่าที่รับ {abs(left[k]):g}")
     if office_back and driver_back:
         for k, label in PRODUCTS:
             if (k in office_back or k in driver_back) and _num(driver_back.get(k)) != _num(office_back.get(k)):
-                flags.append(f"{label}: คนขับคืน {_num(driver_back.get(k)):g} แต่หน้าโรงนับ {_num(office_back.get(k)):g}")
+                said = f"คนขับคืน {_num(driver_back.get(k)):g}" if k in driver_back else "คนขับไม่ได้ใส่"
+                flags.append(f"{label}: {said} แต่หน้าโรงนับ {_num(office_back.get(k)):g}")
     has_cash = bool(doc.get("cash"))
     if has_cash and abs(counted - expected_cash) >= 1:
         flags.append(f"เงิน{'เกิน' if counted > expected_cash else 'ขาด'} {abs(counted - expected_cash):,.0f} บาท")

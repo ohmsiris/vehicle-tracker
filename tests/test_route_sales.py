@@ -216,9 +216,17 @@ def test_the_drivers_returns_count_until_the_plant_counts_and_a_difference_is_fl
     assert t["returned_driver"] == {"lod": 12, "lek": 5}
     assert "ใหญ่: คนขับคืน 12 แต่หน้าโรงนับ 11" in t["flags"] and not any("เล็ก: คนขับคืน" in f for f in t["flags"])
     t = rs.compute(doc, customers, returns={"lod": 12, "lek": 5, "mo": 2})           # หน้าโรง found บด the driver did not write down
-    assert "บด: คนขับคืน 0 แต่หน้าโรงนับ 2" in t["flags"] and not any("ใหญ่: คนขับคืน" in f for f in t["flags"])
+    assert "บด: คนขับไม่ได้ใส่ แต่หน้าโรงนับ 2" in t["flags"] and not any("ใหญ่: คนขับคืน" in f for f in t["flags"])
+    t = rs.compute(doc, customers, returns={"lod": 12, "lek": 5, "mo": 0})           # หน้าโรง counted 0 บด, the driver left it blank
+    assert not any("บด:" in f for f in t["flags"])
     t = rs.compute(doc, customers, returns={})                                       # an empty หน้าโรง count is no count
     assert t["returned_by"] == "driver" and t["returned"]["lod"] == 12
+    loaded_mo = {**doc, "loads": [{"q": {"lod": 20, "lek": 10, "mo": 3}}]}           # บด loaded, the driver typed only ใหญ่ and เล็ก
+    t = rs.compute(loaded_mo, customers)
+    assert t["returned_by"] == "driver" and t["diff"]["mo"] == 0 and t["diff"]["lek"] == -1
+    assert not any(f.startswith("บด ขาด") for f in t["flags"]) and "เล็ก ขาด 1" in t["flags"]
+    t = rs.compute(loaded_mo, customers, returns={"lod": 12, "lek": 5})              # หน้าโรง counts the whole truck: บด not back
+    assert t["diff"]["mo"] == -3 and "บด ขาด 3" in t["flags"]
     t = rs.compute({**doc, "returns": None}, customers)                              # nobody counted: no shortage worked out
     assert t["returned"] is None and t["returned_by"] is None and t["diff"]["lek"] == 0 and not any("ขาด" in f for f in t["flags"])
 
