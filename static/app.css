@@ -2236,3 +2236,17 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .ti-printed { white-space: nowrap; text-align: center; }
 .ti-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 .ti-sortable:hover, .ti-sortable.on { color: var(--accent) !important; }
+
+/* ยอดขายรายวัน: spare driver, summary, export (17 Nov 2026) */
+.dd-export { display: inline-flex; gap: 6px; margin-left: auto; }
+.dd-who { font: inherit; font-size: 13px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--text-2); max-width: 170px; }
+.dd-whocell { padding-left: 8px !important; }
+.dd-grid tr.dd-spare td { background: var(--warn-soft) !important; }
+.dd-grid tr.dd-spare .dd-who { color: var(--warn); font-weight: 600; border-color: var(--warn-line); }
+.dd-grid tfoot tr.dd-sparerow td { font-weight: 600; color: var(--warn); border-top: 0; padding-top: 2px; }
+.dd-sum { margin-top: 14px; }
+.dd-sumtable th.r, .dd-sumtable td.r { text-align: right; white-space: nowrap; }
+.dd-sumtable th { font-size: 12.5px; color: var(--muted); font-weight: 600; text-align: left; padding: 6px 10px; white-space: nowrap; }
+.dd-sumtable tbody tr { cursor: pointer; }
+.dd-sumtable tbody tr.on td, .dd-sumtable tbody tr:hover td { background: var(--accent-soft) !important; }
+.dd-sumtable tfoot td { font-weight: 700; border-top: 1px solid var(--line); background: transparent !important; }

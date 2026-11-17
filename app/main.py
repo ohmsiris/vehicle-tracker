@@ -2500,6 +2500,16 @@ def api_driver_days(month: str = Query(default=""), half: int = Query(default=0)
     return _dd_call(driver_days.overview, month, half)
 
 
+@app.get("/api/driver-days/export.xlsx")
+def api_driver_days_export(month: str = Query(...), half: int = Query(default=0), x_app_token: str = Header(default=""), token: str = Query(default="")):
+    """ยอดขายรายวัน as Excel: a summary tab, then a tab per driver (half = 1 / 2, or 0 = the whole month)."""
+    from urllib.parse import quote
+    from app import driver_days
+    _check_token(x_app_token, token)
+    body, name = _dd_call(driver_days.export, month, half)
+    return Response(content=body, media_type=XLSX, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+
 @app.get("/api/driver-days/{employee_id}")
 def api_driver_days_sheet(employee_id: str, month: str = Query(...), half: int = Query(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import driver_days
