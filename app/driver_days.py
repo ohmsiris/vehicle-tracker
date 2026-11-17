@@ -68,7 +68,7 @@ def _number(v, label: str, whole: bool = False) -> Optional[float]:
     return int(n) if n == int(n) else round(n, 2)
 
 
-def clean_rows(rows: list, month: str, half: int) -> list[dict]:
+def clean_rows(rows: list, month: str, half: int, owner: Optional[str] = None, spares: Optional[set] = None) -> list[dict]:
     """What the page sent -> the rows to keep: [{day, qty, money, spare}], only days with at least one figure or ticked สำรองขับ, only
     days of this half-month."""
     allowed = {d.isoformat() for d in days_of(month, half)}
@@ -89,8 +89,11 @@ def clean_rows(rows: list, month: str, half: int) -> list[dict]:
         qty = {k: n for k in keys if (n := _number(q.get(k), f"{dd} {labels[k]}", whole=True)) is not None}
         money = _number(r.get("money"), f"{dd} เงินที่ได้")
         spare = r.get("spare") is True
+        by = (str(r.get("spare_by") or "") or None) if spare else None          # who the spare was (optional)
+        if by and (by == owner or (spares is not None and by not in spares)):
+            raise DriverDaysError(f"{dd}: เลือกคนขับสำรองไม่ถูกต้อง")
         if qty or money is not None or spare:
-            out.append({"day": day, "qty": qty, "money": money, "spare": spare})
+            out.append({"day": day, "qty": qty, "money": money, "spare": spare, "spare_by": by})
     return sorted(out, key=lambda x: x["day"])
 
 
@@ -109,10 +112,13 @@ def summarize(rows: list[dict], people: list[dict], days: list[str]) -> list[dic
     """Per driver, over `days`: the days he drove (a row with figures, not ticked สำรองขับ), the days the spare drove his truck, his days
     off (every day of the period he did not drive -- the spare's days included), what he sold and the money. A สำรองขับ day counts for
     nobody: the spare only drives and delivers, no commission (owner, 17 Nov 2026). rows = route_driver_days {employee_id, day, qty, money,
-    spare}; people = [{id, name, nickname, truck}]."""
+    spare, spare_by}; people = [{id, name, nickname, truck}]. Whoever was the spare (spare_by) gets the day counted as a day he drove as the
+    spare (as_spare_days) -- still no sales."""
     keys = [k for k, _ in PRODUCTS]
-    acc = {p["id"]: {**p, "own": set(), "spare": set(), "qty": {k: 0 for k in keys}, "money": 0.0} for p in people}
+    acc = {p["id"]: {**p, "own": set(), "spare": set(), "as_spare": set(), "qty": {k: 0 for k in keys}, "money": 0.0} for p in people}
     for r in rows:
+        if r.get("spare") and r.get("spare_by") in acc:
+            acc[r["spare_by"]]["as_spare"].add(r["day"])
         a = acc.get(r["employee_id"])
         if a is None:
             continue
@@ -129,14 +135,26 @@ def summarize(rows: list[dict], people: list[dict], days: list[str]) -> list[dic
     order = lambda a: (not a.get("truck"), int(a["truck"]) if str(a.get("truck") or "").isdigit() else 999, a["name"])  # noqa: E731
     out = []
     for a in sorted(acc.values(), key=order):
-        off = [d for d in days if d not in a["own"]]
-        out.append({"id": a["id"], "name": a["name"], "nickname": a.get("nickname") or "", "truck": a.get("truck"),
-                    "days_worked": len(a["own"]), "spare_days": len(a["spare"]), "days_off": len(off), "off_dates": off,
-                    "spare_dates": sorted(a["spare"]), "qty": a["qty"], "money": round(a["money"], 2)})
+        if a.get("kind") == "หน้าโรง" and not a["as_spare"]:
+            continue                                              # a หน้าโรง driver is listed only when he drove as the spare
+        off = [d for d in days if d not in a["own"] and d not in a["as_spare"]]
+        out.append({"id": a["id"], "name": a["name"], "nickname": a.get("nickname") or "", "truck": a.get("truck"), "kind": a.get("kind") or "สาย",
+                    "days_worked": len(a["own"]), "spare_days": len(a["spare"]), "as_spare_days": len(a["as_spare"]), "days_off": len(off),
+                    "off_dates": off, "spare_dates": sorted(a["spare"]), "as_spare_dates": sorted(a["as_spare"]), "qty": a["qty"],
+                    "money": round(a["money"], 2)})
     return out
 
 
 # ------------------------------------------------------------------ database
+def spares() -> list[dict]:
+    """Who can be picked as the day's spare driver: every Saraburi รถสาย driver, then the หน้าโรง drivers."""
+    out = [{**d, "kind": "สาย"} for d in drivers()]
+    for e in supabase.select_all("employees", {"select": "id,full_name,nickname", "branch": f"eq.{BRANCH}", "status": "eq.active",
+                                               "position": "eq.พนักงานขับรถหน้าโรง", "order": "full_name.asc"}):
+        out.append({"id": e["id"], "code": "", "name": e["full_name"], "nickname": e.get("nickname") or "", "truck": None, "kind": "หน้าโรง"})
+    return out
+
+
 def drivers() -> list[dict]:
     """The รถสาย drivers (active, Saraburi), with the number of the truck each drives now (the truck's main driver)."""
     # a truck's main driver is a row of the drivers list (fleet), matched to the employee by full name -- as น้ำมันเงินสด does
@@ -166,12 +184,12 @@ def _employee(employee_id: str) -> dict:
 
 def _saved(employee_id: str, month: str, half: int) -> list[dict]:
     start, end = period_bounds(month, half)
-    return supabase.select_all("route_driver_days", {"select": "day,qty,money,spare,updated_at", "employee_id": f"eq.{employee_id}",
+    return supabase.select_all("route_driver_days", {"select": "day,qty,money,spare,spare_by,updated_at", "employee_id": f"eq.{employee_id}",
                                                      "day": f"gte.{start.isoformat()}", "and": f"(day.lte.{end.isoformat()})", "order": "day.asc"})
 
 
 def _period_rows(start: date, end: date) -> list[dict]:
-    return supabase.select_all("route_driver_days", {"select": "employee_id,day,qty,money,spare", "day": f"gte.{start.isoformat()}",
+    return supabase.select_all("route_driver_days", {"select": "employee_id,day,qty,money,spare,spare_by", "day": f"gte.{start.isoformat()}",
                                                      "and": f"(day.lte.{end.isoformat()})", "order": "day.asc,id.asc"})
 
 
@@ -183,11 +201,13 @@ def overview(month: str, half) -> dict:
     filled: dict = {}
     for r in rows:
         filled[r["employee_id"]] = filled.get(r["employee_id"], 0) + 1
-    people = drivers()
+    people = spares()
     days = [d.isoformat() for d in days_of(month, half)]
     return {"month": month, "half": half, "start": start.isoformat(), "end": end.isoformat(), "days": len(days),
             "products": [{"key": k, "label": lab} for k, lab in PRODUCTS],
-            "drivers": [{**d, "filled": filled.get(d["id"], 0)} for d in people], "summary": summarize(rows, people, days)}
+            "drivers": [{**d, "filled": filled.get(d["id"], 0)} for d in people if d["kind"] == "สาย"],
+            "spares": [{"id": p["id"], "name": p["name"], "nickname": p["nickname"], "truck": p["truck"], "kind": p["kind"]} for p in people],
+            "summary": summarize(rows, people, days)}
 
 
 def sheet(employee_id: str, month: str, half) -> dict:
@@ -196,7 +216,8 @@ def sheet(employee_id: str, month: str, half) -> dict:
     emp = _employee(employee_id)
     saved = {r["day"]: r for r in _saved(employee_id, month, half)}
     rows = [{"day": d.isoformat(), "qty": (saved.get(d.isoformat()) or {}).get("qty") or {}, "money": (saved.get(d.isoformat()) or {}).get("money"),
-             "spare": bool((saved.get(d.isoformat()) or {}).get("spare"))} for d in days_of(month, half)]
+             "spare": bool((saved.get(d.isoformat()) or {}).get("spare")), "spare_by": (saved.get(d.isoformat()) or {}).get("spare_by")}
+            for d in days_of(month, half)]
     last = max((r["updated_at"] for r in saved.values() if r.get("updated_at")), default=None)
     return {"employee_id": employee_id, "name": emp["full_name"], "nickname": emp.get("nickname") or "", "month": month, "half": half,
             "products": [{"key": k, "label": lab} for k, lab in PRODUCTS], "rows": rows,
@@ -208,7 +229,7 @@ def save(employee_id: str, month: str, half, rows: list) -> dict:
     """Replace this driver's half-month with what the page holds (a day emptied on the page is removed)."""
     month, half = _check_period(month, half)
     _employee(employee_id)
-    keep = clean_rows(rows, month, half)
+    keep = clean_rows(rows, month, half, owner=employee_id, spares={p["id"] for p in spares()})
     start, end = period_bounds(month, half)
     supabase.delete("route_driver_days", {"employee_id": f"eq.{employee_id}", "day": f"gte.{start.isoformat()}", "and": f"(day.lte.{end.isoformat()})"})
     if keep:
@@ -233,7 +254,8 @@ def export(month: str, half) -> tuple[bytes, str]:
     start, end = period_bounds(month, half or None)
     days = [(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)]
     rows = _period_rows(start, end)
-    people = drivers()
+    people = spares()
+    names = {p["id"]: p for p in people}
     summary = summarize(rows, people, days)
     keys = [k for k, _ in PRODUCTS]
     labels = [lab for _, lab in PRODUCTS]
@@ -271,12 +293,12 @@ def export(month: str, half) -> tuple[bytes, str]:
     ws.title = "สรุป"
     ws["A1"], ws["A2"] = "ยอดขายรถสาย สรุป", f"งวด {title} · วันสำรองขับไม่นับยอด (คนขับสำรองไม่ได้ค่าคอม)"
     ws["A1"].font, ws["A2"].font = head_font, body
-    header = ["คนขับ", "รถ", "วันที่ขับ", "หยุด", "สำรองขับ", *labels, "เงินที่ได้ (บาท)"]
-    data = [[f"{x['name']}" + (f" ({x['nickname']})" if x["nickname"] else ""), f"#{x['truck']}" if x["truck"] else "", x["days_worked"], x["days_off"],
-             x["spare_days"], *[x["qty"][k] for k in keys], x["money"]] for x in summary]
-    tot = ["รวม", "", sum(x["days_worked"] for x in summary), "", sum(x["spare_days"] for x in summary), *[sum(x["qty"][k] for x in summary) for k in keys],
-           round(sum(x["money"] for x in summary), 2)]
-    table(ws, 4, header, data, [30, 9, 10, 8, 10, *[10] * len(keys), 16], money_col=len(header), total=tot)
+    header = ["คนขับ", "รถ", "วันที่ขับ", "หยุด", "สำรองขับรถคันนี้", "ไปเป็นสำรอง", *labels, "เงินที่ได้ (บาท)"]
+    data = [[f"{x['name']}" + (f" ({x['nickname']})" if x["nickname"] else ""), f"#{x['truck']}" if x["truck"] else ("หน้าโรง" if x["kind"] == "หน้าโรง" else ""),
+             x["days_worked"], x["days_off"], x["spare_days"], x["as_spare_days"], *[x["qty"][k] for k in keys], x["money"]] for x in summary]
+    tot = ["รวม", "", sum(x["days_worked"] for x in summary), "", sum(x["spare_days"] for x in summary), sum(x["as_spare_days"] for x in summary),
+           *[sum(x["qty"][k] for x in summary) for k in keys], round(sum(x["money"] for x in summary), 2)]
+    table(ws, 4, header, data, [30, 9, 10, 8, 14, 12, *[10] * len(keys), 16], money_col=len(header), total=tot)
     ws.freeze_panes = "B5"
 
     by: dict = {}
@@ -284,9 +306,13 @@ def export(month: str, half) -> tuple[bytes, str]:
         by.setdefault(r["employee_id"], {})[r["day"]] = r
     used = set()
     dows = ["จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส.", "อา."]
+    as_spare: dict = {}
+    for r in rows:
+        if r.get("spare") and r.get("spare_by"):
+            as_spare.setdefault(r["spare_by"], {})[r["day"]] = r
     for x in summary:
         mine = by.get(x["id"], {})
-        if not mine and not x["truck"]:
+        if not mine and not x["truck"] and not x["as_spare_days"]:
             continue
         name = (x["nickname"] or x["name"]).strip()
         t = re.sub(r"[\\/*?:\[\]]", "-", f"{('#' + str(x['truck']) + ' ') if x['truck'] else ''}{name}")[:31]
@@ -295,16 +321,24 @@ def export(month: str, half) -> tuple[bytes, str]:
         used.add(t)
         sh = wb.create_sheet(t)
         sh["A1"] = f"{x['name']}" + (f" ({x['nickname']})" if x["nickname"] else "") + (f"  รถ #{x['truck']}" if x["truck"] else "")
-        sh["A2"] = f"งวด {title} · ขับ {x['days_worked']} วัน · หยุด {x['days_off']} วัน (สำรองขับ {x['spare_days']})"
+        sh["A2"] = (f"งวด {title} · ขับ {x['days_worked']} วัน · หยุด {x['days_off']} วัน (สำรองขับรถคันนี้ {x['spare_days']})"
+                    + (f" · ไปเป็นสำรอง {x['as_spare_days']} วัน" if x["as_spare_days"] else ""))
         sh["A1"].font, sh["A2"].font = head_font, body
         data, faint = [], []
         for i, d in enumerate(days):
             r = mine.get(d)
             label = f"{dows[_date.fromisoformat(d).weekday()]} {be(d)}"
+            other = as_spare.get(x["id"], {}).get(d)
             if r and r.get("spare"):
                 faint.append(i)
+                who = names.get(r.get("spare_by")) or {}
                 data.append([label, *[(r.get("qty") or {}).get(k) for k in keys], float(r["money"]) if r.get("money") is not None else None,
-                             "สำรองขับ — ไม่นับ"])
+                             f"สำรองขับ{(': ' + (who.get('nickname') or who.get('name') or '')) if who else ''} — ไม่นับ"])
+            elif other and not (r and (r.get("qty") or r.get("money") is not None)):
+                faint.append(i)
+                owner = names.get(other["employee_id"]) or {}
+                data.append([label, *[None] * len(keys), None,
+                             f"เป็นสำรองขับ {('#' + str(owner['truck'])) if owner.get('truck') else ''} {owner.get('nickname') or owner.get('name') or ''}".strip()])
             elif r and (r.get("qty") or r.get("money") is not None):
                 data.append([label, *[(r.get("qty") or {}).get(k) for k in keys], float(r["money"]) if r.get("money") is not None else None, ""])
             else:

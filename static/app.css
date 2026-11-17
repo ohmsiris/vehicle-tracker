@@ -2251,3 +2251,6 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .dd-sumtable tbody tr { cursor: pointer; }
 .dd-sumtable tbody tr.on td, .dd-sumtable tbody tr:hover td { background: var(--accent-soft) !important; }
 .dd-sumtable tfoot td { font-weight: 700; border-top: 1px solid var(--line); background: transparent !important; }
+.dd-whowrap { display: inline-flex; align-items: center; gap: 4px; }
+.dd-by { font: inherit; font-size: 12px; padding: 2px 4px; margin-left: 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); width: 118px; min-width: 118px; }
+.dd-by.on { border-color: var(--warn-line); color: var(--warn); font-weight: 600; }

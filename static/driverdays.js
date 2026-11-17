@@ -90,10 +90,18 @@ function ddSheet() {
       inp.addEventListener("keydown", ddKey);
       tr.append(el("td", { class: "r" }, inp));
     });
-    // สำรองขับ: the spare drove -- the day counts for nobody (owner, 17 Nov 2026). Mouse only: Tab never stops here (tabindex -1).
-    const spare = el("input", { type: "checkbox", tabindex: "-1", checked: !!r.spare, "aria-label": `${ddDMY(r.day)} สำรองขับ`,
-      onchange: () => { r.spare = spare.checked; tr.classList.toggle("dd-spare", r.spare); dd_.dirty = true; ddTotals(cols); ddStatus(); } });
-    const who = el("label", { class: "dd-who", title: "คนขับสำรองขับวันนี้ — ไม่นับยอด" }, spare, "สำรอง");
+    // สำรองขับ (owner, 17 Nov 2026): one dropdown -- "—" = his own day; a name (or ไม่ระบุชื่อ) = the spare drove: the day counts for nobody,
+    // the spare's days are counted. Mouse only: Tab never stops here (tabindex -1).
+    const by = el("select", { class: `dd-by${r.spare ? " on" : ""}`, tabindex: "-1", "aria-label": `${ddDMY(r.day)} คนขับสำรอง`, title: "คนขับสำรองขับวันนี้ — ไม่นับยอด",
+      onchange: () => {
+        r.spare = by.value !== ""; r.spare_by = by.value && by.value !== "?" ? by.value : null;
+        by.classList.toggle("on", r.spare); tr.classList.toggle("dd-spare", r.spare); dd_.dirty = true; ddTotals(cols); ddStatus();
+      } },
+      el("option", { value: "", text: "—" }),
+      el("option", { value: "?", text: "สำรอง (ไม่ระบุชื่อ)", selected: r.spare && !r.spare_by }),
+      ...(dd_.ov.spares || []).filter((p) => p.id !== s.employee_id).map((p) => el("option", { value: p.id, selected: r.spare && p.id === r.spare_by,
+        text: `สำรอง: ${p.nickname || p.name.split(" ")[0]}${p.truck ? ` #${p.truck}` : p.kind === "หน้าโรง" ? " (หน้าโรง)" : ""}` })));
+    const who = by;
     tr.firstChild.append(who);                                  // beside the date: always in sight, never in the Tab path
     body.append(tr);
   });
@@ -152,7 +160,7 @@ async function ddSave() {
   if (bad) { showErr("ddError", "มีช่องที่ไม่ใช่ตัวเลข (สีแดง) — แก้ก่อนบันทึก"); bad.focus(); return; }
   showErr("ddError", "");
   const s = dd_.sheet;
-  const rows = s.rows.map((r) => ({ day: r.day, qty: r.qty || {}, money: r.money, spare: !!r.spare }));
+  const rows = s.rows.map((r) => ({ day: r.day, qty: r.qty || {}, money: r.money, spare: !!r.spare, spare_by: r.spare ? r.spare_by || null : null }));
   dd_.saving = true; ddStatus();
   const btn = $("ddSave"); if (btn) btn.disabled = true;
   try {
@@ -177,19 +185,20 @@ function ddSummary() {
   if (!list.length) return null;
   const prods = ov.products;
   const sum = (f) => list.reduce((a, x) => a + f(x), 0);
-  const rows = list.map((x) => el("tr", { class: x.id === dd_.emp ? "on" : "", onclick: () => ddGo(x.id, ov.month, ov.half) },
-    el("td", {}, x.truck ? el("span", { class: "truckno", text: `#${x.truck}` }) : null, ` ${x.nickname || x.name.split(" ")[0]}`),
+  const rows = list.map((x) => el("tr", { class: x.id === dd_.emp ? "on" : "", onclick: () => { if (x.kind !== "หน้าโรง") ddGo(x.id, ov.month, ov.half); } },
+    el("td", {}, x.truck ? el("span", { class: "truckno", text: `#${x.truck}` }) : el("span", { class: "muted small", text: x.kind === "หน้าโรง" ? "หน้าโรง" : "" }), ` ${x.nickname || x.name.split(" ")[0]}`),
     el("td", { class: "r", text: String(x.days_worked) }),
     el("td", { class: "r", title: x.off_dates.map(ddDMY).join(", "), text: String(x.days_off) }),
     el("td", { class: "r", title: x.spare_dates.map(ddDMY).join(", "), text: x.spare_days ? String(x.spare_days) : "–" }),
+    el("td", { class: "r", title: (x.as_spare_dates || []).map(ddDMY).join(", "), text: x.as_spare_days ? String(x.as_spare_days) : "–" }),
     ...prods.map((p) => el("td", { class: "r", text: x.qty[p.key] ? elN(x.qty[p.key]) : "–" })),
     el("td", { class: "r" }, el("b", { text: elN(x.money, x.money % 1 ? 2 : 0) }))));
   return el("section", { class: "card dd-sum" },
     el("h3", { text: `สรุปงวด ${ddDMY(ov.start)} – ${ddDMY(ov.end)}` }),
     el("div", { class: "lc-wrap" }, el("table", { class: "lc-table dd-sumtable" },
-      el("thead", {}, el("tr", {}, ...["คนขับ", "ขับ (วัน)", "หยุด", "สำรองขับ", ...prods.map((p) => p.label), "เงินที่ได้"].map((h, i) => el("th", { class: i ? "r" : "", text: h })))),
+      el("thead", {}, el("tr", {}, ...["คนขับ", "ขับ (วัน)", "หยุด", "สำรองขับรถคันนี้", "ไปเป็นสำรอง", ...prods.map((p) => p.label), "เงินที่ได้"].map((h, i) => el("th", { class: i ? "r" : "", text: h })))),
       el("tbody", {}, ...rows),
-      el("tfoot", {}, el("tr", {}, el("td", { text: "รวม" }), el("td", { class: "r", text: String(sum((x) => x.days_worked)) }), el("td", {}), el("td", { class: "r", text: String(sum((x) => x.spare_days)) }),
+      el("tfoot", {}, el("tr", {}, el("td", { text: "รวม" }), el("td", { class: "r", text: String(sum((x) => x.days_worked)) }), el("td", {}), el("td", { class: "r", text: String(sum((x) => x.spare_days)) }), el("td", { class: "r", text: String(sum((x) => x.as_spare_days || 0)) }),
         ...prods.map((p) => el("td", { class: "r", text: elN(sum((x) => x.qty[p.key] || 0)) })), el("td", { class: "r" }, el("b", { text: elN(sum((x) => x.money), 2) })))))),
     el("p", { class: "small muted", text: "วันที่ติ๊ก สำรองขับ ไม่นับยอดให้ใคร (คนขับสำรองไม่ได้ค่าคอม) และนับเป็นวันหยุดของคนขับหลัก · ชี้ที่ตัวเลขวันหยุด / สำรองขับ เพื่อดูวันที่" }));
 }
