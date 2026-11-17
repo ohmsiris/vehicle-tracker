@@ -100,7 +100,7 @@ function ddSheet() {
       el("option", { value: "", text: "—" }),
       el("option", { value: "?", text: "สำรอง (ไม่ระบุชื่อ)", selected: r.spare && !r.spare_by }),
       ...(dd_.ov.spares || []).filter((p) => p.id !== s.employee_id).map((p) => el("option", { value: p.id, selected: r.spare && p.id === r.spare_by,
-        text: `สำรอง: ${p.nickname || p.name.split(" ")[0]}${p.truck ? ` #${p.truck}` : p.kind === "หน้าโรง" ? " (หน้าโรง)" : ""}` })));
+        text: `สำรอง: ${p.nickname || p.name.split(" ")[0]}` })));
     const who = by;
     tr.firstChild.append(who);                                  // beside the date: always in sight, never in the Tab path
     body.append(tr);

@@ -147,7 +147,8 @@ def summarize(rows: list[dict], people: list[dict], days: list[str]) -> list[dic
 
 # ------------------------------------------------------------------ database
 def spares() -> list[dict]:
-    """Who can be picked as the day's spare driver: every Saraburi รถสาย driver, then the หน้าโรง drivers."""
+    """The รถสาย drivers (kind "สาย") and the หน้าโรง drivers (kind "หน้าโรง") -- only the หน้าโรง ones are offered as the day's spare
+    (owner, 17 Nov 2026: "just FOH drivers is enough"); see spare_choices."""
     out = [{**d, "kind": "สาย"} for d in drivers()]
     for e in supabase.select_all("employees", {"select": "id,full_name,nickname", "branch": f"eq.{BRANCH}", "status": "eq.active",
                                                "position": "eq.พนักงานขับรถหน้าโรง", "order": "full_name.asc"}):
@@ -206,7 +207,8 @@ def overview(month: str, half) -> dict:
     return {"month": month, "half": half, "start": start.isoformat(), "end": end.isoformat(), "days": len(days),
             "products": [{"key": k, "label": lab} for k, lab in PRODUCTS],
             "drivers": [{**d, "filled": filled.get(d["id"], 0)} for d in people if d["kind"] == "สาย"],
-            "spares": [{"id": p["id"], "name": p["name"], "nickname": p["nickname"], "truck": p["truck"], "kind": p["kind"]} for p in people],
+            "spares": [{"id": p["id"], "name": p["name"], "nickname": p["nickname"], "truck": p["truck"], "kind": p["kind"]}
+                       for p in people if p["kind"] == "หน้าโรง"],
             "summary": summarize(rows, people, days)}
 
 
@@ -229,7 +231,7 @@ def save(employee_id: str, month: str, half, rows: list) -> dict:
     """Replace this driver's half-month with what the page holds (a day emptied on the page is removed)."""
     month, half = _check_period(month, half)
     _employee(employee_id)
-    keep = clean_rows(rows, month, half, owner=employee_id, spares={p["id"] for p in spares()})
+    keep = clean_rows(rows, month, half, owner=employee_id, spares={p["id"] for p in spares() if p["kind"] == "หน้าโรง"})
     start, end = period_bounds(month, half)
     supabase.delete("route_driver_days", {"employee_id": f"eq.{employee_id}", "day": f"gte.{start.isoformat()}", "and": f"(day.lte.{end.isoformat()})"})
     if keep:
