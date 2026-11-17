@@ -22,8 +22,8 @@ def test_rows_keep_only_filled_days_and_numbers():
             {"day": "2026-11-12", "qty": {"zong": ""}, "money": ""},                        # nothing typed: no row
             {"day": "2026-11-13", "qty": {}, "money": "0"}]                                  # 0 baht is a figure
     out = dd.clean_rows(rows, "2026-11", 2)
-    assert out == [{"day": "2026-11-11", "qty": {"zong": 12, "lod": 1250}, "money": 18450.5, "driven_by": None},
-                   {"day": "2026-11-13", "qty": {}, "money": 0, "driven_by": None}]
+    assert out == [{"day": "2026-11-11", "qty": {"zong": 12, "lod": 1250}, "money": 18450.5, "spare": False},
+                   {"day": "2026-11-13", "qty": {}, "money": 0, "spare": False}]
     assert dd.totals(out) == {"qty": {"zong": 12, "kak": 0, "lod": 1250, "lek": 0, "pack": 0, "mo": 0}, "money": 18450.5, "days": 2}
 
 
@@ -43,43 +43,43 @@ def test_the_page_is_a_menu_of_its_own():
     assert users.allowed(["driver_days"], "/api/driver-days/abc") and not users.allowed(["sales_sheets"], "/api/driver-days")
 
 
-def test_a_spare_drivers_day_counts_for_the_spare_not_the_truck_driver():
-    people = [{"id": "A", "name": "เอ", "nickname": "", "truck": "5"}, {"id": "S", "name": "สำรอง", "nickname": "", "truck": None}]
+def test_a_spare_day_counts_for_nobody():
+    """Owner, 17 Nov 2026: the spare only drives and delivers (no commission) -- the truck's driver has the day off, the sales count for nobody."""
+    people = [{"id": "A", "name": "เอ", "nickname": "", "truck": "5"}, {"id": "B", "name": "บี", "nickname": "", "truck": "3"}]
     days = ["2026-11-11", "2026-11-12", "2026-11-13"]
-    rows = [{"employee_id": "A", "day": "2026-11-11", "qty": {"zong": 10}, "money": 1000, "driven_by": None},
-            {"employee_id": "A", "day": "2026-11-12", "qty": {"zong": 7}, "money": 700, "driven_by": "S"}]
-    out = {x["id"]: x for x in dd.summarize(rows, people, days)}
-    a, s = out["A"], out["S"]
-    assert (a["own_days"], a["spare_days"], a["days_worked"], a["days_off"], a["covered_days"]) == (1, 0, 1, 2, 1)
-    assert a["qty"]["zong"] == 10 and a["money"] == 1000 and a["off_dates"] == ["2026-11-12", "2026-11-13"]
-    assert (s["spare_days"], s["days_worked"], s["days_off"]) == (1, 1, 2) and s["qty"]["zong"] == 7 and s["money"] == 700
+    rows = [{"employee_id": "A", "day": "2026-11-11", "qty": {"zong": 10}, "money": 1000, "spare": False},
+            {"employee_id": "A", "day": "2026-11-12", "qty": {"zong": 7}, "money": 700, "spare": True}]
+    out = dd.summarize(rows, people, days)
+    assert [x["id"] for x in out] == ["B", "A"]                                   # by truck number
+    a = out[1]
+    assert (a["days_worked"], a["days_off"], a["spare_days"]) == (1, 2, 1) and a["qty"]["zong"] == 10 and a["money"] == 1000
+    assert a["off_dates"] == ["2026-11-12", "2026-11-13"] and a["spare_dates"] == ["2026-11-12"]
+    assert out[0]["days_off"] == 3 and out[0]["money"] == 0
 
 
-def test_rows_keep_who_drove():
-    rows = [{"day": "2026-11-11", "qty": {"zong": "5"}, "money": "500", "driven_by": "S"},
-            {"day": "2026-11-12", "qty": {}, "money": "", "driven_by": "S"},              # the spare drove, figures to come
-            {"day": "2026-11-13", "qty": {"zong": "1"}, "money": "", "driven_by": "A"}]   # the sheet's own driver: not a spare
-    out = dd.clean_rows(rows, "2026-11", 2, owner="A", spares={"S", "A"})
-    assert [(r["day"], r["driven_by"]) for r in out] == [("2026-11-11", "S"), ("2026-11-12", "S"), ("2026-11-13", None)]
-    with pytest.raises(dd.DriverDaysError, match="คนขับแทน"):
-        dd.clean_rows([{"day": "2026-11-11", "qty": {"zong": 1}, "driven_by": "X"}], "2026-11", 2, owner="A", spares={"S"})
+def test_rows_keep_the_spare_tick():
+    rows = [{"day": "2026-11-11", "qty": {"zong": "5"}, "money": "500", "spare": True},
+            {"day": "2026-11-12", "qty": {}, "money": "", "spare": True},                 # ticked, figures not typed: still kept
+            {"day": "2026-11-13", "qty": {"zong": "1"}, "money": ""},
+            {"day": "2026-11-14", "qty": {}, "money": "", "spare": False}]                # nothing at all: no row
+    out = dd.clean_rows(rows, "2026-11", 2)
+    assert [(r["day"], r["spare"]) for r in out] == [("2026-11-11", True), ("2026-11-12", True), ("2026-11-13", False)]
 
 
 def test_export_has_a_summary_tab_then_a_tab_per_driver(monkeypatch):
     import io
     import openpyxl
-    people = [{"id": "A", "name": "สมชาย ใจดี", "nickname": "ชาย", "truck": "5", "kind": "สาย"},
-              {"id": "S", "name": "สมหญิง สำรอง", "nickname": "หญิง", "truck": None, "kind": "สาย"}]
-    rows = [{"employee_id": "A", "day": "2026-11-11", "qty": {"zong": 10, "lod": 2}, "money": 1000.0, "driven_by": None},
-            {"employee_id": "A", "day": "2026-11-12", "qty": {"zong": 7}, "money": 700.0, "driven_by": "S"}]
-    monkeypatch.setattr(dd, "spares", lambda: people)
+    people = [{"id": "A", "name": "สมชาย ใจดี", "nickname": "ชาย", "truck": "5"}, {"id": "B", "name": "สมศักดิ์ ดี", "nickname": "ศักดิ์", "truck": "3"}]
+    rows = [{"employee_id": "A", "day": "2026-11-11", "qty": {"zong": 10, "lod": 2}, "money": 1000.0, "spare": False},
+            {"employee_id": "A", "day": "2026-11-12", "qty": {"zong": 7}, "money": 700.0, "spare": True}]
+    monkeypatch.setattr(dd, "drivers", lambda: people)
     monkeypatch.setattr(dd, "_period_rows", lambda a, b: rows)
     data, name = dd.export("2026-11", 2)
     wb = openpyxl.load_workbook(io.BytesIO(data))
-    assert wb.sheetnames[0] == "สรุป" and wb.sheetnames[1:] == ["#5 ชาย", "หญิง"] and name.endswith("งวด 2.xlsx")
+    assert wb.sheetnames == ["สรุป", "#3 ศักดิ์", "#5 ชาย"] and name.endswith("งวด 2.xlsx")
     s = wb["สรุป"]
-    assert s["A5"].value.startswith("สมชาย") and s["C5"].value == 1 and s["E5"].value == 14 and s["L5"].value == 1000
+    assert s["A6"].value.startswith("สมชาย") and (s["C6"].value, s["D6"].value, s["E6"].value) == (1, 14, 1) and s["F6"].value == 10 and s["L6"].value == 1000
     a = wb["#5 ชาย"]
-    assert a["A5"].value.endswith("11/11/2569") and a["B5"].value == 10 and a["I6"].value == "หยุด — หญิง ขับแทน" and len([r for r in a.iter_rows(min_row=5) if r[0].value]) == 16
-    h = wb["หญิง"]
-    assert h["B6"].value == 7 and h["I6"].value.startswith("ขับแทน #5")
+    assert a["A5"].value.endswith("11/11/2569") and a["B5"].value == 10 and a["I6"].value == "สำรองขับ — ไม่นับ" and a["I7"].value == "หยุด"
+    total = [r for r in a.iter_rows(min_row=5) if r[0].value and str(r[0].value).startswith("รวม")][0]
+    assert total[1].value == 10 and total[7].value == 1000                         # the spare's 7 and 700 are not counted

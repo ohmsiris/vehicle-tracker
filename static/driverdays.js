@@ -76,7 +76,7 @@ function ddSheet() {
   const body = el("tbody", {});
   s.rows.forEach((r, ri) => {
     const d = new Date(`${r.day}T00:00:00`);
-    const tr = el("tr", { class: `${d.getDay() === 0 ? "dd-sun" : ""}${r.driven_by ? " dd-spare" : ""}` }, el("td", { class: "dd-date" }, el("span", { class: "muted small", text: DD_DOW[d.getDay()] }), ` ${r.day.slice(8, 10)}/${r.day.slice(5, 7)}`));
+    const tr = el("tr", { class: `${d.getDay() === 0 ? "dd-sun" : ""}${r.spare ? " dd-spare" : ""}` }, el("td", { class: "dd-date" }, el("span", { class: "muted small", text: DD_DOW[d.getDay()] }), ` ${r.day.slice(8, 10)}/${r.day.slice(5, 7)}`));
     cols.forEach((c, ci) => {
       const v = c.key === "money" ? r.money : (r.qty || {})[c.key];
       const inp = el("input", { type: "text", inputmode: c.whole ? "numeric" : "decimal", class: `dd-in${c.key === "money" ? " dd-money" : ""}`, value: v == null ? "" : String(v),
@@ -90,18 +90,17 @@ function ddSheet() {
       inp.addEventListener("keydown", ddKey);
       tr.append(el("td", { class: "r" }, inp));
     });
-    const who = el("select", { class: "dd-who", tabindex: "-1", "aria-label": `${ddDMY(r.day)} คนขับ`, title: "ใครขับวันนี้",
-      onchange: () => { r.driven_by = who.value || null; tr.classList.toggle("dd-spare", !!r.driven_by); dd_.dirty = true; ddTotals(cols); ddStatus(); } },
-      el("option", { value: "", text: "คนขับหลัก" }),
-      ...(dd_.ov.spares || []).filter((p) => p.id !== s.employee_id).map((p) => el("option", { value: p.id, selected: p.id === r.driven_by,
-        text: `แทน: ${p.nickname || p.name.split(" ")[0]}${p.truck ? ` #${p.truck}` : p.kind === "หน้าโรง" ? " (หน้าโรง)" : " (สำรอง)"}` })));
-    tr.append(el("td", { class: "dd-whocell" }, who));
+    // สำรองขับ: the spare drove -- the day counts for nobody (owner, 17 Nov 2026). Mouse only: Tab never stops here (tabindex -1).
+    const spare = el("input", { type: "checkbox", tabindex: "-1", checked: !!r.spare, "aria-label": `${ddDMY(r.day)} สำรองขับ`,
+      onchange: () => { r.spare = spare.checked; tr.classList.toggle("dd-spare", r.spare); dd_.dirty = true; ddTotals(cols); ddStatus(); } });
+    const who = el("label", { class: "dd-who", title: "คนขับสำรองขับวันนี้ — ไม่นับยอด" }, spare, "สำรอง");
+    tr.firstChild.append(who);                                  // beside the date: always in sight, never in the Tab path
     body.append(tr);
   });
-  const foot = el("tfoot", {}, el("tr", {}, el("td", { text: "รวม (ขับเอง)" }), ...cols.map((c) => el("td", { class: "r", id: `ddT_${c.key}` })), el("td", {})),
-    el("tr", { class: "dd-sparerow", id: "ddSpareRow" }, el("td", { text: "คนขับแทน" }), ...cols.map((c) => el("td", { class: "r", id: `ddS_${c.key}` })), el("td", {})));
+  const foot = el("tfoot", {}, el("tr", {}, el("td", { text: "รวม (ขับเอง)" }), ...cols.map((c) => el("td", { class: "r", id: `ddT_${c.key}` }))),
+    el("tr", { class: "dd-sparerow", id: "ddSpareRow" }, el("td", { text: "สำรองขับ (ไม่นับ)" }), ...cols.map((c) => el("td", { class: "r", id: `ddS_${c.key}` }))));
   const table = el("table", { class: "dd-grid" },
-    el("thead", {}, el("tr", {}, el("th", { text: "วันที่" }), ...cols.map((c) => el("th", { class: "r", text: c.label })), el("th", { text: "คนขับ" }))), body, foot);
+    el("thead", {}, el("tr", {}, el("th", { text: "วันที่" }), ...cols.map((c) => el("th", { class: "r", text: c.label })))), body, foot);
   const card = el("section", { class: "card dd-card" },
     el("div", { class: "dd-head" }, el("h3", { text: `${s.name}${s.nickname ? ` (${s.nickname})` : ""}` }), el("span", { id: "ddStatus", class: "small" })),
     el("div", { class: "lc-wrap" }, table),
@@ -114,7 +113,7 @@ function ddSheet() {
 
 function ddTotals(cols) {
   const rows = dd_.sheet.rows;
-  const own = rows.filter((r) => !r.driven_by), spare = rows.filter((r) => r.driven_by);
+  const own = rows.filter((r) => !r.spare), spare = rows.filter((r) => r.spare);
   cols.forEach((c) => {
     const sumOf = (list) => list.reduce((a, r) => a + (Number(ddNum(c.key === "money" ? r.money : (r.qty || {})[c.key])) || 0), 0);
     const a = sumOf(own), b = sumOf(spare);
@@ -153,7 +152,7 @@ async function ddSave() {
   if (bad) { showErr("ddError", "มีช่องที่ไม่ใช่ตัวเลข (สีแดง) — แก้ก่อนบันทึก"); bad.focus(); return; }
   showErr("ddError", "");
   const s = dd_.sheet;
-  const rows = s.rows.map((r) => ({ day: r.day, qty: r.qty || {}, money: r.money, driven_by: r.driven_by || null }));
+  const rows = s.rows.map((r) => ({ day: r.day, qty: r.qty || {}, money: r.money, spare: !!r.spare }));
   dd_.saving = true; ddStatus();
   const btn = $("ddSave"); if (btn) btn.disabled = true;
   try {
@@ -172,27 +171,27 @@ async function ddSave() {
 }
 
 
-// สรุปงวด: every driver -- the days they drove (their own truck, or for someone as the spare), days off, what they sold, the money
+// สรุปงวด: every driver -- the days they drove, days off (the spare's days included), the spare's days, what they sold, the money
 function ddSummary() {
   const ov = dd_.ov, list = ov.summary || [];
   if (!list.length) return null;
   const prods = ov.products;
   const sum = (f) => list.reduce((a, x) => a + f(x), 0);
-  const rows = list.map((x) => el("tr", { class: x.id === dd_.emp ? "on" : "", onclick: () => { if (x.truck) ddGo(x.id, ov.month, ov.half); } },
-    el("td", {}, x.truck ? el("span", { class: "truckno", text: `#${x.truck}` }) : el("span", { class: "muted small", text: "สำรอง" }), ` ${x.nickname || x.name.split(" ")[0]}`),
+  const rows = list.map((x) => el("tr", { class: x.id === dd_.emp ? "on" : "", onclick: () => ddGo(x.id, ov.month, ov.half) },
+    el("td", {}, x.truck ? el("span", { class: "truckno", text: `#${x.truck}` }) : null, ` ${x.nickname || x.name.split(" ")[0]}`),
     el("td", { class: "r", text: String(x.days_worked) }),
-    el("td", { class: "r", text: x.spare_days ? String(x.spare_days) : "–" }),
     el("td", { class: "r", title: x.off_dates.map(ddDMY).join(", "), text: String(x.days_off) }),
+    el("td", { class: "r", title: x.spare_dates.map(ddDMY).join(", "), text: x.spare_days ? String(x.spare_days) : "–" }),
     ...prods.map((p) => el("td", { class: "r", text: x.qty[p.key] ? elN(x.qty[p.key]) : "–" })),
     el("td", { class: "r" }, el("b", { text: elN(x.money, x.money % 1 ? 2 : 0) }))));
   return el("section", { class: "card dd-sum" },
     el("h3", { text: `สรุปงวด ${ddDMY(ov.start)} – ${ddDMY(ov.end)}` }),
     el("div", { class: "lc-wrap" }, el("table", { class: "lc-table dd-sumtable" },
-      el("thead", {}, el("tr", {}, ...["คนขับ", "ขับ (วัน)", "ขับแทน", "หยุด", ...prods.map((p) => p.label), "เงินที่ได้"].map((h, i) => el("th", { class: i ? "r" : "", text: h })))),
+      el("thead", {}, el("tr", {}, ...["คนขับ", "ขับ (วัน)", "หยุด", "สำรองขับ", ...prods.map((p) => p.label), "เงินที่ได้"].map((h, i) => el("th", { class: i ? "r" : "", text: h })))),
       el("tbody", {}, ...rows),
-      el("tfoot", {}, el("tr", {}, el("td", { text: "รวม" }), el("td", { class: "r", text: String(sum((x) => x.days_worked)) }), el("td", { class: "r", text: String(sum((x) => x.spare_days)) }), el("td", {}),
+      el("tfoot", {}, el("tr", {}, el("td", { text: "รวม" }), el("td", { class: "r", text: String(sum((x) => x.days_worked)) }), el("td", {}), el("td", { class: "r", text: String(sum((x) => x.spare_days)) }),
         ...prods.map((p) => el("td", { class: "r", text: elN(sum((x) => x.qty[p.key] || 0)) })), el("td", { class: "r" }, el("b", { text: elN(sum((x) => x.money), 2) })))))),
-    el("p", { class: "small muted", text: "นับวันตามคนที่ขับจริง — วันที่เลือก “แทน” เป็นของคนขับแทน ไม่ใช่ของคนขับหลัก · หยุด = วันในงวดที่ไม่ได้ขับเลย (ชี้ที่ตัวเลขเพื่อดูวันที่)" }));
+    el("p", { class: "small muted", text: "วันที่ติ๊ก สำรองขับ ไม่นับยอดให้ใคร (คนขับสำรองไม่ได้ค่าคอม) และนับเป็นวันหยุดของคนขับหลัก · ชี้ที่ตัวเลขวันหยุด / สำรองขับ เพื่อดูวันที่" }));
 }
 
 async function ddExport(half, btn) {
