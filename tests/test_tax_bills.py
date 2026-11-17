@@ -51,7 +51,7 @@ def test_the_bill_file_is_her_bill_with_five_cells_changed():
     assert wb.sheetnames == ["CPF01-11153-2026"]
     assert ws["E6"].value == "เลขที่   SRI-2569-11153" and ws["E7"].value == "วันที่  16/11/2569" and ws["C10"].value == 7000
     assert ws["A15"].value == "(สามพันแปดร้อยสิบเก้าบาทเก้าสิบสตางค์)" and ws["F10"].value == 3570 and abs(ws["F15"].value - 3819.9) < 1e-6
-    assert ws.page_setup.paperSize == tpl.page_setup.paperSize and ws.page_setup.scale == tpl.page_setup.scale
+    assert int(ws.page_setup.paperSize) == ti.BILL_PAPER and ws.page_setup.scale == tpl.page_setup.scale
     assert ws.page_margins.left == tpl.page_margins.left and ws.column_dimensions["B"].width == tpl.column_dimensions["B"].width
     assert ws.row_dimensions[10].height == tpl.row_dimensions[10].height and ws["B6"].value == tpl["B6"].value
     changed = {c.coordinate for row in tpl.iter_rows() for c in row if ws[c.coordinate].value != c.value}
@@ -81,6 +81,7 @@ def test_many_bills_on_one_tab_one_page_each_and_nothing_outside_the_box():
     assert ws["A19"].value == ws["A1"].value and ws.row_dimensions[28].height == ws.row_dimensions[10].height
     # one bill = one 9 x 5.5" page: A-F only (G-M made a blank page beside each bill), 18 rows (rows 19-20 spilled onto a blank page)
     assert [b.id for b in ws.row_breaks.brk] == [18, 36] and ws.print_area.endswith("$A$1:$F$54")
+    assert int(ws.page_setup.paperSize) == 167                     # the Epson's 9 x 5.5", not A4
     pm, scale = ws.page_margins, (ws.page_setup.scale or 100) / 100
     tall = sum(ws.row_dimensions[r].height or 21 for r in range(1, 19)) * scale / 72
     assert tall <= 5.5 - pm.top - pm.bottom, tall

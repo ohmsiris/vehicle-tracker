@@ -129,10 +129,10 @@ async function tbDayList(c, box, day) {
   const bar = () => {
     const ids = [...picked];
     const dl = el("button", { class: "btn primary", type: "button", text: `ดาวน์โหลดเพื่อพิมพ์ (${ids.length} ใบ)`, disabled: !ids.length,
-      onclick: async () => {
-        await tbDownload(`/api/tax-invoices/bills.xlsx?ids=${ids.join(",")}`, `บิล ${c.name} ${day}.xlsx`, dl);
-        fill(actions, dl, el("button", { class: "btn", type: "button", text: `ติ๊กพิมพ์แล้ว ${ids.length} ใบนี้`, onclick: async () => {
-          try { await api("/api/tax-invoices/printed", jsonOpts("POST", { ids, printed: true })); draw(); tiReloadQuiet(); } catch (err) { showErr("tiError", err.message); } } }));
+      onclick: async () => {                                  // downloaded = printed (owner, 17 Nov 2026): no second button to press
+        if (!(await tbDownload(`/api/tax-invoices/bills.xlsx?ids=${ids.join(",")}`, `บิล ${c.name} ${day}.xlsx`, dl))) return;
+        try { await api("/api/tax-invoices/printed", jsonOpts("POST", { ids, printed: true })); } catch (err) { showErr("tiError", err.message); }
+        draw(); tiReloadQuiet();
       } });
     fill(actions, dl);
   };
@@ -140,7 +140,7 @@ async function tbDayList(c, box, day) {
   fill(box, el("div", { class: "tb-day" },
     el("div", { class: "ti-listhead" }, el("b", { text: `บิล ${c.name} วันที่ ${tiDMY(day)} — ${rows.length} ใบ · ${tiB(sum)} บาท` }), actions),
     el("div", { class: "lc-wrap" }, el("table", { class: "lc-table ti-list" }, el("thead", {}, el("tr", {}, el("th", {}, all), ...["เลขที่", "รายการ", "น้ำหนัก", "สุทธิ", "", ""].map((h) => el("th", { text: h })))), body)),
-    el("p", { class: "small muted", text: "ติ๊กไว้ให้แล้วเฉพาะบิลที่ยังไม่พิมพ์ — ทุกบิลที่เลือกอยู่ในแท็บเดียว (บิลละหน้า) เปิดใน Excel แล้วพิมพ์ครั้งเดียว" })));
+    el("p", { class: "small muted", text: "ติ๊กไว้ให้แล้วเฉพาะบิลที่ยังไม่พิมพ์ — ทุกบิลที่เลือกอยู่ในแท็บเดียว (บิลละหน้า) เปิดใน Excel แล้วพิมพ์ครั้งเดียว · ดาวน์โหลดแล้วนับเป็นพิมพ์แล้วให้เลย" })));
 }
 
 async function tbDownload(url, name, btn) {
@@ -152,7 +152,8 @@ async function tbDownload(url, name, btn) {
     const a = el("a", { href: u, download: name });
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(u), 5000);
-  } catch (err) { showErr("tiError", `ดาวน์โหลดไม่สำเร็จ: ${err.message}`); }
+    return true;
+  } catch (err) { showErr("tiError", `ดาวน์โหลดไม่สำเร็จ: ${err.message}`); return false; }
   finally { if (btn) btn.disabled = false; }
 }
 

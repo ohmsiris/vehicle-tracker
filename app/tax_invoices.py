@@ -472,6 +472,9 @@ def _month_end(month: str) -> date:
 
 
 BILL_LAST_COL, BILL_ROWS = "F", 18          # the bill box: A1:F18 (ผู้รับเงิน/ผู้ขาย is row 18)
+# The EPSON LQ-310's 9 x 5.5" paper is the driver's paper no. 167 -- what her own bill files carry and what Excel saved when the owner
+# picked 9x5.5 (17 Nov 2026). The templates came through LibreOffice as A4 (9); with 167 the file opens on 9 x 5.5 for that printer.
+BILL_PAPER = 167
 
 
 def bills_workbook(rows: list[dict], path) -> bytes:
@@ -523,6 +526,7 @@ def bills_workbook(rows: list[dict], path) -> bytes:
     first, last = bills[0]["doc_no"], bills[-1]["doc_no"]
     ws.title = sheet_title(first) if len(bills) == 1 else (sheet_title(first) + "-" + last[-3:])[:31]
     ws.print_area = f"A1:{last_col}{block * len(bills)}"
+    ws.page_setup.paperSize = BILL_PAPER
     return _save(wb)
 
 

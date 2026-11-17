@@ -250,7 +250,7 @@ function tiHeadRow() {
 
 const tiPrintable = (r) => r.kind === "invoice" && r.doc_date && r.kg != null && r.price != null && ((ti_.data.templates || {})[r.customer_code] || {}).bill;
 
-// the bar over the list: what is ticked to print, and the buttons (one Excel tab for all of them; then tick พิมพ์แล้ว)
+// the bar over the list: what is ticked to print, and the buttons (one Excel tab for all of them; the download ticks พิมพ์แล้ว)
 function tiPickBar() {
   const rows = ti_.data.rows.filter((r) => ti_.pick.has(r.id));
   const codes = new Set(rows.map((r) => r.customer_code));
@@ -261,12 +261,12 @@ function tiPickBar() {
   const dl = el("button", { class: "btn primary", type: "button", text: `ดาวน์โหลดเพื่อพิมพ์ (${rows.length} ใบ)`, disabled: codes.size > 1,
     onclick: async () => {
       const name = (tiCust([...codes][0]) || {}).name || "";
-      await tbDownload(`/api/tax-invoices/bills.xlsx?ids=${rows.map((r) => r.id).join(",")}`, `บิล ${name} ${rows.length} ใบ.xlsx`, dl);
+      const ids = rows.map((r) => r.id);                     // downloaded = printed (owner, 17 Nov 2026)
+      if (await tbDownload(`/api/tax-invoices/bills.xlsx?ids=${ids.join(",")}`, `บิล ${name} ${rows.length} ใบ.xlsx`, dl)) await tiSetPrinted(ids, true);
     } });
-  const mark = el("button", { class: "btn", type: "button", text: "ติ๊กพิมพ์แล้ว", onclick: () => tiSetPrinted(rows.map((r) => r.id), true) });
   const clear = el("button", { class: "btn", type: "button", text: "ไม่เลือก", onclick: () => { ti_.pick.clear(); tiRedrawList(); } });
   return el("div", { class: "ti-pickbar" }, el("b", { text: `เลือก ${rows.length} ใบ` }),
-    codes.size > 1 ? el("span", { class: "ti-bad small", text: "เลือกได้ทีละลูกค้า" }) : null, dl, mark, clear, pickUnprinted);
+    codes.size > 1 ? el("span", { class: "ti-bad small", text: "เลือกได้ทีละลูกค้า" }) : null, dl, clear, pickUnprinted);
 }
 
 function tiRedrawList() {
