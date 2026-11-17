@@ -1,8 +1,8 @@
 """
 Per-person monthly pay for the Saraburi drivers (SB-PD), from HQ's payroll file "เงินเดือน พขร. สระบุรี <month> 2569 -.xlsx"
 (sheet "ตารางรายรับ-จ่ายพนง.") or, in months HQ only sent a PDF, the summary PDF "สรุป… / ใบสรุป… พขร. สระบุรี …" -- the same
-table printed. Only the main per-person table is read: never the slip sheets, never the bank-account / transfer columns
-(everything right of the deduction columns is left alone), never cell comments.
+table printed. Only the main per-person table is read, from the name column through สะสมยกไป: never the slip sheets, never the
+bank-account / transfer / signature columns right of สะสมยกไป (nor comments on them).
 
 Columns (found by their header text, so a moved column does not matter):
   วัน | เงิน (wage = days x rate) | [sales, no header] | เงิน (commission = sales x %) | ซอง% (bag money + the 1,000 เบี้ยขยัน)
@@ -17,6 +17,16 @@ Columns (found by their header text, so a moved column does not matter):
 The driver sheet's commission column is always sales x % -> parts.commission (drivers have no OT).
 Money in the pay columns that is not pay for the month (a savings refund) comes only from OVERRIDES (owner-confirmed); typed
 ซอง% amounts that look like one are flagged, not moved.
+
+Every row also carries `details` (owner, 17 Nov 2026: every detail on the sheet, not only the summed buckets) -- the same shape from
+the drivers / factory / KK readers, each field None when the sheet does not have it:
+  position (col D as printed), rate (from the wage formula =days*rate; never guessed), sales, commission_pct,
+  loan_before / loan_paid / loan_after (ค้างเงิน / จ่ายค้าง / ค้างย/ป; all None when the person has no loan line, blanks read as 0 otherwise),
+  savings_balance (สะสมยกไป),
+  lines: every non-zero money cell feeding parts / deductions, in sheet order, {side, label (HQ's header), key, amount};
+         income lines add up to รวมรับ (incl. a refund), deduction lines to รวมจ่าย. ซอง% stays ONE line (key "bag") even with the 1,000 in it.
+  notes: xlsx cell comments on the row, name column .. สะสมยกไป, author prefix stripped, {label (column header), text}; PDF months: [].
+  Numbers that look like a bank account or an ID card are masked in notes (they should never be there).
 
 parse_file(path, month) -> list[dict] (see README of the payroll-people modules); parse_xlsx_rows / parse_pdf_words are pure.
 """
@@ -35,6 +45,11 @@ CODE = re.compile(r"^SB-[A-Z]{2}\d+[A-Z]?$")
 NUM = re.compile(r"^-?[\d,]+(?:\.\d+)?$")
 ROLE = re.compile(r"(สแปร์-?)?(พขร\.|ขับรถ|เด็กรถ|พนักงาน)")     # not "(พขร)" inside a name
 MARKS = "ัิ-ฺ็-๎"          # Thai vowels / tone marks that sit above or below a consonant
+BALANCE = {"ค้างเงิน": "loan_before", "จ่ายค้าง": "loan_paid", "ค้างย/ป": "loan_after", "สะสมยกไป": "savings_balance"}
+NO_HEADER = {"sales": "ยอดขาย", "dept": "ตำแหน่ง"}     # columns HQ leaves without a header (notes still need a label)
+FORMULA_RATE = re.compile(r"^=\s*([A-Z]{1,3}\d+|\d+(?:\.\d+)?)\s*\*\s*([A-Z]{1,3}\d+|\d+(?:\.\d+)?)\s*$")
+AUTHOR = re.compile(r"^\s*[^\s:\d][^\s:]*:")          # "Admin:", "PC:" -- not a time like "13:30"
+SECRET = re.compile(r"\d{3}-?\d-?\d{5}-?\d|\d-?\d{4}-?\d{5}-?\d{2}-?\d|\d{13}")   # bank account / ID card -- never kept
 
 
 def deduction_key(label: str):
@@ -96,9 +111,75 @@ def _bonus_from_formula(formula, value: float) -> bool:
     return False
 
 
+def balance_key(label: str):
+    """Header text -> ค้างเงิน / จ่ายค้าง / ค้างย/ป / สะสมยกไป field (None for anything else)."""
+    t = re.sub(r"\s+", "", str(label or ""))
+    if t.startswith("สะสมยก"):
+        return "savings_balance"
+    return BALANCE.get(t)
+
+
+def rate_from_formula(formula, days=None):
+    """The daily rate in a wage formula (=E5*368, =30*368, =368*E5) -> 368.0; None when the cell is typed or not days x rate."""
+    if not isinstance(formula, str):
+        return None
+    m = FORMULA_RATE.match(formula.replace("$", "").replace(" ", "").upper())
+    if not m:
+        return None
+    a, b = m.groups()
+    isnum = lambda x: x[0].isdigit()
+    if isnum(a) and isnum(b):
+        if days is not None and abs(float(b) - float(days)) < 0.005 and abs(float(a) - float(days)) >= 0.005:
+            return float(a)
+        return float(b)
+    if isnum(b):
+        return float(b)
+    if isnum(a):
+        return float(a)
+    return None
+
+
+def clean_note(text) -> str:
+    """Cell comment -> its text: no "Admin:" / "<author>:" prefix, whitespace collapsed, bank / ID-like numbers masked."""
+    t = AUTHOR.sub("", str(text or ""), count=1)
+    t = re.sub(r"\s+", " ", t).strip()
+    return SECRET.sub("[ตัดเลข]", t)
+
+
+def _opt(v):
+    """A cell -> float, None when blank / not a number."""
+    if v is None or (isinstance(v, str) and v.strip() in ("", "-")):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace(",", "")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def make_details(position=None, rate=None, sales=None, commission=None, loan_before=None, loan_paid=None, loan_after=None,
+                 savings_balance=None, lines=(), notes=()) -> dict:
+    """The `details` dict (same shape from all three readers)."""
+    position = re.sub(r"\s+", " ", str(position or "")).strip() or None
+    sales = round(float(sales), 2) if sales else None
+    pct = round(commission / sales * 100, 2) if sales and commission and sales > 0 and commission > 0 else None
+    loan = [loan_before, loan_paid, loan_after]
+    if any(x for x in loan):          # a loan line: blank cells on it are 0
+        loan = [round(float(x or 0.0), 2) for x in loan]
+    else:
+        loan = [None, None, None]
+    return {"position": position, "rate": rate, "sales": sales, "commission_pct": pct,
+            "loan_before": loan[0], "loan_paid": loan[1], "loan_after": loan[2],
+            "savings_balance": None if savings_balance is None else round(float(savings_balance), 2),
+            "lines": [dict(ln, amount=round(float(ln["amount"]), 2)) for ln in lines if ln["amount"] and abs(ln["amount"]) >= 0.005],
+            "notes": [n for n in notes if n.get("text")]}
+
+
 def build(month: str, code: str, name: str, dept: str, days: float, wage: float, sales: float, commission: float,
           bag_col: float, gross: float, deduct_total: float, net: float, deductions: dict, source: str,
-          bonus: float, flags: list, all_deductions: bool = True) -> dict:
+          bonus: float, flags: list, all_deductions: bool = True, details: dict = None) -> dict:
     """One person-month in the output shape. bag_col = the whole ซอง% cell; bonus already decided."""
     flags = list(flags)
     refund = float(OVERRIDES.get((month, code), {}).get("refund", 0.0))
@@ -122,7 +203,7 @@ def build(month: str, code: str, name: str, dept: str, days: float, wage: float,
         flags.append("commission with no sales figure")
     return {"month": month, "group": GROUP, "code": code, "name": name, "dept": dept, "days": float(days), "parts": parts,
             "refund": refund, "gross": round(gross, 2), "deductions": ded, "deduct_total": round(deduct_total, 2),
-            "net": round(net, 2), "source": source, "flags": flags}
+            "net": round(net, 2), "source": source, "flags": flags, "details": details if details is not None else make_details()}
 
 
 # ---------------------------------------------------------------- xlsx
@@ -165,16 +246,55 @@ def header_columns(header_rows: list[list]) -> dict:
         if k and k not in ded:
             ded[k] = c
     cols["ded"] = ded
+    for c in range(cols["net"] + 1, width):          # ค้างเงิน จ่ายค้าง ค้างย/ป สะสมยกไป -- nothing right of สะสมยกไป (bank columns)
+        k = next((balance_key(t) for t in (cell(r, c) for r in range(len(header_rows))) if balance_key(t)), None)
+        if k and k not in cols:
+            cols[k] = c
+        if k == "savings_balance":
+            break
+    cols["end"] = max([cols["net"], *ded.values(), *(cols[k] for k in BALANCE.values() if k in cols)])
+    labels = {}
+    for c in range(cols["name"], cols["end"] + 1):   # the header nearest the numbers (row 4, then 3, then 2), whitespace collapsed
+        texts = [re.sub(r"\s+", " ", str(header_rows[r][c])).strip() if c < len(header_rows[r]) and header_rows[r][c] is not None else ""
+                 for r in range(len(header_rows))]
+        labels[c] = next((t for t in reversed(texts) if t), "")
+    for k, text in NO_HEADER.items():
+        if not labels.get(cols[k]):
+            labels[cols[k]] = text
+    cols["labels"] = labels
     return cols
 
 
-def parse_xlsx_rows(values: list[list], formulas: list[list], month: str) -> list[dict]:
-    """values / formulas: the sheet's rows from row 2 (header rows 2-4 first), each cut at the last deduction column.
-    formulas may hold the formula strings (or values where the cell is typed)."""
+def xlsx_details(cols: dict, row: list, frow: list, crow: list, days: float, commission: float) -> dict:
+    """`details` for one sheet row. crow = the cell comments on the row (None where there is none)."""
+    at = lambda r, c: r[c] if c is not None and c < len(r) else None
+    lab = cols["labels"]
+    lines = []
+    for k in ("wage", "commission", "bag"):
+        lines.append((cols[k], {"side": "income", "label": lab.get(cols[k], ""), "key": k, "amount": _num(at(row, cols[k]))}))
+    for k, c in cols["ded"].items():
+        lines.append((c, {"side": "deduction", "label": lab.get(c, ""), "key": k, "amount": _num(at(row, c))}))
+    lines = [ln for _c, ln in sorted(lines, key=lambda x: x[0])]
+    notes = []
+    for c in range(cols["name"], cols["end"] + 1):
+        text = clean_note(at(crow, c)) if at(crow, c) else ""
+        if text:
+            notes.append({"label": lab.get(c, ""), "text": text})
+    sales = _opt(at(row, cols["sales"]))
+    return make_details(position=at(row, cols["dept"]), rate=rate_from_formula(at(frow, cols["wage"]), days),
+                        sales=sales, commission=commission,
+                        **{k: _opt(at(row, cols.get(k))) for k in BALANCE.values()}, lines=lines, notes=notes)
+
+
+def parse_xlsx_rows(values: list[list], formulas: list[list], month: str, comments: list[list] = None) -> list[dict]:
+    """values / formulas: the sheet's rows from row 2 (header rows 2-4 first), each cut at สะสมยกไป (never the bank columns).
+    formulas may hold the formula strings (or values where the cell is typed). comments: the cell comments' text, same layout."""
     cols = header_columns(values[:3])
+    comments = comments or []
     out = []
     for i in range(3, len(values)):
         row, frow = values[i], formulas[i] if i < len(formulas) else []
+        crow = comments[i] if i < len(comments) else []
         g = lambda k: row[cols[k]] if cols[k] < len(row) else None
         code = str(g("code") or "").strip().upper()
         if not CODE.match(code):
@@ -198,40 +318,71 @@ def parse_xlsx_rows(values: list[list], formulas: list[list], month: str) -> lis
                 flags.append(f"ซอง% typed {bag_col:,.0f} (no formula): เบี้ยขยัน {bonus:,.0f} from the days")
         deds = {k: _num(row[c]) if c < len(row) else 0.0 for k, c in cols["ded"].items()}
         out.append(build(month, code, name, dept, days, wage, sales, comm, bag_col, gross, dtot, net, deds, "xlsx", bonus, flags,
-                         all_deductions=True))
+                         all_deductions=True, details=xlsx_details(cols, row, frow, crow, days, comm)))
     return out
 
 
 def _parse_xlsx(path: str, month: str) -> list[dict]:
     import openpyxl
-    sheets = {}
+    sheets, comments = {}, []
     for data_only in (True, False):
-        wb = openpyxl.load_workbook(path, data_only=data_only, read_only=True)
+        # values read-only (fast); formulas in full mode, which is the one that gives the cell comments
+        wb = openpyxl.load_workbook(path, data_only=data_only, read_only=data_only)
         name = next((n for n in wb.sheetnames if "รายรับ" in n), None)
         if name is None:
             raise ValueError("sheet ตารางรายรับ-จ่ายพนง. not found")
         ws = wb[name]
         head = [list(r) for r in ws.iter_rows(min_row=2, max_row=4, max_col=30, values_only=True)]
         cols = header_columns(head)
-        last = max(cols["ded"].values(), default=cols["net"]) + 1        # stop before ค้างเงิน / สะสมยกไป / bank columns
+        last = cols["end"] + 1                       # through สะสมยกไป: never the bank / transfer / signature columns
         sheets[data_only] = [list(r) for r in ws.iter_rows(min_row=2, max_col=last, values_only=True)]
+        if not data_only:
+            comments = [[c.comment.text if getattr(c, "comment", None) else None for c in r]
+                        for r in ws.iter_rows(min_row=2, max_col=last)]
         wb.close()
-    return parse_xlsx_rows(sheets[True], sheets[False], month)
+    return parse_xlsx_rows(sheets[True], sheets[False], month, comments)
 
 
 # ---------------------------------------------------------------- PDF
 
-def pdf_columns(header_words: list[tuple]) -> dict:
-    """header_words: (x0, y0, x1, y1, text) above the first person. -> {field: right edge x}; numbers are right-aligned under
-    their header, so a number belongs to the column whose header's right edge is nearest its own."""
-    edges, money = {}, []
+def _pdf_header(header_words: list[tuple]) -> list[tuple]:
+    """Header words with a split-off sara-am rejoined ("ท" + "ำบัตร") -> [(x0, y, text, x1)]."""
     joined = []
     for x0, y0, x1, y1, t in sorted(header_words, key=lambda w: (round(w[1]), w[0])):
         if joined and t[:1] in "ำา" and joined[-1][1] == round(y0) and x0 - joined[-1][3] < 3:
             joined[-1] = (joined[-1][0], joined[-1][1], joined[-1][2] + t, x1)
         else:
             joined.append((x0, round(y0), t, x1))
-    for x0, _y, t, x1 in joined:
+    return joined
+
+
+def pdf_labels(header_words: list[tuple]) -> dict:
+    """{field: HQ's header text} for the money columns that become `details.lines` (the PDF's own wording)."""
+    labels, money = {}, []
+    for x0, _y, t, x1 in _pdf_header(header_words):
+        t = re.sub(r"\s+", " ", t).strip()
+        t = re.sub(r"^ทาบัตร", "ทำบัตร", t)           # fonts that map ำ to า
+        flat = t.replace(" ", "")
+        if flat == "เงิน":
+            money.append((x1, t))
+        elif flat == "ซอง%":
+            labels["bag"] = t
+        else:
+            k = deduction_key(flat)
+            if k and k not in labels:
+                labels[k] = t
+    money.sort()
+    if len(money) >= 2:
+        labels["wage"], labels["commission"] = money[0][1], money[1][1]
+    return labels
+
+
+def pdf_columns(header_words: list[tuple]) -> dict:
+    """header_words: (x0, y0, x1, y1, text) above the first person. -> {field: right edge x}; numbers are right-aligned under
+    their header, so a number belongs to the column whose header's right edge is nearest its own.
+    ค้างเงิน / จ่ายค้าง / ค้างย/ป / สะสมยกไป come back as "bal:<field>"."""
+    edges, money = {}, []
+    for x0, _y, t, x1 in _pdf_header(header_words):
         t = re.sub(r"\s+", "", t)
         if t == "วัน":
             edges["days"] = x1
@@ -245,6 +396,8 @@ def pdf_columns(header_words: list[tuple]) -> dict:
             edges["deduct"] = x1
         elif t == "คงเหลือ":
             edges["net"] = x1
+        elif balance_key(t):
+            edges["bal:" + balance_key(t)] = x1
         elif t.startswith("ค้าง") or t.startswith("จ่ายค้าง") or t.startswith("สะสมยก"):
             edges["skip:" + t] = x1
         else:
@@ -269,6 +422,7 @@ def parse_pdf_words(pages: list[list[tuple]], month: str) -> list[dict]:
             continue
         top = codes[0][1]
         edges = pdf_columns([w for w in words if w[1] < top - 4])
+        labels = pdf_labels([w for w in words if w[1] < top - 4])
         stop = min((w[1] for w in words if w[4].strip() == "รวม" and w[1] > codes[-1][1]), default=1e9)
         ded_keys = [k for k in DEDUCTION_KEYS if k in edges]
         for i, cw in enumerate(codes):
@@ -278,7 +432,7 @@ def parse_pdf_words(pages: list[list[tuple]], month: str) -> list[dict]:
             if i == 0:
                 lo = top - 8
             band = [w for w in words if lo <= (w[1] + w[3]) / 2 < hi and w is not cw]
-            vals, text = {}, []
+            vals, text, bal = {}, [], {}
             for x0, y0, x1, y1, t in band:
                 t = t.strip()
                 if x0 < edges["days"] - 30:               # row number, name, role
@@ -292,19 +446,23 @@ def parse_pdf_words(pages: list[list[tuple]], month: str) -> list[dict]:
                 col = min(edges, key=lambda k: abs(edges[k] - x1))
                 if abs(edges[col] - x1) > 25 or col.startswith("skip:"):
                     continue
+                if col.startswith("bal:"):
+                    bal[col[4:]] = bal.get(col[4:], 0.0) + _num(t)
+                    continue
                 vals[col] = vals.get(col, 0.0) + _num(t)
-            out_row = _pdf_row(month, cw[4].strip().upper(), text, vals, ded_keys)
+            out_row = _pdf_row(month, cw[4].strip().upper(), text, vals, ded_keys, bal=bal, edges=edges, labels=labels)
             if out_row:
                 out.append(out_row)
     return out
 
 
-def _pdf_row(month, code, text, vals, ded_keys):
+def _pdf_row(month, code, text, vals, ded_keys, bal=None, edges=None, labels=None):
     raw = fix_thai(" ".join(t for _x, _y, t in sorted(text, key=lambda w: w[0])))
     no_bonus = NO_BONUS in raw.replace(" ", "")
     raw = re.sub(r"-?\s*" + NO_BONUS, " ", raw.replace(" ", " "))
     m = ROLE.search(raw)
     name, dept = (raw[:m.start()], raw[m.start():]) if m else (raw, "")
+    position = dept
     name, dept = re.sub(r"\s+", " ", name).strip(" -"), re.sub(r"\s+", "", dept)
     v = lambda k: vals.get(k, 0.0)
     days, gross, dtot, net = v("days"), v("gross"), v("deduct"), v("net")
@@ -322,8 +480,14 @@ def _pdf_row(month, code, text, vals, ded_keys):
             bonus = BONUS
             flags.append("เบี้ยขยัน 1,000 guessed from the PDF (ซอง% >= 1,000)")
     deds = {k: v(k) for k in ded_keys}
+    edges, labels, bal = edges or {}, labels or {}, bal or {}
+    lines = [(edges.get(k, 0), {"side": "income", "label": labels.get(k, k), "key": k, "amount": v(k)}) for k in ("wage", "commission", "bag")]
+    lines += [(edges.get(k, 0), {"side": "deduction", "label": labels.get(k, k), "key": k, "amount": v(k)}) for k in ded_keys]
+    details = make_details(position=position, rate=None, sales=v("sales"), commission=v("commission"),
+                           **{k: bal.get(k) for k in BALANCE.values()},
+                           lines=[ln for _x, ln in sorted(lines, key=lambda x: x[0])], notes=[])
     return build(month, code, name, dept, days, v("wage"), v("sales"), v("commission"), bag_col, gross, dtot, net, deds, "pdf",
-                 bonus, flags, all_deductions=True)
+                 bonus, flags, all_deductions=True, details=details)
 
 
 def _parse_pdf(path: str, month: str) -> list[dict]:

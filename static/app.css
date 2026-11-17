@@ -2149,6 +2149,39 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .ep-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 28px; padding: 4px 4px 8px; }
 .ep-kv { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 2px 0; }
 .ep-flags { padding: 0 4px 6px; }
+/* 17 Nov 2026: deductions by type, HQ's own labels per month, savings / loan balances, HQ's notes */
+.ep-sw { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 6px; vertical-align: 0; }
+.ep-tilelist { margin-top: 6px; }
+.ep-tilelist .ep-kv { padding: 0; font-size: 12.5px; color: var(--text-2); }
+.ep-table tbody tr:nth-child(odd) td { background: transparent; }
+.ep-table tbody tr.ep-alt td { background: var(--surface-2); }
+.ep-table tbody tr.ep-row.open td { background: var(--accent-soft); }
+.ep-table td.ep-caret { width: 18px; padding-left: 0; font-size: 16px; }
+.ep-row.open .ep-caret { color: var(--text); }
+.ep-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px 6px; margin: 2px 0 8px; }
+.ep-meta { margin-bottom: 4px; }
+.ep-h { margin: 2px 0; font-weight: 600; }
+.ep-kv.ep-total { border-top: 1px solid var(--line); margin-top: 3px; padding-top: 4px; }
+.ep-box + .ep-box { margin-top: 10px; }
+.ep-flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+.ep-notes { border-top: 1px solid var(--line); padding: 6px 4px; display: flex; flex-direction: column; gap: 2px; }
+.ep-sub { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+.ep-bal { margin-top: 18px; }
+.ep-hqnotes { margin-top: 18px; display: flex; flex-direction: column; gap: 4px; }
+.ep-note { display: flex; justify-content: space-between; align-items: baseline; gap: 6px 16px; flex-wrap: wrap; padding: 6px 10px; border-radius: 8px; font-size: 14px; }
+.ep-note:nth-child(even) { background: var(--surface-2); }
+.ep-when { white-space: nowrap; }
+@media (max-width: 700px) {
+  /* many columns: keep it a real table that scrolls sideways instead of the card layout of .lc-table */
+  .ep-table { display: table; } .ep-table tbody { display: table-row-group; }
+  .ep-table tr, .ep-table tr:nth-child(odd) { display: table-row; background: transparent; }
+  .ep-table td { padding: 6px 8px; white-space: nowrap; }
+  .ep-table td:first-child { padding-top: 6px; }
+  .ep-table tbody tr.ep-alt td { background: var(--surface-2) !important; }
+  .ep-table tbody tr.ep-row.open td { background: var(--accent-soft) !important; }
+  .ep-table tr.ep-detail td { white-space: normal; position: sticky; left: 0; }
+  .ep-panel { max-width: calc(100vw - 48px); }
+}
 
 /* ยอดขายรายวัน (คิดเงินเดือน), driverdays.js (16 Nov 2026) */
 .dd-top { margin-bottom: 14px; }

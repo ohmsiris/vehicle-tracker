@@ -8,7 +8,14 @@ The table (columns as in every 2569 workbook; found by their header labels, so a
   E วัน · F เงิน (= days x day rate) · G quantity (OT hours, or sales baht for SB-KK004) · H เงิน · I (the 1,000 เบี้ยขยัน column)
   J รวมรับ · K รวมจ่าย · L คงเหลือ
   M สะสม · N เบิกล่วงหน้า · O คืนเงินกู้ · P ส่วนกลาง · Q passport · R ความผิด · S อุปกรณ์/อื่นๆ · T ปกส.
-Only columns A..T are ever read: the bank-account columns further right are never touched.
+  U ค้างเงิน · V จ่ายค้าง (= the O or Q deduction) · W ค้างย/ป (= U - V) · X สะสมยกไป (from the สะสม sheet)
+  (D's header still reads "ยอดรับเงินเดือนเดือน เม.ย.58", an old label: the cells are the role. Y/Z แผนก are empty in every 2569 file.)
+Only columns A..X are read, plus the หมายเหตุ column found by its header (in 2569 it is =C, the name again, so it only becomes a note
+when it says something else). The bank-account / name / amount columns between them are never read, nor any comment on them.
+
+details (every cell of the row; see make_details): position (D), rate (from the wage formula =E*rate; PDF: None), sales + commission_pct
+(SB-KK004's "=G*2/100"), the U..X balances, one line per non-zero pay / deduction cell, and the cell comments on C..X as notes
+(PDF months: no notes). The October PDF prints U..X, so its balances are read too.
 
 How H and I are split (see split_h / split_i):
   H  workbook formula "=G*2/100" (a % of sales) -> commission; "=G*40" / "=G*35" (hours x rate) -> OT; a typed amount -> commission
@@ -150,8 +157,89 @@ def split_i(value, formula=None, dept="") -> tuple[dict, list]:
     return {"other": v}, [f"I {v:,.0f} is not the 1,000 bonus: put in other (savings paid back? needs an OVERRIDES entry to be a refund)"]
 
 
+# ---------------------------------------------------------------- details (every cell of the row, as HQ printed it)
+# The pay cells have generic headers ("เงิน" twice under "วันทำงาน / OT.", none over the 1,000 column), so their line labels are fixed
+# here from that header wording; the deduction labels are the sheet's own header text.
+INCOME_LABELS = {"wage": "วันทำงาน/เงิน", "h": "OT./เงิน", "i": "เบี้ยขยัน"}
+DED_HEADERS = {"savings": "สะสม", "advance": "เบิกล่วงหน้า", "loan": "คืนเงินกู้", "common": "ส่วนกลาง", "card": "passport",
+               "shortage": "ความผิด", "other": "อุปกรณ์/อื่นๆ", "sso": "ปกส."}
+# balance columns right of ปกส.: details key -> header label (search text)
+BAL_LABELS = (("loan_before", "ค้างเงิน"), ("loan_paid", "จ่ายค้าง"), ("loan_after", "ค้างย/ป"), ("savings_balance", "สะสมยกไป"))
+AUTHOR = re.compile(r"^\s*[^\s:\d][^\s:]*:\s*")          # "Admin:", "PC:" -- not a time like "13:30"
+RATE = re.compile(r"=\$?[A-Z]+\$?\d+\*(\d+(?:\.\d+)?)|=(\d+(?:\.\d+)?)\*\$?[A-Z]+\$?\d+")
+
+
+def _ws(text) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def note_text(comment) -> str:
+    """A cell comment as a note: the "Admin:" / "PC:" author prefix dropped, whitespace collapsed."""
+    return _ws(AUTHOR.sub("", str(comment or ""), count=1))
+
+
+def rate_from(formula):
+    """The day rate written into the wage formula (=E5*440 or =440*E5) -> 440.0; None when the cell is typed or another shape."""
+    if not isinstance(formula, str):
+        return None
+    m = RATE.fullmatch(formula.replace(" ", ""))
+    return float(m.group(1) or m.group(2)) if m else None
+
+
+def pct_rate(value, qty):
+    """PDF: the % when H is a whole/half percent of the quantity (sales) column, else None (same test as split_h_pdf)."""
+    v, q = _num(value), _num(qty)
+    if not (v and q):
+        return None
+    r = v / q
+    if 20 <= r <= 100 and abs(v - q * round(r)) <= 0.51:
+        return None
+    for p in (1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5):
+        if abs(v - q * p / 100) <= 1.01:
+            return p
+    return None
+
+
+def _main_key(parts: dict):
+    return max(parts, key=lambda k: parts[k]) if parts else None
+
+
+def income_lines(wage, h_value, h_parts, i_value, i_parts) -> list[dict]:
+    """The three pay cells (F, H, I), non-zero ones, in sheet order. A cell split over two parts stays one line, keyed by its bigger part."""
+    out = []
+    for lab, val, key in ((INCOME_LABELS["wage"], wage, "wage"), (INCOME_LABELS["h"], h_value, _main_key(h_parts)),
+                          (INCOME_LABELS["i"], i_value, _main_key(i_parts))):
+        v = _num(val)
+        if v and key:
+            out.append({"side": "income", "label": lab, "key": key, "amount": round(v, 2)})
+    return out
+
+
+def deduction_lines(deds: dict, labels: dict | None = None) -> list[dict]:
+    """deds: {deduction key: cell}, in sheet column order (DEDUCTIONS order = M..T)."""
+    labels = labels or {}
+    out = []
+    for k in DEDUCTIONS:
+        v = _num(deds.get(k))
+        if v:
+            out.append({"side": "deduction", "label": labels.get(k) or DED_HEADERS[k], "key": k, "amount": round(v, 2)})
+    return out
+
+
+def make_details(position=None, rate=None, sales=None, commission=None, balances=None, lines=None, notes=None) -> dict:
+    """The details dict (same shape from every payroll reader). balances: {loan_before, loan_paid, loan_after, savings_balance}: a
+    float where the sheet has the column (blank cell = 0), None where it does not."""
+    balances = balances or {}
+    sales = _num(sales) or None
+    commission = _num(commission)
+    return {"position": _ws(position) or None, "rate": rate, "sales": sales,
+            "commission_pct": round(commission / sales * 100, 2) if sales and commission > 0 else None,
+            **{k: (None if balances.get(k) is None else round(_num(balances[k]), 2)) for k, _ in BAL_LABELS},
+            "lines": list(lines or []), "notes": list(notes or [])}
+
+
 def build_row(month, source, code, name, dept, days, wage, h_parts, i_parts, gross, deds, deduct_total, net, flags=None,
-              all_deductions=True) -> dict:
+              all_deductions=True, details=None) -> dict:
     """Assemble one person-month and check the sheet's own arithmetic; anything that does not add up is flagged."""
     flags = list(flags or [])
     code = str(code).strip().upper()
@@ -183,7 +271,7 @@ def build_row(month, source, code, name, dept, days, wage, h_parts, i_parts, gro
     return {"month": month, "group": "kk", "code": code, "name": name, "dept": dept or "", "days": _num(days),
             "parts": {k: round(v, 2) for k, v in parts.items()}, "refund": refund, "gross": gross,
             "deductions": {k: round(v, 2) for k, v in dd.items()}, "deduct_total": deduct_total, "net": net,
-            "source": source, "flags": flags}
+            "source": source, "flags": flags, "details": details if details is not None else make_details(dept)}
 
 
 # ---------------------------------------------------------------- workbook
@@ -206,6 +294,8 @@ def _xlsx_layout(ws_f) -> dict:
                 col.setdefault("deduct_total", c.column)
             elif t == "คงเหลือ":
                 col.setdefault("net", c.column)
+            elif any(t.startswith(lab) for _, lab in BAL_LABELS):
+                col.setdefault("b_" + next(k for k, lab in BAL_LABELS if t.startswith(lab)), c.column)
             else:
                 for key, lab in DED_LABELS:
                     if t.startswith(lab) and not t.startswith("สะสมยกไป"):
@@ -218,19 +308,59 @@ def _xlsx_layout(ws_f) -> dict:
     return col
 
 
+def _xlsx_headers(ws_f, last_col) -> dict:
+    """Column number -> its own header text (the lowest non-empty of rows 2..4, whitespace collapsed), columns A..last_col."""
+    out = {}
+    for row in ws_f.iter_rows(min_row=2, max_row=4, max_col=last_col):
+        for c in row:
+            if isinstance(c.value, str) and c.value.strip():
+                out[c.column] = _ws(c.value)
+    return out
+
+
+def _xlsx_remark_col(ws_f):
+    """The หมายเหตุ column, found by its header in rows 1..4 only (it sits right of the bank columns, which are never read)."""
+    for row in ws_f.iter_rows(min_row=1, max_row=4, min_col=25, max_col=40):
+        for c in row:
+            if isinstance(c.value, str) and c.value.strip() == "หมายเหตุ":
+                return c.column
+    return None
+
+
+def _xlsx_comments(ws_f, first_col, last_col) -> dict:
+    """{(row, col): note text} for the cell comments in columns first_col..last_col (name .. สะสมยกไป) from row 5 down."""
+    out = {}
+    for row in ws_f.iter_rows(min_row=5, max_row=ws_f.max_row, min_col=first_col, max_col=last_col):
+        for c in row:
+            if c.comment and c.comment.text:
+                t = note_text(c.comment.text)
+                if t:
+                    out[(c.row, c.column)] = t
+    return out
+
+
 def parse_xlsx(path: str, month: str) -> list[dict]:
     import openpyxl
-    wf = openpyxl.load_workbook(path, read_only=True)               # formulas
+    from openpyxl.utils import get_column_letter
+    wf = openpyxl.load_workbook(path)                                # formulas + cell comments (comments need a full load)
     wv = openpyxl.load_workbook(path, read_only=True, data_only=True)  # cached values
     sf = wf["สรุป"] if "สรุป" in wf.sheetnames else wf.worksheets[0]
     sv = wv[sf.title]
     col = _xlsx_layout(sf)
     maxc = max(v for v in col.values())
     all_deds = all("d_" + k in col for k, _ in DED_LABELS)
+    heads = _xlsx_headers(sf, maxc)
+    ded_labels = {k: heads.get(col["d_" + k]) for k in DEDUCTIONS if "d_" + k in col}
+    last_note_col = col.get("b_savings_balance", maxc)
+    comments = _xlsx_comments(sf, col["name"], last_note_col)
+    remark_col = _xlsx_remark_col(sf)
+    remarks = ([r[0] for r in sv.iter_rows(min_row=5, max_row=sv.max_row, min_col=remark_col, max_col=remark_col, values_only=True)]
+               if remark_col else [])
     out = []
     rows_f = sf.iter_rows(min_row=5, max_row=sf.max_row, max_col=maxc, values_only=True)
     rows_v = sv.iter_rows(min_row=5, max_row=sv.max_row, max_col=maxc, values_only=True)
-    for rf, rv in zip(rows_f, rows_v):
+    for idx, (rf, rv) in enumerate(zip(rows_f, rows_v)):
+        rown = 5 + idx
         if isinstance(rf[0], str) and rf[0].strip() == "รวม":
             break
         code = rv[col["code"] - 1]
@@ -247,8 +377,18 @@ def parse_xlsx(path: str, month: str) -> list[dict]:
         hp, hf = split_h(g("h"), fo("h"), g("qty"), dept)
         ip, if_ = split_i(g("i"), fo("i"), dept)
         deds = {k: (rv[col["d_" + k] - 1] if "d_" + k in col else 0) for k in DEDUCTIONS}
+        hfo = fo("h") or ""
+        sales = g("qty") if (hp.get("commission") and ("%" in hfo or "/100" in hfo)) else None
+        notes = [{"label": heads.get(c) or get_column_letter(c), "text": t}
+                 for c in range(col["name"], last_note_col + 1) for t in [comments.get((rown, c))] if t]
+        rem = remarks[idx] if idx < len(remarks) else None
+        if isinstance(rem, str) and _ws(rem) and _ws(rem) != _ws(g("name")):   # HQ's หมายเหตุ is mostly =C (the name again)
+            notes.append({"label": "หมายเหตุ", "text": _ws(rem)})
+        details = make_details(dept, rate_from(fo("wage")), sales, hp.get("commission"),
+                               {k: _num(rv[col["b_" + k] - 1]) for k, _ in BAL_LABELS if "b_" + k in col},
+                               income_lines(g("wage"), g("h"), hp, g("i"), ip) + deduction_lines(deds, ded_labels), notes)
         out.append(build_row(month, "xlsx", m.group(1).upper(), name, dept, days, g("wage"), hp, ip, gross, deds, ded, net,
-                             flags + hf + if_, all_deds))
+                             flags + hf + if_, all_deds, details))
     return out
 
 
@@ -352,13 +492,21 @@ def _pdf_layout(page, xs, header_bottom) -> dict:
         b = find(lab, after=col["net"])
         if b is not None:
             col["d_" + key] = b
+    after = max([col["net"]] + [v for k, v in col.items() if k.startswith("d_")])
+    for pos, (key, lab) in enumerate(BAL_LABELS):
+        b = find(lab, after=after)
+        if b is None and len(xs) == 25 and col["net"] == 11 and col.get("d_sso") == 19:   # the standard A..X grid: U..X
+            b = 20 + pos
+        if b is not None:
+            col["b_" + key] = b
     j = col["gross"]
     col.update(dept=col["name"] + 1, days=j - 5, wage=j - 4, qty=j - 3, h=j - 2, i=j - 1)
     return col
 
 
 def _pdf_rows(path):
-    """-> (rows, all_deductions): each row a {colkey: text} dict for one table row of every page."""
+    """-> (rows, all_deductions): each row a {colkey: text} dict for one table row of every page. A balance column a page does not
+    print is absent from its rows' dicts (the row's details then hold None for it)."""
     import pymupdf
     doc = pymupdf.open(path)
     rows, all_deds = [], True
@@ -387,7 +535,11 @@ def _pdf_rows(path):
                 if b is not None and b in inv:
                     cells.setdefault(inv[b], []).append(w[4])
             if cells:
-                rows.append({k: " ".join(v) for k, v in cells.items()})
+                row = {k: " ".join(v) for k, v in cells.items()}
+                for k in col:                       # a printed balance column left blank on this row: 0, not "not printed"
+                    if k.startswith("b_"):
+                        row.setdefault(k, "")
+                rows.append(row)
     return rows, all_deds
 
 
@@ -407,8 +559,12 @@ def parse_pdf(path: str, month: str) -> list[dict]:
         hp, hf = split_h_pdf(c.get("h"), c.get("qty"), dept)
         ip, if_ = split_i(c.get("i"), None, dept)
         deds = {k: c.get("d_" + k) for k in DEDUCTIONS}
+        sales = c.get("qty") if (hp.get("commission") and pct_rate(c.get("h"), c.get("qty"))) else None
+        details = make_details(dept, None, sales, hp.get("commission"),
+                               {k: c["b_" + k] for k, _ in BAL_LABELS if "b_" + k in c},
+                               income_lines(c.get("wage"), c.get("h"), hp, c.get("i"), ip) + deduction_lines(deds), [])
         out.append(build_row(month, "pdf", m.group(1).upper(), name, dept, days, c.get("wage"), hp, ip, gross, deds, ded, net,
-                             flags + hf + if_, all_deds))
+                             flags + hf + if_, all_deds, details))
     return out
 
 

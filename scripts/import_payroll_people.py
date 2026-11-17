@@ -30,7 +30,7 @@ def main():
             payload = [{"month": month, "grp": r["group"], "code": r["code"], "employee_id": emp.get(alias.get(r["code"], r["code"])), "name": r["name"],
                         "dept": r.get("dept"), "days": r["days"], "parts": r["parts"], "refund": r["refund"], "gross": r["gross"],
                         "deductions": r["deductions"], "deduct_total": r["deduct_total"], "net": r["net"], "source": r["source"], "file": r["file"],
-                        "flags": r["flags"]} for r in rows]
+                        "flags": r["flags"], "details": r.get("details") or {}} for r in rows]
             for i in range(0, len(payload), 200):
                 supabase.insert("employee_pay_months", payload[i:i + 200])
     print("written" if write else "(dry run -- add --write to save)")

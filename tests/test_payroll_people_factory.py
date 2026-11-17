@@ -1,4 +1,5 @@
 import os
+import re
 
 import pytest
 
@@ -175,3 +176,110 @@ def test_january_pdf_without_card_column():
     assert abs(sum(p["gross"] for p in r["people"]) + sum(e["gross"] for e in r["extras"]) - 812081) <= 1
     fr003 = next(p for p in r["people"] if p["code"] == "SB-FR003")      # numbers printed on a second line inside the row
     assert fr003["deductions"]["advance"] == 3000 and fr003["deductions"]["loan"] == 2500 and fr003["net"] == 5976
+
+
+# ------------------------------------------------------------------------------------------------ details (every cell on the row)
+def test_layout_finds_balance_columns_and_stops_there():
+    head = {1: "scan no.", 2: "รายชื่อ", 3: "แผนก", 4: "วัน", 5: "เงิน", 7: "เงิน", 8: "ซอง%", 9: "รวมรับ", 10: "รวมจ่าย", 11: "คงเหลือ",
+            12: "รายจ่าย สะสม", 13: "เบิกล่วงหน้า", 14: "ปกส.", 15: "ค้างเงิน", 16: "จ่ายค้าง", 17: "ค้างย/ป", 18: "สะสมยกไป", 19: "แผนก",
+            20: "เลขที่บัญชี", 21: "ค้างเงิน"}
+    lay = pf.layout(head)
+    assert lay["balances"] == {"loan_before": 15, "loan_paid": 16, "loan_after": 17, "savings_balance": 18}
+    assert lay["labels"][12] == "สะสม" and lay["labels"][8] == "ซอง%"
+    # a PDF header with the vertical รายรับ / รายจ่าย pieces stuck in front
+    assert pf.short_label("ายจ่า เงินขาด/ความผิด") == "เงินขาด/ความผิด" and pf.short_label("ยรับ ซอง%") == "ซอง%"
+    assert pf.layout({k: v for k, v in head.items() if k <= 14})["balances"] == {}
+
+
+def test_helpers_rate_notes_name_suffix():
+    assert pf.wage_rate("=F5*390") == 390 and pf.wage_rate("=390*F12") == 390 and pf.wage_rate("=F5*357.5") == 357.5
+    assert pf.wage_rate("=28*390+2*344") is None and pf.wage_rate(11700) is None and pf.wage_rate(None) is None
+    assert pf.clean_note("Admin:\nปรับค่าแรง ต.ค.64ขึ้นอีก46.-") == "ปรับค่าแรง ต.ค.64ขึ้นอีก46.-"
+    assert pf.clean_note("PC:\nเบิกเพิ่ม ปีใหม่ 10,000+ ซ่อมรถ10000\n") == "เบิกเพิ่ม ปีใหม่ 10,000+ ซ่อมรถ10000"
+    assert pf.clean_note("เบิกติดโควิด") == "เบิกติดโควิด" and pf.clean_note("Admin:\n") == ""
+    assert pf.name_note("นายเม ( Mr. MIN HTKE )-หัก ปกส.นางนวย") == "หัก ปกส.นางนวย"
+    assert pf.name_note("นางอี๊ด -คืนสะสม") == "คืนสะสม"
+    assert pf.name_note("นายเป้(Mr.PYAE PHYO AUNG)03/69 ย้ายเป็นเด็กรถ") == "03/69 ย้ายเป็นเด็กรถ"
+    assert pf.name_note("นางแตงโม-( Mrs. HAY TWAL MOE )") is None and pf.name_note("นางจารุณี (แพ็ค) คตวงศ์ฆ้อง") is None
+    assert pf.name_note("นายจรูญ  มินฉิมพลี") is None
+
+
+def test_details_lines_balances_and_notes():
+    p = pf.build_person(raw(name="นายเม ( Mr. MIN HTKE )-หัก ปกส.นางนวย", wage_formula="=F5*390", money2=400, money2_formula="=H5*40",
+                            bag_cell=2491, bag_formula="=497*3+1000", gross=14591, deduct_total=3960, net=10631,
+                            deductions={"advance": 3000, "other": 480, "sso": 480},
+                            balances={"loan_before": 7500, "loan_paid": 1500, "loan_after": 6000, "savings_balance": 10700},
+                            labels={"bag": "ซอง%", "other": "อุปกรณ์/อื่นๆ"},
+                            comments=[("ปกส.", "Admin:\nย้อนหลังไม่ได้หลายเดือน"), ("ค้างเงิน", "Admin:\n"), ("เงิน", "PC: เพิ่ม50.- มี.ค.63")]),
+                        "2026-09", "xlsx")
+    check_invariants(p)
+    d = p["details"]
+    assert d["position"] == "ผลิต" and d["rate"] == 390 and d["sales"] is None and d["commission_pct"] is None
+    assert (d["loan_before"], d["loan_paid"], d["loan_after"], d["savings_balance"]) == (7500, 1500, 6000, 10700)
+    assert [(x["side"], x["label"], x["key"], x["amount"]) for x in d["lines"]] == [
+        ("income", "เงิน", "wage", 11700), ("income", "เงิน", "ot", 400), ("income", "ซอง%", "bag", 2491),
+        ("deduction", "เบิกล่วงหน้า", "advance", 3000), ("deduction", "อุปกรณ์/อื่นๆ", "other", 480), ("deduction", "ปกส.", "sso", 480)]
+    assert d["notes"] == [{"label": "รายชื่อ", "text": "หัก ปกส.นางนวย"}, {"label": "ปกส.", "text": "ย้อนหลังไม่ได้หลายเดือน"},
+                          {"label": "เงิน", "text": "เพิ่ม50.- มี.ค.63"}]
+    assert p["name"] == "นายเม ( Mr. MIN HTKE )-หัก ปกส.นางนวย"          # the name itself is kept as before
+    assert p["parts"] == {"wage": 11700, "commission": 0, "bag": 1491, "bonus": 1000, "ot": 400, "other": 0}
+
+
+def test_details_commission_sales_refund_and_missing_columns():
+    com = pf.build_person(raw(dept="หน้าโรง", money2=450, money2_formula="=H10*1.5%", qty=30000, gross=12150, net=8670), "2026-09", "xlsx")
+    d = com["details"]
+    assert d["sales"] == 30000 and d["commission_pct"] == 1.5 and d["lines"][1]["key"] == "commission"
+    assert d["rate"] is None and d["loan_before"] is None and d["savings_balance"] is None and d["notes"] == []
+    ref = pf.build_person(raw(name="นางอี๊ด -คืนสะสม", wage=0, days=0, bag_cell=10000, gross=10000, deduct_total=0, net=10000,
+                              deductions={}), "2026-10", "pdf")
+    assert ref["details"]["lines"] == [{"side": "income", "label": "ซอง%", "key": "other", "amount": 10000}]
+    assert ref["details"]["notes"] == [{"label": "รายชื่อ", "text": "คืนสะสม"}]
+    gap = pf.build_person(raw(gross=12000, net=8520), "2026-09", "xlsx")      # รวมรับ printed 300 more than its cells
+    assert sum(x["amount"] for x in gap["details"]["lines"] if x["side"] == "income") == 12000
+
+
+BANK_RE = re.compile(r"\d{3}-?\d-?\d{5}-?\d")
+ID_RE = re.compile(r"\d{13}")
+
+
+def _all_months():
+    from app import payroll_people as pp
+    return [(m, pp.BASE + g["factory"]) for m, g in sorted(pp.FILES.items()) if g.get("factory")]
+
+
+@pytest.mark.parametrize("month,path", _all_months())
+def test_details_add_up_on_every_real_month(month, path):
+    if not os.path.exists(path):
+        pytest.skip("payroll file not on this machine")
+    people = pf.parse_file(path, month)
+    loan_breaks = []
+    for p in people:
+        d = p["details"]
+        assert set(d) == {"position", "rate", "sales", "commission_pct", "loan_before", "loan_paid", "loan_after", "savings_balance",
+                          "lines", "notes"}
+        assert abs(sum(x["amount"] for x in d["lines"] if x["side"] == "income") - p["gross"]) <= 1, p["code"]
+        assert abs(sum(x["amount"] for x in d["lines"] if x["side"] == "deduction") - p["deduct_total"]) <= 1, p["code"]
+        for x in d["lines"]:
+            assert x["amount"] and x["label"] and (x["key"] in pf.PART_KEYS if x["side"] == "income" else x["key"] in pf.DED_KEYS)
+        a, b, c = d["loan_before"], d["loan_paid"], d["loan_after"]
+        if None not in (a, b, c) and abs(a - b - c) > 1:
+            loan_breaks.append((p["code"], a, b, c))
+        assert None not in (a, b, c, d["savings_balance"])         # every month, xlsx and PDF, prints the four balance columns
+        blob = repr(d)
+        assert not BANK_RE.search(blob) and not ID_RE.search(blob), p["code"]
+        if p["source"] == "pdf":
+            assert all(n["label"] == "รายชื่อ" for n in d["notes"])      # no comments in a PDF, only HQ's note after a name
+    # HQ's own arithmetic held on every row of 2569 when this was written; a break is listed here, it is HQ's sheet, not the reader
+    assert loan_breaks == [], f"ค้างเงิน - จ่ายค้าง != ค้างย/ป on: {loan_breaks}"
+
+
+@pytest.mark.skipif(not os.path.exists(SEP_XLSX), reason="payroll files not on this machine")
+def test_september_details_spot_checks():
+    by = {p["code"]: p for p in pf.parse_file(SEP_XLSX, "2026-09")}
+    d = by["SB-FR001"]["details"]
+    assert d["rate"] == 800 and (d["loan_before"], d["loan_paid"], d["loan_after"]) == (2500, 2500, 0) and d["savings_balance"] == 21300
+    assert d["notes"][0]["label"] == "ค้างเงิน" and not d["notes"][0]["text"].startswith("Admin")
+    nuay = by["SB-FR066"]["details"]
+    assert {"label": "รายชื่อ", "text": "หัก ปกส.นางนวย"} in nuay["notes"]
+    assert [(x["key"], x["amount"]) for x in nuay["lines"] if x["side"] == "deduction"][-2:] == [("other", 480), ("sso", 480)]
+    assert {"label": "ปกส.", "text": "ปกส.8/64 ไม่ได้หัก"} in by["SB-FR008"]["details"]["notes"]

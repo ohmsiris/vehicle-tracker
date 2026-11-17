@@ -7,6 +7,7 @@ Money on the sheet that is not this month's pay -- savings paid back, back pay -
 (คืนสะสม, ลาออก, ค่าแรงขาด): it is shown apart, not as pay. Anything else unusual stays where the reader put it, with its flag, to go through
 with the owner. The parts and deductions add up to what HQ printed (รวมรับ / รวมจ่าย / คงเหลือ).
 """
+import json
 import re
 from typing import Optional
 
@@ -62,8 +63,41 @@ def read_month(month: str) -> list[dict]:
     return out
 
 
+DETAIL_NUMS = ("rate", "sales", "commission_pct", "loan_before", "loan_paid", "loan_after", "savings_balance")
+
+
+def details_of(r: dict) -> dict:
+    """The row's `details` (HQ's own labels, the loan and savings balances, HQ's notes) in one shape; {} / missing on old rows."""
+    d = r.get("details")
+    if isinstance(d, str):
+        try:
+            d = json.loads(d)
+        except ValueError:
+            d = None
+    d = d if isinstance(d, dict) else {}
+    num = lambda v: float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    lines = [{"side": x.get("side"), "label": str(x.get("label") or ""), "key": x.get("key"), "amount": float(x.get("amount") or 0)}
+             for x in d.get("lines") or [] if isinstance(x, dict) and x.get("side") in ("income", "deduction")]
+    notes = [{"label": str(x.get("label") or ""), "text": str(x.get("text") or "")} for x in d.get("notes") or [] if isinstance(x, dict) and x.get("text")]
+    out = {"position": (str(d["position"]).strip() or None) if d.get("position") else None, **{k: num(d.get(k)) for k in DETAIL_NUMS},
+           "lines": lines, "notes": notes}
+    loan = ("loan_before", "loan_paid", "loan_after")
+    if not any(out[k] for k in loan):                     # no loan this month: the drivers' reader says None, factory / KK say 0 -- one meaning
+        out.update({k: None for k in loan})
+    return out
+
+
+def latest(months: list[dict], key: str) -> tuple[Optional[float], Optional[str]]:
+    """The newest month (months are newest first) whose details carry `key`: (value, month)."""
+    for m in months:
+        if m["details"].get(key) is not None:
+            return m["details"][key], m["month"]
+    return None, None
+
+
 def view(rows: list[dict]) -> dict:
-    """One person's months, newest first, with what the page needs: the parts (as pay), the refund apart, the totals."""
+    """One person's months, newest first, with what the page needs: the parts (as pay), the refund apart, the totals, and HQ's own
+    detail of the row (its column labels, the loan and savings balances, its notes)."""
     months = []
     for r in sorted(rows, key=lambda x: x["month"], reverse=True):
         parts = {k: float((r.get("parts") or {}).get(k) or 0) for k in PART_LABELS}
@@ -71,11 +105,16 @@ def view(rows: list[dict]) -> dict:
         months.append({"month": r["month"], "days": float(r.get("days") or 0), "parts": parts, "pay": pay, "refund": float(r.get("refund") or 0),
                        "deductions": {k: float((r.get("deductions") or {}).get(k) or 0) for k in DEDUCTION_LABELS},
                        "deduct_total": float(r.get("deduct_total") or 0), "net": float(r.get("net") or 0), "dept": r.get("dept"),
-                       "source": r.get("source"), "flags": r.get("flags") or []})
+                       "source": r.get("source"), "flags": r.get("flags") or [], "details": details_of(r)})
     year = [m for m in months if m["month"].startswith(months[0]["month"][:4])] if months else []
+    savings, savings_month = latest(months, "savings_balance")
+    loan, loan_month = latest(months, "loan_after")
     tiles = {"avg_net": round(sum(m["net"] - m["refund"] for m in year) / len(year), 2) if year else 0,
              "days": round(sum(m["days"] for m in year), 1), "pay": round(sum(m["pay"] for m in year), 2), "months": len(year),
-             "year": int(months[0]["month"][:4]) + 543 if months else None}
+             "year": int(months[0]["month"][:4]) + 543 if months else None,
+             "savings_balance": savings, "savings_month": savings_month, "loan_after": loan, "loan_month": loan_month,
+             "deductions": {k: round(sum(m["deductions"][k] for m in year), 2) for k in DEDUCTION_LABELS},
+             "deduct_total": round(sum(m["deduct_total"] for m in year), 2)}
     return {"months": months, "tiles": tiles, "part_labels": PART_LABELS, "deduction_labels": DEDUCTION_LABELS}
 
 

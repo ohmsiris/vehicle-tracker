@@ -27,3 +27,55 @@ def test_the_page_months_newest_first_and_the_tiles():
     assert v["months"][0]["pay"] == 13830.4                                       # the refund is not pay
     assert v["tiles"]["pay"] == 27660.8 and v["tiles"]["days"] == 62 and v["tiles"]["avg_net"] == 10230.4 and v["tiles"]["year"] == 2569
     assert set(pp.FILES) == {f"2026-{m:02d}" for m in range(1, 11)} and all(len(g) == 3 for g in pp.FILES.values())
+
+
+def _details(**kw):
+    d = {"position": " ขับรถซอง (ใหญ่) ", "rate": 368, "sales": 99020, "commission_pct": 2.0, "loan_before": 5000, "loan_paid": 1000,
+         "loan_after": 4000, "savings_balance": 12500,
+         "lines": [{"side": "income", "label": "ค่าแรง", "key": "wage", "amount": 10850},
+                   {"side": "deduction", "label": "เงินขาด/กระสอบไม่ครบ", "key": "shortage", "amount": 120},
+                   {"side": "deduction", "label": "ปกส.", "key": "sso", "amount": 600}],
+         "notes": [{"label": "ค้างเงิน", "text": "ยืม 5,000 ผ่อน 1,000"}]}
+    d.update(kw)
+    return d
+
+
+def test_hqs_details_pass_through_per_month():
+    v = pp.view([_row("2026-10", details=_details())])
+    d = v["months"][0]["details"]
+    assert d["position"] == "ขับรถซอง (ใหญ่)" and d["rate"] == 368 and d["sales"] == 99020 and d["commission_pct"] == 2.0
+    assert (d["loan_before"], d["loan_paid"], d["loan_after"], d["savings_balance"]) == (5000, 1000, 4000, 12500)
+    assert [x["label"] for x in d["lines"]] == ["ค่าแรง", "เงินขาด/กระสอบไม่ครบ", "ปกส."]
+    assert d["lines"][1] == {"side": "deduction", "label": "เงินขาด/กระสอบไม่ครบ", "key": "shortage", "amount": 120.0}
+    assert d["notes"] == [{"label": "ค้างเงิน", "text": "ยืม 5,000 ผ่อน 1,000"}]
+
+
+def test_old_rows_without_details_still_show():
+    empty = {"position": None, "rate": None, "sales": None, "commission_pct": None, "loan_before": None, "loan_paid": None,
+             "loan_after": None, "savings_balance": None, "lines": [], "notes": []}
+    v = pp.view([_row("2026-09"), _row("2026-08", details={}), _row("2026-07", details=None)])
+    assert all(m["details"] == empty for m in v["months"])
+    t = v["tiles"]
+    assert t["savings_balance"] is None and t["loan_after"] is None and t["savings_month"] is None and t["loan_month"] is None
+    assert t["pay"] == 41491.2                                                    # the old tiles unchanged
+    assert pp.view([_row("2026-09", details='{"savings_balance": 300}')])["months"][0]["details"]["savings_balance"] == 300.0
+
+
+def test_tiles_latest_balances_and_the_years_deductions_by_type():
+    v = pp.view([_row("2025-12", details=_details(savings_balance=99, loan_after=99), deductions={"savings": 500}, deduct_total=500),
+                 _row("2026-08", details=_details(savings_balance=11000, loan_after=5000)),
+                 _row("2026-09", details=_details(savings_balance=12500, loan_after=0)),
+                 _row("2026-10", details=_details(savings_balance=None, loan_after=None))])  # October has neither: September's figures
+    t = v["tiles"]
+    assert (t["savings_balance"], t["savings_month"]) == (12500, "2026-09")
+    assert (t["loan_after"], t["loan_month"]) == (0, "2026-09")                   # nothing owed is still a figure
+    assert t["deductions"]["advance"] == 9000 and t["deductions"]["sso"] == 1800 and t["deductions"]["savings"] == 0   # 2026 only
+    assert set(t["deductions"]) == set(pp.DEDUCTION_LABELS) and t["deduct_total"] == 10800
+
+
+def test_no_loan_is_none_whichever_reader_wrote_it():
+    from app import payroll_people as pp
+    zero = pp.details_of({"details": {"loan_before": 0, "loan_paid": 0, "loan_after": 0, "savings_balance": 0}})
+    assert (zero["loan_before"], zero["loan_paid"], zero["loan_after"]) == (None, None, None)
+    paid_off = pp.details_of({"details": {"loan_before": 2500, "loan_paid": 2500, "loan_after": 0}})
+    assert paid_off["loan_after"] == 0.0 and paid_off["loan_paid"] == 2500.0

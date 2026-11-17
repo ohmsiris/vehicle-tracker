@@ -115,7 +115,75 @@ def layout(labels: dict[int, str]) -> dict:
         raise ValueError("ไม่พบคอลัมน์ ปกส.")
     lay["deductions"] = ded
     lay["last"] = ded["sso"]
+    # the balance columns right of ปกส. (ค้างเงิน, จ่ายค้าง, ค้างย/ป, สะสมยกไป) -- found by header; nothing right of สะสมยกไป is ever
+    # used (แผนก again, bank account, transfer amount, SSO number)
+    bal = {}
+    for c in range(ded["sso"] + 1, ded["sso"] + 9):
+        k = balance_key(labels.get(c, ""))
+        if k is None:
+            if re.sub(r"\s+", "", labels.get(c, "") or ""):
+                break
+            continue
+        bal.setdefault(k, c)
+        if k == "savings_balance":
+            break
+    lay["balances"] = bal
+    lay["labels"] = {c: short_label(t) for c, t in labels.items()}
     return lay
+
+
+BALANCE_KEYS = ("loan_before", "loan_paid", "loan_after", "savings_balance")
+
+
+def balance_key(label: str) -> Optional[str]:
+    t = re.sub(r"\s+", "", label or "")
+    if "สะสมยกไป" in t:
+        return "savings_balance"
+    if "จ่ายค้าง" in t:
+        return "loan_paid"
+    if "ค้างเงิน" in t:
+        return "loan_before"
+    if "ค้างย" in t:
+        return "loan_after"
+    return None
+
+
+def short_label(text: str) -> str:
+    """HQ's header for a column as printed on its lowest header line: multi-row headers ("รายจ่าย สะสม", and on the PDF the vertical
+    "รายรับ"/"รายจ่าย" pieces stuck in front: "ยรับ ซอง%", "ายจ่า เงินขาด/ความผิด") keep only the last word."""
+    words = re.sub(r"\s+", " ", str(text or "")).strip().split(" ")
+    return words[-1] if words else ""
+
+
+DEFAULT_LABELS = {"name": "รายชื่อ", "wage": "เงิน", "money2": "เงิน", "bag": "ซอง%", "savings": "สะสม", "advance": "เบิกล่วงหน้า",
+                  "loan": "เงินยืม", "common": "ส่วนกลาง", "card": "ทำบัตร", "shortage": "เงินขาด/ความผิด", "other": "อุปกรณ์/อื่นๆ",
+                  "sso": "ปกส."}
+AUTHOR_RE = re.compile(r"^\s*[A-Za-z][A-Za-z0-9_.]*(?: [A-Za-z0-9_.]+)?\s*:")
+
+
+def clean_note(text) -> str:
+    """A cell comment as the owner should read it: the author prefix ("Admin:", "PC:") off, whitespace collapsed."""
+    return re.sub(r"\s+", " ", AUTHOR_RE.sub("", str(text or ""), count=1)).strip()
+
+
+def name_note(name: str) -> Optional[str]:
+    """Text HQ writes after a name ("นายเม ( Mr. MIN HTKE )-หัก ปกส.นางนวย", "นางอี๊ด -คืนสะสม"): what follows the last "-" when it has no
+    brackets (so "นางแตงโม-( Mrs. HAY TWAL MOE )" has none); or a dated note straight after the bracket ("...AUNG)03/69 ย้ายเป็นเด็กรถ" --
+    only when it starts with a digit, since a surname can follow a bracket too: "นางจารุณี (แพ็ค) คตวงศ์ฆ้อง")."""
+    m = re.search(r"-\s*([^()\-]*)$", name or "") or re.search(r"\)\s*(\d[^()]*)$", name or "")
+    if not m:
+        return None
+    t = re.sub(r"\s+", " ", m.group(1)).strip()
+    return t if len(t) >= 2 and re.search(r"[ก-๙0-9]", t) else None
+
+
+def wage_rate(formula) -> Optional[float]:
+    """=F5*390 or =390*F5 -> 390. Anything else (=28*390+2*344, a typed number, the PDF) -> None."""
+    if not isinstance(formula, str):
+        return None
+    f = formula.replace(" ", "")
+    m = re.fullmatch(r"=\$?[A-Z]+\$?\d+\*(\d+(?:\.\d+)?)", f) or re.fullmatch(r"=(\d+(?:\.\d+)?)\*\$?[A-Z]+\$?\d+", f)
+    return float(m.group(1)) if m else None
 
 
 def dept_kind(dept: str) -> Optional[str]:
@@ -141,10 +209,11 @@ def build_person(raw: dict, month: str, source: str) -> dict:
 
     # the second เงิน column: OT (quantity x 40) or sales commission (quantity x %)
     m2 = to_num(raw.get("money2"))
+    kind = None
+    bag_key = "bag"
     if m2:
         f = raw.get("money2_formula")
         f = f if isinstance(f, str) and f.startswith("=") else None
-        kind = None
         if f and ("%" in f or "/100" in f):
             kind = "commission"
         elif f and (mm := re.search(r"\*\s*(\d+(?:\.\d+)?)\s*$", f)):
@@ -168,6 +237,7 @@ def build_person(raw: dict, month: str, source: str) -> dict:
         f = f if isinstance(f, str) and f.startswith("=") else None
         note = next((n for n in NOT_PAY_NOTES if n in notes), None)
         if note:
+            bag_key = "other"
             parts["other"] += bagv
             flags.append(f"ซอง% {bagv:,.0f}: หมายเหตุ '{name}' -- น่าจะไม่ใช่ค่าจ้างเดือนนี้ (คืนสะสม/จ่ายค้าง) ใส่ไว้ใน other; ยืนยันแล้วเพิ่มใน OVERRIDES")
         else:
@@ -217,10 +287,59 @@ def build_person(raw: dict, month: str, source: str) -> dict:
     if abs(gross - deduct_total - net) > 1:
         flags.append(f"รวมรับ - รวมจ่าย ไม่เท่ากับ คงเหลือ ({gross:,.0f} - {deduct_total:,.0f} != {net:,.0f})")
 
+    details = build_details(raw, name, dept, m2, kind, bagv, bag_key, diff)
     return {"month": month, "group": GROUP, "code": code, "name": name, "dept": dept, "days": to_num(raw.get("days")),
             "parts": {k: round(v, 2) for k, v in parts.items()}, "refund": refund, "gross": gross,
             "deductions": {k: round(v, 2) for k, v in deductions.items()}, "deduct_total": deduct_total, "net": net,
-            "source": source, "flags": flags}
+            "source": source, "flags": flags, "details": details}
+
+
+def build_details(raw: dict, name: str, dept: str, m2: float, kind: Optional[str], bagv: float, bag_key: str, diff: float) -> dict:
+    """Everything else on the row, cell by cell (owner, 17 Nov 2026): the money cells as HQ labelled them, the loan / savings balances,
+    the daily rate from the wage formula, the comments. raw may carry: wage_formula, qty, balances {loan_before..savings_balance}
+    (a key only when the sheet has that column), labels {field: header}, comments [(header, text)]."""
+    labels = {**DEFAULT_LABELS, **(raw.get("labels") or {})}
+    lines = []
+
+    def add(side, field, key, amount):
+        if abs(amount) >= 0.005:
+            lines.append({"side": side, "label": re.sub(r"\s+", " ", labels.get(field) or field).strip(), "key": key,
+                          "amount": round(amount, 2)})
+
+    add("income", "wage", "wage", to_num(raw.get("wage")))
+    add("income", "money2", kind or "ot", m2)
+    add("income", "bag", bag_key, bagv)
+    if abs(diff) >= 0.01:                   # รวมรับ printed differently from its cells: the gap, so the lines still add up to รวมรับ
+        lines.append({"side": "income", "label": "ส่วนต่างรวมรับ", "key": "other", "amount": round(diff, 2)})
+    for k in DED_KEYS:                      # DED_KEYS is the sheet's own left-to-right order
+        if k in (raw.get("deductions") or {}):
+            add("deduction", k, k, to_num(raw["deductions"][k]))
+
+    sales = None
+    commission_pct = None
+    if kind == "commission":
+        s = to_num(raw.get("qty"))
+        if s > 0:
+            sales = s
+            if m2 > 0:
+                commission_pct = round(m2 / s * 100, 2)
+
+    bal = raw.get("balances") or {}
+    out = {"position": dept or None, "rate": wage_rate(raw.get("wage_formula")), "sales": sales, "commission_pct": commission_pct}
+    for k in BALANCE_KEYS:
+        out[k] = round(to_num(bal[k]), 2) if k in bal else None
+
+    notes = []
+    suffix = name_note(name)
+    if suffix:
+        notes.append({"label": labels["name"], "text": suffix})
+    for label, text in raw.get("comments") or []:
+        t = clean_note(text)
+        if t:
+            notes.append({"label": short_label(label) or label, "text": t})
+    out["lines"] = lines
+    out["notes"] = notes
+    return out
 
 
 def _is_empty(raw: dict) -> bool:
@@ -231,7 +350,7 @@ def _is_empty(raw: dict) -> bool:
 # ---------------------------------------------------------------------------------------------------------------- xlsx
 def _xlsx_rows(path: str) -> dict:
     import openpyxl
-    wf = openpyxl.load_workbook(path, read_only=True, data_only=False)
+    wf = openpyxl.load_workbook(path, read_only=False, data_only=False)      # not read-only: the cell comments are wanted
     wv = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
         name = "ตารางรายรับ-จ่ายพนง." if "ตารางรายรับ-จ่ายพนง." in wf.sheetnames else None
@@ -251,9 +370,14 @@ def _xlsx_rows(path: str) -> dict:
                 if isinstance(v, str) and v.strip():
                     head[c] = (head.get(c, "") + " " + v.strip()).strip()
         lay = layout(head)
-        last = lay["last"]
+        last = max([lay["last"], *lay["balances"].values()])      # never past สะสมยกไป: bank / transfer / SSO-number columns stay unread
         frows = list(sf.iter_rows(min_row=first, max_col=last, values_only=True))
         vrows = list(sv.iter_rows(min_row=first, max_col=last, values_only=True))
+        comments = {}                                               # row offset -> [(header, text)], name column .. สะสมยกไป only
+        for i, row in enumerate(sf.iter_rows(min_row=first, min_col=lay["name"], max_col=last)):
+            for c in row:
+                if getattr(c, "comment", None) is not None and c.comment.text:
+                    comments.setdefault(i, []).append((lay["labels"].get(c.column, ""), c.comment.text))
     finally:
         wf.close()
         wv.close()
@@ -262,7 +386,10 @@ def _xlsx_rows(path: str) -> dict:
     def cell(row, c):
         return row[c - 1] if c - 1 < len(row) else None
 
-    for fr, vr in zip(frows, vrows):
+    labels = {f: lay["labels"].get(lay[f], "") for f in ("name", "wage", "money2", "bag")}
+    labels.update({k: lay["labels"].get(c, "") for k, c in lay["deductions"].items()})
+    labels = {k: v for k, v in labels.items() if v}
+    for i, (fr, vr) in enumerate(zip(frows, vrows)):
         first_cell = cell(vr, 1)
         if isinstance(first_cell, str) and first_cell.strip().startswith("รวม"):
             total = {k: to_num(cell(vr, lay[k])) for k in ("gross", "deduct_total", "net")}
@@ -271,7 +398,9 @@ def _xlsx_rows(path: str) -> dict:
                "days": cell(vr, lay["days"]), "wage": cell(vr, lay["wage"]), "money2": cell(vr, lay["money2"]),
                "money2_formula": cell(fr, lay["money2"]), "bag_cell": cell(vr, lay["bag"]), "bag_formula": cell(fr, lay["bag"]),
                "gross": cell(vr, lay["gross"]), "gross_formula": cell(fr, lay["gross"]), "deduct_total": cell(vr, lay["deduct_total"]),
-               "net": cell(vr, lay["net"]), "deductions": {k: cell(vr, c) for k, c in lay["deductions"].items()}, "notes": ""}
+               "net": cell(vr, lay["net"]), "deductions": {k: cell(vr, c) for k, c in lay["deductions"].items()}, "notes": "",
+               "wage_formula": cell(fr, lay["wage"]), "qty": cell(vr, lay["qty"]),
+               "balances": {k: cell(vr, c) for k, c in lay["balances"].items()}, "labels": labels, "comments": comments.get(i, [])}
         code = str(raw["code"] or "").strip().upper()
         if CODE_RE.match(code):
             people.append(raw)
@@ -386,6 +515,9 @@ def _pdf_rows(path: str) -> dict:
                         head[c] = (head.get(c, "") + " " + t).strip()
             lay = layout(head)
             has |= set(lay["deductions"])
+            labels = {f: lay["labels"].get(lay[f], "") for f in ("name", "wage", "money2", "bag")}
+            labels.update({k: lay["labels"].get(c, "") for k, c in lay["deductions"].items()})
+            labels = {k: v for k, v in labels.items() if v}
             for b in bands:
                 if b < first:
                     continue
@@ -394,7 +526,9 @@ def _pdf_rows(path: str) -> dict:
                        "money2_formula": None, "bag_cell": text(b, lay["bag"]), "bag_formula": None, "gross": text(b, lay["gross"]),
                        "deduct_total": text(b, lay["deduct_total"]), "net": text(b, lay["net"]),
                        "deductions": {k: text(b, c) for k, c in lay["deductions"].items()},
-                       "notes": NO_BONUS_NOTE if NO_BONUS_NOTE in fix_thai(band_words.get(b, [])).replace(" ", "") else ""}
+                       "notes": NO_BONUS_NOTE if NO_BONUS_NOTE in fix_thai(band_words.get(b, [])).replace(" ", "") else "",
+                       "wage_formula": None, "qty": text(b, lay["qty"]),
+                       "balances": {k: text(b, c) for k, c in lay["balances"].items()}, "labels": labels, "comments": []}
                 code = raw["code"].replace(" ", "").upper()
                 label = " ".join(t for t in (text(b, 0), raw["code"], raw["name"]) if t)
                 if CODE_RE.match(code):
