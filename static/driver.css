@@ -168,3 +168,17 @@ main { padding: 12px 12px calc(92px + env(safe-area-inset-bottom)); max-width: 6
 .num.xpin { width: 88px; height: 40px; font-size: 18px; }
 .xpick { display: grid; gap: 6px; }
 .xpick .quick button { color: var(--blue); border-color: var(--line); min-width: 64px; }
+
+/* no ice, no selling (owner, 16 Nov 2026): the card on the customer list, a product nothing was loaded of */
+.box.noice { background: var(--warn-soft); border-color: #f3d6a2; }
+.noice-t { display: flex; gap: 10px; align-items: flex-start; color: var(--warn); }
+.noice-t b { display: block; font-size: 17px; color: var(--ink); }
+.noice-t small { display: block; font-size: 14px; color: var(--warn); margin-top: 2px; }
+.howto { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; }
+.mini .v .none { color: var(--muted); font-weight: 400; } .mini .v .none.warn { color: var(--warn); font-weight: 700; }
+.prow .pp.av { font-weight: 400; font-size: 13px; padding: 0; } .prow .pp.av.over { color: var(--bad); font-weight: 700; }
+.prow .pp.nold { color: var(--warn); font-size: 13px; padding: 0; }
+.prow.off .pl { color: var(--muted); }
+.step button:disabled { opacity: .35; }
+.quick button:disabled { opacity: .5; color: var(--muted); }
+.quick button small { display: block; font-size: 11px; font-weight: 400; }

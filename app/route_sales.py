@@ -19,6 +19,11 @@ and price, products ซอง กั๊ก หลอด เล็ก แพ็�
   (ส่งใบขาย) locks the day. The driver can ask the office to reopen it; the office reopens it (the driver then fixes and sends
   again) and every request / reopen is kept in reopen_log. The server enforces all of this, so an old phone or an old offline copy
   cannot overwrite a sent day.
+* No ice, no selling (owner, 16 Nov 2026): until the driver enters what was loaded (รับน้ำแข็ง, doc.loads) the phone says there is no ice
+  to sell and will not take sale quantities; a product with nothing loaded cannot be sold. Collecting an old debt still works.
+  Selling more than was loaded is not blocked (compute flags it).
+* Returns (owner, 16 Nov 2026, brought back): the driver types what came back (คืน, doc.returns) at ปิดวัน. หน้าโรง's own count
+  (sale_days.returns_foh, set_returns / the office day page) wins when there is one; when both exist and differ, the day is flagged.
 """
 import hashlib
 import hmac
@@ -123,6 +128,22 @@ def extra_prices(sale: dict, listed: dict) -> dict:
     return {k: round(_num(xp.get(k)), 2) for k in KEYS if 0 < _num(xp.get(k)) < 100_000 and _num(listed.get(k)) <= 0}
 
 
+def clean_returns(raw) -> dict:
+    """Ice that came back, per product: real products and numbers only. A 0 is kept (nothing came back is an answer); a blank,
+    a negative or junk is dropped."""
+    out: dict = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else []):
+        if k not in KEYS or v is None or isinstance(v, bool) or str(v).strip() == "":
+            continue
+        try:
+            x = float(str(v).replace(",", "").strip())
+        except ValueError:
+            continue
+        if x == x and 0 <= x < 1e6:
+            out[k] = x
+    return out
+
+
 def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start: Optional[float] = None) -> dict:
     """doc = what the phone sent; customers = {customer id (str): {"prices", "billing", "free"}}. -> the day's totals and what does
     not add up. A sale line: {"q": {product: n}, "paid": baht (prices come from the route list only),
@@ -130,7 +151,8 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
     A discount or one-off free with reason "factory" (น้ำแข็งเสีย / แตก -- the plant's fault, owner 10 Nov 2026) still counts at full
     price in `commission_sales`, so the driver's percentage is not cut by the plant's mistake. Customers free on the route list
     (ตำรวจ ...) are not sales and do not count, as on the paper sheet.
-    returns = the ice back at the plant, counted by หน้าโรง (the office enters it); km_start = the last reading before this day."""
+    returns = the ice back at the plant, counted by หน้าโรง (the office enters it); it wins over what the driver typed (doc.returns),
+    which is used when หน้าโรง has not counted; both there and different -> flagged. km_start = the last reading before this day."""
     loaded = {k: 0.0 for k in KEYS}
     for ld in doc.get("loads") or []:
         for k in KEYS:
@@ -192,7 +214,8 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
         old_paid += op
         lines.append({"customer": str(cid), "qty": {k: v for k, v in q.items() if v}, "amount": amount, "paid": paid, "old_paid": op,
                       "billing": billing, "discount": round(disc, 2), "free": free, "waived": waived, "waived_reason": reason})
-    back = returns if returns is not None else doc.get("returns")
+    office_back, driver_back = clean_returns(returns), clean_returns(doc.get("returns"))
+    back = office_back or driver_back or None           # หน้าโรง's count wins; else the driver's
     returned = {k: _num((back or {}).get(k)) for k in KEYS}
     left = {k: loaded[k] - sold[k] for k in KEYS}
     diff = {k: returned[k] - left[k] for k in KEYS} if back else {k: 0.0 for k in KEYS}   # + เกิน / - ขาด
@@ -207,6 +230,10 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
             flags.append(f"{label} {'เกิน' if diff[k] > 0 else 'ขาด'} {abs(diff[k]):g}")
         if left[k] < 0:
             flags.append(f"{label} ขายมากกว่าที่รับ {abs(left[k]):g}")
+    if office_back and driver_back:
+        for k, label in PRODUCTS:
+            if (k in office_back or k in driver_back) and _num(driver_back.get(k)) != _num(office_back.get(k)):
+                flags.append(f"{label}: คนขับคืน {_num(driver_back.get(k)):g} แต่หน้าโรงนับ {_num(office_back.get(k)):g}")
     has_cash = bool(doc.get("cash"))
     if has_cash and abs(counted - expected_cash) >= 1:
         flags.append(f"เงิน{'เกิน' if counted > expected_cash else 'ขาด'} {abs(counted - expected_cash):,.0f} บาท")
@@ -220,6 +247,7 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
     if other_waived:
         flags.append(f"ส่วนลด / แจกฟรี อื่นๆ {other_waived:,.0f} บาท — ตรวจว่าอนุญาตแล้ว")
     return {"loaded": loaded, "sold": sold, "left": left, "returned": returned if back else None, "diff": diff, "free": free_q,
+            "returned_by": "office" if office_back else "driver" if driver_back else None, "returned_driver": driver_back or None,
             "amount": round(amount_all, 2), "cash_sales": round(cash_sales, 2), "old_paid": round(old_paid, 2),
             "credit": round(credit, 2), "invoiced": round(invoiced, 2), "discount": round(discounts, 2), "expected_cash": round(expected_cash, 2),
             "factory_waived": round(factory, 2), "other_waived": round(other_waived, 2), "commission_sales": round(amount_all + factory, 2),
@@ -406,7 +434,7 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
     refusal = edit_refusal(day, current["status"] if current else None, datetime.now(BANGKOK))
     if refusal:
         raise RouteSalesError(refusal)
-    doc = {**doc, "new_customers": clean_walkins(doc.get("new_customers"))}
+    doc = {**doc, "new_customers": clean_walkins(doc.get("new_customers")), "returns": clean_returns(doc.get("returns")) or None}
     customers = {**{str(c["id"]): c for c in _customers(route_id)}, **walkin_customers(doc)}
     id_map: dict = {}
     doc["sales"] = {k: v for k, v in (doc.get("sales") or {}).items() if k in customers}      # a deleted customer's line is dropped
@@ -603,7 +631,7 @@ def set_returns(day_id: int, returns: dict) -> dict:
     if not d:
         raise RouteSalesError("ไม่พบวันนี้")
     d = d[0]
-    back = {k: _num(v) for k, v in (returns or {}).items() if k in KEYS and str(v).strip() != ""}
+    back = clean_returns(returns)
     customers = {**{str(c["id"]): c for c in _customers(d["route_id"])}, **walkin_customers(d["doc"] or {})}
     totals = compute(d["doc"] or {}, customers, back, _last_km(d["route_id"], date.fromisoformat(d["day"])))
     supabase.update("sale_days", {"id": f"eq.{d['id']}"}, {"returns_foh": back, "returns_at": datetime.now(timezone.utc).isoformat(),
@@ -740,7 +768,8 @@ def clean_doc(doc: dict) -> dict:
     loads = [{"q": q(ld.get("q")), **({"t": str(ld["t"])[:5]} if ld.get("t") else {})} for ld in doc.get("loads") or [] if isinstance(ld, dict)]
     cash = {k: _num(v) for k, v in (doc.get("cash") or {}).items() if (k in [str(n) for n in NOTES] or k == "coins") and _num(v)}
     out = {"sales": sales, "loads": [ld for ld in loads if ld["q"]], "new_customers": clean_walkins(doc.get("new_customers")),
-           "cash": cash or None, "km_end": _num(doc.get("km_end")) or None, "closed": bool(doc.get("closed"))}
+           "cash": cash or None, "km_end": _num(doc.get("km_end")) or None, "closed": bool(doc.get("closed")),
+           "returns": clean_returns(doc.get("returns")) or None}          # what the driver says came back: kept as the driver typed it
     return out
 
 
@@ -793,8 +822,7 @@ def office_save_day(route_id: int, day: date, doc: dict, returns: Optional[dict]
     current = _day(int(route_id), day)
     customers = {**{str(c["id"]): c for c in _customers(int(route_id))}, **walkin_customers(doc)}
     doc["sales"] = {k: v for k, v in doc["sales"].items() if k in customers}
-    back = {k: _num(v) for k, v in (returns or {}).items() if k in KEYS and str(v).strip() != ""} if returns is not None \
-        else (current or {}).get("returns_foh")
+    back = clean_returns(returns) if returns is not None else (current or {}).get("returns_foh")
     totals = compute(doc, customers, back or None, _last_km(int(route_id), day))
     status = current["status"] if current else "closed"
     doc["closed"] = status != "open"

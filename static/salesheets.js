@@ -104,6 +104,7 @@ function ssProducts() {
   d.customers.forEach((c) => Object.keys(c.prices || {}).forEach((k) => used.add(k)));
   Object.values(ss_.doc.sales).forEach((s) => Object.keys(s.q || {}).forEach((k) => used.add(k)));
   (ss_.doc.loads || []).forEach((ld) => Object.keys(ld.q || {}).forEach((k) => used.add(k)));
+  [ss_.doc.returns, ss_.returns].forEach((r) => Object.keys(r || {}).forEach((k) => used.add(k)));
   return d.products.filter((p) => used.has(p.key));
 }
 
@@ -143,7 +144,11 @@ function ssTotals() {
     P.forEach((k) => { t.sold[k] += ssN(ln.q[k]); });
   });
   (ss_.doc.loads || []).forEach((ld) => P.forEach((k) => { t.loaded[k] += ssN((ld.q || {})[k]); }));
-  P.forEach((k) => { t.back[k] = ssN((ss_.returns || {})[k]); });
+  // what came back: หน้าโรง's count wins; until there is one, what the driver typed on the phone (owner, 16 Nov 2026)
+  const office = ss_.returns && Object.keys(ss_.returns).length ? ss_.returns : null;
+  const driver = ss_.doc.returns && Object.keys(ss_.doc.returns).length ? ss_.doc.returns : null;
+  t.backBy = office ? "office" : driver ? "driver" : null;
+  P.forEach((k) => { t.back[k] = ssN((office || driver || {})[k]); });
   const cash = ss_.doc.cash || {};
   t.expected = t.cash + t.old;
   t.counted = ss_.data.notes.reduce((a, n) => a + ssN(cash[String(n)]) * n, 0) + ssN(cash.coins);
@@ -244,6 +249,7 @@ function ssDayTab() {
         el("td", {}, ss_.doc.loads.length > 1 ? el("button", { class: "btn small", type: "button", text: "ลบ", onclick: () => { ss_.doc.loads.splice(i, 1); ss_.dirty = true; ssRenderDriver(); } }) : null))),
       el("tr", {}, el("td", { text: "คืน (หน้าโรงนับ)" }), ...P.map((p) => el("td", { class: "c" }, ssNumIn((ss_.returns || {})[p.key], (v) => {
         ss_.returns = ss_.returns || {}; if (v === "") delete ss_.returns[p.key]; else ss_.returns[p.key] = ssN(v); }))), el("td", {})),
+      el("tr", { id: "ssDrvRetRow" }),
       el("tr", { class: "muted", id: "ssSoldRow" }),
       el("tr", { class: "ss-totrow", id: "ssLeftRow" })));
   const cash = ss_.doc.cash || (ss_.doc.cash = {});
@@ -317,8 +323,16 @@ function ssPaintNumbers() {
     tile("วิ่ง", t.km != null ? `${elN(t.km)} กม.` : "—"));
   const sold = $("ssSoldRow");
   if (sold) fill(sold, el("td", { text: "ขาย (จากตาราง)" }), ...P.map((p) => el("td", { class: "c", text: t.sold[p.key] ? elN(t.sold[p.key]) : "" })), el("td", {}));
+  const drv = $("ssDrvRetRow"), dret = ss_.doc.returns || {}, hasD = Object.keys(dret).length > 0, office = ss_.returns || {};
+  const hasO = Object.keys(office).length > 0;
+  if (drv) fill(drv, el("td", { class: "muted", text: hasD ? "คืน (คนขับใส่)" : "คืน (คนขับใส่) — ยังไม่ได้ใส่" }), ...P.map((p) => {
+    const has = dret[p.key] != null && dret[p.key] !== "";
+    const differ = hasO && hasD && ssN(dret[p.key]) !== ssN(office[p.key]);
+    return el("td", { class: `c${differ ? " warn-text b" : " muted"}`, text: has ? elN(ssN(dret[p.key])) : hasD ? "—" : "",
+      title: differ ? `คนขับคืน ${elN(ssN(dret[p.key]))} แต่หน้าโรงนับ ${elN(ssN(office[p.key]))}` : "" });
+  }), el("td", { class: "muted small", text: hasO && hasD ? "ใช้หน้าโรง" : hasD ? "ใช้ตามคนขับ" : "" }));
   const left = $("ssLeftRow");
-  if (left) fill(left, el("td", { text: "รับ − ขาย − คืน = เหลือ" }), ...P.map((p) => {
+  if (left) fill(left, el("td", { text: t.backBy === "driver" ? "รับ − ขาย − คืน (คนขับ) = เหลือ" : "รับ − ขาย − คืน = เหลือ" }), ...P.map((p) => {
     const v = t.loaded[p.key] - t.sold[p.key] - t.back[p.key];
     return el("td", { class: `c${Math.abs(v) >= 1 ? " warn-text" : ""}`, text: t.loaded[p.key] || t.sold[p.key] || t.back[p.key] ? elN(v) : "" });
   }), el("td", {}));
