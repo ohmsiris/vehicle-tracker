@@ -52,3 +52,22 @@ def test_a_shop_with_its_own_price_per_product_gets_the_diagonal_cells():
     ws = load_workbook(BytesIO(rsh.to_xlsx(s))).active
     cell = ws.cell(row=5, column=4 + 2)                                         # row 2 of the customers, column ใหญ่
     assert str(cell.value) == "40" and cell.border.diagonalUp
+
+
+def test_the_drivers_returns_print_when_the_plant_has_not_counted():
+    from app import route_sales as rs
+    doc = {"loads": [{"q": {"lod": 10, "lek": 4}}], "sales": {"1": {"q": {"lod": 6, "lek": 4}}}, "returns": {"lod": 3}}
+    t = rs._public(rs.compute(doc, {"1": {"prices": {"lod": 40, "lek": 40}}}))
+    s = rsh.build(ROUTE, CUST, "2026-11-10", {"status": "closed", "returns_foh": None, "doc": doc, "totals": t}, [], {})
+    sm = s["summary"]
+    assert sm["returned"]["lod"] == 3 and sm["returned_by"] == "driver" and sm["returned_label"] == "คืน (คนขับ)"
+    assert sm["diff"]["lod"] == -1 and sm["diff"]["lek"] is None                 # ขาด 1 ใหญ่; nothing made up for เล็ก
+    ws = load_workbook(BytesIO(rsh.to_xlsx(s))).active
+    assert "คืน (คนขับ)" in [c.value for c in ws["A"]]
+    # totals saved before compute() knew the driver's count: the raw numbers still print
+    old = rsh.build(ROUTE, CUST, "2026-11-10", {"status": "closed", "returns_foh": None, "doc": doc, "totals": {"loaded": {"lod": 10}}}, [], {})
+    assert old["summary"]["returned"]["lod"] == 3 and old["summary"]["returned_label"] == "คืน (คนขับ)"
+    # หน้าโรง counted: its count, plain คืน
+    t = rs._public(rs.compute(doc, {"1": {"prices": {"lod": 40, "lek": 40}}}, returns={"lod": 4, "lek": 0}))
+    s = rsh.build(ROUTE, CUST, "2026-11-10", {"status": "closed", "returns_foh": {"lod": 4, "lek": 0}, "doc": doc, "totals": t}, [], {})
+    assert s["summary"]["returned"]["lod"] == 4 and s["summary"]["returned_label"] == "คืน" and s["summary"]["diff"]["lod"] is None

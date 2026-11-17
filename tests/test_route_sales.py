@@ -194,3 +194,45 @@ def test_filling_in_a_missing_price_reworks_only_the_days_it_was_sold_without_on
             {"id": 2, "doc": {"sales": {"675": {"q": {"pack": 2}}}}},
             {"id": 3, "doc": {"sales": {"9": {"q": {"lek": 1}}}}}, {"id": 4, "doc": None}]
     assert [d["id"] for d in rs.days_to_reprice(days, 675, {"lek"})] == [1]
+
+
+def test_returns_keep_real_products_and_numbers_and_a_zero_is_an_answer():
+    assert rs.clean_returns({"lod": "12", "lek": 0, "mo": "", "pack": None, "bad": 3, "kak": "x", "zong": -2, "ice": True}) \
+        == {"lod": 12.0, "lek": 0.0}
+    assert rs.clean_returns(None) == {} and rs.clean_returns("junk") == {} and rs.clean_returns({"lod": "1,200"}) == {"lod": 1200.0}
+    d = rs.clean_doc({"sales": {}, "returns": {"lod": "3", "lek": 0, "bad": 9, "mo": ""}})
+    assert d["returns"] == {"lod": 3.0, "lek": 0.0}                                  # the office's save keeps what the driver typed
+    assert rs.clean_doc({"sales": {}})["returns"] is None
+
+
+def test_the_drivers_returns_count_until_the_plant_counts_and_a_difference_is_flagged():
+    customers = {"1": {"prices": {"lod": 40, "lek": 30}, "billing": "cash"}}
+    doc = {"loads": [{"q": {"lod": 20, "lek": 10}}], "sales": {"1": {"q": {"lod": 8, "lek": 4}}}, "returns": {"lod": 12, "lek": 5}}
+    t = rs.compute(doc, customers)                                                   # only the driver's count
+    assert t["returned_by"] == "driver" and t["returned"]["lod"] == 12 and t["diff"]["lod"] == 0 and t["diff"]["lek"] == -1
+    assert "เล็ก ขาด 1" in t["flags"] and not any("หน้าโรงนับ" in f for f in t["flags"])
+    t = rs.compute(doc, customers, returns={"lod": 11, "lek": 5})                    # หน้าโรง counted: its count wins
+    assert t["returned_by"] == "office" and t["returned"]["lod"] == 11 and t["diff"]["lod"] == -1
+    assert t["returned_driver"] == {"lod": 12, "lek": 5}
+    assert "ใหญ่: คนขับคืน 12 แต่หน้าโรงนับ 11" in t["flags"] and not any("เล็ก: คนขับคืน" in f for f in t["flags"])
+    t = rs.compute(doc, customers, returns={"lod": 12, "lek": 5, "mo": 2})           # หน้าโรง found บด the driver did not write down
+    assert "บด: คนขับไม่ได้ใส่ แต่หน้าโรงนับ 2" in t["flags"] and not any("ใหญ่: คนขับคืน" in f for f in t["flags"])
+    t = rs.compute(doc, customers, returns={"lod": 12, "lek": 5, "mo": 0})           # หน้าโรง counted 0 บด, the driver left it blank
+    assert not any("บด:" in f for f in t["flags"])
+    t = rs.compute(doc, customers, returns={})                                       # an empty หน้าโรง count is no count
+    assert t["returned_by"] == "driver" and t["returned"]["lod"] == 12
+    loaded_mo = {**doc, "loads": [{"q": {"lod": 20, "lek": 10, "mo": 3}}]}           # บด loaded, the driver typed only ใหญ่ and เล็ก
+    t = rs.compute(loaded_mo, customers)
+    assert t["returned_by"] == "driver" and t["diff"]["mo"] == 0 and t["diff"]["lek"] == -1
+    assert not any(f.startswith("บด ขาด") for f in t["flags"]) and "เล็ก ขาด 1" in t["flags"]
+    t = rs.compute(loaded_mo, customers, returns={"lod": 12, "lek": 5})              # หน้าโรง counts the whole truck: บด not back
+    assert t["diff"]["mo"] == -3 and "บด ขาด 3" in t["flags"]
+    t = rs.compute({**doc, "returns": None}, customers)                              # nobody counted: no shortage worked out
+    assert t["returned"] is None and t["returned_by"] is None and t["diff"]["lek"] == 0 and not any("ขาด" in f for f in t["flags"])
+
+
+def test_selling_more_than_was_loaded_is_flagged_not_refused():
+    t = rs.compute({"loads": [], "sales": {"1": {"q": {"lod": 2}}}}, {"1": {"prices": {"lod": 40}}})
+    assert t["amount"] == 80 and "ใหญ่ ขายมากกว่าที่รับ 2" in t["flags"]
+    t = rs.compute({"loads": [], "sales": {"1": {"q": {}, "old_paid": 300}}}, {"1": {"prices": {"lod": 40}}})   # old debt, no ice
+    assert t["old_paid"] == 300 and t["expected_cash"] == 300 and not t["flags"]

@@ -213,6 +213,8 @@ def _summary(t: _Template, sm: Optional[dict]) -> str:
     for ri, tr in enumerate(rows):
         cells = _cells(tr)
         v = {i: _text_of(c) for i, c in enumerate(cells)}                  # keep every label
+        if ri == 5 and sm.get("returned_label", "คืน") != "คืน" and cells:
+            v[0] = [(sm["returned_label"], {})]                          # คืน (คนขับ): the driver's own count, หน้าโรง has not counted
         if ri in stock:
             for i, k in enumerate(KEYS):
                 v[1 + i] = [(_n((stock[ri] or {}).get(k)), {})]

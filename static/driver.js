@@ -5,6 +5,9 @@
    (and again when the signal comes back). `rev` counts the phone's saves; the server ignores a save older than what it has.
    Only today can be changed (plus an unsent yesterday, until noon); ส่งใบขาย locks the day, and the office reopens it on request.
    Screens: sign in (name, then a 4-digit PIN) -> the day with three tabs: รับน้ำแข็ง · ลูกค้า · ปิดวัน.
+   No ice, no selling (owner, 16 Nov 2026): until a trip is entered on รับน้ำแข็ง the customer list says so and a tap on a shop offers
+   the way there (an old debt can still be collected); a product with nothing loaded cannot be sold. ปิดวัน takes what came back
+   (คืน, doc.returns) beside รับ / ขาย / ควรเหลือ; หน้าโรง's own count wins on the server when there is one.
 */
 (function () {
   var TOKEN_KEY = "icebox_driver_token";
@@ -111,6 +114,14 @@
     });
     return { loaded: loaded, sold: sold, cash: cash, credit: credit, invoiced: inv, old: old, amount: amt, shops: shops, discount: disc, freeShops: freeShops };
   }
+  // No ice, no selling (owner, 16 Nov 2026): nothing can be sold until the ice loaded onto the truck is entered (รับน้ำแข็ง)
+  function loadedNow() {
+    var l = {}; products().forEach(function (p) { l[p.key] = 0; });
+    (S.doc.loads || []).forEach(function (ld) { products().forEach(function (p) { l[p.key] += n(ld.q && ld.q[p.key]); }); });
+    return l;
+  }
+  function hasIce() { var l = loadedNow(); return products().some(function (p) { return l[p.key] > 0; }); }
+  function hasRet(k) { var r = S.doc.returns; return !!(r && r[k] != null && r[k] !== ""); }
   function balanceOf(id) { return n((S.boot.balances || {})[String(id)]); }
   function nextCustomer(afterId) {          // the next shop in route order not served yet (after afterId, wrapping round)
     var list = customers(), ids = list.map(function (x) { return String(x.id); });
@@ -253,7 +264,12 @@
       var left = t.loaded[p.key] - t.sold[p.key];
       if (t.loaded[p.key] || t.sold[p.key]) parts.push(esc(shortOf(p.key)) + " " + (left < 0 ? '<span class="neg">' + fmt(left) + "</span>" : fmt(left)));
     });
-    $("onTruck").innerHTML = parts.length ? parts.join(" · ") : '<span style="color:var(--muted);font-weight:400">ยังไม่ได้รับ</span>';
+    $("onTruck").innerHTML = parts.length ? parts.join(" · ") : '<span class="' + (locked() ? "none" : "none warn") + '">ยังไม่ได้รับ' + (locked() ? "" : " — แตะเพื่อใส่") + "</span>";
+    var card = $("onTruck").parentNode, go = parts.length || locked() ? null : function () { goLoads(null); };
+    card.onclick = go;                              // empty: a tap goes to รับน้ำแข็ง, so it is a button while it does
+    card.onkeydown = go ? function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } } : null;
+    if (go) { card.setAttribute("role", "button"); card.setAttribute("tabindex", "0"); card.style.cursor = "pointer"; }
+    else { card.removeAttribute("role"); card.removeAttribute("tabindex"); card.style.cursor = ""; }
     $("cashNow").textContent = "฿" + money(t.cash + t.old);
     var all = customers().length || 1;
     $("progBar").style.width = Math.min(100, Math.round(100 * t.shops / all)) + "%";
@@ -286,14 +302,50 @@
   // ---- customers
   function renderCustomers() {
     var m = $("main"), owing = Object.keys(S.boot.balances || {}).filter(function (k) { return n(S.boot.balances[k]) > 0; }).length;
-    m.innerHTML = banners() + '<div class="tools"><label class="search">' + ic("search", "s") + '<input id="q" type="search" placeholder="ค้นหาร้าน หรือเลขที่" value="' + esc(S.q) + '" autocomplete="off"></label>' +
+    m.innerHTML = banners() + (locked() || hasIce() ? "" : noIceBox(true)) + '<div class="tools"><label class="search">' + ic("search", "s") + '<input id="q" type="search" placeholder="ค้นหาร้าน หรือเลขที่" value="' + esc(S.q) + '" autocomplete="off"></label>' +
       (owing ? '<button class="filter' + (S.owing ? " on" : "") + '" id="owing">ค้าง ' + owing + "</button>" : "") + "</div>" +
       '<div class="list" id="list"></div>' + (locked() ? "" : '<button class="add" id="addc">' + ic("plus", "s") + "เพิ่มลูกค้าเอง (ร้านที่ไม่มีในรายชื่อ)</button>");
     $("q").oninput = function () { S.q = this.value; paintList(); };
     if ($("owing")) $("owing").onclick = function () { S.owing = !S.owing; renderCustomers(); };
     $("list").onclick = function (e) { var r = e.target.closest(".cust"); if (r) openSale(r.getAttribute("data-id")); };
-    if ($("addc")) $("addc").onclick = openNewCustomer;
+    if ($("addc")) $("addc").onclick = function () { if (hasIce()) openNewCustomer(); else openNoIce(null); };
+    if ($("goload")) $("goload").onclick = function () { goLoads(null); };
     wireBanners(); paintList();
+  }
+  // the card on top of the customer list while nothing is loaded; also the body of the sheet a customer tap opens
+  function noIceBox(withButton) {
+    var o = S.boot.order_today, bal = S.boot.balances || {};
+    var owing = Object.keys(bal).some(function (k) { return n(bal[k]) > 0; });
+    return '<div class="box noice"><div class="noice-t">' + ic("truck", "l") + "<div><b>ยังไม่ได้ใส่น้ำแข็งที่รับขึ้นรถ — ใส่ก่อนจึงจะขายได้</b>" +
+      "<small>บนรถยังไม่มีน้ำแข็งให้ขาย" + (o && orderText(o) ? " · สั่งไว้ " + esc(orderText(o)) : "") + "</small></div></div>" +
+      (withButton ? '<button class="btn primary big" id="goload">' + ic("truck", "s") + "ใส่น้ำแข็งที่รับ</button>" +
+        (owing ? '<p class="note">เก็บเงินค้างเก่าได้ตามปกติ — แตะชื่อร้าน</p>' : "") : "") + "</div>";
+  }
+  // a customer tapped while nothing is loaded: say why it cannot be sold, offer the way to รับน้ำแข็ง (and an old debt, which needs no ice)
+  function openNoIce(id) {
+    var c = id != null ? custById(id) : null;
+    var bal = c ? balanceOf(c.id) : 0;
+    var other = c && !c.free && !c.fresh && c.billing !== "invoice" && bal > 0 ? "เก็บเงินค้างเก่า ฿" + money(bal) : c && soldTo(c.id) ? "ดูรายการร้านนี้" : "";
+    openSheet('<div class="sheet-head"><button class="back" id="sx" aria-label="กลับ">' + ic("back", "l") + "</button><h2>" +
+      (c ? (c.fresh ? "" : c.seq + ". ") + esc(c.name) : "ยังขายไม่ได้") + "</h2></div>" +
+      '<div class="sheet-body">' + noIceBox(false) + '<div class="box"><h3>ทำอย่างไร</h3><ol class="howto">' +
+      "<li>กด <b>ใส่น้ำแข็งที่รับ</b></li><li>ใส่จำนวนที่รับขึ้นรถแต่ละอย่าง แล้วกด <b>บันทึก</b></li><li>" + (c ? "กลับมาขายร้านนี้ได้เลย" : "ขายได้ตามปกติ") + "</li></ol>" +
+      (other && bal > 0 ? '<p class="note">ร้านนี้ค้าง ฿' + money(bal) + " — เก็บเงินค้างได้เลย ไม่ต้องมีน้ำแข็ง</p>" : "") + "</div></div>" +
+      '<div class="actions' + (other ? "" : " one") + '">' + (other ? '<button class="btn" id="niother">' + esc(other) + "</button>" : "") +
+      '<button class="btn primary" id="nigo">' + ic("truck", "s") + "ใส่น้ำแข็งที่รับ</button></div>");
+    $("sx").onclick = closeSheet;
+    if ($("niother")) $("niother").onclick = function () { openSale(c.id, true); };
+    $("nigo").onclick = function () { goLoads(c ? c.id : null); };
+  }
+  // straight to a new trip on รับน้ำแข็ง (filled from today's order, if any: the driver checks it and saves); once saved, back to selling
+  function goLoads(thenId) {
+    closeSheet(); S.tab = "loads"; render(); window.scrollTo(0, 0);
+    if (locked()) return;
+    openLoad(-1, function () {
+      S.tab = "customers"; S.scrollToNext = true; render(); window.scrollTo(0, 0);
+      toast("รับน้ำแข็งแล้ว ✓ ขายได้เลย");
+      if (thenId != null && custById(thenId)) openSale(thenId);
+    });
   }
   function paintList() {
     var q = S.q.trim().toLowerCase();
@@ -332,28 +384,63 @@
   // ---- one customer's sale (full-screen sheet)
   function openSheet(html) { var sh = $("sheet"); sh.innerHTML = html; sh.hidden = false; sh.scrollTop = 0; document.body.style.overflow = "hidden"; }
   function closeSheet() { var sh = $("sheet"); if (!sh) return; sh.hidden = true; sh.innerHTML = ""; document.body.style.overflow = ""; }
-  function stepper(id, val, ro) {
-    var dis = ro ? " disabled" : "";
+  // max: the most it may hold (a product sold before anything of it was loaded: it may only come down) -> no + and typing capped
+  function stepper(id, val, ro, max) {
+    var dis = ro ? " disabled" : "", capped = max != null && !ro;
     return '<div class="step"><button data-step="' + id + '" data-d="-1" aria-label="ลด"' + dis + ">" + ic("minus") + '</button><input class="num" id="' + id +
-      '" inputmode="numeric" pattern="[0-9]*" value="' + (val ? val : "") + '" placeholder="0"' + dis + '><button data-step="' + id + '" data-d="1" aria-label="เพิ่ม"' + dis + ">" + ic("plus") + "</button></div>";
+      '" inputmode="numeric" pattern="[0-9]*" value="' + (val ? val : "") + '" placeholder="0"' + dis + (capped ? ' data-max="' + max + '"' : "") +
+      '><button data-step="' + id + '" data-d="1" aria-label="เพิ่ม"' + (ro || capped ? " disabled" : "") + ">" + ic("plus") + "</button></div>";
+  }
+  function capInput(inp) {
+    var mx = inp.getAttribute("data-max");
+    if (mx != null && n(inp.value) > n(mx)) { inp.value = n(mx) || ""; return true; }
+    return false;
   }
   function bindSteppers(root, onChange) {
     root.addEventListener("click", function (e) {
       var b = e.target.closest("button[data-step]"); if (!b) return;
       var inp = $(b.getAttribute("data-step")); var v = Math.max(0, n(inp.value) + n(b.getAttribute("data-d")));
-      inp.value = v || ""; onChange();
+      inp.value = v || ""; capInput(inp); onChange();
     });
-    root.addEventListener("input", function (e) { if (e.target.classList.contains("num")) onChange(); });
+    root.addEventListener("input", function (e) {
+      if (!e.target.classList.contains("num")) return;
+      if (capInput(e.target)) toast("ยังไม่ได้รับ — เพิ่มไม่ได้ แก้ที่ รับน้ำแข็ง", true);
+      onChange();
+    });
     root.addEventListener("focusin", function (e) { if (e.target.classList.contains("num")) setTimeout(function () { try { e.target.select(); } catch (x) {} }, 0); });
   }
 
-  function openSale(id) {
+  function openSale(id, force) {
     var c = custById(id); if (!c) return;
+    if (!force && !locked() && !hasIce()) { openNoIce(id); return; }     // nothing on the truck: say so instead of opening the sale
     var s = JSON.parse(JSON.stringify(S.doc.sales[String(id)] || { q: {}, pay: "cash" }));
     if (!s.q) s.q = {};
     if (!s.pay) s.pay = "cash";
     var ro = locked(), showExtra = !!(n(s.discount) || s.free), pickOther = false;
     var added = Object.keys(s.q).filter(function (k) { return n(s.q[k]); }).concat(Object.keys(s.xp || {}));
+    // what is on the truck for this shop: loaded minus what the other shops took (this shop's own line not counted)
+    var tt = totals(), avail = {}, noLoad = {};
+    // nothing of it loaded: cannot be sold. Already on the line (sold before รับน้ำแข็ง was filled in): it may come down, never go up
+    var cap = {};
+    products().forEach(function (p) {
+      avail[p.key] = tt.loaded[p.key] - tt.sold[p.key] + n(s.q[p.key]); noLoad[p.key] = !(tt.loaded[p.key] > 0);
+      if (noLoad[p.key] && n(s.q[p.key])) cap[p.key] = n(s.q[p.key]);
+    });
+    function blocked(k) { return noLoad[k] && cap[k] == null; }
+    function qStep(k) { return stepper("q_" + k, n(s.q[k]), ro || blocked(k), noLoad[k] ? cap[k] : null); }
+    function onTruckHint(k) {
+      if (ro) return "";
+      if (noLoad[k]) return '<div class="pp nold" id="av_' + k + '">ยังไม่ได้รับ ' + esc(label(k)) + (cap[k] != null ? " — แก้ที่ รับน้ำแข็ง" : "") + "</div>";
+      var left = avail[k] - n(s.q[k]);
+      return '<div class="pp av' + (left < 0 ? " over" : "") + '" id="av_' + k + '">' + (left < 0 ? "เกินที่รับ " + fmt(-left) : "บนรถเหลือ " + fmt(left)) + "</div>";
+    }
+    function paintHints() {
+      products().forEach(function (p) {
+        var el = $("av_" + p.key); if (!el || noLoad[p.key]) return;
+        var left = avail[p.key] - n(s.q[p.key]);
+        el.className = "pp av" + (left < 0 ? " over" : ""); el.textContent = left < 0 ? "เกินที่รับ " + fmt(-left) : "บนรถเหลือ " + fmt(left);
+      });
+    }
     function draw() {
       var list = sellable(c), listed = list.map(function (p) { return p.key; });
       // products not on this shop's list (owner, 12 Nov 2026): the driver adds one and types its price; the office sees it
@@ -368,19 +455,19 @@
       if (c.free) html += '<div class="banner ok"><div class="t"><b>ลูกค้าฟรี</b><small>ไม่คิดเงิน · ใส่แค่จำนวน</small></div></div>';
       html += '<div class="box"><h3>ขายวันนี้</h3>' + (list.length ? list.map(function (p) {
         var price = priceOf(c, s, p.key);
-        return '<div class="prow"><div><div class="pl">' + esc(p.label) + '</div><div class="pp">' + (isFree(c, s) ? "ฟรี" : "฿" + money(price) + " / หน่วย") + "</div></div>" +
-          stepper("q_" + p.key, n(s.q[p.key]), ro) + "</div>";
+        return '<div class="prow' + (blocked(p.key) ? " off" : "") + '"><div><div class="pl">' + esc(p.label) + '</div><div class="pp">' + (isFree(c, s) ? "ฟรี" : "฿" + money(price) + " / หน่วย") + "</div>" +
+          onTruckHint(p.key) + "</div>" + qStep(p.key) + "</div>";
       }).join("") : shown.length ? "" : '<p class="note">ร้านนี้ยังไม่มีราคา — กด “+ สินค้าอื่น” หรือติดต่อออฟฟิศ</p>');
       html += shown.map(function (p) {
         var xp = s.xp && n(s.xp[p.key]);
-        return '<div class="prow xrow"><div><div class="pl">' + esc(p.label) + ' <span class="chip warn">นอกรายการ</span></div>' +
-          '<div class="pp xpp">฿<input class="num xpin" id="xp_' + p.key + '" inputmode="decimal" value="' + (xp || "") + '" placeholder="' + (invoice ? "ราคา" : "ใส่ราคา") + '"' + dis + "></div></div>" +
-          stepper("q_" + p.key, n(s.q[p.key]), ro) + "</div>";
+        return '<div class="prow xrow' + (blocked(p.key) ? " off" : "") + '"><div><div class="pl">' + esc(p.label) + ' <span class="chip warn">นอกรายการ</span></div>' +
+          '<div class="pp xpp">฿<input class="num xpin" id="xp_' + p.key + '" inputmode="decimal" value="' + (xp || "") + '" placeholder="' + (invoice ? "ราคา" : "ใส่ราคา") + '"' + dis + "></div>" +
+          onTruckHint(p.key) + "</div>" + qStep(p.key) + "</div>";
       }).join("");
       if (!ro && left.length) {
         html += pickOther
           ? '<div class="xpick"><p class="note">ขายอะไรเพิ่ม (ไม่มีในรายการของร้านนี้)</p><div class="quick">' +
-            left.map(function (p) { return '<button data-addp="' + p.key + '">' + esc(p.label) + "</button>"; }).join("") + "</div></div>"
+            left.map(function (p) { return '<button data-addp="' + p.key + '"' + (noLoad[p.key] ? " disabled" : "") + ">" + esc(p.label) + (noLoad[p.key] ? "<small>ยังไม่ได้รับ</small>" : "") + "</button>"; }).join("") + "</div></div>"
           : '<button class="more" id="addp">+ สินค้าอื่น</button>';
       }
       if (shown.length) html += '<p class="note">สินค้านอกรายการ: ' + (invoice ? "ใส่ราคาถ้ารู้ ถ้าไม่รู้ ออฟฟิศใส่ให้" : "ใส่ราคาที่เก็บจริง") + " · ออฟฟิศจะเห็นทุกครั้ง</p>";
@@ -417,7 +504,7 @@
       if (ro) { $("sclose").onclick = closeSheet; return; }
       if ($("extra")) $("extra").onclick = function () { readInputs(); showExtra = true; draw(); };
       if ($("addp")) $("addp").onclick = function () { readInputs(); pickOther = true; draw(); };
-      bindSteppers($("sb"), function () { readInputs(); $("amt").textContent = isFree(c, s) ? "ฟรี" : "฿" + money(amountOf(c, s)); });
+      bindSteppers($("sb"), function () { readInputs(); paintHints(); $("amt").textContent = isFree(c, s) ? "ฟรี" : "฿" + money(amountOf(c, s)); });
       $("sb").addEventListener("click", function (e) {
         var pay = e.target.closest("button[data-pay]");
         if (pay) { readInputs(); s.pay = pay.getAttribute("data-pay"); draw(); return; }
@@ -461,6 +548,7 @@
       if (!s.free && !n(s.discount)) delete s.reason;
       if (any) { delete s.price; s.t = s.t || nowHM(); s.paid = paidOf(c, s); S.doc.sales[String(c.id)] = s; } else delete S.doc.sales[String(c.id)];
       changed(); afterSale();
+      if (!hasIce()) { closeSheet(); toast("บันทึกแล้ว ✓"); return; }     // an old debt taken with nothing loaded: back to the list
       var nx = nextCustomer(c.id);                  // straight to the next shop on the route
       if (nx) { openSale(nx.id); toast("บันทึกแล้ว ✓"); }
       else { closeSheet(); toast("ครบทุกร้านแล้ว ✓"); }
@@ -555,11 +643,14 @@
     if ($("addl")) $("addl").onclick = function () { openLoad(-1); };
     wireBanners(); wireOrderCards();
   }
-  function openLoad(i) {
+  function openLoad(i, after) {          // after: what to do once a new trip is saved (goLoads: back to selling)
     var ld = i >= 0 ? JSON.parse(JSON.stringify(S.doc.loads[i])) : { q: {}, t: nowHM() };
-    var ro = locked();
+    var ro = locked(), o = S.boot.order_today;
+    var fromOrder = i < 0 && !(S.doc.loads || []).length && o && orderText(o);    // the first trip: suggest what was ordered, the driver checks it
+    if (fromOrder) { ld.q = JSON.parse(JSON.stringify(o.q || {})); ld.from_order = true; }
     openSheet('<div class="sheet-head"><button class="back" id="sx" aria-label="กลับ">' + ic("back", "l") + "</button><h2>รับน้ำแข็ง เที่ยว " + (i >= 0 ? i + 1 : (S.doc.loads.length + 1)) + "<small>" + esc(ld.t) + "</small></h2></div>" +
-      '<div class="sheet-body" id="lb"><div class="box">' + products().map(function (p) {
+      '<div class="sheet-body" id="lb">' + (fromOrder ? '<div class="banner warn"><div class="t"><b>ใส่ตามที่สั่งไว้ให้แล้ว</b><small>แก้ให้ตรงกับที่รับขึ้นรถจริง แล้วกดบันทึก</small></div></div>' : "") +
+      '<div class="box">' + products().map(function (p) {
         return '<div class="prow"><div class="pl">' + esc(p.label) + "</div>" + stepper("l_" + p.key, n(ld.q[p.key]), ro) + "</div>";
       }).join("") + "</div></div>" +
       (ro ? '<div class="actions one"><button class="btn" id="lx">' + ic("back", "s") + "กลับ</button></div>"
@@ -571,33 +662,45 @@
     $("ls").onclick = function () {
       ld.q = {};
       products().forEach(function (p) { var v = n($("l_" + p.key).value); if (v) ld.q[p.key] = v; });
-      if (ld.from_order) ld.edited = true;
+      if (ld.from_order) {                          // edited = what was saved is not what was ordered (the office sees it)
+        var oq = (o && o.q) || {};
+        var same = products().every(function (p) { return n(ld.q[p.key]) === n(oq[p.key]); });
+        if (same) delete ld.edited; else ld.edited = true;
+      }
       if (!Object.keys(ld.q).length) { toast("ใส่จำนวนอย่างน้อย 1 อย่าง", true); return; }
       if (i >= 0) S.doc.loads[i] = ld; else S.doc.loads.push(ld);
-      changed(); closeSheet(); render();
+      changed(); closeSheet();
+      if (after && i < 0) after(); else render();
     };
   }
 
   // ---- close the day
   function renderClose() {
     var t = totals(), m = $("main"), ro = locked(), dis = ro ? " disabled" : "";
-    var used = products().filter(function (p) { return t.loaded[p.key] || t.sold[p.key]; });
+    var used = products().filter(function (p) { return t.loaded[p.key] || t.sold[p.key] || hasRet(p.key); });
     var ret = S.doc.returns || {};
     var html = banners();
-    var foh = S.sheetMeta.returns_foh || null;
-    html += '<div class="box"><h3>น้ำแข็ง</h3>';
+    var foh = S.sheetMeta.returns_foh && Object.keys(S.sheetMeta.returns_foh).length ? S.sheetMeta.returns_foh : null;
+    // รับ / ขาย / ควรเหลือ, and what the driver brought back (owner, 16 Nov 2026); หน้าโรง's own count beside it once there is one
+    html += '<div class="box"><h3>น้ำแข็งที่คืน (เหลือบนรถตอนกลับถึงโรง)</h3>';
     if (used.length) {
-      html += '<div class="grid4" style="grid-template-columns:minmax(0,1.1fr) repeat(' + (foh ? 4 : 3) + ',minmax(0,1fr))"><span class="h"></span><span class="h">รับ</span><span class="h">ขาย</span><span class="h">เหลือ</span>' +
-        (foh ? '<span class="h">หน้าโรงนับ</span>' : "") +
+      html += '<div class="grid4"' + (foh ? ' style="grid-template-columns:minmax(0,1fr) repeat(3,minmax(0,.75fr)) minmax(0,1fr) minmax(0,.9fr)"' : "") + '><span class="h"></span><span class="h">รับ</span><span class="h">ขาย</span>' +
+        '<span class="h">ควรเหลือ</span><span class="h">คืน</span>' + (foh ? '<span class="h">หน้าโรงนับ</span>' : "") +
         used.map(function (p) {
-          var left = t.loaded[p.key] - t.sold[p.key];
+          var left = t.loaded[p.key] - t.sold[p.key], has = hasRet(p.key), diff = has ? n(ret[p.key]) - left : 0;
+          var mine = ro ? '<span class="c"><b>' + (has ? fmt(ret[p.key]) : "—") + "</b></span>"
+            : '<input class="num" data-ret="' + p.key + '" inputmode="numeric" pattern="[0-9]*" value="' + (has ? n(ret[p.key]) : "") + '" aria-label="คืน ' + esc(p.label) + '">';
           var cell = "";
           if (foh) {
-            var got = n(foh[p.key]), diff = got - left;
-            cell = '<span class="c">' + fmt(got) + (diff ? '<br><span class="' + (diff < 0 ? "bad-t" : "warn-t") + '">' + (diff < 0 ? "ขาด " : "เกิน ") + fmt(Math.abs(diff)) + "</span>" : ' <span class="ok-t">✓</span>') + "</span>";
+            var got = n(foh[p.key]), fd = got - left, differ = has && n(ret[p.key]) !== got;
+            cell = '<span class="c' + (differ ? " bad-t" : "") + '">' + fmt(got) + (fd ? '<br><span class="' + (fd < 0 ? "bad-t" : "warn-t") + '">' + (fd < 0 ? "ขาด " : "เกิน ") + fmt(Math.abs(fd)) + "</span>" : ' <span class="ok-t">✓</span>') + "</span>";
           }
-          return "<b>" + esc(p.label) + '</b><span class="c">' + fmt(t.loaded[p.key]) + '</span><span class="c">' + fmt(t.sold[p.key]) + '</span><span class="c"><b>' + fmt(left) + "</b></span>" + cell;
-        }).join("") + "</div>";
+          return "<b>" + esc(p.label) + '</b><span class="c">' + fmt(t.loaded[p.key]) + '</span><span class="c">' + fmt(t.sold[p.key]) + '</span><span class="c"><b>' + fmt(left) + "</b>" +
+            (has ? "<br>" + (diff ? '<span class="' + (diff < 0 ? "bad-t" : "warn-t") + '">' + (diff < 0 ? "ขาด " : "เกิน ") + fmt(Math.abs(diff)) + "</span>" : '<span class="ok-t">ตรง ✓</span>') : "") +
+            "</span>" + mine + cell;
+        }).join("") + "</div>" +
+        (ro ? "" : '<p class="note">นับน้ำแข็งที่เหลือบนรถแล้วใส่ช่อง “คืน” — ไม่เหลือใส่ 0 · ควรเหลือ = รับ − ขาย</p>') +
+        (foh && used.some(function (p) { return hasRet(p.key) && n(ret[p.key]) !== n(foh[p.key]); }) ? '<p class="note bad-t">ที่คนขับใส่ไม่ตรงกับหน้าโรงนับ — ออฟฟิศใช้ตัวเลขหน้าโรง</p>' : "");
     } else html += '<p class="note">ยังไม่มีการรับ / ขาย</p>';
     html += "</div>";
     html += '<div class="box"><div class="line"><h3 style="margin:0">' + ic("truck", "s") + 'ไมล์</h3><input class="num wide" id="kme" inputmode="numeric" value="' + (S.doc.km_end || "") + '" placeholder="0"' + dis + "></div></div>";
@@ -624,7 +727,13 @@
     if (ro) { m.onchange = null; return; }
     m.onchange = function (e) {
       var el = e.target;
-      if (el.hasAttribute("data-note")) { if (!S.doc.cash) S.doc.cash = {}; S.doc.cash[el.getAttribute("data-note")] = n(el.value); }
+      if (el.hasAttribute("data-ret")) {
+        var rk = el.getAttribute("data-ret"); if (!S.doc.returns) S.doc.returns = {};
+        var rv = parseFloat(String(el.value).replace(/,/g, "").trim());       // blank or not a number: no answer (0 is an answer)
+        if (isFinite(rv)) S.doc.returns[rk] = Math.max(0, rv); else { delete S.doc.returns[rk]; el.value = ""; }
+        if (!Object.keys(S.doc.returns).length) S.doc.returns = null;
+      }
+      else if (el.hasAttribute("data-note")) { if (!S.doc.cash) S.doc.cash = {}; S.doc.cash[el.getAttribute("data-note")] = n(el.value); }
       else if (el.id === "kme") S.doc.km_end = n(el.value) || null;
       else return;
       changed(); var y = window.scrollY; renderClose(); window.scrollTo(0, y); paintTop();
@@ -633,6 +742,7 @@
       var missing = [];
       if (!S.doc.km_end) missing.push("ไมล์");
       if (!S.doc.cash) missing.push("นับเงิน");
+      if (used.some(function (p) { return !hasRet(p.key); })) missing.push("น้ำแข็งที่คืน");
       var msg = (missing.length ? "ยังไม่ได้ใส่: " + missing.join(", ") + "\n\n" : "") + "ส่งแล้วจะล็อก แก้ไม่ได้ ส่งเลยไหม?";
       if (!window.confirm(msg)) return;
       S.doc.closed = true; S.rev += 1; persist();
@@ -657,7 +767,10 @@
         if (cached) {
           var d = new Date(), day = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);   // the phone's own date
           var b = JSON.parse(JSON.stringify(cached));
-          if (b.day !== day) { b.sheet = null; b.pending_yesterday = null; b.editable = true; }
+          if (b.day !== day) {                     // a boot from another day: its order for "tomorrow" is today's only if that is today
+            b.sheet = null; b.pending_yesterday = null; b.editable = true;
+            b.order_today = b.next_day === day ? b.order_next : null; b.order_next = null; b.next_day = null;
+          }
           b.today = day; b.day = day;
           openDay(b); toast("ไม่มีสัญญาณ — ใช้ข้อมูลในเครื่อง", true);
         } else $("app").innerHTML = '<div class="boot">ต่ออินเทอร์เน็ตไม่ได้ ลองใหม่อีกครั้ง</div>';
