@@ -94,7 +94,6 @@ function tbBill(c) {
       f("วันที่", date),
       f(byBags ? `จำนวน${bagWord}` : "น้ำหนักสุทธิ (กก.)", qty),
       item ? f("รายการ", item, "ti-wide") : null,
-      c.code === "P" ? f("เลขที่บัตรชั่ง", ticket) : null,
       f("เลขที่ (เลขถัดไป)", no, "ti-wide"),
       el("div", { class: "ti-go" }, btn)),
     info, el("div", { id: "tiOk2", class: "small ti-ok" }), dayList);

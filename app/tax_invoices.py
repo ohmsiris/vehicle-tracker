@@ -471,6 +471,9 @@ def _month_end(month: str) -> date:
     return date(y + (m == 12), m % 12 + 1, 1) - _dt.timedelta(days=1)
 
 
+BILL_LAST_COL, BILL_ROWS = "F", 18          # the bill box: A1:F18 (ผู้รับเงิน/ผู้ขาย is row 18)
+
+
 def bills_workbook(rows: list[dict], path) -> bytes:
     """The bills as her Excel file, all on ONE tab (owner, 16 Nov 2026: one print prints them all): her own bill (same page set-up, fonts,
     columns, margins, print area width and centring -- so it lands on the 9 x 5.5" paper exactly where it does now) repeated down the
@@ -482,9 +485,10 @@ def bills_workbook(rows: list[dict], path) -> bytes:
     from openpyxl.worksheet.pagebreak import Break
     from app.bahttext import bahttext
     wb, ws = _workbook(path)
-    area = (ws.print_area or "A1:M20").split("!")[-1].replace("$", "")
-    m = re.fullmatch(r"([A-Z]+)1:([A-Z]+)(\d+)", area)
-    last_col, block = (m.group(2), int(m.group(3))) if m else ("M", 20)
+    # The bill is A1:F18. Her print area (A1:M20) is wider and taller than the 9 x 5.5" page: Excel printed each bill plus a blank page
+    # (rows 19-20 below it) and a blank page for G-M beside it -- 13 bills gave 52 pages (owner, 17 Nov 2026). So the file prints A-F,
+    # 18 rows a bill, a page break after each: one bill = one page.
+    last_col, block = BILL_LAST_COL, BILL_ROWS
     ncol = column_index_from_string(last_col)
     snap = {(r, c): (ws.cell(r, c).value, copy(ws.cell(r, c).font), copy(ws.cell(r, c).border), copy(ws.cell(r, c).fill),
                      ws.cell(r, c).number_format, copy(ws.cell(r, c).alignment), copy(ws.cell(r, c).protection))

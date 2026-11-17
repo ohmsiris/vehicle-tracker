@@ -76,11 +76,15 @@ def test_many_bills_on_one_tab_one_page_each_and_nothing_outside_the_box():
     wb = openpyxl.load_workbook(io.BytesIO(ti.bills_workbook(rows, ti.template("P"))))
     assert len(wb.sheetnames) == 1
     ws = wb.worksheets[0]
-    assert ws["E6"].value == "เลขที่   SRI-2569-11153" and ws["E26"].value == "เลขที่   SRI-2569-11154" and ws["E46"].value == "เลขที่   SRI-2569-11155"
-    assert ws["C30"].value == 7004 and abs(ws["F30"].value - 7004 * 0.51) < 1e-6 and ws["F35"].value == 3822.08
-    assert ws["A21"].value == ws["A1"].value and ws.row_dimensions[30].height == ws.row_dimensions[10].height
-    assert [b.id for b in ws.row_breaks.brk] == [20, 40] and ws.print_area.endswith("$A$1:$M$60")
-    assert all(ws.cell(r, c).value is None for r in range(1, 61) for c in range(7, 14))   # no notes, no helper column G
+    assert ws["E6"].value == "เลขที่   SRI-2569-11153" and ws["E24"].value == "เลขที่   SRI-2569-11154" and ws["E42"].value == "เลขที่   SRI-2569-11155"
+    assert ws["C28"].value == 7004 and abs(ws["F28"].value - 7004 * 0.51) < 1e-6 and ws["F33"].value == 3822.08
+    assert ws["A19"].value == ws["A1"].value and ws.row_dimensions[28].height == ws.row_dimensions[10].height
+    # one bill = one 9 x 5.5" page: A-F only (G-M made a blank page beside each bill), 18 rows (rows 19-20 spilled onto a blank page)
+    assert [b.id for b in ws.row_breaks.brk] == [18, 36] and ws.print_area.endswith("$A$1:$F$54")
+    pm, scale = ws.page_margins, (ws.page_setup.scale or 100) / 100
+    tall = sum(ws.row_dimensions[r].height or 21 for r in range(1, 19)) * scale / 72
+    assert tall <= 5.5 - pm.top - pm.bottom, tall
+    assert all(ws.cell(r, c).value is None for r in range(1, 55) for c in range(7, 14))   # no notes, no helper column G
 
 
 def test_excel_will_not_call_the_file_damaged():
