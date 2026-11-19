@@ -27,6 +27,7 @@ const plMonths = (m) => (m === null || m === undefined ? "–" : `${Number.isInt
 
 function plDueText(i) {
   if (i.state === "unknown") return "ยังไม่มีประวัติ";
+  if (i.est_due) return "ครบระยะแล้ว (ประมาณจากเลขไมล์ล่าสุด ที่อ่านภายใน 30 วัน) — ถึงเวลาทำ";
   if (i.state === "check") return plCheckText(i);
   if (i.days_left === null) return "ปกติ";
   const by = i.due_by === "km" ? "ครบระยะทาง" : "ครบเวลา";
@@ -49,7 +50,8 @@ const plAsOf = () => (pl.simDays > 0 ? addDaysISO(plToday(), pl.simDays) : "");
 const plAsOfQuery = (sep = "?") => (pl.simDays > 0 ? `${sep}as_of=${plAsOf()}` : "");
 
 function plChip(i, v) {
-  const when = i.state === "check" ? `เช็คเลขไมล์${i.km_left !== null && i.km_left !== undefined ? ` · ≈ ${i.km_left >= 0 ? "เหลือ" : "เกิน"} ${baht(Math.abs(i.km_left))} กม.` : ""}`
+  const over = i.km_left !== null && i.km_left !== undefined && i.km_left < 0 ? ` · ≈ เกิน ${baht(-i.km_left)} กม.` : "";
+  const when = i.est_due ? `ครบระยะ (ประมาณ)${over}` : i.state === "check" ? `เช็คเลขไมล์${i.km_left !== null && i.km_left !== undefined ? ` · ≈ ${i.km_left >= 0 ? "เหลือ" : "เกิน"} ${baht(Math.abs(i.km_left))} กม.` : ""}`
     : i.days_left < 0 ? `เลย ${-i.days_left} วัน` : i.days_left === 0 ? "วันนี้" : `อีก ${i.days_left} วัน`;
   if (i.snoozed_until) return el("span", { class: "badge", title: "เลื่อนเตือนอยู่", text: `💤 ${i.label} · เลื่อนเตือนถึง ${beDate(i.snoozed_until)}` });
   if (!v) return el("span", { class: `badge ${PL_BADGE[i.state]}`.trim(), title: plDueText(i), text: `${i.label} · ${when}` });
@@ -177,7 +179,7 @@ function plKpi(label, value, sub, tone, show, current) {
 }
 
 // chips in the order that matters: engine oil first, then overdue, read-the-odometer, soon -- the most overdue first
-const plChipOrder = (i) => [PL_OIL.includes(i.key) ? 0 : 1, { overdue: 0, check: 1, soon: 2 }[i.state] ?? 3, i.days_left ?? 0];
+const plChipOrder = (i) => [PL_OIL.includes(i.key) ? 0 : 1, i.est_due ? 1 : { overdue: 0, check: 2, soon: 3 }[i.state] ?? 4, i.days_left ?? 0];
 const plByUrgency = (a, b) => { const x = plChipOrder(a), y = plChipOrder(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; };
 
 // a truck with the green tick has its whole history in: an item with no record there was never done (grey, not counted as due)
@@ -630,7 +632,7 @@ function openReadingDialog(v, kind = "gps") {
     gpsOnly,
     el("div", { class: "mfields" }, mfield(d, "end_date", "ถึงวันที่", { type: "date", caption: true }), mfield(d, "km", "ระยะทาง (กม.)", { type: "number" }), mfield(d, "notes", "หมายเหตุ", { wide: true })));
   draw();
-  plOpenDialog("บันทึกระยะทางที่วิ่ง", "บันทึก");
+  plOpenDialog(`${kind === "odometer" ? "อ่านเลขไมล์" : "บันทึกระยะทางที่วิ่ง"} — ${plLabel(v) || "รถ"}`, "บันทึก");   // the truck in the title: no reading on the wrong truck
 }
 
 async function savePlanDialog() {
@@ -646,6 +648,15 @@ async function savePlanDialog() {
     } else if (dlg.kind === "snooze") {
       await api("/api/plan/snooze", jsonOpts("POST", { vehicle_id: dlg.vehicle.id, item_key: dlg.item.key, days: d.days }));
     } else {
+      // more than 1,000 km a day since the last reading is asked about before it is saved; a LOWER figure the server refuses
+      // (owner, 19 Nov 2026: 366,876 for #52 landed on #9, read at 608,485 the same day)
+      const last = dlg.vehicle.odometer, km = Number(String(d.km || "").replace(/,/g, ""));
+      if (d.kind === "odometer" && last && last.km && km) {
+        const days = Math.max(1, Math.round((new Date(d.end_date) - new Date(last.date)) / 86400000));
+        if (km >= last.km && (km - last.km) / days > 1000 && !confirm(`${baht(km)} กม. ไม่เข้ากับเลขไมล์ล่าสุดของ ${plLabel(dlg.vehicle)} (${baht(last.km)} กม. เมื่อ ${beDate(last.date)}) — ใช่รถคันนี้แน่ไหม?`)) {
+          btn.disabled = false; return;
+        }
+      }
       await api("/api/plan/readings", jsonOpts("POST", { vehicle_id: dlg.vehicle.id, kind: d.kind, start_date: d.kind === "gps" ? d.start_date : "", end_date: d.end_date, km: d.km, notes: d.notes }));
     }
   } catch (err) {

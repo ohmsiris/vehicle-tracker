@@ -36,6 +36,7 @@ RULE_SETS = [SMALL, BIG]
 NEEDS_V10 = "ต้องรัน schema_v10.sql และ schema_v11.sql ใน Supabase ก่อน จึงจะใช้แผนซ่อมบำรุงได้"
 NEEDS_V13 = "ต้องรัน schema_v13.sql ใน Supabase ก่อน จึงจะเลื่อนเตือนได้"
 SOON_DAYS = 10                       # "due soon" = due within this many days (changeable in the settings)
+FRESH_READING_DAYS = 30              # an odometer reading this recent is current: never ask for another (drivers read monthly)
 DEFAULT_REMIND_ITEMS = None   # which items are reminded about: None = every item (changeable in the settings)
 OVERDUE_REPEAT_DAYS = 3              # an overdue item is reminded about again every this many days
 MAX_SNOOZE_DAYS = 90
@@ -504,6 +505,9 @@ def item_status(item: dict, last: Optional[dict], kmpd: Optional[float], odo_now
     due, by = min(candidates)
     left = (due - today).days
     check_at = add_months_f(done, item["interval_months"]) if item.get("interval_months") else None
+    # a reading of the last FRESH_READING_DAYS is current (owner, 19 Nov 2026: the drivers read the odometer once a month at most): the
+    # plan never asks for another one then, it goes by that reading plus the km per day -- past the km = "ครบระยะ (ประมาณ)", due now
+    fresh = bool(odo_now and (today - odo_now["date"]).days <= FRESH_READING_DAYS)
     if cap_date < today:
         state, by = "overdue", "months"
     elif read_left is not None and read_left <= 0 and not km_trusted:
@@ -513,9 +517,12 @@ def item_status(item: dict, last: Optional[dict], kmpd: Optional[float], odo_now
         # how late: the day the reading says the km were passed (from the km per day), not the time limit still ahead
         due = odo_now["date"] - timedelta(days=math.ceil(-read_left / kmpd)) if kmpd else odo_now["date"]
         left = (due - today).days
+    elif out["km_left"] is not None and out["km_left"] <= 0 and fresh:
+        state, out["est_due"] = "soon", True                     # read lately, and the km since then reach it: due now (still not red)
+        due, left = today, 0
     elif out["km_left"] is not None and out["km_left"] <= 0:
         state, out["check_reason"] = "check", "estimate"         # only the estimate says it is due: read the odometer first
-    elif check_at and check_at <= today and not (odo_now and odo_now["date"] >= check_at and read_left is not None):
+    elif check_at and check_at <= today and not fresh and not (odo_now and odo_now["date"] >= check_at and read_left is not None):
         state, out["check_reason"] = "check", "months"           # the group's months have passed and nobody has read the odometer since
     elif left <= soon_days:
         state = "soon"
@@ -1001,21 +1008,26 @@ def _vehicles(branch: str = "", vehicle_class: str = "", only: Optional[str] = N
 
 
 OIL_KEYS = ("engine_oil",)             # engine oil alone decides (owner, 19 Nov 2026): a late filter on its own (#13) is not an oil change
-URGENT_ORDER = {"overdue": 0, "check": 1, "soon": 2}
+URGENT_ORDER = {"overdue": 0, "due_est": 1, "check": 2, "soon": 3}
+
+
+def _urgency(i: dict) -> int:
+    return URGENT_ORDER["due_est" if i.get("est_due") else i["state"]]
 
 
 def priority(r: dict) -> tuple:
-    """How urgent a truck is (owner, 19 Nov 2026): engine oil first -- overdue, then read-the-odometer, then soon, the most
-    overdue on top -- then trucks where only other items are due, then the rest. Snoozed items do not count. (tier, days left)"""
+    """How urgent a truck is (owner, 19 Nov 2026): engine oil first -- overdue, then due now by the estimate from a fresh reading, then
+    read-the-odometer, then soon, the most overdue on top -- then trucks where only other items are due, then the rest. Snoozed items do
+    not count. (tier, days left)"""
     live = [i for i in r.get("items") or [] if i.get("state") in URGENT_ORDER and not i.get("snoozed_until")]
     oil = [i for i in live if i["key"] in OIL_KEYS]
     pick = oil or live
     if not pick:
         known = sum((r.get("counts") or {}).get(s, 0) for s in ("overdue", "check", "soon", "ok"))
-        return (6 if known else 7, 0)
-    worst = min(pick, key=lambda i: (URGENT_ORDER[i["state"]], i.get("days_left") if i.get("days_left") is not None else 0))
+        return (8 if known else 9, 0)
+    worst = min(pick, key=lambda i: (_urgency(i), i.get("days_left") if i.get("days_left") is not None else 0))
     days = worst.get("days_left") if worst.get("days_left") is not None else 0
-    return ((0 if oil else 3) + URGENT_ORDER[worst["state"]], days)
+    return ((0 if oil else 4) + _urgency(worst), days)
 
 
 def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date] = None) -> dict:
@@ -1195,8 +1207,17 @@ def delete_record(record_id: str) -> None:
 def add_reading(data: dict) -> dict:
     _require()
     row = clean_reading(data, today=today_th())
-    if not _vehicles(only=row["vehicle_id"]):
+    found = _vehicles(only=row["vehicle_id"])
+    if not found:
         raise InvalidPlan("ไม่พบรถคันนี้")
+    if row["kind"] == "odometer":                     # the same check as the monthly sheet: lower than the last = a typo or the wrong truck
+        day = date.fromisoformat(row["end_date"])      # (owner, 19 Nov 2026: #52's 366,876 landed on #9, read at 608,485 that day)
+        prev = supabase.select("km_readings", {"select": "km,end_date", "vehicle_id": f"eq.{row['vehicle_id']}", "kind": "eq.odometer",
+                                               "end_date": f"lte.{row['end_date']}", "order": "km.desc", "limit": "1"})
+        last = {row["vehicle_id"]: {"date": date.fromisoformat(prev[0]["end_date"]), "km": prev[0]["km"], "label": _truck_label(found[0])}} if prev else {}
+        errors = check_bulk_readings([{"vehicle_id": row["vehicle_id"], "km": row["km"]}], last, day)
+        if errors:
+            raise InvalidPlan(f"{errors[0]} — ใช่รถคันนี้แน่ไหม?")
     return supabase.insert("km_readings", [row])[0]
 
 

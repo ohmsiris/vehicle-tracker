@@ -776,6 +776,44 @@ def test_engine_oil_decides_the_order_most_overdue_first():
     rows = [fine, others_only, many_others, oil_later, snoozed_oil, oil_read, oil_late]
     # a late oil filter on its own (#13) is not an oil change: it ranks with the other items (owner, 19 Nov 2026)
     assert sorted(rows, key=sp.priority) == [oil_late, oil_read, many_others, others_only, oil_later, fine, snoozed_oil]
-    assert sp.priority(oil_later) == (3, -15)
-    assert sp.priority(oil_late) == (0, -181) and sp.priority(many_others) == (2, 5) and sp.priority(others_only) == (3, -4200)
-    assert sp.priority(snoozed_oil) == (6, 0)                     # a snoozed item does not count
+    assert sp.priority(oil_later) == (4, -15)
+    assert sp.priority(oil_late) == (0, -181) and sp.priority(many_others) == (3, 5) and sp.priority(others_only) == (4, -4200)
+    assert sp.priority(snoozed_oil) == (8, 0)                     # a snoozed item does not count
+
+
+def test_a_reading_of_the_last_30_days_is_current_no_new_reading_is_asked():
+    # truck #20 (owner, 19 Nov 2026): read 3 days ago 29 km short of its oil change; at ~90 km a day it has passed it since.
+    # Drivers read the odometer once a month: the plan says the oil change is due now ("ครบระยะ (ประมาณ)"), not "read it again".
+    recs = [{"item_key": "engine_oil", "done_date": "2026-09-20", "odometer_km": 588_276, "source": "bill"}]
+    reads = [{"kind": "odometer", "end_date": "2026-09-20", "km": 588_276}, {"kind": "odometer", "end_date": "2026-11-16", "km": 598_247}]
+    oil = lambda p: next(i for i in p["items"] if i["key"] == "engine_oil")          # noqa: E731
+    p = sp.vehicle_plan(KM_TRUCK, group=sp.merge_groups(None)["S2"], records=recs, readings=reads, overrides=[], today=date(2026, 11, 19))
+    o = oil(p)
+    assert o["state"] == "soon" and o.get("est_due") and o["days_left"] == 0 and o["km_left"] < 0 and o["check_reason"] is None
+    # the same truck read 45 days ago: the estimate alone is past the km -> read the odometer first (yellow), as before
+    old = [{"kind": "odometer", "end_date": "2026-08-01", "km": 580_000}, {"kind": "odometer", "end_date": "2026-10-05", "km": 596_000}]
+    p = sp.vehicle_plan(KM_TRUCK, group=sp.merge_groups(None)["S2"], records=recs, readings=old, overrides=[], today=date(2026, 11, 19))
+    assert oil(p)["state"] == "check" and oil(p)["check_reason"] == "estimate"
+
+
+def test_one_reading_lower_than_the_trucks_last_is_refused(monkeypatch):
+    import pytest
+    monkeypatch.setattr(sp, "_require", lambda: None)
+    monkeypatch.setattr(sp, "_vehicles", lambda **kw: [{"id": VID, "vehicle_number": "9", "plate_number": "1ฒถ 8975"}])
+    monkeypatch.setattr(sp.supabase, "select", lambda table, params: [{"km": 608_485, "end_date": "2026-11-19"}])
+    saved = []
+    monkeypatch.setattr(sp.supabase, "insert", lambda table, rows: saved.extend(rows) or rows)
+    monkeypatch.setattr(sp, "today_th", lambda: date(2026, 11, 19))
+    with pytest.raises(sp.InvalidPlan, match="น้อยกว่าเลขไมล์ล่าสุด"):
+        sp.add_reading({"vehicle_id": VID, "kind": "odometer", "end_date": "2026-11-19", "km": "366876"})      # #52's figure, on #9
+    assert saved == []
+    sp.add_reading({"vehicle_id": VID, "kind": "odometer", "end_date": "2026-11-19", "km": "608600"})
+    assert saved and saved[0]["km"] == 608_600
+
+
+def test_oil_due_now_by_a_fresh_estimate_comes_before_a_truck_that_only_needs_reading():
+    from app import service_plan as sp
+    counts = {"overdue": 0, "check": 1, "soon": 1, "ok": 1}
+    due_now = {"items": [{"key": "engine_oil", "state": "soon", "days_left": 0, "est_due": True}], "counts": counts}
+    read_it = {"items": [{"key": "engine_oil", "state": "check", "days_left": 0}], "counts": counts}
+    assert sorted([read_it, due_now], key=sp.priority) == [due_now, read_it]
