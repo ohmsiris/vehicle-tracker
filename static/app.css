@@ -2265,6 +2265,7 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .ti-sumcard .lc-tiles { margin: 12px 0; }
 #tbMaker .ti-entry { box-shadow: none; border: 0; padding: 0; margin: 0; }
 
+.ti-editrow .ti-custcell select + span select, .ti-editrow .ti-custcell span select { display: block; margin-top: 4px; }
 .ti-pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 4px; }
 .ti-printed { white-space: nowrap; text-align: center; }
 .ti-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
