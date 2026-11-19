@@ -2265,7 +2265,17 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .ti-sumcard .lc-tiles { margin: 12px 0; }
 #tbMaker .ti-entry { box-shadow: none; border: 0; padding: 0; margin: 0; }
 
-.ti-editrow .ti-custcell select + span select, .ti-editrow .ti-custcell span select { display: block; margin-top: 4px; }
+/* the edit row (owner, 19 Nov 2026): one full-width strip of labelled boxes */
+.ti-editbox { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; padding: 6px 4px; }
+.ti-editbox .ti-f { flex: 0 0 110px; min-width: 0; }                  /* น้ำหนัก, ราคา (narrowed below) */
+.ti-editbox .ti-f:nth-child(1) { flex-basis: 150px; }                  /* เลขที่ */
+.ti-editbox .ti-f:nth-child(2) { flex-basis: 150px; }                  /* วันที่ */
+.ti-editbox .ti-f:nth-child(3) { flex-basis: 170px; }                  /* ลูกค้า */
+.ti-editbox .ti-f:nth-child(6) { flex-basis: 80px; }                   /* ราคา */
+.ti-editbox .ti-f input[type="date"] { min-width: 0; }
+.ti-editbox .ti-editslot:empty { display: none; }
+.ti-editbox .ti-editslot .ti-f { width: 120px; }
+.ti-editbtns { display: flex; gap: 8px; margin-left: auto; }
 .ti-pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 4px; }
 .ti-printed { white-space: nowrap; text-align: center; }
 .ti-sortable { cursor: pointer; user-select: none; white-space: nowrap; }

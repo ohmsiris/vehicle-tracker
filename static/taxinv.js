@@ -307,7 +307,7 @@ function tiRow(r) {
       onchange: (e) => { if (e.target.checked) ti_.pick.add(r.id); else ti_.pick.delete(r.id); const bar = $("tiPickBar"); if (bar) fill(bar, tiPickBar()); } }) : null),
     el("td", { class: "nowrap" }, cn ? el("span", { class: "badge", text: "ใบลดหนี้" }) : null, ` ${r.doc_no}`),
     el("td", { class: "nowrap", text: tiDMY(r.doc_date) }),
-    el("td", {}, (tiCust(r.customer_code) || {}).name || r.customer_name || "–",
+    el("td", { class: "nowrap" }, (tiCust(r.customer_code) || {}).name || r.customer_name || "–",
       tiItems(r.customer_code).length > 1 && r.item ? el("span", { class: "small muted", text: ` · ${tiItemShort(r.item)}` }) : null),
     el("td", { class: "r", text: r.kg != null ? tiB(r.kg, 0) : "–" }),
     el("td", { class: "r", text: r.price != null ? String(Number(r.price)) : "–" }),
@@ -325,12 +325,15 @@ function tiEditRow(r) {
     ...ti_.data.customers.map((c) => el("option", { value: c.code, text: c.name, selected: c.code === r.customer_code })));
   const kg = inp(r.kg, { inputmode: "decimal" }), price = inp(r.price == null ? "" : Number(r.price), { inputmode: "decimal" });
   const amount = inp(r.amount, { inputmode: "decimal", title: "ยอดก่อน VAT — ใช้เมื่อไม่มีน้ำหนัก (ซันฟู้ด / ใบลดหนี้)" });
-  const itemBox = el("span", {});
+  const f = (label, node, cls = "") => el("label", { class: `ti-f ${cls}` }, el("span", { class: "small muted", text: label }), node);
+  const itemBox = el("span", { class: "ti-editslot" }), amountBox = f("ก่อน VAT (ซันฟู้ด / ใบลดหนี้)", amount);
   let item = null;
   const drawItem = () => {                                 // a dropdown only for a customer with more than one item
     const list = tiItems(cust.value);
     item = list.length > 1 ? el("select", { "aria-label": "รายการ" }, ...list.map((t) => el("option", { value: t, text: tiItemShort(t), selected: t === r.item }))) : null;
-    fill(itemBox, item);
+    fill(itemBox, item ? f("รายการ", item) : null);
+    const c = ti_.data.customers.find((x) => x.code === cust.value);
+    amountBox.hidden = !((c && c.mode === "total") || r.kind === "credit_note");     // the amount is typed only where there is no weight
   };
   cust.addEventListener("change", drawItem);
   drawItem();
@@ -348,13 +351,14 @@ function tiEditRow(r) {
     try { await api(`/api/tax-invoices/${r.id}`, { method: "DELETE" }); ti_.editing = null; await tiReload(); }
     catch (err) { showErr("tiError", `ลบไม่สำเร็จ: ${err.message}`); }
   };
+  // owner, 19 Nov 2026: one full-width strip with labelled boxes, not boxes squeezed into the list's columns
   return el("tr", { class: "ti-editrow", onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } if (e.key === "Escape") { ti_.editing = null; $("tiRows").replaceWith(tiRows()); } } },
-    el("td", {}), el("td", {}, no), el("td", {}, date), el("td", { class: "ti-custcell" }, cust, itemBox), el("td", { class: "r" }, kg), el("td", { class: "r" }, price),
-    el("td", { class: "r", colspan: "3" }, amount), el("td", {}),
-    el("td", { class: "nowrap" },
-      el("button", { class: "btn small primary", type: "button", text: "บันทึก", onclick: save }), " ",
-      el("button", { class: "btn small", type: "button", text: "ยกเลิก", onclick: () => { ti_.editing = null; $("tiRows").replaceWith(tiRows()); } }), " ",
-      el("button", { class: "btn small danger", type: "button", text: "ลบ", onclick: del })),
+    el("td", { colspan: "11" }, el("div", { class: "ti-editbox" },
+      f("เลขที่", no, "ti-wide"), f("วันที่", date), f("ลูกค้า", cust, "ti-wide"), itemBox, f("น้ำหนัก (กก.)", kg), f("ราคา", price), amountBox,
+      el("div", { class: "ti-editbtns" },
+        el("button", { class: "btn primary", type: "button", text: "บันทึก", onclick: save }),
+        el("button", { class: "btn", type: "button", text: "ยกเลิก", onclick: () => { ti_.editing = null; $("tiRows").replaceWith(tiRows()); } }),
+        el("button", { class: "btn danger", type: "button", text: "ลบ", onclick: del })))),
   );
 }
 
