@@ -508,6 +508,24 @@ def _line_who(cid: str, customers: dict) -> dict:
     return {"customer_id": None, "walkin": (customers.get(str(cid)) or {}).get("name") or str(cid)}
 
 
+TEST_BRANCH = "ทดสอบ"          # the owner's test route (19 Nov 2026): kept off every สระบุรี page
+
+
+def reset_test_route(driver: dict) -> dict:
+    """ล้างข้อมูลทดสอบ (owner, 19 Nov 2026): wipe every day, line and ice order of the test route so a scenario can be tried again. Only a
+    route on the test branch -- a real route can never be wiped from a phone."""
+    from app import supabase
+    r = supabase.select("sale_routes", {"select": "id,branch", "id": f"eq.{int(driver['route_id'])}", "limit": "1"})
+    if not r or r[0].get("branch") != TEST_BRANCH:
+        raise RouteSalesError("ล้างได้เฉพาะสายทดสอบ")
+    rid = f"eq.{r[0]['id']}"
+    days = supabase.select_all("sale_days", {"select": "id", "route_id": rid, "order": "id.asc"})
+    supabase.delete("sale_lines", {"route_id": rid})
+    supabase.delete("sale_days", {"route_id": rid})
+    supabase.delete("sale_orders", {"route_id": rid})
+    return {"days": len(days)}
+
+
 def request_reopen(driver: dict, day_text: str) -> dict:
     from app import supabase
     try:

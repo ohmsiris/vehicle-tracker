@@ -2668,6 +2668,14 @@ def api_driver_reopen_request(body: dict = Body(...), x_driver_token: str = Head
     return _route_call(route_sales.request_reopen, driver, str(body.get("day") or ""))
 
 
+@app.post("/api/d/test-reset")
+def api_driver_test_reset(x_driver_token: str = Header(default="")) -> dict:
+    """The test route only: wipe its days to try again (owner, 19 Nov 2026)."""
+    from app import route_sales
+    driver = _route_call(route_sales.driver_for_token, x_driver_token)
+    return _route_call(route_sales.reset_test_route, driver)
+
+
 @app.post("/api/d/logout")
 def api_driver_logout(x_driver_token: str = Header(default="")) -> dict:
     from app import route_sales

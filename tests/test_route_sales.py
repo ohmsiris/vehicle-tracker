@@ -263,3 +263,18 @@ def test_an_old_page_that_sends_an_incomplete_day_keeps_it_open(monkeypatch):
     assert day_row["status"] == "open" and day_row["doc"]["closed"] is False and day_row["doc"]["sales"]   # nothing typed is lost
     r = rs.save_day({"id": 1, "route_id": 1}, rs.today().isoformat(), 6, {**doc, "returns": {"lod": 6}, "cash": {"100": 1, "50": 1}})
     assert r["status"] == "closed" and "notice" not in r
+
+
+def test_only_the_test_route_can_be_wiped_from_a_phone(monkeypatch):
+    import pytest
+    from app import route_sales as rs, supabase
+    gone = []
+    monkeypatch.setattr(supabase, "delete", lambda table, params: gone.append((table, params["route_id"])))
+    monkeypatch.setattr(supabase, "select_all", lambda table, params: [{"id": 1}, {"id": 2}])
+    monkeypatch.setattr(supabase, "select", lambda table, params: [{"id": 14, "branch": "สระบุรี"}])
+    with pytest.raises(rs.RouteSalesError):
+        rs.reset_test_route({"route_id": 14})                       # route 35, the real one: refused
+    assert gone == []
+    monkeypatch.setattr(supabase, "select", lambda table, params: [{"id": 32, "branch": "ทดสอบ"}])
+    assert rs.reset_test_route({"route_id": 32}) == {"days": 2}
+    assert gone == [("sale_lines", "eq.32"), ("sale_days", "eq.32"), ("sale_orders", "eq.32")]

@@ -722,11 +722,24 @@
       '<span class="gap">คงค้าง</span><b class="gap">฿' + money(t.credit) + "</b>" +
       (t.discount ? "<span>ส่วนลด</span><b>฿" + money(t.discount) + "</b>" : "") + (t.freeShops ? "<span>แจกฟรี</span><b>" + t.freeShops + " ร้าน</b>" : "") + "</div></div>";
     if (!ro) html += '<button class="btn primary big" id="closeday">' + ic("send", "s") + 'ส่งใบขาย · ปิดวัน</button><p class="note" style="text-align:center;margin-top:6px">ส่งแล้วจะล็อก ถ้าต้องแก้ต้องขอออฟฟิศ</p>';
+    var testing = S.boot.route.branch === "ทดสอบ";              // the owner's test route: a button to wipe it and try again (19 Nov 2026)
+    if (testing) html += '<div class="box testbox"><h3>บัญชีทดสอบ</h3><p class="note">ลบทุกวันของสายทดสอบ (ขาย รับ คืน เงิน ยอดสั่ง) แล้วเริ่มใหม่ — สายจริงไม่ถูกแตะ</p>' +
+      '<button class="btn big" id="testreset">ล้างข้อมูลทดสอบ · เริ่มใหม่</button></div>';
     html += '<div class="foot"><button class="link" id="logout">' + ic("out", "s") + "ออกจากระบบ</button></div>";
     m.innerHTML = S.status !== "open" ? html.replace('<div class="foot">', orderCards(false) + '<div class="foot">') : html;   // sent: remind to order tomorrow
     wireOrderCards();
     wireBanners();
     $("logout").onclick = logout;
+    if (testing) $("testreset").onclick = function () {
+      if (!window.confirm("ลบข้อมูลทุกวันของสายทดสอบแล้วเริ่มใหม่?")) return;
+      clearTimeout(S.syncTimer);
+      api("POST", "/api/d/test-reset").then(function () {
+        var pre = "icebox_day_" + S.boot.route.id + "_";
+        try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf(pre) === 0) localStorage.removeItem(k); }); } catch (e) { /* blocked */ }
+        S.rev = 0; S.savedRev = 0; S.tab = "loads";
+        toast("ล้างข้อมูลทดสอบแล้ว ✓"); reload(true);
+      }).catch(function (e) { toast(e.message || "ล้างไม่สำเร็จ", true); });
+    };
     if (ro) { m.onchange = null; return; }
     m.onchange = function (e) {
       var el = e.target;
