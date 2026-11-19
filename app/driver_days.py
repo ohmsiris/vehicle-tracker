@@ -210,6 +210,44 @@ def _period_rows(start: date, end: date) -> list[dict]:
                                                      "and": f"(day.lte.{end.isoformat()})", "order": "day.asc,id.asc"})
 
 
+def _norm(name) -> str:
+    return re.sub(r"\s+", " ", str(name or "")).strip()
+
+
+def phone_suggestions(sale_days: list[dict], days: list[str]) -> dict:
+    """The phone sales sheets (route_sales, sale_days rows) as this page's figures, day by day -- a suggestion while the paper and the phone
+    run side by side (owner, 19 Nov 2026): qty = what the phone says was sold, money = the day's sales at list price (totals.commission_sales:
+    cash + credit + billed, the figure the paper's เงินที่ได้ matches). Days with nothing sold are left out."""
+    out: dict = {}
+    for d in sale_days:
+        day = str(d.get("day") or "")
+        t = d.get("totals") or {}
+        sold = {k: int(v) if float(v).is_integer() else float(v) for k, v in (t.get("sold") or {}).items() if k in dict(PRODUCTS) and v}
+        if day not in days or not sold or day in out:
+            continue
+        money = t.get("commission_sales", t.get("amount"))
+        out[day] = {"qty": sold, "money": round(float(money), 2) if money is not None else None, "sent": d.get("status") == "closed"}
+    return out
+
+
+def _phone_days(employee_id: str, full_name: str, start: date, end: date) -> dict:
+    """This driver's phone sheets in the period: the routes whose truck he drives (fleet list), or whose driver / phone login carries his name."""
+    try:
+        truck = next((d["truck"] for d in drivers() if d["id"] == employee_id), None)
+        routes = supabase.select_all("sale_routes", {"select": "id,truck_no,driver_name", "branch": f"eq.{BRANCH}", "order": "id.asc"})
+        logins = supabase.select_all("sale_drivers", {"select": "route_id,name", "order": "id.asc"})
+        me = _norm(full_name)
+        ids = sorted({r["id"] for r in routes if (truck and str(r.get("truck_no") or "") == str(truck)) or _norm(r.get("driver_name")) == me}
+                     | {x["route_id"] for x in logins if _norm(x.get("name")) == me})
+        if not ids:
+            return {}
+        rows = supabase.select_all("sale_days", {"select": "day,status,totals", "route_id": f"in.({','.join(map(str, ids))})",
+                                                 "day": f"gte.{start.isoformat()}", "and": f"(day.lte.{end.isoformat()})", "order": "day.asc,id.asc"})
+    except supabase.SupabaseError:
+        return {}
+    return phone_suggestions(rows, [(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)])
+
+
 def overview(month: str, half) -> dict:
     """The page's list: every driver, how many days of this half-month each already has, and the period's summary."""
     month, half = _check_period(month, half)
@@ -238,7 +276,8 @@ def sheet(employee_id: str, month: str, half) -> dict:
              "parts": (saved.get(d.isoformat()) or {}).get("money_parts") or {}}
             for d in days_of(month, half)]
     last = max((r["updated_at"] for r in saved.values() if r.get("updated_at")), default=None)
-    return {"employee_id": employee_id, "name": emp["full_name"], "nickname": emp.get("nickname") or "", "month": month, "half": half,
+    start, end = period_bounds(month, half)
+    return {"phone": _phone_days(employee_id, emp["full_name"], start, end),"employee_id": employee_id, "name": emp["full_name"], "nickname": emp.get("nickname") or "", "month": month, "half": half,
             "split": employee_id in split_ids(), "parts": [{"key": k, "label": lab} for k, lab in PARTS],
             "products": [{"key": k, "label": lab} for k, lab in PRODUCTS], "rows": rows,
             "totals": totals([r for r in saved.values() if not r.get("spare")]), "spare_totals": totals([r for r in saved.values() if r.get("spare")]),

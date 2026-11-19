@@ -123,3 +123,16 @@ def test_split_drivers_type_two_sales_and_the_money_is_their_sum(monkeypatch):
     ws = openpyxl.load_workbook(io.BytesIO(dd.export("2026-11", 2)[0]))["#7 เฉิ่ม"]
     assert ws["H4"].value == "ยอดขายซอง (บาท)" and ws["I4"].value == "ยอดขายหลอด (บาท)" and ws["J4"].value == "เงินที่ได้ (บาท)"
     assert (ws["H5"].value, ws["I5"].value, ws["J5"].value) == (1250.5, 300, 1550.5) and ws["H5"].number_format == "#,##0.00"
+
+
+def test_phone_sheet_figures_are_offered_day_by_day():
+    from app import driver_days as dd
+    days = ["2026-11-11", "2026-11-12", "2026-11-13"]
+    got = dd.phone_suggestions([
+        {"day": "2026-11-11", "status": "closed", "totals": {"sold": {"zong": 3, "kak": 0, "lod": 73.0, "mo": 11}, "amount": 4877.0, "commission_sales": 4877.0}},
+        {"day": "2026-11-12", "status": "open", "totals": {"sold": {"zong": 0, "lod": 0}, "amount": 0}},          # nothing sold: no suggestion
+        {"day": "2026-11-13", "status": "open", "totals": {"sold": {"lod": 40}, "amount": 3970.0}},                 # old totals: amount
+        {"day": "2026-10-20", "status": "closed", "totals": {"sold": {"lod": 9}, "amount": 1}},                     # outside the half-month
+    ], days)
+    assert got == {"2026-11-11": {"qty": {"zong": 3, "lod": 73, "mo": 11}, "money": 4877.0, "sent": True},
+                   "2026-11-13": {"qty": {"lod": 40}, "money": 3970.0, "sent": False}}

@@ -70,6 +70,28 @@ function ddRender() {
   if (dd_.sheet) { const first = document.querySelector("#ddBody .dd-in"); if (first) first.focus(); }
 }
 
+// ใบขายมือถือ (owner, 19 Nov 2026): while the paper and the phone sheet run side by side, the phone's figures for a day are offered here --
+// a tag beside each date (click: copy that day in; orange when it differs from what is typed) and one button that fills every empty day.
+// Copied figures stay tinted until บันทึก, which is the confirm. Temporary: goes once the paper does. Server: driver_days.phone_suggestions.
+const ddPhoneOf = (r) => ((dd_.sheet && dd_.sheet.phone) || {})[r.day] || null;
+const ddEmptyRow = (r) => ddNum(r.money) === null && !Object.values(r.qty || {}).some((v) => ddNum(v) !== null)
+  && !Object.values(r.parts || {}).some((v) => ddNum(v) !== null);
+function ddPhoneText(p) {
+  const q = dd_.sheet.products.filter((x) => p.qty[x.key]).map((x) => `${x.label} ${elN(p.qty[x.key])}`).join(" · ");
+  return `ใบขายมือถือ (${p.sent ? "ส่งแล้ว" : "ยังไม่ส่ง"}): ${q || "–"}${p.money != null ? ` · เงิน ${elN(p.money, p.money % 1 ? 2 : 0)}` : ""}`;
+}
+function ddPhoneDiffers(r, p) {
+  if (ddEmptyRow(r)) return false;
+  const qd = dd_.sheet.products.some((x) => (ddNum((r.qty || {})[x.key]) || 0) !== (Number(p.qty[x.key]) || 0));
+  const md = !dd_.sheet.split && p.money != null && Math.abs((ddNum(r.money) || 0) - p.money) >= 0.5;
+  return qd || md;
+}
+function ddApplyPhone(r, p) {
+  r.qty = Object.fromEntries(Object.entries(p.qty).map(([k, v]) => [k, String(v)]));
+  if (!dd_.sheet.split && p.money != null) r.money = String(p.money);    // split drivers type ซอง / หลอด baht themselves
+  r._phone = true; dd_.dirty = true;
+}
+
 function ddSheet() {
   const s = dd_.sheet, prods = s.products;
   // ทวาย สำเริง สะอาด (owner, 17 Nov 2026): ยอดขายซอง + ยอดขายหลอด in baht; เงินที่ได้ is their sum -- worked out, not typed, Tab skips it
@@ -84,12 +106,14 @@ function ddSheet() {
     const tr = el("tr", { class: `${d.getDay() === 0 ? "dd-sun" : ""}${r.spare ? " dd-spare" : ""}` }, el("td", { class: "dd-date" }, el("span", { class: "muted small", text: DD_DOW[d.getDay()] }), ` ${r.day.slice(8, 10)}/${r.day.slice(5, 7)}`));
     cols.forEach((c, ci) => {
       const v = valOf(r, c);
-      const inp = el("input", { type: "text", inputmode: c.whole ? "numeric" : "decimal", class: `dd-in${c.key === "money" || c.part ? " dd-money" : ""}${c.auto ? " dd-auto" : ""}`,
+      const sug = r._phone && !c.part && !(split && c.key === "money");
+      const inp = el("input", { type: "text", inputmode: c.whole ? "numeric" : "decimal", class: `dd-in${c.key === "money" || c.part ? " dd-money" : ""}${c.auto ? " dd-auto" : ""}${sug ? " dd-sug" : ""}`,
         value: v == null ? "" : String(v), "aria-label": `${ddDMY(r.day)} ${c.label}`, autocomplete: "off",
         ...(c.auto ? { readOnly: true, tabindex: "-1", title: "รวมยอดขายซอง + หลอด ให้เอง — แก้ไม่ได้" } : {}) });
       inp.dataset.r = String(ri); inp.dataset.c = String(ci);
       inp.addEventListener("input", () => {
         if (c.auto) return;
+        inp.classList.remove("dd-sug");
         if (c.key === "money") r.money = inp.value;
         else if (c.part) {
           r.parts = { ...(r.parts || {}) }; r.parts[c.part] = inp.value;
@@ -116,6 +140,13 @@ function ddSheet() {
         text: `สำรอง: ${p.nickname || p.name.split(" ")[0]}` })));
     const who = by;
     tr.firstChild.append(who);                                  // beside the date: always in sight, never in the Tab path
+    const ph = ddPhoneOf(r);
+    if (ph) {
+      const diff = ddPhoneDiffers(r, ph);
+      tr.firstChild.append(el("button", { type: "button", tabindex: "-1", class: `dd-ph${diff ? " diff" : ""}${ph.sent ? "" : " unsent"}`,
+        title: `${ddPhoneText(ph)}${diff ? " — ต่างจากที่กรอก" : ""} · คลิกเพื่อใช้ตัวเลขนี้`, text: diff ? "มือถือ ≠" : "มือถือ",
+        onclick: () => { ddApplyPhone(r, ph); ddRender(); } }));
+    }
     body.append(tr);
   });
   const foot = el("tfoot", {}, el("tr", {}, el("td", { text: "รวม (ขับเอง)" }), ...cols.map((c) => el("td", { class: "r", id: `ddT_${c.key}` }))),
@@ -124,12 +155,25 @@ function ddSheet() {
     el("thead", {}, el("tr", {}, el("th", { text: "วันที่" }), ...cols.map((c) => el("th", { class: "r", text: c.label })))), body, foot);
   const card = el("section", { class: "card dd-card" },
     el("div", { class: "dd-head" }, el("h3", { text: `${s.name}${s.nickname ? ` (${s.nickname})` : ""}` }), el("span", { id: "ddStatus", class: "small" })),
+    ddPhoneBar(),
     el("div", { class: "lc-wrap" }, table),
     el("div", { class: "dd-actions" },
       el("span", { id: "ddDays", class: "muted small" }),
       el("button", { class: "btn primary", id: "ddSave", type: "button", text: "บันทึก", onclick: ddSave })));
   queueMicrotask(() => { ddTotals(cols); ddStatus(); });
   return card;
+}
+
+function ddPhoneBar() {
+  const s = dd_.sheet, rows = s.rows.filter((r) => ddPhoneOf(r));
+  if (!rows.length) return null;
+  const empty = rows.filter((r) => !r.spare && ddEmptyRow(r)), diff = rows.filter((r) => ddPhoneDiffers(r, ddPhoneOf(r))).length;
+  const sent = rows.filter((r) => ddPhoneOf(r).sent).length;
+  return el("div", { class: "dd-phonebar" },
+    el("span", { text: `ใบขายมือถือมี ${rows.length} วัน${sent < rows.length ? ` (ส่งแล้ว ${sent})` : ""}${diff ? ` · ต่างจากที่กรอก ${diff} วัน` : ""}` }),
+    el("button", { class: "btn small", type: "button", tabindex: "-1", disabled: !empty.length, text: `เติมจากมือถือ ${empty.length} วันที่ยังว่าง`,
+      onclick: () => { empty.forEach((r) => ddApplyPhone(r, ddPhoneOf(r))); ddRender(); } }),
+    el("span", { class: "small muted", text: "ตัวเลขที่เติมเป็นสีฟ้า — ตรวจกับใบกระดาษ แล้วกดบันทึก" }));
 }
 
 function ddTotals(cols) {

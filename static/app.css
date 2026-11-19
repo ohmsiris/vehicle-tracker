@@ -2287,4 +2287,9 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .dd-whowrap { display: inline-flex; align-items: center; gap: 4px; }
 .dd-by { font: inherit; font-size: 12px; padding: 2px 4px; margin-left: 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); width: 118px; min-width: 118px; }
 .dd-by.on { border-color: var(--warn-line); color: var(--warn); font-weight: 600; }
+.dd-phonebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 10px; border-radius: var(--radius-sm); background: var(--accent-soft); font-size: 13px; }
+.dd-ph { font: inherit; font-size: 11px; line-height: 1.4; padding: 1px 7px; margin-left: 6px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--accent); cursor: pointer; white-space: nowrap; }
+.dd-ph.diff { border-color: var(--warn-line); color: var(--warn); background: var(--warn-soft); }
+.dd-ph.unsent { border-style: dashed; }
+.dd-in.dd-sug { background: var(--accent-soft); }
 .dd-in.dd-auto { background: var(--surface-2); color: var(--text); font-weight: 600; border-style: dashed; cursor: default; }
