@@ -2266,16 +2266,20 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 #tbMaker .ti-entry { box-shadow: none; border: 0; padding: 0; margin: 0; }
 
 /* the edit row (owner, 19 Nov 2026): one full-width strip of labelled boxes */
-.ti-editbox { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; padding: 6px 4px; }
-.ti-editbox .ti-f { flex: 0 0 110px; min-width: 0; }                  /* น้ำหนัก, ราคา (narrowed below) */
-.ti-editbox .ti-f:nth-child(1) { flex-basis: 150px; }                  /* เลขที่ */
-.ti-editbox .ti-f:nth-child(2) { flex-basis: 150px; }                  /* วันที่ */
-.ti-editbox .ti-f:nth-child(3) { flex-basis: 170px; }                  /* ลูกค้า */
-.ti-editbox .ti-f:nth-child(6) { flex-basis: 80px; }                   /* ราคา */
-.ti-editbox .ti-f input[type="date"] { min-width: 0; }
+.ti-editbox { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 6px 4px; }
+.ti-editbox .ti-f { flex: 0 0 100px; min-width: 0; gap: 4px; margin-bottom: 0; }        /* น้ำหนัก (others below) */
+.ti-editbox .ti-f:nth-child(1) { flex-basis: 140px; }                  /* เลขที่ */
+.ti-editbox .ti-f:nth-child(2) { flex-basis: 145px; }                  /* วันที่ */
+.ti-editbox .ti-f:nth-child(3) { flex-basis: 160px; }                  /* ลูกค้า */
+.ti-editbox .ti-f:nth-child(6) { flex-basis: 75px; }                   /* ราคา */
 .ti-editbox .ti-editslot:empty { display: none; }
-.ti-editbox .ti-editslot .ti-f { width: 120px; }
+.ti-editbox .ti-editslot .ti-f { width: 110px; }
+/* every box the same height (a date box and a dropdown are otherwise taller / shorter than a text box), so the labels line up */
+.ti-editbox input, .ti-editbox select { box-sizing: border-box; height: 38px; min-width: 0; padding: 0 9px; font-size: 14px; line-height: 36px; }
+.ti-editbox .ti-f > span { line-height: 1.3; }
+.ti-editbox .dtf input.dtf-text { min-height: 0; height: 38px; }
 .ti-editbtns { display: flex; gap: 8px; margin-left: auto; }
+.ti-editbtns .btn { height: 38px; box-sizing: border-box; padding-top: 0; padding-bottom: 0; }
 .ti-pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 4px; }
 .ti-printed { white-space: nowrap; text-align: center; }
 .ti-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
