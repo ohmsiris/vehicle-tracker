@@ -185,8 +185,8 @@ the reminders, `/api/plan/reminders`), one small card per truck with what is due
 "เข้าคิว ↓") and it becomes a repair request "ถึงรอบบำรุง: น้ำมันเครื่อง, …". A truck with any unfinished job on the board
 (waiting, at a shop, back waiting for the bill) has no card there: instead its job card carries a **ถึงรอบบำรุง** button (red / amber,
 green ✓ once every due item is named in the job). It opens a list of what is due -- "never recorded" items folded underneath -- with
-the text to copy ("น้ำมันเครื่อง, กรองน้ำมันเครื่อง, …"), "+ เพิ่ม" per item and "เพิ่มทั้งหมดลงในงานนี้", which add the names to the end
-of the job's text, and a link to the truck's plan.
+"+ เพิ่ม" per item and "เพิ่มทั้งหมดลงในงานนี้", which add the names to the end
+of the job's text, **ข้อความส่งอู่** (the same message dialog as on แผนซ่อมบำรุง, not a second format) and a link to the truck's plan.
 "+ แจ้งซ่อม" goes to the request tab.
 
 **Who to call**: on the board and "รถอยู่ที่ไหน" the server works out who to ring about each request (`fleet.call_target`): the truck's main driver -- or, for a factory truck (รถหน้าโรง, which has no driver), whoever reported the problem (ผู้แจ้ง), found among the drivers by nickname / name / first name when exactly one matches and has a number. A driver's number is a tap-to-call button (`tel:`) on the truck's page, the drivers list, the board cards

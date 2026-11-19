@@ -235,17 +235,18 @@ function openDueDialog(r) {
   $("dueNeverBox").hidden = !d.never.length;
   $("dueNeverBox").querySelector("summary").textContent = `ไม่เคยมีบันทึก (${d.never.length})`;
   fill($("dueNeverTable").tBodies[0], ...d.never.map((n) => row(n.label, "ไม่เคยมีบันทึก", "never")));
-  $("dueText").value = d.items.map((i) => i.label).join(", ");
   $("dueAddAll").disabled = !d.items.some((i) => !inJob(r, i.label));
-  $("dueCopied").hidden = true;
   $("dueError").hidden = true;
   if (!$("dueDialog").open) $("dueDialog").showModal();
 }
 
-async function copyDueText() {
-  const t = $("dueText");
-  try { await navigator.clipboard.writeText(t.value); } catch (e) { t.select(); document.execCommand("copy"); }
-  $("dueCopied").hidden = false;
+// the message for the shop: the same "ข้อความส่งอู่" as on แผนซ่อมบำรุง (plan.js openShopText), not a second format
+async function openDueShopText() {
+  let d;
+  try { d = await api(`/api/plan/vehicles/${dueTarget.vehicle_id}`); } catch (err) { $("dueError").textContent = err.message; $("dueError").hidden = false; return; }
+  $("dueDialog").close();
+  openShopText({ id: d.vehicle.id, plate_number: d.vehicle.plate_number, vehicle_number: d.vehicle.vehicle_number, nickname: d.vehicle.nickname,
+    history_current_on: d.vehicle.history_current_on, items: d.items, next_visit: d.next_visit, next_visit_date: d.next_visit_date });
 }
 
 // add items to the end of the job's text ("ซ่อมคัดซี" -> "ซ่อมคัดซี, น้ำมันเครื่อง, กรองน้ำมันเครื่อง"); ones already in it are skipped
@@ -967,7 +968,7 @@ function initBoard() {
   $("fixHasBill").addEventListener("click", () => submitFix("fixed_awaiting_bill"));
   $("fixNoBill").addEventListener("click", () => submitFix("fixed_no_bill"));
   $("dueClose").addEventListener("click", () => $("dueDialog").close());
-  $("dueCopy").addEventListener("click", copyDueText);
+  $("dueShopText").addEventListener("click", openDueShopText);
   $("dueAddAll").addEventListener("click", () => addDueToJob(((board.dueOf.get(dueTarget.vehicle_id) || { items: [] }).items).map((i) => i.label)));
   $("duePlanLink").addEventListener("click", () => $("dueDialog").close());
   $("reCancel").addEventListener("click", () => $("reqEditDialog").close());
