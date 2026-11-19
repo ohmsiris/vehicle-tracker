@@ -1000,6 +1000,24 @@ def _vehicles(branch: str = "", vehicle_class: str = "", only: Optional[str] = N
     return supabase.select_all("vehicles", params)
 
 
+OIL_KEYS = ("engine_oil", "engine_filter")
+URGENT_ORDER = {"overdue": 0, "check": 1, "soon": 2}
+
+
+def priority(r: dict) -> tuple:
+    """How urgent a truck is (owner, 19 Nov 2026): engine oil / oil filter first -- overdue, then read-the-odometer, then soon, the most
+    overdue on top -- then trucks where only other items are due, then the rest. Snoozed items do not count. (tier, days left)"""
+    live = [i for i in r.get("items") or [] if i.get("state") in URGENT_ORDER and not i.get("snoozed_until")]
+    oil = [i for i in live if i["key"] in OIL_KEYS]
+    pick = oil or live
+    if not pick:
+        known = sum((r.get("counts") or {}).get(s, 0) for s in ("overdue", "check", "soon", "ok"))
+        return (6 if known else 7, 0)
+    worst = min(pick, key=lambda i: (URGENT_ORDER[i["state"]], i.get("days_left") if i.get("days_left") is not None else 0))
+    days = worst.get("days_left") if worst.get("days_left") is not None else 0
+    return ((0 if oil else 3) + URGENT_ORDER[worst["state"]], days)
+
+
 def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date] = None) -> dict:
     """Every active truck with its programme, the trucks that need attention first. `today` is the day to look from
     (the "look ahead" slider passes a later one: nothing is saved, it only shows what would be due then)."""
@@ -1024,10 +1042,10 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
                      "at_shop": at_shop.get(v["id"])})
 
     def rank(r):
-        c = r["counts"]
-        known = c["overdue"] + c["check"] + c["soon"] + c["ok"]
-        return (1 if r.get("at_shop") else 0, -c["overdue"], -c["check"], -c["soon"], 0 if known else 1, str(r.get("branch")), _numkey(r.get("vehicle_number")))      # at a shop: last
+        return (1 if r.get("at_shop") else 0, *priority(r), str(r.get("branch")), _numkey(r.get("vehicle_number")))      # at a shop: last
 
+    for r in rows:
+        r["priority"] = list(priority(r))
     rows.sort(key=rank)
     totals = {s: sum(r["counts"][s] for r in rows) for s in ("overdue", "check", "soon", "ok", "unknown")}
     return {"as_of": today.isoformat(), "simulated": today != real_today, "soon_days": soon_days, "ready": ready, "vehicles": rows, "totals": totals,

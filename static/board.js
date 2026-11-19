@@ -186,7 +186,11 @@ async function loadDueStrip() {
     byTruck.get(it.vehicle_id).items.push(it);
   }
   for (const n of r.never || []) if (byTruck.has(n.vehicle_id)) byTruck.get(n.vehicle_id).never.push(n);
-  board.due = [...byTruck.values()].sort((a, b) => Math.min(...a.items.map((i) => i.days_left)) - Math.min(...b.items.map((i) => i.days_left)));
+  // the same order as แผนซ่อมบำรุง (owner, 19 Nov 2026): engine oil / oil filter first, the most overdue on top; trucks with other items after
+  const isOil = (i) => ["engine_oil", "engine_filter"].includes(i.item_key);
+  const rank = (d) => { const o = d.items.filter(isOil); return [o.length ? 0 : 1, Math.min(...(o.length ? o : d.items).map((i) => i.days_left))]; };
+  for (const d of byTruck.values()) d.items.sort((a, b) => (isOil(a) ? 0 : 1) - (isOil(b) ? 0 : 1) || a.days_left - b.days_left);
+  board.due = [...byTruck.values()].sort((a, b) => { const x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1]; });
   renderDueStrip();
 }
 

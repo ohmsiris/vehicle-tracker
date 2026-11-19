@@ -249,6 +249,10 @@ dialog label { margin: 14px 0 5px; }
   background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: var(--radius);
   box-shadow: var(--shadow-sm); padding: 15px 18px 16px;
 }
+#plKpis { grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); }      /* six tiles on one row */
+button.kpi-btn { font: inherit; text-align: left; cursor: pointer; color: inherit; width: 100%; }
+button.kpi-btn:hover { box-shadow: var(--shadow-md); }
+button.kpi-btn.on { outline: 2px solid var(--accent); outline-offset: 1px; }
 .kpi.warn { border-top-color: var(--warn-line); background: linear-gradient(180deg, var(--warn-soft), var(--surface) 70%); }
 .kpi.bad { border-top-color: var(--bad); background: linear-gradient(180deg, var(--bad-soft), var(--surface) 70%); }
 .kpi-group { margin: 6px 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }

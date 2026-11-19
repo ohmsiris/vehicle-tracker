@@ -760,3 +760,20 @@ def test_the_valve_cover_gasket_is_not_an_item_of_its_own():
     assert "valve_cover_seal" not in sp.ITEMS
     assert sp.classify_items("ปะเก็นฝาครอบวาล์ว 4JJ3(อีซูซุ)(ใหม่)-AC") == []          # a part, not a job
     assert sp.classify_items("ปรับตั้งวาล์ว4J**") == ["valve_adjust"]
+
+
+def test_engine_oil_decides_the_order_most_overdue_first():
+    from app import service_plan as sp
+    it = lambda key, state, days, **kw: {"key": key, "state": state, "days_left": days, **kw}          # noqa: E731
+    counts = {"overdue": 0, "check": 0, "soon": 0, "ok": 1}
+    many_others = {"items": [it("fuel_filter", "overdue", -8), it("air_filter", "overdue", -387), it("engine_oil", "soon", 5)], "counts": counts}
+    oil_late = {"items": [it("engine_oil", "overdue", -181), it("brake_clutch_fluid", "overdue", -512)], "counts": counts}
+    oil_later = {"items": [it("engine_filter", "overdue", -15)], "counts": counts}
+    oil_read = {"items": [it("engine_oil", "check", -2)], "counts": counts}
+    others_only = {"items": [it("power_steering", "overdue", -4200)], "counts": counts}
+    snoozed_oil = {"items": [it("engine_oil", "overdue", -900, snoozed_until="2026-12-01")], "counts": counts}
+    fine = {"items": [it("engine_oil", "ok", 90)], "counts": counts}
+    rows = [fine, others_only, many_others, oil_later, snoozed_oil, oil_read, oil_late]
+    assert sorted(rows, key=sp.priority) == [oil_late, oil_later, oil_read, many_others, others_only, fine, snoozed_oil]
+    assert sp.priority(oil_late) == (0, -181) and sp.priority(many_others) == (2, 5) and sp.priority(others_only) == (3, -4200)
+    assert sp.priority(snoozed_oil) == (6, 0)                     # a snoozed item does not count

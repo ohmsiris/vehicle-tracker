@@ -42,7 +42,7 @@ function plKmPerDay(k) {
 }
 
 const plSourceText = (src) => (src === "bill" ? "จากบิล" : src === "baseline" ? "เริ่มนับ" : "ช่างทำเอง / บันทึกเอง");
-const plLabel = (v) => [v.vehicle_number ? `#${v.vehicle_number}` : null, v.plate_number, v.nickname].filter(Boolean).join(" · ");
+const plLabel = (v) => [v.vehicle_number && v.vehicle_number !== v.plate_number ? `#${v.vehicle_number}` : null, v.plate_number, v.nickname].filter(Boolean).join(" · ");   // no number of its own: the plate once
 
 // The day the page is looking at: today, or (slider) some days ahead. Nothing is saved by looking ahead.
 const plAsOf = () => (pl.simDays > 0 ? addDaysISO(plToday(), pl.simDays) : "");
@@ -127,38 +127,65 @@ async function loadPreview() {
   fill($("plPreviewMeta"), `${r.items.length} รายการที่จะเตือน${r.snoozed.length ? ` · ที่เลื่อนเตือนไว้ ${r.snoozed.length}` : ""} · ${r.enabled ? "เปิดเตือนอยู่" : "ปิดการเตือนอยู่"} — ตัวเลขข้างเมนู “แผนซ่อมบำรุง” นับรายการเหล่านี้ (ไม่ส่ง LINE)`);
 }
 
+// owner, 19 Nov 2026: the trucks come most urgent first -- engine oil / oil filter overdue on top (the server's priority), the rest after;
+// each tile is also a filter (click it), and the dropdown has one entry per kind of trouble
+const PL_OIL = ["engine_oil", "engine_filter"];
+const plLive = (v, state) => v.items.some((i) => i.state === state && !i.snoozed_until);
+const plOilDue = (v) => v.items.some((i) => PL_OIL.includes(i.key) && plNeedsAttention(i) && !i.snoozed_until);
+const PL_SHOW = {
+  due: (v) => v.counts.overdue || v.counts.check || v.counts.soon || v.odometer_anomaly,
+  oil: plOilDue,
+  overdue: (v) => plLive(v, "overdue"),
+  check: (v) => plLive(v, "check") || !!v.odometer_anomaly,
+  soon: (v) => plLive(v, "soon"),
+  nohistory: (v) => v.has_plan && !(v.counts.overdue + (v.counts.check || 0) + v.counts.soon + v.counts.ok),
+  all: () => true,
+};
+
+function plSetShow(show) {
+  $("plShow").value = $("plShow").value === show && show !== "due" ? "due" : show;     // the same tile again: back to "ที่ต้องทำ"
+  renderOverview();
+  $("plList").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function renderOverview() {
   const o = pl.overview;
   if (!o) return;
   const t = o.totals, k = o.trucks;
-  fill($("plKpis"),
-    plKpi("รถที่มีรายการเลยกำหนด", k.overdue, `${t.overdue} รายการ (เลขไมล์จริงถึงระยะ หรือเกินเวลาสูงสุด)`, k.overdue ? "bad" : ""),
-    plKpi("รถที่ควรอ่านเลขไมล์", k.check || 0, `${t.check || 0} รายการ — อ่านเลขไมล์ก่อนส่งซ่อม${k.anomaly ? ` · ข้อมูลไมล์ผิดปกติ ${k.anomaly} คัน` : ""}`, k.check ? "warn" : ""),
-    plKpi("รถที่ใกล้ถึงกำหนด", k.soon, `ภายใน ${o.soon_days || pl.opts.soon_days} วัน · ${t.soon} รายการ`, k.soon ? "warn" : ""),
-    plKpi("รถที่ยังไม่มีประวัติเลย", k.no_history, "บันทึกครั้งล่าสุดเพื่อเริ่มนับ", ""),
-    plKpi("รายการที่ปกติ", t.ok, "อยู่ในระยะ", ""));
-  const q = $("plQ").value.trim().toLowerCase();
   const show = $("plShow").value;
-  const rows = o.vehicles.filter((v) => {
-    if (q && ![v.plate_number, v.vehicle_number, v.nickname, v.make, v.model, v.usage].filter(Boolean).join(" ").toLowerCase().includes(q)) return false;
-    if (show === "due") return v.counts.overdue || v.counts.check || v.counts.soon || v.odometer_anomaly;
-    if (show === "nohistory") return v.has_plan && !(v.counts.overdue + (v.counts.check || 0) + v.counts.soon + v.counts.ok);
-    return true;
-  });
+  const q = $("plQ").value.trim().toLowerCase();
+  const found = o.vehicles.filter((v) => !q || [v.plate_number, v.vehicle_number, v.nickname, v.make, v.model, v.usage].filter(Boolean).join(" ").toLowerCase().includes(q));
+  const n = (key) => found.filter(PL_SHOW[key]).length;             // each tile counts exactly the trucks it lists when clicked (the search box too)
+  const oilTrucks = n("oil"), overdue = n("overdue"), check = n("check"), soon = n("soon");
+  fill($("plKpis"),
+    plKpi("น้ำมันเครื่อง / กรองถึงกำหนด", oilTrucks, "คัน — คันที่เลยมากที่สุดอยู่บนสุด", oilTrucks ? "bad" : "", "oil", show),
+    plKpi("รถที่มีรายการเลยกำหนด", overdue, `${t.overdue} รายการ (เลขไมล์จริงถึงระยะ หรือเกินเวลาสูงสุด)`, overdue ? "bad" : "", "overdue", show),
+    plKpi("รถที่ควรอ่านเลขไมล์", check, `${t.check || 0} รายการ — อ่านเลขไมล์ก่อนส่งซ่อม${k.anomaly ? ` · ข้อมูลไมล์ผิดปกติ ${k.anomaly} คัน` : ""}`, check ? "warn" : "", "check", show),
+    plKpi("รถที่ใกล้ถึงกำหนด", soon, `ภายใน ${o.soon_days || pl.opts.soon_days} วัน · ${t.soon} รายการ`, soon ? "warn" : "", "soon", show),
+    plKpi("รถที่ยังไม่มีประวัติเลย", n("nohistory"), "บันทึกครั้งล่าสุดเพื่อเริ่มนับ", "", "nohistory", show),
+    plKpi("รถทั้งหมด", found.length, `${t.ok} รายการอยู่ในระยะ — กดเพื่อดูทุกคัน`, "", "all", show));
+  const rows = found.filter(PL_SHOW[show] || PL_SHOW.all);
   const nothing = show === "due" && !rows.length;
   fill($("plCount"), `${rows.length} คัน${nothing ? ` — ไม่มีรถที่ต้องทำตอนนี้${k.no_history ? ` · แต่ยังมี ${k.no_history} คันที่ไม่มีประวัติเลย (เลือก “ที่ยังไม่มีประวัติเลย” เพื่อดู)` : ""}` : ""}${k.no_group ? ` · ${k.no_group} คันยังไม่ได้เลือกกลุ่มแผน (เลือกได้ที่แท็บ “ตั้งค่าระยะ”)` : ""}`);
   fill($("plList"), ...(rows.length ? rows.map(planCard) : [el("p", { class: "muted empty", text: "ไม่พบรถที่ตรงกับตัวกรอง" })]));
 }
 
-function plKpi(label, value, sub, tone) {
-  return el("div", { class: `kpi ${tone}`.trim() }, el("div", { class: "kpi-label", text: label }), el("div", { class: "kpi-value", text: String(value) }), el("div", { class: "kpi-sub", text: sub }));
+function plKpi(label, value, sub, tone, show, current) {
+  return el("button", { class: `kpi kpi-btn ${tone}${show && show === current ? " on" : ""}`.trim(), type: "button", title: "กดเพื่อดูเฉพาะรถกลุ่มนี้",
+    onclick: () => plSetShow(show) },
+    el("div", { class: "kpi-label", text: label }), el("div", { class: "kpi-value", text: String(value) }), el("div", { class: "kpi-sub", text: sub }));
 }
+
+// chips in the order that matters: engine oil / oil filter first, then overdue, read-the-odometer, soon -- the most overdue first
+const plChipOrder = (i) => [PL_OIL.includes(i.key) ? 0 : 1, { overdue: 0, check: 1, soon: 2 }[i.state] ?? 3, i.days_left ?? 0];
+const plByUrgency = (a, b) => { const x = plChipOrder(a), y = plChipOrder(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; };
 
 // a truck with the green tick has its whole history in: an item with no record there was never done (grey, not counted as due)
 const plNeverChip = (i) => el("span", { class: "badge never", title: "รถคันนี้ประวัติครบ (✓) แต่ไม่เคยมีบันทึกรายการนี้ — อาจไม่เคยทำเลย", text: `${i.label} · ไม่เคยทำ` });
 
 function planCard(v) {
-  const attention = v.items.filter(plNeedsAttention);
+  const attention = v.items.filter(plNeedsAttention).sort(plByUrgency);
+  const needsReading = PL_SHOW.check(v);                                         // the same trucks the "ควรอ่านเลขไมล์" tile lists
   const never = v.history_current_on ? v.items.filter((i) => i.state === "unknown") : [];
   const known = v.counts.overdue + (v.counts.check || 0) + v.counts.soon + v.counts.ok;
   const shop = v.at_shop;                                                        // on the repair board as "อยู่ที่อู่": the plan can wait until it is back
@@ -168,6 +195,7 @@ function planCard(v) {
       shop ? el("span", { class: "badge shop", title: "อยู่ในบอร์ดซ่อมว่า “อยู่ที่อู่” — รอให้กลับมาก่อนค่อยดูแผน", text: `🔧 อยู่ที่อู่${shop.shop ? ` · ${shop.shop}` : ""}${shop.since ? ` · ตั้งแต่ ${beDate(shop.since)}` : ""}` }) : null,
       el("span", { class: "badge", title: v.group ? v.group.label : "", text: v.group ? `${v.group.code} · ${plMonths(v.group.months)} ต่อ ${baht(v.group.step_km)} กม.` : "ยังไม่ได้เลือกกลุ่มแผน" }),
       el("span", { class: "grow" }),
+      needsReading ? el("button", { class: "btn small", type: "button", text: "อ่านเลขไมล์", title: "ใส่เลขไมล์จากหน้าปัด", onclick: () => openReadingDialog(v, "odometer") }) : null,
       el("button", { class: "btn small", type: "button", text: "ข้อความส่งอู่", onclick: () => openShopText(v) }),
       v.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, attention.map((i) => i.key)) }) : null),
     !v.has_plan ? el("p", { class: "muted small" }, "ยังไม่ได้เลือกกลุ่มแผน — เลือกได้ที่ ", el("a", { href: "#plan-settings", text: "ตั้งค่าระยะ › รถแต่ละคันใช้กลุ่มไหน" }), " (หรือปล่อยว่างถ้าไม่ต้องทำตาราง)")
@@ -585,8 +613,8 @@ function plShopPick(draft, key, label) {
   return el("div", { class: "mfield" }, el("label", { for: `mf_${key}`, text: label }), sel, own);
 }
 
-function openReadingDialog(v) {
-  pl.dlg = { kind: "reading", vehicle: v, draft: { kind: "gps", start_date: "", end_date: plToday(), km: "", notes: "" } };
+function openReadingDialog(v, kind = "gps") {
+  pl.dlg = { kind: "reading", vehicle: v, draft: { kind, start_date: "", end_date: plToday(), km: "", notes: "" } };
   const d = pl.dlg.draft;
   const gpsOnly = el("div", { class: "mfields" }, mfield(d, "start_date", "ตั้งแต่วันที่", { type: "date", caption: true }));
   const draw = () => {
