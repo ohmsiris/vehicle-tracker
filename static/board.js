@@ -219,7 +219,7 @@ function dueButton(r) {
     text: `ถึงรอบบำรุง ${left.length} รายการ · ${left[0].label}${left.length > 1 ? " …" : ""}`, onclick: () => openDueDialog(r) });
 }
 
-let dueTarget = null;
+let dueTarget = null, dueAddList = [];
 function openDueDialog(r) {
   dueTarget = r;
   const d = board.dueOf.get(r.vehicle_id) || { items: [], never: [] };
@@ -235,7 +235,14 @@ function openDueDialog(r) {
   $("dueNeverBox").hidden = !d.never.length;
   $("dueNeverBox").querySelector("summary").textContent = `ไม่เคยมีบันทึก (${d.never.length})`;
   fill($("dueNeverTable").tBodies[0], ...d.never.map((n) => row(n.label, "ไม่เคยมีบันทึก", "never")));
-  $("dueAddAll").disabled = !d.items.some((i) => !inJob(r, i.label));
+  // "add all": the due items first; once they are all in the job, the never-recorded ones (owner, 19 Nov 2026: #48 had both due items
+  // in its job, so the button went grey with 11 never-recorded items still listed)
+  const dueLeft = d.items.filter((i) => !inJob(r, i.label)).map((i) => i.label);
+  const neverLeft = d.never.filter((n) => !inJob(r, n.label)).map((n) => n.label);
+  dueAddList = dueLeft.length ? dueLeft : neverLeft;
+  $("dueAddAll").textContent = dueLeft.length ? `เพิ่มที่ถึงรอบทั้งหมด (${dueLeft.length})` : neverLeft.length ? `เพิ่มที่ไม่เคยมีบันทึกทั้งหมด (${neverLeft.length})` : "ครบแล้วทุกรายการ ✓";
+  $("dueAddAll").disabled = !dueAddList.length;
+  if (!dueLeft.length && neverLeft.length) $("dueNeverBox").open = true;
   $("dueError").hidden = true;
   if (!$("dueDialog").open) $("dueDialog").showModal();
 }
@@ -969,7 +976,7 @@ function initBoard() {
   $("fixNoBill").addEventListener("click", () => submitFix("fixed_no_bill"));
   $("dueClose").addEventListener("click", () => $("dueDialog").close());
   $("dueShopText").addEventListener("click", openDueShopText);
-  $("dueAddAll").addEventListener("click", () => addDueToJob(((board.dueOf.get(dueTarget.vehicle_id) || { items: [] }).items).map((i) => i.label)));
+  $("dueAddAll").addEventListener("click", () => addDueToJob(dueAddList));
   $("duePlanLink").addEventListener("click", () => $("dueDialog").close());
   $("reCancel").addEventListener("click", () => $("reqEditDialog").close());
   $("reSave").addEventListener("click", saveEditRequest);
