@@ -149,6 +149,9 @@ main { padding: 12px 12px calc(92px + env(safe-area-inset-bottom)); max-width: 6
 .cashrow .sub { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .sumgrid { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 16px; }
 .sumgrid b { text-align: right; font-variant-numeric: tabular-nums; }
+.sumgrid .sub-k, .sumgrid .sub-v { font-size: 14px; color: var(--muted, #6b7280); padding-left: 12px; font-weight: 400; }
+.sumgrid .sum-k, .sumgrid .sum-v { border-top: 1px solid var(--line, #d1d5db); padding-top: 6px; margin-top: 2px; font-weight: 700; font-size: 18px; }
+.sumgrid .sum-k { margin-right: -12px; padding-right: 12px; }      /* one unbroken line across the grid gap */
 .toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 40; background: var(--ink); color: #fff;
   padding: 10px 16px; border-radius: 12px; font-size: 15px; max-width: calc(100vw - 32px); text-align: center; }
 .toast.bad { background: var(--bad); }

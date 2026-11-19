@@ -715,8 +715,12 @@
     var expect = t.cash + t.old, cdiff = counted - expect;
     html += '<div class="sumgrid"><span>ต้องมีเงินสด</span><b>฿' + money(expect) + "</b><span>นับได้</span><b>฿" + money(counted) + "</b>" +
       (S.doc.cash ? '<span>ต่าง</span><b class="' + (Math.abs(cdiff) < 1 ? "ok-t" : cdiff < 0 ? "bad-t" : "warn-t") + '">' + (Math.abs(cdiff) < 1 ? "ตรง ✓" : (cdiff < 0 ? "ขาด ฿" : "เกิน ฿") + money(Math.abs(cdiff))) + "</b>" : "") + "</div></div>";
-    html += '<div class="box"><h3>สรุปวันนี้</h3><div class="sumgrid"><span>ขายทั้งหมด</span><b>฿' + money(t.amount) + "</b><span>เงินสด (ขายวันนี้)</span><b>฿" + money(t.cash) +
-      "</b><span>เก็บเงินวันก่อน</span><b>฿" + money(t.old) + "</b><span>ค้าง</span><b>฿" + money(t.credit) + "</b><span>วางบิล</span><b>฿" + money(t.invoiced) + "</b>" +
+    // owner, 19 Nov 2026: the day's sales as เงินสด (cash customers, ค้าง included) + วางบิล (bill customers) = รวม -- the total sold today
+    html += '<div class="box"><h3>สรุปวันนี้</h3><div class="sumgrid"><span>เงินสด</span><b>฿' + money(t.cash + t.credit) + "</b>" +
+      (t.credit ? '<span class="sub-k">ในนี้ยังค้าง</span><b class="sub-v">฿' + money(t.credit) + "</b>" : "") +
+      "<span>วางบิล</span><b>฿" + money(t.invoiced) + "</b>" +
+      '<span class="sum-k">รวม</span><b class="sum-v">฿' + money(t.amount) + "</b>" +
+      (t.old ? "<span>เก็บเงินวันก่อน</span><b>฿" + money(t.old) + "</b>" : "") +
       (t.discount ? "<span>ส่วนลด</span><b>฿" + money(t.discount) + "</b>" : "") + (t.freeShops ? "<span>แจกฟรี</span><b>" + t.freeShops + " ร้าน</b>" : "") + "</div></div>";
     if (!ro) html += '<button class="btn primary big" id="closeday">' + ic("send", "s") + 'ส่งใบขาย · ปิดวัน</button><p class="note" style="text-align:center;margin-top:6px">ส่งแล้วจะล็อก ถ้าต้องแก้ต้องขอออฟฟิศ</p>';
     html += '<div class="foot"><button class="link" id="logout">' + ic("out", "s") + "ออกจากระบบ</button></div>";
