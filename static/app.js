@@ -124,10 +124,14 @@ function initSidebar() {
 }
 
 // --------------------------------------------------------------- vehicles
+// "#41 สต๊อคน้ำแข็ง · บต 4622 กรุงเทพมหานคร · ISUZU D-Max"; a truck with no number of its own (its number is its plate) shows its
+// nickname instead of the plate twice: "หัวขาว · บฉ 6161 ยโสธร · ISUZU D-Max 2.5" (owner, 19 Nov 2026: which is หัวน้ำเงิน / หัวขาว?)
 function vehicleLabel(v) {
-  const bits = [`#${v.truck_number}`, v.plate, v.province].filter(Boolean).join(" ");
+  const own = v.truck_number && v.truck_number !== v.plate ? `#${v.truck_number}` : "";
+  const plate = [v.plate, v.province].filter(Boolean).join(" ");
+  const who = v.nickname ? `${[own, v.nickname].filter(Boolean).join(" ")} · ${plate}` : [own, plate].filter(Boolean).join(" ");
   const mm = `${v.make || ""} ${v.model || ""}`.trim();
-  return mm ? `${bits} · ${mm}` : bits;
+  return mm ? `${who} · ${mm}` : who;
 }
 
 function fillVehicleSelect(select, selectedIdx = "") {
