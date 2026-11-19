@@ -60,11 +60,11 @@ def upload(feed: str, period: str, branch: str, files: list[tuple[str, bytes]]) 
     done: list[str] = []
     try:
         for r in rows:
-            supabase.storage_upload(r["storage_path"], r["_data"], r["mime_type"])
+            supabase.storage_upload(r["storage_path"], r["_data"], r["mime_type"], bucket=supabase.PRIVATE_BUCKET)
             done.append(r["storage_path"])
         supabase.insert("acc_files", [{k: v for k, v in r.items() if k != "_data"} for r in rows])
     except Exception:
-        supabase.storage_delete(done)
+        supabase.storage_delete(done, bucket=supabase.PRIVATE_BUCKET)
         raise
     out = [{k: r[k] for k in ("id", "feed", "period", "branch", "file_name", "mime_type", "byte_size")} for r in rows]
     if feed == "electricity" and branch != "all":         # PEA bills are read exactly from the PDF (no AI) and booked
@@ -91,13 +91,14 @@ def _row(file_id: str) -> dict:
 
 def download(file_id: str) -> tuple[bytes, str, str]:
     r = _row(file_id)
-    return supabase.storage_download(r["storage_path"]), r["mime_type"] or "application/octet-stream", r["file_name"]
+    return supabase.storage_download_private(r["storage_path"]), r["mime_type"] or "application/octet-stream", r["file_name"]
 
 
 def remove(file_id: str) -> None:
     r = _row(file_id)
     supabase.delete("acc_files", {"id": f"eq.{file_id}"})
-    supabase.storage_delete([r["storage_path"]])
+    supabase.storage_delete([r["storage_path"]], bucket=supabase.PRIVATE_BUCKET)
+    supabase.storage_delete([r["storage_path"]])               # and the old place, for a file from before the move
 
 
 def counts(month: str, half: Optional[int], branch: str) -> dict:

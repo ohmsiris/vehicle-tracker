@@ -18,6 +18,7 @@ if not defined DEST goto :nodrive
 
 rem the photos: only the ones Drive does not have yet; the database export: this run's folder, kept under runs\ by date
 robocopy "backups\files" "%DEST%\files" /E /XO /R:2 /W:5 /NFL /NDL /NJH /NJS >> backups\last_run.log 2>&1
+if exist "backups\files_private" robocopy "backups\files_private" "%DEST%\files_private" /E /XO /R:2 /W:5 /NFL /NDL /NJH /NJS >> backups\last_run.log 2>&1
 set "LATEST="
 for /f "delims=" %%d in ('dir /b /ad /o-n backups\20*') do if not defined LATEST set "LATEST=%%d"
 robocopy "backups\%LATEST%" "%DEST%\runs\%LATEST%" /E /R:2 /W:5 /NFL /NDL /NJH /NJS >> backups\last_run.log 2>&1

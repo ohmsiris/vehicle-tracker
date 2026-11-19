@@ -121,6 +121,12 @@ TABLES: dict[str, str] = {
     "tax_invoice_prices": "id.asc",
     "tax_invoices": "id.asc",
     "tax_invoice_deliveries": "id.asc",
+    "elec_bills": "id.asc",
+    "foh_devices": "token_hash.asc",
+    "foh_entries": "id.asc",
+    "foh_photos": "id.asc",
+    "foh_points": "key.asc",
+    "foh_staff": "id.asc",
 }
 # the tables whose rows point at a file in Storage (storage_path, byte_size): bill photos and purchase-bill photos
 FILE_TABLES = ("event_attachments", "purchase_attachments")
@@ -137,6 +143,9 @@ def run_backup(
     root: Path,
     *,
     now: Optional[datetime] = None,
+    buckets: tuple = (),
+    list_bucket: Optional[Callable[[str], list[dict]]] = None,
+    download_from: Optional[Callable[[str, str], bytes]] = None,
 ) -> dict:
     """
     select_all(table, params) -> every row; download(storage_path) -> file bytes.
@@ -197,6 +206,41 @@ def run_backup(
         downloaded += 1
         total_bytes += len(blob)
 
+    # every file in Storage, whichever table points at it (owner, 19 Nov 2026: ID cards, cash-fuel pages, employee papers, the accounts'
+    # source files were in no backup). buckets = ((bucket, folder under backups/), ...); a file already there with the same size is kept.
+    storage: dict = {}
+    for bucket, folder in buckets:
+        dest = root / folder
+        dest.mkdir(parents=True, exist_ok=True)
+        got = had = size = 0
+        try:
+            objects = list_bucket(bucket)
+        except Exception as exc:
+            problems.append(f"could not list the files of {bucket}: {exc}")
+            continue
+        for obj in objects:
+            target = (dest / obj["path"]).resolve()
+            if dest.resolve() not in target.parents:
+                problems.append(f"unsafe storage path skipped: {bucket}/{obj['path']!r}")
+                continue
+            if target.exists() and (obj.get("size") is None or target.stat().st_size == obj["size"]):
+                had += 1
+                size += target.stat().st_size
+                continue
+            try:
+                blob = download_from(obj["path"], bucket)
+            except Exception as exc:
+                problems.append(f"could not download {bucket}/{obj['path']}: {exc}")
+                continue
+            if obj.get("size") is not None and len(blob) != obj["size"]:
+                problems.append(f"size mismatch for {bucket}/{obj['path']}: storage says {obj['size']} bytes, downloaded {len(blob)}")
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(blob)
+            got += 1
+            size += len(blob)
+        storage[bucket] = {"expected": len(objects), "downloaded_now": got, "already_had": had, "bytes": size, "folder": folder}
+
     # read the tables back from disk: what is on disk is what counts
     for table, n in counts.items():
         on_disk = len(json.loads((data_dir / f"{table}.json").read_text(encoding="utf-8")))
@@ -208,6 +252,7 @@ def run_backup(
         "ok": not problems,
         "rows": counts,
         "files": {"expected": len(attachments), "downloaded_now": downloaded, "already_had": already, "bytes": total_bytes},
+        "storage": storage,
         "tables_not_in_this_database": missing_tables,
         "problems": problems,
     }

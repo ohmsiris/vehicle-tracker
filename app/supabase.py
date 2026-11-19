@@ -190,6 +190,38 @@ def storage_download(path: str, bucket: str = STORAGE_BUCKET) -> bytes:
     return _check(resp, f"storage download {path}").content
 
 
+def storage_download_private(path: str) -> bytes:
+    """A file that belongs in the private bucket (the accounts' pages and files, 19 Nov 2026: they sat in the public bucket under
+    guessable names). Read from the private bucket; one not moved yet is still found in the old place."""
+    try:
+        return storage_download(path, bucket=PRIVATE_BUCKET)
+    except SupabaseError:
+        return storage_download(path)
+
+
+def storage_list_all(bucket: str = STORAGE_BUCKET) -> list[dict]:
+    """Every file in a bucket: [{"path", "size"}] (folders walked one by one; the backup uses this so no stored file is missed)."""
+    out: list[dict] = []
+    todo = [""]
+    while todo:
+        prefix = todo.pop()
+        offset = 0
+        while True:
+            resp = _client().post(f"/storage/v1/object/list/{bucket}", json={"prefix": prefix, "limit": 1000, "offset": offset,
+                                                                             "sortBy": {"column": "name", "order": "asc"}})
+            rows = _check(resp, f"storage list {bucket}/{prefix}").json()
+            for r in rows:
+                path = f"{prefix}{r['name']}"
+                if r.get("id") is None:                    # a folder
+                    todo.append(path + "/")
+                else:
+                    out.append({"path": path, "size": (r.get("metadata") or {}).get("size")})
+            if len(rows) < 1000:
+                break
+            offset += 1000
+    return out
+
+
 def storage_delete(paths: list[str], bucket: str = STORAGE_BUCKET) -> None:
     """Best-effort cleanup (used when a save fails after photos were uploaded)."""
     if not paths:

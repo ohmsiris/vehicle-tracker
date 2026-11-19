@@ -149,3 +149,30 @@ def test_every_table_the_schema_files_create_is_in_the_backup():
         created |= set(re.findall(r"create table (?:if not exists )?(?:public\.)?(\w+)", text, re.I))
     created -= {"service_custom_items", "machine_job_settings"}            # made by schema_v18 / v33 and dropped again by schema_v20 / v34
     assert created - set(backup.TABLES) == set(), "a table is not backed up: add it to app/backup.py TABLES"
+
+
+def test_every_stored_file_is_saved_whichever_table_points_at_it(tmp_path):
+    f = Fake()
+    objects = {"customer-files": [{"path": "cust/12/id.jpg", "size": 4}, {"path": "cashfuel/ab/page.jpg", "size": 2}, {"path": "../evil.jpg", "size": 1}]}
+    blobs = {("cust/12/id.jpg", "customer-files"): b"card", ("cashfuel/ab/page.jpg", "customer-files"): b"pg", ("../evil.jpg", "customer-files"): b"x"}
+    run = lambda: backup.run_backup(f.select_all, f.download, tmp_path, now=NOW, buckets=(("customer-files", "files_private"),),          # noqa: E731
+                                    list_bucket=lambda b: objects[b], download_from=lambda p, b: blobs[(p, b)])
+    m = run()
+    assert (tmp_path / "files_private" / "cust" / "12" / "id.jpg").read_bytes() == b"card"
+    assert m["storage"]["customer-files"] == {"expected": 3, "downloaded_now": 2, "already_had": 0, "bytes": 6, "folder": "files_private"}
+    assert not m["ok"] and "unsafe storage path" in m["problems"][0] and not (tmp_path / "evil.jpg").exists()
+    assert run()["storage"]["customer-files"]["downloaded_now"] == 0                    # the second run fetches nothing again
+
+
+def test_every_table_with_data_has_row_level_security_in_its_schema_file():
+    """A table made without it can be read with the public key (found 19 Nov 2026: the ledger and the tyre store). Every schema file
+    from v89 on must switch it on for each table it creates; the older ones are covered by schema_v89.sql."""
+    import re
+    root = Path(__file__).resolve().parent.parent
+    for sql in root.glob("schema_v*.sql"):
+        n = int(re.search(r"schema_v(\d+)", sql.name).group(1))
+        if n < 89:
+            continue
+        text = sql.read_text(encoding="utf-8").lower()
+        for table in re.findall(r"create table (?:if not exists )?(?:public\.)?(\w+)", text):
+            assert re.search(rf"alter table (?:public\.)?{table} enable row level security", text), f"{sql.name}: {table} has no row level security"

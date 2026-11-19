@@ -247,7 +247,8 @@ def upload_images(batch: dict, pdfs: dict, dpi: int = 140) -> int:
         if not doc or not it.get("file_page"):
             continue
         pix = doc[it["file_page"] - 1].get_pixmap(dpi=dpi)
-        supabase.storage_upload(image_path(batch["batch"], it["page"]), pix.tobytes("jpeg", jpg_quality=72), "image/jpeg", upsert=True)
+        supabase.storage_upload(image_path(batch["batch"], it["page"]), pix.tobytes("jpeg", jpg_quality=72), "image/jpeg", upsert=True,
+                                bucket=supabase.PRIVATE_BUCKET)          # never the public bucket: these names can be guessed
         n += 1
     return n
 
@@ -263,7 +264,7 @@ def doc_image(doc_id: str) -> bytes:
     d = _doc(doc_id)
     if not d.get("image_path"):
         raise BadBatch("เอกสารนี้ไม่มีรูป")
-    return supabase.storage_download(d["image_path"])
+    return supabase.storage_download_private(d["image_path"])
 
 
 def _line_no(source_id: str) -> int:

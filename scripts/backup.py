@@ -22,12 +22,17 @@ def main() -> int:
     if not supabase.configured():
         print("SUPABASE_URL / SUPABASE_SERVICE_KEY are not set (.env).")
         return 2
-    m = run_backup(supabase.select_all, supabase.storage_download, ROOT / "backups")
+    # every stored file: the bill photos keep their folder (backups/files); the private bucket (ID cards, cash-fuel pages) gets its own
+    m = run_backup(supabase.select_all, supabase.storage_download, ROOT / "backups",
+                   buckets=((supabase.STORAGE_BUCKET, "files"), (supabase.PRIVATE_BUCKET, "files_private")),
+                   list_bucket=supabase.storage_list_all, download_from=lambda path, bucket: supabase.storage_download(path, bucket=bucket))
     print("Rows   :", ", ".join(f"{t} {n}" for t, n in m["rows"].items()))
     if m.get("tables_not_in_this_database"):
         print("Not in this database yet (nothing to save):", ", ".join(m["tables_not_in_this_database"]))
     f = m["files"]
     print(f"Files  : {f['expected']} expected, {f['downloaded_now']} downloaded now, {f['already_had']} already had ({f['bytes'] / 1_000_000:.1f} MB total)")
+    for bucket, s in (m.get("storage") or {}).items():
+        print(f"Storage: {bucket}: {s['expected']} files, {s['downloaded_now']} downloaded now, {s['already_had']} already had ({s['bytes'] / 1_000_000:.1f} MB)")
     if m["ok"]:
         print("RESULT : OK -- everything was read back and checked.")
         return 0
