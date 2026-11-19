@@ -774,6 +774,8 @@ def test_engine_oil_decides_the_order_most_overdue_first():
     snoozed_oil = {"items": [it("engine_oil", "overdue", -900, snoozed_until="2026-12-01")], "counts": counts}
     fine = {"items": [it("engine_oil", "ok", 90)], "counts": counts}
     rows = [fine, others_only, many_others, oil_later, snoozed_oil, oil_read, oil_late]
-    assert sorted(rows, key=sp.priority) == [oil_late, oil_later, oil_read, many_others, others_only, fine, snoozed_oil]
+    # a late oil filter on its own (#13) is not an oil change: it ranks with the other items (owner, 19 Nov 2026)
+    assert sorted(rows, key=sp.priority) == [oil_late, oil_read, many_others, others_only, oil_later, fine, snoozed_oil]
+    assert sp.priority(oil_later) == (3, -15)
     assert sp.priority(oil_late) == (0, -181) and sp.priority(many_others) == (2, 5) and sp.priority(others_only) == (3, -4200)
     assert sp.priority(snoozed_oil) == (6, 0)                     # a snoozed item does not count

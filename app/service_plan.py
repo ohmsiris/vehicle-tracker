@@ -1000,12 +1000,12 @@ def _vehicles(branch: str = "", vehicle_class: str = "", only: Optional[str] = N
     return supabase.select_all("vehicles", params)
 
 
-OIL_KEYS = ("engine_oil", "engine_filter")
+OIL_KEYS = ("engine_oil",)             # engine oil alone decides (owner, 19 Nov 2026): a late filter on its own (#13) is not an oil change
 URGENT_ORDER = {"overdue": 0, "check": 1, "soon": 2}
 
 
 def priority(r: dict) -> tuple:
-    """How urgent a truck is (owner, 19 Nov 2026): engine oil / oil filter first -- overdue, then read-the-odometer, then soon, the most
+    """How urgent a truck is (owner, 19 Nov 2026): engine oil first -- overdue, then read-the-odometer, then soon, the most
     overdue on top -- then trucks where only other items are due, then the rest. Snoozed items do not count. (tier, days left)"""
     live = [i for i in r.get("items") or [] if i.get("state") in URGENT_ORDER and not i.get("snoozed_until")]
     oil = [i for i in live if i["key"] in OIL_KEYS]

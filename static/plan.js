@@ -127,9 +127,9 @@ async function loadPreview() {
   fill($("plPreviewMeta"), `${r.items.length} รายการที่จะเตือน${r.snoozed.length ? ` · ที่เลื่อนเตือนไว้ ${r.snoozed.length}` : ""} · ${r.enabled ? "เปิดเตือนอยู่" : "ปิดการเตือนอยู่"} — ตัวเลขข้างเมนู “แผนซ่อมบำรุง” นับรายการเหล่านี้ (ไม่ส่ง LINE)`);
 }
 
-// owner, 19 Nov 2026: the trucks come most urgent first -- engine oil / oil filter overdue on top (the server's priority), the rest after;
+// owner, 19 Nov 2026: the trucks come most urgent first -- engine oil overdue on top (the server's priority), the rest after;
 // each tile is also a filter (click it), and the dropdown has one entry per kind of trouble
-const PL_OIL = ["engine_oil", "engine_filter"];
+const PL_OIL = ["engine_oil"];             // engine oil alone (owner, 19 Nov 2026: a late filter on its own does not count)
 const plLive = (v, state) => v.items.some((i) => i.state === state && !i.snoozed_until);
 const plOilDue = (v) => v.items.some((i) => PL_OIL.includes(i.key) && plNeedsAttention(i) && !i.snoozed_until);
 const PL_SHOW = {
@@ -158,7 +158,7 @@ function renderOverview() {
   const n = (key) => found.filter(PL_SHOW[key]).length;             // each tile counts exactly the trucks it lists when clicked (the search box too)
   const oilTrucks = n("oil"), overdue = n("overdue"), check = n("check"), soon = n("soon");
   fill($("plKpis"),
-    plKpi("น้ำมันเครื่อง / กรองถึงกำหนด", oilTrucks, "คัน — คันที่เลยมากที่สุดอยู่บนสุด", oilTrucks ? "bad" : "", "oil", show),
+    plKpi("น้ำมันเครื่องถึงกำหนด", oilTrucks, "คัน — คันที่เลยมากที่สุดอยู่บนสุด", oilTrucks ? "bad" : "", "oil", show),
     plKpi("รถที่มีรายการเลยกำหนด", overdue, `${t.overdue} รายการ (เลขไมล์จริงถึงระยะ หรือเกินเวลาสูงสุด)`, overdue ? "bad" : "", "overdue", show),
     plKpi("รถที่ควรอ่านเลขไมล์", check, `${t.check || 0} รายการ — อ่านเลขไมล์ก่อนส่งซ่อม${k.anomaly ? ` · ข้อมูลไมล์ผิดปกติ ${k.anomaly} คัน` : ""}`, check ? "warn" : "", "check", show),
     plKpi("รถที่ใกล้ถึงกำหนด", soon, `ภายใน ${o.soon_days || pl.opts.soon_days} วัน · ${t.soon} รายการ`, soon ? "warn" : "", "soon", show),
@@ -176,7 +176,7 @@ function plKpi(label, value, sub, tone, show, current) {
     el("div", { class: "kpi-label", text: label }), el("div", { class: "kpi-value", text: String(value) }), el("div", { class: "kpi-sub", text: sub }));
 }
 
-// chips in the order that matters: engine oil / oil filter first, then overdue, read-the-odometer, soon -- the most overdue first
+// chips in the order that matters: engine oil first, then overdue, read-the-odometer, soon -- the most overdue first
 const plChipOrder = (i) => [PL_OIL.includes(i.key) ? 0 : 1, { overdue: 0, check: 1, soon: 2 }[i.state] ?? 3, i.days_left ?? 0];
 const plByUrgency = (a, b) => { const x = plChipOrder(a), y = plChipOrder(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; };
 
