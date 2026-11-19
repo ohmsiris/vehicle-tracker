@@ -182,7 +182,9 @@ from a board card or a truck always lands on the bill tab.
 
 **รถใกล้ถึงคิวบำรุง** (top of สถานะงานซ่อม): the trucks the maintenance plan says are close to / past a round (the same list as
 the reminders, `/api/plan/reminders`), one small card per truck with what is due. Drag a card into **รอซ่อม** (or press
-"เข้าคิว ↓") and it becomes a repair request "ถึงรอบบำรุง: น้ำมันเครื่อง, …"; a truck already queued that way is not shown again.
+"เข้าคิว ↓") and it becomes a repair request "ถึงรอบบำรุง: น้ำมันเครื่อง, …". A truck queued that way, or at a shop for anything, is not
+shown; an item its open jobs already name ("ถ่ายน้ำมันเครื่อง" -- which also covers the filter and what goes with the oil,
+"น้ำมันเกียร์, น้ำมันเฟืองท้าย") is dropped. A fault that only mentions it ("น้ำมันเครื่องรั่ว") does not count.
 "+ แจ้งซ่อม" goes to the request tab.
 
 **Who to call**: on the board and "รถอยู่ที่ไหน" the server works out who to ring about each request (`fleet.call_target`): the truck's main driver -- or, for a factory truck (รถหน้าโรง, which has no driver), whoever reported the problem (ผู้แจ้ง), found among the drivers by nickname / name / first name when exactly one matches and has a number. A driver's number is a tap-to-call button (`tel:`) on the truck's page, the drivers list, the board cards

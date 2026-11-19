@@ -178,10 +178,25 @@ async function loadDueStrip() {
     $("dueStrip").hidden = true;                           // the plan is optional: no strip rather than an error
     return;
   }
-  const queued = new Set(board.active.filter((x) => (x.problem || "").startsWith(DUE_PREFIX)).map((x) => x.vehicle_id));
+  // a truck already being looked after gets no warning (owner, 19 Nov 2026: "the truck is literally being fixed"):
+  //  - queued from this strip ("ถึงรอบบำรุง: …") or at a shop right now for anything -> no card;
+  //  - an item named in one of its open jobs typed by hand as a change ("ถ่ายน้ำมันเครื่อง", "เปลี่ยนน้ำมันเกียร์") is dropped --
+  //    an engine-oil change also covers the filter and what is done together with the oil -- and a truck left with nothing has no card.
+  //    A plain mention ("น้ำมันเครื่องรั่ว") is a fault, not a change, so it covers nothing.
+  const jobs = new Map();
+  for (const x of board.active) { if (!jobs.has(x.vehicle_id)) jobs.set(x.vehicle_id, []); jobs.get(x.vehicle_id).push(x); }
+  const skip = (vid) => (jobs.get(vid) || []).some((x) => (x.problem || "").startsWith(DUE_PREFIX) || x.status === "at_shop");
+  // the item's name standing on its own ("…, น้ำมันเฟืองท้าย, …", "ถ่ายน้ำมันเครื่องและกรอง") -- not part of another word
+  // ("น้ำมันเครื่องรั่ว" is a leak, "กรองน้ำมันเครื่อง" is the filter)
+  const changed = (text, label) => new RegExp("(^|[^฀-๿]|ถ่าย|เปลี่ยน|และ|กับ)" + label.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "(?=$|[^฀-๿]|และ|กับ)").test(text);
+  const covered = (it) => {
+    const text = (jobs.get(it.vehicle_id) || []).map((x) => x.problem || "").join(" , ").replace(/\s+/g, "");
+    if (changed(text, "น้ำมันเครื่อง") && (it.item_key === "engine_oil" || it.item_key === "engine_filter" || it.together)) return true;
+    return !!it.label && changed(text, it.label.replace(/\s+/g, ""));
+  };
   const byTruck = new Map();
   for (const it of r.items || []) {
-    if (queued.has(it.vehicle_id)) continue;               // already in the queue for its round
+    if (skip(it.vehicle_id) || covered(it)) continue;
     if (!byTruck.has(it.vehicle_id)) byTruck.set(it.vehicle_id, { due: true, vehicle_id: it.vehicle_id, truck: it.truck, branch: it.branch, items: [], never: [] });
     byTruck.get(it.vehicle_id).items.push(it);
   }
