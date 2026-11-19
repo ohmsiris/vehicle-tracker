@@ -236,3 +236,30 @@ def test_selling_more_than_was_loaded_is_flagged_not_refused():
     assert t["amount"] == 80 and "ใหญ่ ขายมากกว่าที่รับ 2" in t["flags"]
     t = rs.compute({"loads": [], "sales": {"1": {"q": {}, "old_paid": 300}}}, {"1": {"prices": {"lod": 40}}})   # old debt, no ice
     assert t["old_paid"] == 300 and t["expected_cash"] == 300 and not t["flags"]
+
+
+def test_a_day_cannot_close_without_returns_and_the_cash_count():
+    from app import route_sales as rs
+    t = {"loaded": {"lod": 50, "mo": 0}, "sold": {"lod": 40, "mo": 0}}
+    assert rs.close_missing({}, t) == ["น้ำแข็งที่คืน", "นับเงิน"]
+    assert rs.close_missing({"returns": {"lod": 0}, "cash": {"1000": 2}}, t) == []           # 0 back is an answer
+    assert rs.close_missing({"returns": {"lod": ""}, "cash": {"1000": 2}}, t) == ["น้ำแข็งที่คืน"]
+    assert rs.close_missing({"returns": {"lod": 10}, "cash": {}}, t) == ["นับเงิน"]
+    assert rs.close_missing({"cash": {"coins": 0}}, {"loaded": {}, "sold": {}}) == []        # nothing loaded or sold: only the count
+
+
+def test_an_old_page_that_sends_an_incomplete_day_keeps_it_open(monkeypatch):
+    from app import route_sales as rs, supabase
+    saved = []
+    monkeypatch.setattr(rs, "_day", lambda route_id, day: None)
+    monkeypatch.setattr(rs, "_customers", lambda route_id: [{"id": 1, "name": "test1", "prices": {"lod": 40}, "billing": "cash"}])
+    monkeypatch.setattr(rs, "_last_km", lambda route_id, day: None)
+    monkeypatch.setattr(supabase, "insert", lambda table, rows, **kw: (saved.append((table, rows)), [{"id": 9, **rows[0]}])[1])
+    monkeypatch.setattr(supabase, "delete", lambda *a, **kw: None)
+    doc = {"loads": [{"q": {"lod": 10}}], "sales": {"1": {"q": {"lod": 4}}}, "closed": True}
+    r = rs.save_day({"id": 1, "route_id": 1}, rs.today().isoformat(), 5, doc)
+    assert r["status"] == "open" and "น้ำแข็งที่คืน" in r["notice"] and "นับเงิน" in r["notice"]
+    day_row = saved[0][1][0]
+    assert day_row["status"] == "open" and day_row["doc"]["closed"] is False and day_row["doc"]["sales"]   # nothing typed is lost
+    r = rs.save_day({"id": 1, "route_id": 1}, rs.today().isoformat(), 6, {**doc, "returns": {"lod": 6}, "cash": {"100": 1, "50": 1}})
+    assert r["status"] == "closed" and "notice" not in r

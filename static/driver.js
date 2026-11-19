@@ -158,6 +158,7 @@
       }
       S.savedRev = Math.max(S.savedRev, r.rev || rev);
       if (r.status) S.status = r.status;
+      if (r.notice) { S.doc.closed = false; persist(); toast(r.notice, true); render(); return; }     // the server kept the day open
       var map = r.id_map || {}, keys = Object.keys(map);
       if (keys.length) {                          // new customers the office now knows: swap the phone's temporary keys
         keys.forEach(function (k) { if (S.doc.sales[k]) { S.doc.sales[map[k]] = S.doc.sales[k]; delete S.doc.sales[k]; } });
@@ -715,12 +716,10 @@
     var expect = t.cash + t.old, cdiff = counted - expect;
     html += '<div class="sumgrid"><span>ต้องมีเงินสด</span><b>฿' + money(expect) + "</b><span>นับได้</span><b>฿" + money(counted) + "</b>" +
       (S.doc.cash ? '<span>ต่าง</span><b class="' + (Math.abs(cdiff) < 1 ? "ok-t" : cdiff < 0 ? "bad-t" : "warn-t") + '">' + (Math.abs(cdiff) < 1 ? "ตรง ✓" : (cdiff < 0 ? "ขาด ฿" : "เกิน ฿") + money(Math.abs(cdiff))) + "</b>" : "") + "</div></div>";
-    // owner, 19 Nov 2026: the day's sales as เงินสด (cash customers, ค้าง included) + วางบิล (bill customers) = รวม -- the total sold today
-    html += '<div class="box"><h3>สรุปวันนี้</h3><div class="sumgrid"><span>เงินสด</span><b>฿' + money(t.cash + t.credit) + "</b>" +
-      (t.credit ? '<span class="sub-k">ในนี้ยังค้าง</span><b class="sub-v">฿' + money(t.credit) + "</b>" : "") +
-      "<span>วางบิล</span><b>฿" + money(t.invoiced) + "</b>" +
-      '<span class="sum-k">รวม</span><b class="sum-v">฿' + money(t.amount) + "</b>" +
-      (t.old ? "<span>เก็บเงินวันก่อน</span><b>฿" + money(t.old) + "</b>" : "") +
+    // owner, 19 Nov 2026: ขายทั้งหมด, เงินสด, จ่ายเก่า, วางบิล -- then, set apart, คงค้าง
+    html += '<div class="box"><h3>สรุปวันนี้</h3><div class="sumgrid"><span>ขายทั้งหมด</span><b>฿' + money(t.amount) + "</b>" +
+      "<span>เงินสด</span><b>฿" + money(t.cash) + "</b><span>จ่ายเก่า</span><b>฿" + money(t.old) + "</b><span>วางบิล</span><b>฿" + money(t.invoiced) + "</b>" +
+      '<span class="gap">คงค้าง</span><b class="gap">฿' + money(t.credit) + "</b>" +
       (t.discount ? "<span>ส่วนลด</span><b>฿" + money(t.discount) + "</b>" : "") + (t.freeShops ? "<span>แจกฟรี</span><b>" + t.freeShops + " ร้าน</b>" : "") + "</div></div>";
     if (!ro) html += '<button class="btn primary big" id="closeday">' + ic("send", "s") + 'ส่งใบขาย · ปิดวัน</button><p class="note" style="text-align:center;margin-top:6px">ส่งแล้วจะล็อก ถ้าต้องแก้ต้องขอออฟฟิศ</p>';
     html += '<div class="foot"><button class="link" id="logout">' + ic("out", "s") + "ออกจากระบบ</button></div>";
@@ -743,10 +742,14 @@
       changed(); var y = window.scrollY; renderClose(); window.scrollTo(0, y); paintTop();
     };
     $("closeday").onclick = function () {
+      // owner, 19 Nov 2026: no คืน or no cash count = the day cannot be sent (the server holds the same rule: route_sales.close_missing)
+      var must = [];
+      if (used.some(function (p) { return (t.loaded[p.key] || t.sold[p.key]) && !hasRet(p.key); })) must.push("น้ำแข็งที่คืน (ไม่เหลือใส่ 0)");
+      var cashed = S.doc.cash && Object.keys(S.doc.cash).some(function (k) { var v = S.doc.cash[k]; return v != null && String(v).trim() !== ""; });
+      if (!cashed) must.push("นับเงิน (จำนวนแบงก์แต่ละแบบ)");
+      if (must.length) { window.alert("ยังส่งไม่ได้ — ต้องใส่ก่อน:\n• " + must.join("\n• ")); return; }
       var missing = [];
       if (!S.doc.km_end) missing.push("ไมล์");
-      if (!S.doc.cash) missing.push("นับเงิน");
-      if (used.some(function (p) { return !hasRet(p.key); })) missing.push("น้ำแข็งที่คืน");
       var msg = (missing.length ? "ยังไม่ได้ใส่: " + missing.join(", ") + "\n\n" : "") + "ส่งแล้วจะล็อก แก้ไม่ได้ ส่งเลยไหม?";
       if (!window.confirm(msg)) return;
       S.doc.closed = true; S.rev += 1; persist();

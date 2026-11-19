@@ -263,6 +263,20 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
 NOON = 12
 
 
+def close_missing(doc: dict, totals: dict) -> list[str]:
+    """What the driver must fill in before the day can be sent (owner, 19 Nov 2026): คืน for every product loaded or sold (0 is an answer),
+    and the cash counted by note. An empty list = the day can close."""
+    used = [k for k in KEYS if _num((totals.get("loaded") or {}).get(k)) or _num((totals.get("sold") or {}).get(k))]
+    back = clean_returns(doc.get("returns"))
+    missing = []
+    if any(k not in back for k in used):
+        missing.append("น้ำแข็งที่คืน")
+    cash = doc.get("cash")
+    if not (isinstance(cash, dict) and any(v is not None and str(v).strip() != "" for v in cash.values())):
+        missing.append("นับเงิน")
+    return missing
+
+
 def edit_refusal(day: date, status: Optional[str], now: datetime) -> Optional[str]:
     """None when the phone may save this day; otherwise the reason, shown to the driver as it is. now = Bangkok time."""
     t = now.date()
@@ -448,6 +462,10 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
             v.pop("office_amount")
     totals = compute(doc, customers, (current or {}).get("returns_foh"), _last_km(route_id, day))
     status = "closed" if doc.get("closed") else "open"
+    notice = None
+    if status == "closed" and (missing := close_missing(doc, totals)):   # an old page that let it through: kept, but the day stays open
+        doc, status = {**doc, "closed": False}, "open"
+        notice = "ยังส่งไม่ได้ — ยังไม่ได้ใส่: " + ", ".join(missing)
     now = datetime.now(timezone.utc).isoformat()
     row = {"route_id": route_id, "day": day.isoformat(), "driver_id": driver["id"], "doc": doc, "rev": int(rev), "status": status,
            "totals": {k: v for k, v in totals.items() if k != "lines"}, "updated_at": now, "closed_at": now if status == "closed" else None}
@@ -458,7 +476,7 @@ def save_day(driver: dict, day_text: str, rev: int, doc: dict) -> dict:
               "free": ln["free"], "waived": ln["waived"], "waived_reason": ln["waived_reason"]} for ln in totals["lines"]]
     for i in range(0, len(lines), 500):
         supabase.insert("sale_lines", lines[i:i + 500])
-    return {"rev": int(rev), "status": status, "totals": _public(row["totals"]), "id_map": id_map}
+    return {"rev": int(rev), "status": status, "totals": _public(row["totals"]), "id_map": id_map, **({"notice": notice} if notice else {})}
 
 
 def clean_walkins(raw) -> list:
