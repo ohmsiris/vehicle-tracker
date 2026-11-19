@@ -13,7 +13,7 @@ if not "%RC%"=="0" goto :end
 
 rem find the Drive folder: Google Drive for Desktop shows My Drive as a drive letter (it is not always the same one)
 set "DEST="
-for %%L in (E F H I J K L M N O P Q R S T U V W X Y Z) do if exist "%%L:\My Drive\IceBox Backup\" if not defined DEST set "DEST=%%L:\My Drive\IceBox Backup"
+for %%L in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do if exist "%%L:\My Drive\IceBox Backup\" if not defined DEST set "DEST=%%L:\My Drive\IceBox Backup"
 if not defined DEST goto :nodrive
 
 rem the photos: only the ones Drive does not have yet; the database export: this run's folder, kept under runs\ by date
