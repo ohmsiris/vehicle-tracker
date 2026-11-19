@@ -178,35 +178,89 @@ async function loadDueStrip() {
     $("dueStrip").hidden = true;                           // the plan is optional: no strip rather than an error
     return;
   }
-  // a truck already being looked after gets no warning (owner, 19 Nov 2026: "the truck is literally being fixed"):
-  //  - queued from this strip ("ถึงรอบบำรุง: …") or at a shop right now for anything -> no card;
-  //  - an item named in one of its open jobs typed by hand as a change ("ถ่ายน้ำมันเครื่อง", "เปลี่ยนน้ำมันเกียร์") is dropped --
-  //    an engine-oil change also covers the filter and what is done together with the oil -- and a truck left with nothing has no card.
-  //    A plain mention ("น้ำมันเครื่องรั่ว") is a fault, not a change, so it covers nothing.
-  const jobs = new Map();
-  for (const x of board.active) { if (!jobs.has(x.vehicle_id)) jobs.set(x.vehicle_id, []); jobs.get(x.vehicle_id).push(x); }
-  const skip = (vid) => (jobs.get(vid) || []).some((x) => (x.problem || "").startsWith(DUE_PREFIX) || x.status === "at_shop");
-  // the item's name standing on its own ("…, น้ำมันเฟืองท้าย, …", "ถ่ายน้ำมันเครื่องและกรอง") -- not part of another word
-  // ("น้ำมันเครื่องรั่ว" is a leak, "กรองน้ำมันเครื่อง" is the filter)
-  const changed = (text, label) => new RegExp("(^|[^฀-๿]|ถ่าย|เปลี่ยน|และ|กับ)" + label.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "(?=$|[^฀-๿]|และ|กับ)").test(text);
-  const covered = (it) => {
-    const text = (jobs.get(it.vehicle_id) || []).map((x) => x.problem || "").join(" , ").replace(/\s+/g, "");
-    if (changed(text, "น้ำมันเครื่อง") && (it.item_key === "engine_oil" || it.item_key === "engine_filter" || it.together)) return true;
-    return !!it.label && changed(text, it.label.replace(/\s+/g, ""));
-  };
+  // A truck with ANY unfinished job on the board (waiting, at a shop, back waiting for the bill) gets no card here (owner,
+  // 19 Nov 2026: "scrap the warning for every truck in shop -- I usually check the oil anyway"). What is due shows on its job card
+  // instead, as a "ถึงรอบบำรุง" button: the list to copy, or to add to the job (dueButton / openDueDialog).
+  const busy = new Set(board.active.map((x) => x.vehicle_id));
   const byTruck = new Map();
+  board.dueOf = new Map();
   for (const it of r.items || []) {
-    if (skip(it.vehicle_id) || covered(it)) continue;
+    if (!board.dueOf.has(it.vehicle_id)) board.dueOf.set(it.vehicle_id, { vehicle_id: it.vehicle_id, truck: it.truck, items: [], never: [] });
+    board.dueOf.get(it.vehicle_id).items.push(it);
+    if (busy.has(it.vehicle_id)) continue;
     if (!byTruck.has(it.vehicle_id)) byTruck.set(it.vehicle_id, { due: true, vehicle_id: it.vehicle_id, truck: it.truck, branch: it.branch, items: [], never: [] });
     byTruck.get(it.vehicle_id).items.push(it);
   }
-  for (const n of r.never || []) if (byTruck.has(n.vehicle_id)) byTruck.get(n.vehicle_id).never.push(n);
+  for (const n of r.never || []) {
+    if (board.dueOf.has(n.vehicle_id)) board.dueOf.get(n.vehicle_id).never.push(n);
+    if (byTruck.has(n.vehicle_id)) byTruck.get(n.vehicle_id).never.push(n);
+  }
   // the same order as แผนซ่อมบำรุง (owner, 19 Nov 2026): engine oil first, the most overdue on top; trucks with other items after
   const isOil = (i) => i.item_key === "engine_oil";
   const rank = (d) => { const o = d.items.filter(isOil); return [o.length ? 0 : 1, Math.min(...(o.length ? o : d.items).map((i) => i.days_left))]; };
   for (const d of byTruck.values()) d.items.sort((a, b) => (isOil(a) ? 0 : 1) - (isOil(b) ? 0 : 1) || a.days_left - b.days_left);
+  for (const d of board.dueOf.values()) d.items.sort((a, b) => (isOil(a) ? 0 : 1) - (isOil(b) ? 0 : 1) || a.days_left - b.days_left);
   board.due = [...byTruck.values()].sort((a, b) => { const x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1]; });
   renderDueStrip();
+  renderBoard();                                           // the job cards get their "ถึงรอบบำรุง" button
+}
+
+// ---- "ถึงรอบบำรุง" on a job card: the truck is already on the board, so what is due rides along with the job
+const dueKey = (t) => String(t || "").replace(/\s+/g, "");
+const inJob = (r, label) => dueKey(r.problem).includes(dueKey(label));
+
+function dueButton(r) {
+  const d = board.dueOf && board.dueOf.get(r.vehicle_id);
+  if (!d || !d.items.length) return null;
+  const left = d.items.filter((i) => !inJob(r, i.label));
+  if (!left.length) return el("button", { class: "badge ok duebtn", type: "button", title: "ทุกรายการที่ถึงรอบอยู่ในงานนี้แล้ว", text: "ถึงรอบบำรุง ✓ อยู่ในงานแล้ว", onclick: () => openDueDialog(r) });
+  const late = left.some((i) => i.stage !== "soon");
+  return el("button", { class: `badge ${late ? "urgent" : "warn"} duebtn`, type: "button", title: "รายการที่ถึงรอบบำรุงของรถคันนี้ — กดเพื่อคัดลอกหรือเพิ่มลงในงานนี้",
+    text: `ถึงรอบบำรุง ${left.length} รายการ · ${left[0].label}${left.length > 1 ? " …" : ""}`, onclick: () => openDueDialog(r) });
+}
+
+let dueTarget = null;
+function openDueDialog(r) {
+  dueTarget = r;
+  const d = board.dueOf.get(r.vehicle_id) || { items: [], never: [] };
+  $("dueSummary").textContent = `${truckLabel(r)} · งาน: ${r.problem}`;
+  $("duePlanLink").href = `#truck=${r.vehicle_id}`;
+  const row = (label, status, cls) => el("tr", {},
+    el("td", { text: label }),
+    el("td", {}, el("span", { class: `badge ${cls}`, text: status })),
+    el("td", { class: "right" }, inJob(r, label) ? el("span", { class: "muted small", text: "อยู่ในงานแล้ว ✓" })
+      : el("button", { class: "btn small", type: "button", text: "+ เพิ่ม", onclick: () => addDueToJob([label]) })));
+  fill($("dueTable").tBodies[0], ...d.items.map((i) => row(i.label, dueText(i), i.stage === "soon" ? "warn" : "urgent")));
+  // never recorded: often just no history yet, so folded away under the due ones
+  $("dueNeverBox").hidden = !d.never.length;
+  $("dueNeverBox").querySelector("summary").textContent = `ไม่เคยมีบันทึก (${d.never.length})`;
+  fill($("dueNeverTable").tBodies[0], ...d.never.map((n) => row(n.label, "ไม่เคยมีบันทึก", "never")));
+  $("dueText").value = d.items.map((i) => i.label).join(", ");
+  $("dueAddAll").disabled = !d.items.some((i) => !inJob(r, i.label));
+  $("dueCopied").hidden = true;
+  $("dueError").hidden = true;
+  if (!$("dueDialog").open) $("dueDialog").showModal();
+}
+
+async function copyDueText() {
+  const t = $("dueText");
+  try { await navigator.clipboard.writeText(t.value); } catch (e) { t.select(); document.execCommand("copy"); }
+  $("dueCopied").hidden = false;
+}
+
+// add items to the end of the job's text ("ซ่อมคัดซี" -> "ซ่อมคัดซี, น้ำมันเครื่อง, กรองน้ำมันเครื่อง"); ones already in it are skipped
+async function addDueToJob(labels) {
+  const r = dueTarget;
+  const add = labels.filter((l) => !inJob(r, l));
+  if (!add.length) return;
+  const problem = `${r.problem.trim()}, ${add.join(", ")}`;
+  if (problem.length > 500) { $("dueError").textContent = "ข้อความงานยาวเกิน 500 ตัวอักษร — คัดลอกไปแก้เองแทน"; $("dueError").hidden = false; return; }
+  try {
+    await api(`/api/requests/${r.request_id}`, jsonOpts("PATCH", { problem }));
+  } catch (err) { $("dueError").textContent = err.message; $("dueError").hidden = false; return; }
+  await loadBoard();
+  const fresh = board.active.find((x) => x.request_id === r.request_id);
+  if (fresh && $("dueDialog").open) openDueDialog(fresh);
 }
 
 const dueText = (i) => (i.stage === "overdue" ? `เลย ${-i.days_left} วัน` : i.stage === "due" ? "ครบวันนี้" : `อีก ${i.days_left} วัน`) + (i.together ? " · ทำพร้อมน้ำมันเครื่อง" : "");
@@ -428,6 +482,7 @@ function requestCard(r, kind) {
       overdue ? el("span", { class: "badge urgent", text: `เลยกำหนด ${overdue} วัน` }) : null,
       ageChip(days, kind)),
     el("p", { class: "req-problem", text: r.problem }),
+    dueButton(r),
     el("p", { class: "muted small", text: meta.filter(Boolean).join(" · ") }),
     kind === "at_shop" && r.last_update ? el("p", { class: "req-update small" },
       el("strong", { text: "ล่าสุด: " }), r.last_update, el("span", { class: "muted", text: ` · ${r.last_update_at ? (daysSince(r.last_update_at) === 0 ? "วันนี้" : `${daysSince(r.last_update_at)} วันก่อน`) : ""}${r.update_count > 1 ? ` · ทั้งหมด ${r.update_count} ครั้ง` : ""}` })) : null,
@@ -911,6 +966,10 @@ function initBoard() {
   $("fixCancel").addEventListener("click", () => $("fixDialog").close());
   $("fixHasBill").addEventListener("click", () => submitFix("fixed_awaiting_bill"));
   $("fixNoBill").addEventListener("click", () => submitFix("fixed_no_bill"));
+  $("dueClose").addEventListener("click", () => $("dueDialog").close());
+  $("dueCopy").addEventListener("click", copyDueText);
+  $("dueAddAll").addEventListener("click", () => addDueToJob(((board.dueOf.get(dueTarget.vehicle_id) || { items: [] }).items).map((i) => i.label)));
+  $("duePlanLink").addEventListener("click", () => $("dueDialog").close());
   $("reCancel").addEventListener("click", () => $("reqEditDialog").close());
   $("reSave").addEventListener("click", saveEditRequest);
   bindDateField($("reDate"), $("reDateCap"));

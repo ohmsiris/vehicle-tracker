@@ -938,6 +938,16 @@ input[type=time], input[type=tel] { width: 100%; padding: 9px 12px; font: inheri
 .duecard-top a { font-weight: 600; color: var(--text); text-decoration: none; }
 .duecard-items { display: flex; flex-wrap: wrap; gap: 4px; }
 .duecard .btn { justify-self: start; }
+.duebtn { font: inherit; font-size: 12.5px; cursor: pointer; margin: 0 0 6px; text-align: left; }
+.duebtn:hover { text-decoration: underline; }
+table.duetable { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+table.duetable th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+table.duetable td { padding: 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.duetable td.right { text-align: right; white-space: nowrap; }
+#dueText { width: 100%; font: inherit; resize: vertical; }
+.duenever { margin-top: 10px; }
+.duenever summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.duenever table.duetable { margin-top: 4px; }
 .kanban.dragging-due .kcol[data-status="open"] { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: var(--radius); }
 
 /* ------------------------------------------------------------- buying: bills, prices, stock */
