@@ -1762,12 +1762,23 @@ def api_today(fresh: bool = False, x_app_token: str = Header(default=""), token:
 
 @app.get("/api/home")
 def api_home(fresh: bool = False, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
-    """The home page: every card in one request (app/home.py). The owner's alone (owner, 21 Nov 2026: "it's just going to be me"):
-    it is not a menu that can be ticked for someone, and the server refuses everyone else here."""
+    """The home page "เช้านี้": what needs the owner today, the day's numbers, the last complete month's profit and how far each feed
+    reaches -- one request (app/home.py). The owner's alone (owner, 21 Nov 2026: "it's just going to be me"): it is not a menu that can
+    be ticked for someone, and the server refuses everyone else here. ?fresh=true reads everything again."""
     _check_owner(x_app_token, token)
     if not supabase.configured():
         raise HTTPException(503, "Supabase is not configured on the server")
     return home.load(fresh=fresh)
+
+
+@app.get("/api/home/trends")
+def api_home_trends(fresh: bool = False, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The home page's two charts (daily route sales, monthly profit by branch), asked for after the first paint. The owner's alone,
+    like /api/home."""
+    _check_owner(x_app_token, token)
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    return home.trends(fresh=fresh)
 
 
 @app.get("/api/plan/options")

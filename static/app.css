@@ -1027,19 +1027,110 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 .progress-history { display: grid; gap: 4px; margin-top: 12px; max-height: 220px; overflow-y: auto; }
 .progress-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
 
-/* ---- Home page (หน้าแรก): cards that grow in a grid; the dashed ones are ideas not built yet */
+/* ---- the home entry at the top of the menu */
 .side-top { margin-bottom: 10px; }
 .side-top .sideitem { margin-left: 0; width: 100%; font-weight: 650; }
-.home-title { margin: 0; font-size: 20px; }
-.homegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; margin-bottom: 16px; }
-.hcard { margin-bottom: 0; }
-.hcard.wide { grid-column: 1 / -1; }
+
+/* ======================================================================
+   home (เช้านี้) -- the owner's home page (static/home.js). Both branches as one view.
+   Row 1: "ต้องดูวันนี้" beside the tiles + the closed month's profit. Row 2: two charts. Row 3: how fresh each feed is.
+   Only the site's tokens; the two chart series use the electricity page's --el-off / --el-peak so charts agree.
+   ====================================================================== */
+.hm-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.hm-title { margin: 0; font-size: 20px; line-height: 1.3; }
+.hm-sub { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.hm { display: grid; gap: 12px; container-type: inline-size; }       /* the rows fold to one column by the width of THIS box, not of the window: the menu takes 252 px */
+.hm-two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+#homeCharts { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }       /* the two charts share the row evenly, so their text is the same size */
+.hm-side { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.hm-card { margin-bottom: 0; padding: 14px 16px; min-width: 0; }
+.hm-card h3 { margin: 0; font-size: 15px; }
+.hm-row { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.hm-chip { font-size: 11.5px; line-height: 1.65; border-radius: 999px; padding: 0 8px; white-space: nowrap; background: var(--bg); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.hm-chip.ok { background: var(--ok-soft); color: var(--ok); }
+.hm-chip.warn { background: var(--warn-soft); color: var(--warn); }
+.hm-chip.bad { background: var(--bad-soft); color: var(--bad); }
+.hm-chip b { font-weight: 650; }
+.hm-none { color: var(--muted); font-size: 13px; }
+.hm-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.hm-link { color: var(--accent); font-size: 12.5px; white-space: nowrap; text-decoration: none; border-radius: 6px; }
+.hm-link:hover { text-decoration: underline; }
+.hm-it:focus-visible, .hm-tile:focus-visible, .hm-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the ranked list: a bar coloured by level, the title + who, the detail under it, where it goes at the right */
+.hm-todo { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
+.hm-it { display: grid; grid-template-columns: 4px minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; padding: 9px 8px; border-radius: 9px; color: inherit; text-decoration: none; }
+.hm-todo li:nth-child(odd) .hm-it { background: var(--surface-2); }
+.hm-todo li a.hm-it:hover { background: var(--accent-soft); }
+.hm-bar { width: 4px; border-radius: 2px; align-self: stretch; background: var(--line-strong); }
+.hm-it.bad .hm-bar { background: var(--bad); }
+.hm-it.warn .hm-bar { background: var(--warn); }
+.hm-it-main { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
+.hm-it-main b { font-weight: 650; }
+.hm-who { color: var(--text); }
+.hm-detail { display: block; color: var(--text-2); font-size: 13px; }
+.hm-go { color: var(--accent); font-size: 12.5px; white-space: nowrap; padding-top: 2px; }
+.hm-calm { margin: 12px 0 2px; color: var(--text-2); }
+.hm-part { margin: 8px 0 0; font-size: 12.5px; color: var(--warn); }
+.hm-todo + .hm-part, .hm-card > .hm-none { margin-top: 8px; }
+/* the tiles: two across, a toned tile for a number that needs a look */
+.hm-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.hm-tile { display: grid; gap: 1px; align-content: start; min-width: 0; padding: 11px 14px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm); color: inherit; text-decoration: none; }
+a.hm-tile:hover { border-color: var(--accent); box-shadow: var(--shadow-md); }
+.hm-k { display: flex; flex-wrap: wrap; gap: 3px 6px; align-items: center; font-size: 12.5px; color: var(--text-2); }
+.hm-v { font-size: 24px; font-weight: 700; line-height: 1.25; letter-spacing: -.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.hm-v small { font-size: 13px; font-weight: 500; color: var(--text-2); letter-spacing: 0; }
+.hm-d { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.hm-delta { font-weight: 650; }
+.hm-delta.good { color: var(--ok); }
+.hm-delta.bad { color: var(--bad); }
+.hm-delta.flat { color: var(--text-2); }
+.hm-tile.warn { background: var(--warn-soft); border-color: transparent; }
+.hm-tile.bad { background: var(--bad-soft); border-color: transparent; }
+.hm-tile.warn .hm-v { color: var(--warn); }
+.hm-tile.bad .hm-v { color: var(--bad); }
+.hm-tile.warn .hm-chip, .hm-tile.bad .hm-chip { background: var(--surface); }
+.hm-tile.warn .hm-d, .hm-tile.bad .hm-d, .hm-tile.warn .hm-v small, .hm-tile.bad .hm-v small { color: var(--text-2); }
+.hm-spark { display: block; width: 100%; height: 30px; margin-top: 4px; }
+.hm-spark polyline { fill: none; stroke: var(--el-off); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+/* the closed month's profit: the total, then each branch, green for a profit and red for a loss */
+.hm-profit { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 6px; }
+.hm-pn { font-size: 20px; font-weight: 700; line-height: 1.3; letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hm-pn.up { color: var(--ok); }
+.hm-pn.down { color: var(--bad); }
+.hm-note { margin-top: 4px; }
+/* the charts (plain SVG on the electricity page's frame classes: .el-svg, .el-gl, .el-base, .el-tick, .el-val, .el-legend, .el-tip) */
+.hm-chart { min-height: 120px; margin-top: 2px; }
+.hm-chart > .hm-none { padding: 46px 0; text-align: center; }
+.hm-wait { display: grid; place-items: center; min-height: 150px; color: var(--muted); font-size: 13px; }
+.hm-line { fill: none; stroke: var(--el-off); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.hm-dot { fill: var(--el-off); stroke: var(--surface); stroke-width: 2; opacity: 0; }
+.hm-guide { stroke: var(--line-strong); stroke-width: 1; opacity: 0; }
+.hm-dot.on, .hm-hit:hover .hm-dot, .hm-hit:hover .hm-guide { opacity: 1; }
+.hm-pale { opacity: .35; }
+.hm-hit:hover .hm-bar-mark { opacity: .82; }
+.hm-hit:hover .hm-pale { opacity: .26; }
+/* how fresh each feed is */
+.hm-fresh { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 12.5px; color: var(--text-2); }
+.hm-fresh > b { color: var(--text); font-weight: 650; margin-right: 2px; }
+.hm-failed { margin: 0; }
+@media (max-width: 900px) { .hm-two, #homeCharts { grid-template-columns: minmax(0, 1fr); } }       /* for a browser without container queries */
+@container (max-width: 800px) { .hm-two, #homeCharts { grid-template-columns: minmax(0, 1fr); } }       /* under ~1105 px of window with the menu open: tiles and charts would be too narrow side by side */
+@media (max-width: 560px) {
+  .hm-card { padding: 12px; }
+  .hm-tile { padding: 10px 11px; }
+  .hm-v { font-size: 20px; }
+  .hm-pn { font-size: 18px; }
+  .hm-it { grid-template-columns: 4px minmax(0, 1fr); }
+  .hm-bar { grid-row: 1 / span 2; }
+  .hm-go { grid-column: 2; padding-top: 0; white-space: normal; }
+}
+
+/* ---- small pieces the พนักงาน pages share (เงินกู้, เอกสาร, ค่าแรง): a head row, a text link, number boxes, a plain list */
 .hcard-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .hcard-head h2 { margin: 0; }
 .hlink { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; padding: 2px 4px; border-radius: 6px; white-space: nowrap; }
 .hlink:hover { background: var(--accent-soft); }
-.hsub { margin: 14px 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
-.hsub:first-of-type { margin-top: 0; }
 .hstats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .hstat { flex: 1 1 88px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px 12px; }
 .hstat.warn { background: var(--warn-soft); border-color: var(--warn-line); }
@@ -1050,15 +1141,9 @@ dialog.bu-viewer { width: min(96vw, 1100px); max-width: none; padding: 12px; }
 .hlist { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 2px; }
 .hrow { display: flex; justify-content: space-between; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--line); font-size: 14px; }
 .hrow:last-child { border-bottom: 0; }
-.hrow.warn .hrow-main { color: var(--warn); font-weight: 600; }
-.hrow.bad .hrow-main { color: var(--bad); font-weight: 600; }
 .hrow-side { text-align: right; flex-shrink: 0; max-width: 55%; }
-.hempty { margin: 4px 0 8px; }
 .hsoon { border: 2px dashed var(--line); border-radius: var(--radius); padding: 16px 18px; background: transparent; position: relative; }
-.hsoon h2 { margin-bottom: 6px; color: var(--text-2); }
 .hsoon-tag { position: absolute; top: 12px; right: 14px; font-size: 11px; font-weight: 600; color: var(--warn); background: var(--warn-soft); padding: 1px 9px; border-radius: 999px; }
-.hsoon-needs { color: var(--muted); font-style: italic; margin: 8px 0 0; }
-.hdigest { white-space: pre-line; font-size: 14px; margin: 4px 0 6px; line-height: 1.55; }
 /* the repair-bill review: the same turnable preview, but as big as its column */
 .bill .preview .bu-thumb { --thumb-w: 340px; --thumb-h: 460px; width: 100%; height: 460px; }
 .bill .preview .bu-thumb img { width: auto; border: 0; box-shadow: none; background: transparent; }

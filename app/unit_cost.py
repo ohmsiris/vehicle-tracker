@@ -35,6 +35,19 @@ ACCOUNT_CAT = {"5100": "elec", "5400": "labour", "5410": "labour", "5300": "pack
                "6100": "delivery", "6110": "delivery", "6120": "delivery", "6130": "delivery", "6200": "delivery", "6300": "delivery"}
 TO_BLOCK, TO_TUBE = {"5300"}, {"5330"}          # salt is for the brine tanks; bags are for tube ice
 SKIP = {"5050", "5060"}                          # ice bought from elsewhere
+CHEQUE_ACCOUNTS = frozenset(a for a, c in ACCOUNT_CAT.items() if c in ("pack", "supply"))   # bought on HQ's monthly cheque run: bags, salt, water, ammonia, chemicals
+INCOMPLETE_SHARE = 0.3
+
+
+def incomplete_flags(cheque_items: list[float]) -> list[bool]:
+    """Which months' books are not complete yet -- one flag per month, in the order given. A month whose cheque-paid supplies (bags, salt,
+    chemicals: CHEQUE_ACCOUNTS) are not booked yet reads too cheap, so: a month is incomplete when those items come to less than
+    INCOMPLETE_SHARE of the average of the other months. The ต้นทุนต่อหน่วย page and the home page's "last complete month" both use this."""
+    out = []
+    for i, mine in enumerate(cheque_items):
+        others = cheque_items[:i] + cheque_items[i + 1:]
+        out.append(bool(others) and mine < INCOMPLETE_SHARE * (sum(others) / len(others)))
+    return out
 
 
 def company_month(d: date) -> str:
@@ -196,9 +209,8 @@ def summary(branch: str = "สระบุรี") -> dict:
     # a month whose cheque-paid supplies (bags, salt, chemicals) are not booked yet reads too cheap: say so
     def cheque_items(x):
         return sum(x[k]["total"]["pack"] + x[k]["total"]["supply"] for k in ("tube", "block"))
-    for x in out:
-        others = [cheque_items(y) for y in out if y is not x]
-        x["incomplete"] = bool(others) and cheque_items(x) < 0.3 * (sum(others) / len(others))
+    for x, flag in zip(out, incomplete_flags([cheque_items(x) for x in out])):
+        x["incomplete"] = flag
     res = {"branch": branch, "ready": True, "months": out, "categories": [{"key": k, "label": l} for k, l in CATEGORIES],
            "assumptions": [
                f"น้ำแข็งซอง: บ่อ 27 แถว × 24 ซอง = {p['cans']} ซอง · เก็บได้ประมาณครึ่งหนึ่งต่อวันถ้าเดินตลอด · ก้อนละ ~{p['block_kg']:.0f} กก. (ตัวเลขทางทฤษฎีจากเจ้าของ)",

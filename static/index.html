@@ -349,15 +349,22 @@
 
   <!-- ============ Home ============ -->
   <section id="homeView">
-    <div class="dash-filters">
-      <h2 class="home-title">หน้าแรก</h2>
+    <!-- "เช้านี้": what needs the owner today, the tiles, two charts, how fresh each feed is. Both branches as one view. Drawn by home.js -->
+    <div class="hm-head">
+      <div>
+        <h2 class="hm-title">หน้าแรก</h2>
+        <div id="homeAsOf" class="hm-sub"></div>
+      </div>
+      <span class="grow"></span>
       <button id="homeRefresh" class="btn small" type="button">รีเฟรช</button>
-      <span id="homeAsOf" class="muted small"></span>
     </div>
     <p class="error" id="homeError" hidden></p>
-    <div id="homeCards" class="homegrid"><p class="muted small">กำลังโหลด…</p></div>
-    <h3 class="kpi-group" id="homeSoonHead" hidden>ที่จะมาในหน้านี้ (ยังไม่ได้สร้าง — บอกได้ว่าอยากได้อันไหนก่อน)</h3>
-    <div id="homeSoon" class="homegrid"></div>
+    <div class="hm">
+      <div id="homeTop" class="hm-two"><p class="muted small">กำลังโหลด…</p></div>
+      <div id="homeCharts" class="hm-two"></div>
+      <div id="homeFresh" class="card hm-card hm-fresh" hidden></div>
+      <p id="homeFailed" class="muted small hm-failed" hidden></p>
+    </div>
   </section>
 
   <!-- ============ Repair board ============ -->
