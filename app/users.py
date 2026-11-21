@@ -25,6 +25,8 @@ PW_TRIES, LOCK_MINUTES, INVITE_DAYS, MIN_PW = 5, 10, 7, 8
 # EVERY page of the app can be given (owner, 13 Nov 2026: "just in case I need to share with someone"); the five first ones keep their
 # keys and order, so the people who already have them keep exactly what they had. A menu opens its page for viewing AND changing what is
 # on it -- the same as the owner. Mapped page by page (13 Nov 2026) from each page's own calls to the server.
+# The one page that can NOT be given is the home page (#home, /api/home): it sums up every part of the business, so it is the owner's
+# alone (owner, 21 Nov 2026) -- no entry here, and the endpoint itself checks for the owner.
 GROUPS = ["หน้าแรก", "บัญชี", "รถสาย", "ผู้จัดการ", "พนักงาน", "รถ", "เครื่องจักร"]
 _BILL = ['/api/events', '/api/categorize', '/api/summarize']
 _TRUCK = ['/api/vehicles', '/api/drivers', '/api/tyres', '/api/plan/']
@@ -38,7 +40,6 @@ MENUS = {
     "tax_invoices": {"label": "ใบกำกับภาษี แก่งคอย", "group": "บัญชี", "pos": 6, "nav": ["navTaxInvoices"], "hash": "#tax-invoices",
                      "api": ["/api/tax-invoices"]},
     "driver_days": {"label": "ยอดขายรายวัน (คิดเงินเดือน)", "group": "รถสาย", "pos": 5, "nav": ["navDriverDays"], "hash": "#driver-days", "api": ["/api/driver-days"]},
-    "home": {"label": "หน้าแรก (สรุปทุกส่วน)", "group": "หน้าแรก", "pos": 1, "nav": ["navHome"], "hash": "#home", "api": ["/api/home"]},
     "accounts_in": {"label": "ลงข้อมูล / แนบไฟล์", "group": "บัญชี", "pos": 1, "nav": ["navAccountsIn"], "hash": "#accounts-in", "also": ["#event="],
                     "api": ["/api/accounts/", *_BILL]},
     "electricity": {"label": "ค่าไฟฟ้า", "group": "บัญชี", "pos": 2, "nav": ["navElectricity"], "hash": "#electricity", "api": ["/api/electricity"]},

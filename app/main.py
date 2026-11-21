@@ -1762,8 +1762,9 @@ def api_today(fresh: bool = False, x_app_token: str = Header(default=""), token:
 
 @app.get("/api/home")
 def api_home(fresh: bool = False, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
-    """The home page: every card in one request (app/home.py)."""
-    _check_token(x_app_token, token)
+    """The home page: every card in one request (app/home.py). The owner's alone (owner, 21 Nov 2026: "it's just going to be me"):
+    it is not a menu that can be ticked for someone, and the server refuses everyone else here."""
+    _check_owner(x_app_token, token)
     if not supabase.configured():
         raise HTTPException(503, "Supabase is not configured on the server")
     return home.load(fresh=fresh)

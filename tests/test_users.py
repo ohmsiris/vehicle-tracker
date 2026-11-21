@@ -74,6 +74,25 @@ def test_an_owner_account_sees_everything(monkeypatch):
     assert "ไม่มีสิทธิ์" not in r.text                                           # the menu gate lets the owner through
 
 
+def test_the_home_page_is_the_owners_alone(monkeypatch):
+    """Owner, 21 Nov 2026: nobody else sees the home dashboard -- it cannot be ticked, and the server refuses even every menu at once."""
+    from app import main
+    object.__setattr__(main.settings, "app_token", "secret")
+    monkeypatch.setattr(main.supabase, "configured", lambda: True)
+    monkeypatch.setattr(main.home, "load", lambda fresh=False: {"as_of": "2026-11-21"})
+    everything = list(users.MENUS) + ["home"]                                    # "home" as an old saved tick would have it
+    monkeypatch.setattr(users, "session_user", lambda t: {"id": 1, "name": "บัญชี", "username": "acc1", "menus": everything} if t == "u_all"
+                        else {"id": 2, "name": "เจ้าของ", "username": "boss", "menus": [], "role": "owner"} if t == "u_boss" else None)
+    assert "home" not in users.MENUS and "home" not in users.clean_menus(everything)
+    assert not users.allowed(users.clean_menus(everything), "/api/home")
+    assert users.me_for({"name": "x", "menus": ["home"]})["home"] is None        # a person with only that old tick lands nowhere
+    c = TestClient(main.app)
+    assert c.get("/api/home", headers={"X-App-Token": "u_all"}).status_code == 403
+    assert c.get("/api/home?token=u_all").status_code == 403
+    assert c.get("/api/home", headers={"X-App-Token": "u_boss"}).json() == {"as_of": "2026-11-21"}
+    assert c.get("/api/home", headers={"X-App-Token": "secret"}).json() == {"as_of": "2026-11-21"}
+
+
 def test_the_register_is_its_own_menu():
     assert not users.allowed(["sales_sheets"], "/api/customers")
     assert not users.allowed(["sales_sheets"], "/api/customers/photo/1")
@@ -84,7 +103,7 @@ def test_every_page_can_be_given_and_the_old_menus_stay():
     """Owner, 13 Nov 2026: every menu with its sections; the five old keys keep their order (people who have them keep exactly that)."""
     assert list(users.MENUS)[:5] == ["sales_sheets", "routes", "cash_fuel", "orders", "customers"]
     opts = users.menu_options()
-    assert len(opts) == len(users.MENUS) >= 35 and opts[0]["key"] == "home"
+    assert len(opts) == len(users.MENUS) >= 35 and opts[0]["key"] == "accounts_in"
     assert all(o["group"] in users.GROUPS for o in opts)
     navs = [n for m in users.MENUS.values() for n in m["nav"]]
     assert len(navs) == len(set(navs))                                              # each sidebar button in one menu
