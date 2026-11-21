@@ -23,7 +23,8 @@ and price, products ซอง กั๊ก หลอด เล็ก แพ็�
   to sell and will not take sale quantities; a product with nothing loaded cannot be sold. Collecting an old debt still works.
   Selling more than was loaded is not blocked (compute flags it).
 * Returns (owner, 16 Nov 2026, brought back): the driver types what came back (คืน, doc.returns) at ปิดวัน. หน้าโรง's own count
-  (sale_days.returns_foh, set_returns / the office day page) wins when there is one; when both exist and differ, the day is flagged.
+  (sale_days.returns_foh, set_returns / the office day page) wins product by product: a box the office left blank uses the driver's
+  number (owner, 21 Nov 2026). Where both typed a number and they differ, the day is flagged.
 """
 import hashlib
 import hmac
@@ -215,13 +216,14 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
         lines.append({"customer": str(cid), "qty": {k: v for k, v in q.items() if v}, "amount": amount, "paid": paid, "old_paid": op,
                       "billing": billing, "discount": round(disc, 2), "free": free, "waived": waived, "waived_reason": reason})
     office_back, driver_back = clean_returns(returns), clean_returns(doc.get("returns"))
-    back = office_back or driver_back or None           # หน้าโรง's count wins; else the driver's
+    # product by product (owner, 21 Nov 2026 -- หน้าโรง has no app, the office types its count): a number the office typed wins;
+    # a box it left blank is "not counted", so the driver's number for that product is used. A blank on both sides is no answer,
+    # so no ขาด is made up for it.
+    from_k = {k: "office" if k in office_back else "driver" for k in KEYS if k in office_back or k in driver_back}
+    back = {k: office_back[k] if src == "office" else driver_back[k] for k, src in from_k.items()} or None
     returned = {k: _num((back or {}).get(k)) for k in KEYS}
     left = {k: loaded[k] - sold[k] for k in KEYS}
-    # + เกิน / - ขาด. หน้าโรง counts the whole truck; the driver's count covers only the products the driver typed (a blank is
-    # no answer, so no ขาด is made up for it)
-    counted_k = set(KEYS) if office_back else set(driver_back)
-    diff = {k: returned[k] - left[k] if back and k in counted_k else 0.0 for k in KEYS}
+    diff = {k: returned[k] - left[k] if k in from_k else 0.0 for k in KEYS}   # + เกิน / - ขาด
     counted = sum(_num((doc.get("cash") or {}).get(str(n))) * n for n in NOTES) + _num((doc.get("cash") or {}).get("coins"))
     expected_cash = cash_sales + old_paid
     start = km_start if km_start is not None else _num(doc.get("km_start"))
@@ -233,11 +235,10 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
             flags.append(f"{label} {'เกิน' if diff[k] > 0 else 'ขาด'} {abs(diff[k]):g}")
         if left[k] < 0:
             flags.append(f"{label} ขายมากกว่าที่รับ {abs(left[k]):g}")
-    if office_back and driver_back:
-        for k, label in PRODUCTS:
-            if (k in office_back or k in driver_back) and _num(driver_back.get(k)) != _num(office_back.get(k)):
-                said = f"คนขับคืน {_num(driver_back.get(k)):g}" if k in driver_back else "คนขับไม่ได้ใส่"
-                flags.append(f"{label}: {said} แต่หน้าโรงนับ {_num(office_back.get(k)):g}")
+    for k, label in PRODUCTS:                           # the office's count against the driver's, only where the office typed a number
+        if k in office_back and _num(driver_back.get(k)) != office_back[k] and (k in driver_back or office_back[k]):
+            said = f"คนขับคืน {_num(driver_back.get(k)):g}" if k in driver_back else "คนขับไม่ได้ใส่"
+            flags.append(f"{label}: {said} แต่หน้าโรงนับ {office_back[k]:g}")
     has_cash = bool(doc.get("cash"))
     if has_cash and abs(counted - expected_cash) >= 1:
         flags.append(f"เงิน{'เกิน' if counted > expected_cash else 'ขาด'} {abs(counted - expected_cash):,.0f} บาท")
@@ -252,6 +253,7 @@ def compute(doc: dict, customers: dict, returns: Optional[dict] = None, km_start
         flags.append(f"ส่วนลด / แจกฟรี อื่นๆ {other_waived:,.0f} บาท — ตรวจว่าอนุญาตแล้ว")
     return {"loaded": loaded, "sold": sold, "left": left, "returned": returned if back else None, "diff": diff, "free": free_q,
             "returned_by": "office" if office_back else "driver" if driver_back else None, "returned_driver": driver_back or None,
+            "returned_from": from_k or None,
             "amount": round(amount_all, 2), "cash_sales": round(cash_sales, 2), "old_paid": round(old_paid, 2),
             "credit": round(credit, 2), "invoiced": round(invoiced, 2), "discount": round(discounts, 2), "expected_cash": round(expected_cash, 2),
             "factory_waived": round(factory, 2), "other_waived": round(other_waived, 2), "commission_sales": round(amount_all + factory, 2),
@@ -851,6 +853,69 @@ def office_day(route_id: int, day: date) -> dict:
             "km_start": _last_km(r[0]["id"], day), "driver_selling": bool(d and d["status"] == "open" and day == now.date())}
 
 
+LABEL = dict(PRODUCTS)
+MAX_CHANGES = 80
+
+
+def _fmt(v) -> str:
+    return "—" if v in (None, "") else f"{_num(v):,.2f}".rstrip("0").rstrip(".")
+
+
+def doc_changes(old: Optional[dict], new: dict, old_ret: Optional[dict], new_ret: Optional[dict], customers: dict) -> list[str]:
+    """What an office save changed, as short Thai lines for the day's history (owner, 21 Nov 2026: "is there a log of what I edited").
+    Loads by trip, the office's returns count, each shop's quantities / money, the cash count and the mileage."""
+    old = old or {}
+    out: list[str] = []
+
+    def cmp(label: str, a, b):
+        if _num(a) != _num(b) or (a in (None, "")) != (b in (None, "")):
+            out.append(f"{label}: {_fmt(a)} → {_fmt(b)}")
+
+    ol, nl = old.get("loads") or [], new.get("loads") or []
+    for i in range(max(len(ol), len(nl))):
+        a = (ol[i].get("q") if i < len(ol) else None) or {}
+        b = (nl[i].get("q") if i < len(nl) else None) or {}
+        if i >= len(ol):
+            out.append(f"เพิ่มเที่ยว {i + 1}")
+        elif i >= len(nl):
+            out.append(f"ลบเที่ยว {i + 1}")
+        for k in KEYS:
+            cmp(f"รับ เที่ยว {i + 1} {LABEL[k]}", a.get(k), b.get(k))
+    oret, nret = clean_returns(old_ret), clean_returns(new_ret)
+    for k in KEYS:
+        cmp(f"คืน (หน้าโรงนับ) {LABEL[k]}", oret.get(k), nret.get(k))
+    os_, ns = old.get("sales") or {}, new.get("sales") or {}
+    for cid in list(dict.fromkeys(list(os_) + list(ns))):
+        a, b = os_.get(cid) or {}, ns.get(cid) or {}
+        name = (customers.get(str(cid)) or {}).get("name") or str(cid)
+        for k in KEYS:
+            cmp(f"{name} {LABEL[k]}", (a.get("q") or {}).get(k), (b.get("q") or {}).get(k))
+        for k, lab in (("office_amount", "ยอดเงิน"), ("paid", "จ่าย"), ("old_paid", "จ่ายเก่า"), ("discount", "ส่วนลด")):
+            cmp(f"{name} {lab}", a.get(k), b.get(k))
+    oc, nc = old.get("cash") or {}, new.get("cash") or {}
+    for n in [str(x) for x in NOTES] + ["coins"]:
+        cmp("เหรียญ" if n == "coins" else f"แบงก์ {int(n):,}", oc.get(n), nc.get(n))
+    cmp("ไมล์ใหม่", old.get("km_end"), new.get("km_end"))
+    return out[:MAX_CHANGES] + ([f"… และอีก {len(out) - MAX_CHANGES} รายการ"] if len(out) > MAX_CHANGES else [])
+
+
+def office_close_day(day_id: int, who: str = "office") -> dict:
+    """The office sends a day for the driver (owner, 21 Nov 2026: the driver could not send it and there was nowhere to do it in the
+    office). The status becomes 'closed' exactly as if the phone had sent it; written in reopen_log."""
+    from app import supabase
+    d = supabase.select("sale_days", {"select": "id,doc,rev,status,reopen_log", "id": f"eq.{int(day_id)}", "limit": "1"})
+    if not d:
+        raise RouteSalesError("ไม่พบวันนี้")
+    d = d[0]
+    if d["status"] != "open":
+        raise RouteSalesError("วันนี้ส่งแล้ว")
+    now = datetime.now(timezone.utc).isoformat()
+    supabase.update("sale_days", {"id": f"eq.{d['id']}"}, {
+        "status": "closed", "closed_at": now, "rev": int(d["rev"]) + OFFICE_REV_STEP, "doc": {**(d["doc"] or {}), "closed": True},
+        "reopen_requested_at": None, "reopen_log": (d.get("reopen_log") or []) + [{"at": now, "what": "office_close", "who": who}]})
+    return {"status": "closed"}
+
+
 def office_save_day(route_id: int, day: date, doc: dict, returns: Optional[dict] = None, who: str = "office") -> dict:
     """The owner / bookkeeper saves a day straight away (owner, 11 Nov 2026: no more ask the driver -> reopen -> the driver fixes).
     Works for a day the phone never sent, a sent one, and a day only on paper (created here). The status stays as it was (a new
@@ -869,7 +934,8 @@ def office_save_day(route_id: int, day: date, doc: dict, returns: Optional[dict]
     now = datetime.now(timezone.utc).isoformat()
     row = {"route_id": int(route_id), "day": day.isoformat(), "doc": doc, "rev": int((current or {}).get("rev") or 0) + OFFICE_REV_STEP,
            "status": status, "totals": _public(totals), "updated_at": now, "returns_foh": back or None,
-           "reopen_log": ((current or {}).get("reopen_log") or []) + [{"at": now, "what": "office_edit", "who": who}],
+           "reopen_log": ((current or {}).get("reopen_log") or []) + [{"at": now, "what": "office_edit", "who": who,
+                                                                     "changes": doc_changes((current or {}).get("doc"), doc, (current or {}).get("returns_foh"), back, customers)}],
            "reopen_requested_at": None}            # the driver asked for a fix: the office just made it
     if not current:
         row["closed_at"] = now

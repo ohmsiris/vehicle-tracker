@@ -51,8 +51,9 @@ async function loginWithName(ev) {
   const username = $("loginUser").value.trim(), password = $("loginPw").value;
   if (!username || !password) { err.textContent = "ใส่ชื่อเข้าระบบและรหัสผ่าน"; err.hidden = false; return; }
   const btn = $("loginForm").querySelector("button[type=submit]");
+  // the keyboard check comes first: it used to run after the button was switched off, leaving it stuck at "กำลังเข้าระบบ…" (21 Nov 2026)
+  if (!isPlainAscii(password)) { err.textContent = NOT_ENGLISH_KEYS; err.hidden = false; $("loginPw").select(); return; }
   btn.disabled = true; btn.textContent = "กำลังเข้าระบบ…";
-  if (!isPlainAscii(password)) { err.textContent = NOT_ENGLISH_KEYS; err.hidden = false; return; }
   try {
     const r = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
     const j = await r.json().catch(() => ({}));

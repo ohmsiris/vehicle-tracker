@@ -2961,6 +2961,14 @@ def api_sales_routes_attention(x_app_token: str = Header(default=""), token: str
     return _route_call(route_sales.attention)
 
 
+@app.post("/api/sales-routes/day/{day_id}/close")
+def api_sales_route_office_close(day_id: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The office sends a day the driver could not (route_sales.office_close_day)."""
+    from app import route_sales
+    _check_token(x_app_token, token)
+    return _route_call(route_sales.office_close_day, day_id, _who(x_app_token or token))
+
+
 @app.post("/api/sales-routes/day/{day_id}/check")
 def api_sales_route_check(day_id: int, body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import route_sales

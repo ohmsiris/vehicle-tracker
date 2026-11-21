@@ -144,11 +144,13 @@ function ssTotals() {
     P.forEach((k) => { t.sold[k] += ssN(ln.q[k]); });
   });
   (ss_.doc.loads || []).forEach((ld) => P.forEach((k) => { t.loaded[k] += ssN((ld.q || {})[k]); }));
-  // what came back: หน้าโรง's count wins; until there is one, what the driver typed on the phone (owner, 16 Nov 2026)
-  const office = ss_.returns && Object.keys(ss_.returns).length ? ss_.returns : null;
-  const driver = ss_.doc.returns && Object.keys(ss_.doc.returns).length ? ss_.doc.returns : null;
-  t.backBy = office ? "office" : driver ? "driver" : null;
-  P.forEach((k) => { t.back[k] = ssN((office || driver || {})[k]); });
+  // what came back, product by product (owner, 21 Nov 2026): the number the office typed for หน้าโรง wins; a box left blank uses
+  // what the driver typed on the phone (same rule as route_sales.compute)
+  const office = ss_.returns || {}, driver = ss_.doc.returns || {};
+  const has = (o, k) => o[k] != null && o[k] !== "";
+  t.from = {};
+  P.forEach((k) => { t.from[k] = has(office, k) ? "office" : has(driver, k) ? "driver" : null; t.back[k] = ssN(t.from[k] === "office" ? office[k] : driver[k]); });
+  t.backBy = P.some((k) => t.from[k] === "office") ? "office" : P.some((k) => t.from[k] === "driver") ? "driver" : null;
   const cash = ss_.doc.cash || {};
   t.expected = t.cash + t.old;
   t.counted = ss_.data.notes.reduce((a, n) => a + ssN(cash[String(n)]) * n, 0) + ssN(cash.coins);
@@ -268,11 +270,13 @@ function ssDayTab() {
   const km = el("div", { class: "ss-km" },
     el("label", {}, "ไมล์ใหม่ ", ssNumIn(ss_.doc.km_end, (v) => { ss_.doc.km_end = v === "" ? null : ssN(v); }, { "aria-label": "ไมล์ใหม่" })),
     el("span", { class: "muted small", text: `ไมล์เก่า ${d.km_start ? elN(d.km_start) : "—"}` }));
-  const under = el("div", { class: "ss-under" }, el("div", {}, loads, el("button", { class: "btn small", type: "button", text: "+ เพิ่มเที่ยว",
+  const under = el("div", { class: "ss-under" }, el("div", {}, loads,
+    el("p", { class: "muted small", text: "คืน (หน้าโรงนับ): ช่องว่าง = ใช้ตัวเลขที่คนขับใส่ · นับแล้วไม่มีให้ใส่ 0" }), el("button", { class: "btn small", type: "button", text: "+ เพิ่มเที่ยว",
     onclick: () => { ss_.doc.loads.push({ q: {} }); ss_.dirty = true; ssRenderDriver(); } })), el("div", {}, split, money, km));
 
   const bar = el("div", { class: "ss-savebar" },
     el("button", { class: "btn primary", id: "ssSave", type: "button", text: sheet ? "บันทึกแล้ว" : "บันทึก", disabled: true, onclick: ssSaveDay }),
+    sheet && sheet.status === "open" ? el("button", { class: "btn", type: "button", text: "ส่งใบขายแทนคนขับ", title: "คนขับยังไม่ได้ส่งวันนี้ — ส่ง (ปิดวัน) ให้แทน", onclick: () => ssOfficeClose(sheet.id) }) : null,
     sheet && sheet.status === "checked" ? el("button", { class: "btn", type: "button", text: "ยกเลิกการตรวจ", onclick: () => ssCheck(sheet.id, false) })
       : sheet ? el("button", { class: "btn", type: "button", text: "ตรวจแล้ว ✓", onclick: () => ssCheck(sheet.id, true) }) : null,
     el("span", { class: "grow" }),
@@ -281,7 +285,7 @@ function ssDayTab() {
     el("button", { class: "btn", type: "button", text: "Word", onclick: () => ssSheetDocx(d.route.id, sheet ? ss_.day : "") }),
     el("button", { class: "btn", type: "button", text: "Excel", onclick: () => ssSheetXlsx(d.route.id, sheet ? ss_.day : "") }));
   setTimeout(ssPaintNumbers, 0);
-  return el("div", {}, nav, tiles, ...warn, table, under, bar);
+  return el("div", {}, nav, tiles, ...warn, table, under, bar, ssHistory(sheet));
 }
 
 function ssPrice(c) {
@@ -331,10 +335,10 @@ function ssPaintNumbers() {
   const hasO = Object.keys(office).length > 0;
   if (drv) fill(drv, el("td", { class: "muted", text: hasD ? "คืน (คนขับใส่)" : "คืน (คนขับใส่) — ยังไม่ได้ใส่" }), ...P.map((p) => {
     const has = dret[p.key] != null && dret[p.key] !== "";
-    const differ = hasO && hasD && ssN(dret[p.key]) !== ssN(office[p.key]);
+    const differ = has && office[p.key] != null && office[p.key] !== "" && ssN(dret[p.key]) !== ssN(office[p.key]);
     return el("td", { class: `c${differ ? " warn-text b" : " muted"}`, text: has ? elN(ssN(dret[p.key])) : hasD ? "—" : "",
       title: differ ? `คนขับคืน ${elN(ssN(dret[p.key]))} แต่หน้าโรงนับ ${elN(ssN(office[p.key]))}` : "" });
-  }), el("td", { class: "muted small", text: hasO && hasD ? "ใช้หน้าโรง" : hasD ? "ใช้ตามคนขับ" : "" }));
+  }), el("td", { class: "muted small", text: hasO && hasD ? "หน้าโรงว่าง = ใช้คนขับ" : hasD ? "ใช้ตามคนขับ" : "" }));
   const left = $("ssLeftRow");
   if (left) fill(left, el("td", { text: t.backBy === "driver" ? "รับ − ขาย − คืน (คนขับ) = เหลือ" : "รับ − ขาย − คืน = เหลือ" }), ...P.map((p) => {
     const v = t.loaded[p.key] - t.sold[p.key] - t.back[p.key];
@@ -377,6 +381,29 @@ async function ssSaveDay() {
   ss_.dirty = false;
   await ssLoadDay();
   const s = $("ssSave"); if (s) s.textContent = "บันทึกแล้ว ✓";
+  if (typeof loadSalesAttention === "function") loadSalesAttention();
+}
+
+// the day's history (owner, 21 Nov 2026): who sent / reopened / edited it and, for an office edit, what changed
+const SS_LOG = { office_edit: "ออฟฟิศแก้ไข", office_close: "ออฟฟิศส่งแทนคนขับ", requested: "คนขับขอให้เปิดแก้", reopened: "ออฟฟิศเปิดให้แก้" };
+function ssHistory(sheet) {
+  const log = (sheet && sheet.reopen_log) || [];
+  if (!log.length) return null;
+  const when = (iso) => { const d = new Date(iso); return `${ssDmy(iso.slice(0, 10))} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  return el("details", { class: "card ss-history" }, el("summary", { text: `ประวัติการแก้ (${log.length})` }),
+    el("ul", {}, ...log.slice().reverse().map((x) => el("li", {},
+      el("b", { text: `${when(x.at)} · ${SS_LOG[x.what] || x.what}${x.who ? ` · ${x.who}` : ""}` }),
+      x.what === "office_edit" ? (x.changes ? (x.changes.length ? el("ul", { class: "small" }, ...x.changes.map((c) => el("li", { text: c })))
+        : el("div", { class: "muted small", text: "ไม่มีตัวเลขเปลี่ยน" })) : el("div", { class: "muted small", text: "ก่อนวันที่ 21/11/2026 ไม่ได้เก็บว่าแก้อะไร" })) : null))));
+}
+
+async function ssOfficeClose(dayId) {
+  if (ss_.dirty && !confirm("ยังไม่ได้บันทึกการแก้ไข — ส่งโดยไม่บันทึก?")) return;
+  const t = ssTotals(), P = ssProducts();
+  const blank = P.filter((p) => (t.loaded[p.key] || t.sold[p.key]) && !t.from[p.key]).map((p) => p.label);
+  if (!confirm(`ส่งใบขายวันนี้แทนคนขับ? ส่งแล้วคนขับแก้จากมือถือไม่ได้${blank.length ? `\n\nยังไม่มีตัวเลขคืน: ${blank.join(", ")}` : ""}${t.hasCash ? "" : "\nยังไม่ได้นับเงิน"}`)) return;
+  try { await api(`/api/sales-routes/day/${dayId}/close`, jsonOpts("POST", {})); } catch (err) { alert(err.message); return; }
+  await ssLoadDay();
   if (typeof loadSalesAttention === "function") loadSalesAttention();
 }
 

@@ -225,8 +225,15 @@ def test_the_drivers_returns_count_until_the_plant_counts_and_a_difference_is_fl
     t = rs.compute(loaded_mo, customers)
     assert t["returned_by"] == "driver" and t["diff"]["mo"] == 0 and t["diff"]["lek"] == -1
     assert not any(f.startswith("บด ขาด") for f in t["flags"]) and "เล็ก ขาด 1" in t["flags"]
-    t = rs.compute(loaded_mo, customers, returns={"lod": 12, "lek": 5})              # หน้าโรง counts the whole truck: บด not back
+    t = rs.compute(loaded_mo, customers, returns={"lod": 12, "lek": 5})              # a box หน้าโรง left blank is not counted
+    assert t["diff"]["mo"] == 0 and not any(f.startswith("บด") for f in t["flags"])
+    t = rs.compute(loaded_mo, customers, returns={"lod": 12, "lek": 5, "mo": 0})     # ...a 0 it typed is: บด not back
     assert t["diff"]["mo"] == -3 and "บด ขาด 3" in t["flags"]
+    # สาย 57, 20 Nov 2026: the driver typed ใหญ่ 1 and บด 2, the office typed only บด 2 -> ใหญ่ uses the driver's 1, no false ขาด
+    s57 = {"loads": [{"q": {"lod": 58, "mo": 50}}], "sales": {"1": {"q": {"lod": 57, "mo": 48}}}, "returns": {"lod": 1, "mo": 2}}
+    t = rs.compute(s57, {"1": {"prices": {"lod": 40, "mo": 40}}}, returns={"mo": 2})
+    assert t["returned"]["lod"] == 1 and t["diff"]["lod"] == 0 and t["returned_from"] == {"lod": "driver", "mo": "office"}
+    assert not any("ใหญ่" in f for f in t["flags"])
     t = rs.compute({**doc, "returns": None}, customers)                              # nobody counted: no shortage worked out
     assert t["returned"] is None and t["returned_by"] is None and t["diff"]["lek"] == 0 and not any("ขาด" in f for f in t["flags"])
 

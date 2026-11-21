@@ -689,19 +689,26 @@
         '<span class="h">ควรเหลือ</span><span class="h">คืน</span>' + (foh ? '<span class="h">หน้าโรงนับ</span>' : "") +
         used.map(function (p) {
           var left = t.loaded[p.key] - t.sold[p.key], has = hasRet(p.key), diff = has ? n(ret[p.key]) - left : 0;
+          var need = !has && (t.loaded[p.key] || t.sold[p.key]);         // must be answered before sending: 0 is an answer
           var mine = ro ? '<span class="c"><b>' + (has ? fmt(ret[p.key]) : "—") + "</b></span>"
-            : '<input class="num" data-ret="' + p.key + '" inputmode="numeric" pattern="[0-9]*" value="' + (has ? n(ret[p.key]) : "") + '" aria-label="คืน ' + esc(p.label) + '">';
+            : '<input class="num' + (need ? " need" : "") + '" placeholder="' + (need ? "ใส่" : "") + '" data-ret="' + p.key + '" inputmode="numeric" pattern="[0-9]*" value="' + (has ? n(ret[p.key]) : "") + '" aria-label="คืน ' + esc(p.label) + '">';
           var cell = "";
           if (foh) {
-            var got = n(foh[p.key]), fd = got - left, differ = has && n(ret[p.key]) !== got;
-            cell = '<span class="c' + (differ ? " bad-t" : "") + '">' + fmt(got) + (fd ? '<br><span class="' + (fd < 0 ? "bad-t" : "warn-t") + '">' + (fd < 0 ? "ขาด " : "เกิน ") + fmt(Math.abs(fd)) + "</span>" : ' <span class="ok-t">✓</span>') + "</span>";
+            var counted = foh[p.key] != null && foh[p.key] !== "";      // a box the office left blank: not counted, the driver's number is used
+            var got = n(foh[p.key]), fd = got - left, differ = counted && has && n(ret[p.key]) !== got;
+            cell = !counted ? '<span class="c muted">—</span>'
+              : '<span class="c' + (differ ? " bad-t" : "") + '">' + fmt(got) + (fd ? '<br><span class="' + (fd < 0 ? "bad-t" : "warn-t") + '">' + (fd < 0 ? "ขาด " : "เกิน ") + fmt(Math.abs(fd)) + "</span>" : ' <span class="ok-t">✓</span>') + "</span>";
           }
           return "<b>" + esc(p.label) + '</b><span class="c">' + fmt(t.loaded[p.key]) + '</span><span class="c">' + fmt(t.sold[p.key]) + '</span><span class="c"><b>' + fmt(left) + "</b>" +
             (has ? "<br>" + (diff ? '<span class="' + (diff < 0 ? "bad-t" : "warn-t") + '">' + (diff < 0 ? "ขาด " : "เกิน ") + fmt(Math.abs(diff)) + "</span>" : '<span class="ok-t">ตรง ✓</span>') : "") +
             "</span>" + mine + cell;
         }).join("") + "</div>" +
-        (ro ? "" : '<p class="note">นับน้ำแข็งที่เหลือบนรถแล้วใส่ช่อง “คืน” — ไม่เหลือใส่ 0 · ควรเหลือ = รับ − ขาย</p>') +
-        (foh && used.some(function (p) { return hasRet(p.key) && n(ret[p.key]) !== n(foh[p.key]); }) ? '<p class="note bad-t">ที่คนขับใส่ไม่ตรงกับหน้าโรงนับ — ออฟฟิศใช้ตัวเลขหน้าโรง</p>' : "");
+        (ro ? "" : (function () {   // owner, 21 Nov 2026: say plainly which boxes are still empty and that 0 must be typed
+          var blank = used.filter(function (p) { return !hasRet(p.key) && (t.loaded[p.key] || t.sold[p.key]); }).map(function (p) { return p.label; });
+          return (blank.length ? '<p class="note bad-t"><b>ยังไม่ได้ใส่: ' + esc(blank.join(", ")) + '</b> — ต้องใส่ทุกช่องก่อนส่ง ไม่เหลือให้ใส่ 0</p>' : "") +
+            '<p class="note">นับน้ำแข็งที่เหลือบนรถแล้วใส่ช่อง “คืน” ทุกช่อง — ไม่เหลือใส่ 0 · ควรเหลือ = รับ − ขาย</p>';
+        })()) +
+        (foh && used.some(function (p) { return hasRet(p.key) && foh[p.key] != null && foh[p.key] !== "" && n(ret[p.key]) !== n(foh[p.key]); }) ? '<p class="note bad-t">ที่คนขับใส่ไม่ตรงกับหน้าโรงนับ — ออฟฟิศใช้ตัวเลขหน้าโรง</p>' : "");
     } else html += '<p class="note">ยังไม่มีการรับ / ขาย</p>';
     html += "</div>";
     html += '<div class="box"><div class="line"><h3 style="margin:0">' + ic("truck", "s") + 'ไมล์</h3><input class="num wide" id="kme" inputmode="numeric" value="' + (S.doc.km_end || "") + '" placeholder="0"' + dis + "></div></div>";

@@ -116,6 +116,8 @@ main { padding: 12px 12px calc(92px + env(safe-area-inset-bottom)); max-width: 6
   font-variant-numeric: tabular-nums; background: #fff; }
 .num.wide { width: 120px; }
 .num:disabled { background: var(--soft); color: var(--muted); }
+.num.need { border: 2px solid var(--bad, #c0392b); }
+.num.need::placeholder { color: var(--bad, #c0392b); font-size: 15px; font-weight: 600; }
 .more { color: var(--blue); font-weight: 600; padding: 6px 0; justify-self: start; }
 .clear-link { justify-self: end; color: var(--bad); font-weight: 600; font-size: 14px; padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; }
 .total { display: flex; justify-content: space-between; align-items: baseline; font-size: 18px; }

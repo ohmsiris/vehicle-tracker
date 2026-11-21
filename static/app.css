@@ -1897,6 +1897,10 @@ body.signed-out .shell { display: block; }
 .ss-mini th, .ss-mini td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
 .ss-mini .c { text-align: center; }
 .ss-mini.ss-split { margin-bottom: 14px; }
+.ss-history { margin-top: 14px; }
+.ss-history summary { cursor: pointer; font-weight: 650; }
+.ss-history > ul { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 8px; }
+.ss-history ul ul { margin: 4px 0 0; padding-left: 18px; }
 .ss-km { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
 .ss-savebar { position: sticky; bottom: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-sm); }
 .ss-savebar .grow, .ss-dlg-foot .grow { flex: 1; }

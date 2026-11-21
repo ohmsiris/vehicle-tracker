@@ -878,8 +878,10 @@ async function init() {
   });
   $("tokenSave").addEventListener("click", () => {
     const typed = $("tokenInput").value.trim();
+    $("tokenError").textContent = NOT_ENGLISH_KEYS;
     $("tokenError").hidden = isPlainAscii(typed);
     if (!isPlainAscii(typed)) { $("tokenInput").value = ""; $("tokenInput").focus(); return; }
+    try { sessionStorage.setItem("vt_code_tried", "1"); } catch (e) { /* storage blocked: no message, as before */ }
     state.token = typed; saveToken(state.token); location.href = "/"; });
 
   showView("home");                     // the app opens on the home page (clears the hash, as every non-truck page does)
@@ -942,6 +944,14 @@ async function loadMeta() {
     $("tokenBox").hidden = false;
     document.body.classList.remove("booting");
     if (err.status === 403 || err.status === 503) { document.body.classList.add("signed-out"); setTimeout(() => $("loginUser").focus(), 0); }
+    // a wrong access code used to just bring the login card back with no word (owner, 21 Nov 2026: "I typed my password, it didn't work")
+    let tried = false;
+    try { tried = sessionStorage.getItem("vt_code_tried") === "1"; sessionStorage.removeItem("vt_code_tried"); } catch (e) { /* blocked */ }
+    if (tried && err.status === 403) {
+      $("tokenError").textContent = "รหัสเข้าใช้งานไม่ถูกต้อง — ถ้าเป็นรหัสผ่านของชื่อผู้ใช้ ให้ใส่ที่ช่อง “ชื่อเข้าระบบ” และ “รหัสผ่าน” ด้านบนแทน";
+      $("tokenError").hidden = false;
+      const det = $("tokenInput").closest("details"); if (det) det.open = true;
+    }
     $("vehicleSelect").replaceChildren(el("option", { value: "", text: err.status === 403 || err.status === 503 ? "ต้องใส่รหัสเข้าใช้งานก่อน" : "โหลดรายชื่อรถไม่สำเร็จ" }));
   }
 }
