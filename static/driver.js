@@ -757,7 +757,9 @@
     $("closeday").onclick = function () {
       // owner, 19 Nov 2026: no คืน or no cash count = the day cannot be sent (the server holds the same rule: route_sales.close_missing)
       var must = [];
-      if (used.some(function (p) { return (t.loaded[p.key] || t.sold[p.key]) && !hasRet(p.key); })) must.push("น้ำแข็งที่คืน (ไม่เหลือใส่ 0)");
+      // name the products still blank (owner, 21 Nov 2026: สาย 57 typed บด and ใหญ่ but left เล็ก / แพ็ค empty and could not tell why)
+      var blank = used.filter(function (p) { return (t.loaded[p.key] || t.sold[p.key]) && !hasRet(p.key); }).map(function (p) { return p.label; });
+      if (blank.length) must.push("น้ำแข็งที่คืน: " + blank.join(", ") + " (ไม่เหลือใส่ 0)");
       var cashed = S.doc.cash && Object.keys(S.doc.cash).some(function (k) { var v = S.doc.cash[k]; return v != null && String(v).trim() !== ""; });
       if (!cashed) must.push("นับเงิน (จำนวนแบงก์แต่ละแบบ)");
       if (must.length) { window.alert("ยังส่งไม่ได้ — ต้องใส่ก่อน:\n• " + must.join("\n• ")); return; }

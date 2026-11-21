@@ -261,11 +261,15 @@ function ssDayTab() {
     el("tfoot", {}, el("tr", { class: "ss-totrow" }, el("td", { text: "รวมนับได้" }), el("td", {}), el("td", { class: "r", id: "ssCashTot" })),
       el("tr", {}, el("td", { text: "เงินสดต้องมี" }), el("td", {}), el("td", { class: "r", id: "ssCashWant" })),
       el("tr", {}, el("td", { id: "ssCashDiffL" }), el("td", {}), el("td", { class: "r", id: "ssCashDiff" }))));
+  // owner, 21 Nov 2026: beside the cash count, how the day's sales split -- cash vs วางบิล (and credit / old debts when there are any)
+  const split = el("table", { class: "ss-mini ss-split" },
+    el("thead", {}, el("tr", {}, el("th", { text: "ยอดขาย" }), el("th", { class: "r", text: "เป็นเงิน" }))),
+    el("tbody", { id: "ssSplitBody" }));
   const km = el("div", { class: "ss-km" },
     el("label", {}, "ไมล์ใหม่ ", ssNumIn(ss_.doc.km_end, (v) => { ss_.doc.km_end = v === "" ? null : ssN(v); }, { "aria-label": "ไมล์ใหม่" })),
     el("span", { class: "muted small", text: `ไมล์เก่า ${d.km_start ? elN(d.km_start) : "—"}` }));
   const under = el("div", { class: "ss-under" }, el("div", {}, loads, el("button", { class: "btn small", type: "button", text: "+ เพิ่มเที่ยว",
-    onclick: () => { ss_.doc.loads.push({ q: {} }); ss_.dirty = true; ssRenderDriver(); } })), el("div", {}, money, km));
+    onclick: () => { ss_.doc.loads.push({ q: {} }); ss_.dirty = true; ssRenderDriver(); } })), el("div", {}, split, money, km));
 
   const bar = el("div", { class: "ss-savebar" },
     el("button", { class: "btn primary", id: "ssSave", type: "button", text: sheet ? "บันทึกแล้ว" : "บันทึก", disabled: true, onclick: ssSaveDay }),
@@ -343,6 +347,12 @@ function ssPaintNumbers() {
     el("td", { class: "r", text: elN(t.cash) }), el("td", { class: "r", text: t.credit ? elN(t.credit) : "" }));
   const cash = ss_.doc.cash || {};
   ss_.data.notes.concat(["coins"]).forEach((n) => { const c = $(`ssCash${n}`); if (c) c.textContent = ssN(cash[String(n)]) ? elN(ssN(cash[String(n)]) * (n === "coins" ? 1 : n)) : ""; });
+  const sb = $("ssSplitBody");
+  if (sb) {
+    const row = (label, v, cls = "") => el("tr", { class: cls }, el("td", { text: label }), el("td", { class: "r", text: `฿${elN(v)}` }));
+    fill(sb, row("เงินสด", t.cash), row("วางบิล", t.invoiced), t.credit >= 1 ? row("ค้าง (ขายเชื่อ)", t.credit) : null,
+      row("ขายทั้งหมด", t.amount, "ss-totrow"), t.old >= 1 ? row("+ เก็บหนี้เก่า (จ่ายเก่า)", t.old, "muted") : null);
+  }
   const put = (id, v) => { const c = $(id); if (c) c.textContent = v; };
   put("ssCashTot", t.hasCash ? `฿${elN(t.counted)}` : "—");
   put("ssCashWant", `฿${elN(t.expected)}`);
