@@ -104,7 +104,7 @@ def sniff_file(name: str, data: bytes, choices: Optional[dict] = None) -> Droppe
         f.is_scan = True
     elif ext in (".xls", ".xlsx", ".xlsm", ".csv"):
         try:
-            f.sheets = {k: v[:40] for k, v in workbook(data, name).items()}
+            f.sheets = workbook(data, name, max_rows=40)          # only the top: a 20k-row export must not slow the upload
         except Exception:                     # a .xls that is really HTML (PEA AMR export) or a broken file: readers look at the bytes
             f.sheets = None
     elif ext in (".htm", ".html"):
@@ -134,20 +134,27 @@ def pdf_page_images(data: bytes, dpi: int = 150) -> list[bytes]:
     return out
 
 
-def workbook(data: bytes, name: str = "") -> dict:
-    """{sheet name: rows (lists of cell values)} of an .xls / .xlsx / .csv given as BYTES."""
+def workbook(data: bytes, name: str = "", max_rows: Optional[int] = None) -> dict:
+    """{sheet name: rows (lists of cell values)} of an .xls / .xlsx / .csv given as BYTES (only the first max_rows rows of each sheet if given)."""
     low = name.lower()
     if low.endswith(".csv"):
         import csv
         text = data.decode("utf-8-sig", errors="replace")
-        return {"csv": [row for row in csv.reader(io.StringIO(text))]}
+        rows = []
+        for row in csv.reader(io.StringIO(text)):
+            if max_rows and len(rows) >= max_rows:
+                break
+            rows.append(row)
+        return {"csv": rows}
     if low.endswith(".xls") or data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         import xlrd
-        book = xlrd.open_workbook(file_contents=data)
-        return {sh.name: [[c.value for c in sh.row(i)] for i in range(sh.nrows)] for sh in book.sheets()}
+        book = xlrd.open_workbook(file_contents=data, on_demand=True)
+        return {sh.name: [[c.value for c in sh.row(i)] for i in range(min(sh.nrows, max_rows or sh.nrows))] for sh in book.sheets()}
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
-    return {ws.title: [list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets}
+    out = {ws.title: [list(r) for r in ws.iter_rows(values_only=True, max_row=max_rows)] for ws in wb.worksheets}
+    wb.close()
+    return out
 
 
 _MARKS = "ัิ-ฺ็-๎"

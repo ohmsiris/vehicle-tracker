@@ -45,6 +45,7 @@ FEEDS = [
     {"key": "fuel_card", "from": "you", "half": 2, "en": "Fuel card (Bangchak / PT)", "th": "น้ำมันบัตร (บางจาก / PT)", "account": "6120"},
     {"key": "hq_cheques", "from": "hq", "half": 2, "en": "HQ cheques (salt, chemicals, bags)", "th": "เช็คจาก HQ (เกลือ เคมี ถุง)", "account": "5300"},
     {"key": "hq_salary", "from": "hq", "half": 2, "en": "Salaries (HQ)", "th": "เงินเดือน (HQ)", "account": "5400"},
+    {"key": "sales_program", "from": "you", "half": 2, "en": "Front-yard sales (ice program)", "th": "ยอดขายหน้าโรง (โปรแกรมขาย)", "account": "4100"},
 ]
 FEED_BY_KEY = {f["key"]: f for f in FEEDS}
 # Which acc_entries sources fill each checklist row (owner, 24 Nov 2026: "the checklist becomes an automatic status board"). A row was
@@ -350,13 +351,16 @@ def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
     if not branch:      # both branches together: ice one branch sold the other is not a sale of the company (5060 / 4150)
         rows = [r for r in rows if r["account"] not in INTERNAL]
     counts: dict = {}
-    seen: set = set()
+    per_entry: dict = {}          # entry id -> (entry, the cost it books, or for a sales entry the revenue)
     for r in rows:
-        e = r["entry"]
-        if e["id"] in seen:
-            continue
-        seen.add(e["id"])
-        total = sum(_money(x["debit"]) for x in rows if x["entry"]["id"] == e["id"] and accounts.get(x["account"], {}).get("kind") in ("cogs", "expense"))
+        kind = accounts.get(r["account"], {}).get("kind")
+        e, total = per_entry.get(r["entry"]["id"], (r["entry"], 0.0))
+        if kind in ("cogs", "expense"):
+            total += _money(r["debit"])
+        elif kind == "income":
+            total += _money(r["credit"]) - _money(r["debit"])
+        per_entry[e["id"]] = (e, total)
+    for e, total in per_entry.values():
         n, t = counts.get(e["source"], (0, 0.0))
         counts[e["source"]] = (n + 1, t + total)
     period_key = f"{month}-{half or 0}"

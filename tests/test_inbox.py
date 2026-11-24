@@ -469,7 +469,9 @@ def test_routes_upload_list_book_and_map_errors_to_thai_4xx(db, readers, monkeyp
     assert c.post("/api/accounts/inbox/00000000-0000-0000-0000-000000000000/reread", headers=h).status_code == 404
     assert c.post(f"/api/accounts/inbox/{got[1]['id']}/ai", headers=h).status_code == 422          # no AI key on the server
     assert c.delete(f"/api/accounts/inbox/{fid}", headers=h).json() == {"ok": True} and fid not in db.rows
-    assert c.get("/api/accounts/checks?month=2026-11", headers=h).json()["available"] in (False, True)
+    monkeypatch.setattr(inbox, "_optional", lambda name: type("M", (), {"run": staticmethod(lambda m, b: {"checks": [{"key": "x", "state": "ok"}]})})()
+                        if name == "acc_checks" else None)
+    assert c.get("/api/accounts/checks?month=2026-11", headers=h).json() == {"available": True, "checks": [{"key": "x", "state": "ok"}], "note": ""}
     assert c.get("/api/accounts/inbox", headers={"X-App-Token": "wrong"}).status_code == 403
 
 
