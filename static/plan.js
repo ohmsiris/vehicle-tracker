@@ -198,6 +198,8 @@ function planCard(v) {
       el("span", { class: "badge", title: v.group ? v.group.label : "", text: v.group ? `${v.group.code} · ${plMonths(v.group.months)} ต่อ ${baht(v.group.step_km)} กม.` : "ยังไม่ได้เลือกกลุ่มแผน" }),
       el("span", { class: "grow" }),
       needsReading ? el("button", { class: "btn small", type: "button", text: "อ่านเลขไมล์", title: "ใส่เลขไมล์จากหน้าปัด", onclick: () => openReadingDialog(v, "odometer") }) : null,
+      v.in_queue ? el("span", { class: "badge warn", title: v.in_queue.problem || "", text: `อยู่ในคิวซ่อมแล้ว${v.in_queue.since ? ` · ${beDate(v.in_queue.since)}` : ""}` })
+        : !shop && attention.length ? el("button", { class: "btn small", type: "button", text: "เข้าคิวซ่อม", title: "เพิ่มในบอร์ดซ่อมช่อง “รอซ่อม” พร้อมรายการที่ถึงกำหนด", onclick: (e) => plQueue(v, attention, e.currentTarget) }) : null,
       el("button", { class: "btn small", type: "button", text: "ข้อความส่งอู่", onclick: () => openShopText(v) }),
       v.has_plan ? el("button", { class: "btn small", type: "button", text: "+ บันทึกว่าทำแล้ว", onclick: () => openRecordDialog(v, attention.map((i) => i.key)) }) : null),
     !v.has_plan ? el("p", { class: "muted small" }, "ยังไม่ได้เลือกกลุ่มแผน — เลือกได้ที่ ", el("a", { href: "#plan-settings", text: "ตั้งค่าระยะ › รถแต่ละคันใช้กลุ่มไหน" }), " (หรือปล่อยว่างถ้าไม่ต้องทำตาราง)")
@@ -205,6 +207,27 @@ function planCard(v) {
       : el("p", { class: "muted small", text: known ? `ปกติทุกรายการที่มีประวัติ (${known}/${v.items.length} รายการ)` : "ยังไม่มีประวัติเลย — กด “บันทึกว่าทำแล้ว” เพื่อเริ่มนับ" }),
     v.odometer_anomaly ? el("p", { class: "warn-text small", text: `⚠ ${v.odometer_anomaly.text}` }) : null,
     v.has_plan ? el("div", { class: "muted small", text: v.km_first === false ? "ไมล์เสีย — นับตามเวลาของกลุ่ม" : plKmPerDay(v.km_per_day) }) : null);
+}
+
+// "เข้าคิวซ่อม" (owner, 24 Nov 2026): the same as the repair board's "เข้าคิว ↓" on its due list -- one request in รอซ่อม, its problem the
+// items that need doing (most urgent first), so the truck is in the queue without going to the board
+async function plQueue(v, items, btn) {
+  const problem = DUE_PREFIX + items.map((i) => i.label).join(", ");
+  btn.disabled = true;
+  try {
+    const open = (await api("/api/requests?scope=active")).filter((r) => r.vehicle_id === v.id);
+    if (open.length && !confirm(`${plLabel(v)} มีงานที่ยังไม่ปิดอยู่แล้ว ${open.length} งาน:\n${open.map((r) => `• ${r.problem}`).join("\n")}\n\nเพิ่ม “${problem}” อีกงานใช่ไหม?`)) {
+      btn.disabled = false;
+      return;
+    }
+    await api("/api/requests", jsonOpts("POST", { vehicle_id: v.id, problem, reported_by: null, urgent: false, shop: null, request_date: todayISO() }));
+  } catch (err) {
+    btn.disabled = false;
+    showErr("plError", `เข้าคิวซ่อมไม่สำเร็จ: ${err.message}`);
+    return;
+  }
+  v.in_queue = { problem, since: todayISO() };
+  renderOverview();
 }
 
 // ================================================================== the settings (second tab)

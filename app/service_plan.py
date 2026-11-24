@@ -1044,14 +1044,14 @@ def overview(branch: str = "", vehicle_class: str = "", *, today: Optional[date]
     groups, assigned = _groups(), _vehicle_groups()
     events = _bill_events()
     hits, odos = _group(bill_hits(events, _rule_sets(vehicles, groups, assigned))), _group(bill_odometers(events))
-    at_shop = _at_shop()
+    at_shop, in_queue = _at_shop(), _in_queue()
     rows = []
     for v in vehicles:
         group = groups.get(assigned.get(v["id"]))
         plan = vehicle_plan(v, group=group, records=records.get(v["id"], []) + hits.get(v["id"], []), readings=readings.get(v["id"], []) + odos.get(v["id"], []),
                             overrides=overrides, today=today, soon_days=soon_days, snoozes=snoozes.get(v["id"]))
         rows.append({**{k: v.get(k) for k in ("id", "plate_number", "vehicle_number", "nickname", "branch", "vehicle_class", "make", "model", "usage", "history_current_on", "odometer_broken")}, **plan,
-                     "at_shop": at_shop.get(v["id"])})
+                     "at_shop": at_shop.get(v["id"]), "in_queue": in_queue.get(v["id"])})
 
     def rank(r):
         return (1 if r.get("at_shop") else 0, *priority(r), str(r.get("branch")), _numkey(r.get("vehicle_number")))      # at a shop: last
@@ -1079,6 +1079,20 @@ def _at_shop() -> dict:
     for r in rows:
         if r.get("vehicle_id") and r["vehicle_id"] not in out:
             out[r["vehicle_id"]] = {"shop": r.get("shop"), "since": r.get("sent_date")}
+    return out
+
+
+def _in_queue() -> dict:
+    """vehicle id -> {problem, since} for the trucks waiting on the repair board (รอซ่อม): the plan page shows it instead of a second
+    "เข้าคิวซ่อม" (owner, 24 Nov 2026)."""
+    try:
+        rows = supabase.select_all("repair_requests", {"select": "vehicle_id,problem,request_date", "status": "eq.open", "order": "id.asc"})
+    except supabase.SupabaseError:
+        return {}
+    out: dict = {}
+    for r in rows:
+        if r.get("vehicle_id") and r["vehicle_id"] not in out:
+            out[r["vehicle_id"]] = {"problem": r.get("problem"), "since": r.get("request_date")}
     return out
 
 

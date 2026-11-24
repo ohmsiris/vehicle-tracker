@@ -817,3 +817,16 @@ def test_oil_due_now_by_a_fresh_estimate_comes_before_a_truck_that_only_needs_re
     due_now = {"items": [{"key": "engine_oil", "state": "soon", "days_left": 0, "est_due": True}], "counts": counts}
     read_it = {"items": [{"key": "engine_oil", "state": "check", "days_left": 0}], "counts": counts}
     assert sorted([read_it, due_now], key=sp.priority) == [due_now, read_it]
+
+
+def test_in_queue_lists_waiting_trucks_once(monkeypatch):
+    from app import supabase
+    seen = {}
+
+    def fake(table, params):
+        seen.update(table=table, status=params.get("status"))
+        return [{"vehicle_id": "v1", "problem": "ถึงรอบบำรุง: น้ำมันเครื่อง", "request_date": "2026-11-24"},
+                {"vehicle_id": "v1", "problem": "เบรกดัง", "request_date": "2026-11-25"}, {"vehicle_id": None, "problem": "x"}]
+    monkeypatch.setattr(supabase, "select_all", fake)
+    assert sp._in_queue() == {"v1": {"problem": "ถึงรอบบำรุง: น้ำมันเครื่อง", "since": "2026-11-24"}}
+    assert seen == {"table": "repair_requests", "status": "eq.open"}
