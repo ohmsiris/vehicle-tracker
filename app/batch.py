@@ -46,6 +46,8 @@ NON_DESCRIPTIVE_CATEGORIES = {"ค่าแรง", "อื่นๆ"}
 MAX_PLAUSIBLE_MILEAGE = 3_000_000
 DATE_LOOKBACK_DAYS = 3 * 365
 MONEY_TOLERANCE_BAHT = 1.0
+VAT_RATE = 0.07
+VAT_LINE = re.compile(r"^\s*(?:vat|ภาษีมูลค่าเพิ่ม)", re.I)     # same test as app/accounting.py and the review page (static/app.js VAT_LINE_RE)
 
 
 def _digits_to_int(raw) -> Optional[int]:
@@ -219,9 +221,19 @@ def build_draft(
     ]
     stated_sum = round(sum(stated_totals), 2)
     line_sum = round(sum(li["line_total"] or 0 for li in line_items), 2)
+    # The lines (every page) + 7 % = the bill's total, and no VAT line was read: the lines are before VAT (owner, 24 Nov 2026). The review
+    # page then ticks "ยังไม่รวม VAT" by itself with this amount, so the lines and the total agree.
+    vat_to_add = None
+    if (stated_sum > 0 and line_sum > 0 and abs(stated_sum - line_sum) > MONEY_TOLERANCE_BAHT
+            and not any(VAT_LINE.match(li["description"] or "") for li in line_items)
+            and abs(line_sum * (1 + VAT_RATE) - stated_sum) <= MONEY_TOLERANCE_BAHT):
+        vat_to_add = round(stated_sum - line_sum, 2)
     if stated_sum > 0:
         total_cost: Optional[float] = stated_sum
-        if line_sum > 0 and abs(stated_sum - line_sum) > MONEY_TOLERANCE_BAHT:
+        if vat_to_add:
+            warnings.append(f"ผลรวมรายการ ({line_sum:,.2f}) + VAT 7% ({vat_to_add:,.2f}) = ยอดรวมในบิล ({stated_sum:,.2f}) "
+                            "-- ถือว่าราคาในรายการยังไม่รวม VAT ติ๊ก VAT ให้แล้ว")
+        elif line_sum > 0 and abs(stated_sum - line_sum) > MONEY_TOLERANCE_BAHT:
             warnings.append(
                 f"ผลรวมรายการ ({line_sum:,.2f}) ไม่ตรงกับยอดรวมในบิล ({stated_sum:,.2f}) "
                 "-- อาจมี VAT/ส่วนลด หรืออ่านรายการผิดบางแถว"
@@ -278,5 +290,6 @@ def build_draft(
             for f in files
         ],
         "line_items": line_items,
+        "vat_to_add": vat_to_add,
         "warnings": warnings,
     }

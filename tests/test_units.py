@@ -149,6 +149,38 @@ def test_total_mismatch_flags_total():
     assert any("ไม่ตรงกับยอดรวม" in w for w in d["warnings"])
 
 
+def test_lines_plus_vat_equal_total_ticks_vat():
+    # two pages, no VAT line: 3000 + 500 = 3500 before VAT, the bill says 3745 (= 3500 x 1.07)
+    p1 = _bill(total_cost=0, has_total_this_page=False)
+    p2 = _bill(total_cost=3745, line_items=[{"quantity": 1, "unit": "", "description": "C", "cost": 500, "category": "เบรก", "low_confidence_fields": []}])
+    d = draft([_file(0, p1), _file(1, p2)])
+    assert d["vat_to_add"] == 245
+    assert d["event"]["total_cost"] == 3745
+    assert "total_cost" not in d["event"]["low_confidence_fields"]
+    assert any("VAT 7%" in w for w in d["warnings"]) and not any("ไม่ตรงกับยอดรวม" in w for w in d["warnings"])
+
+
+def test_vat_rounding_within_a_baht_still_counts():
+    d = draft([_file(0, _bill(total_cost=3210.5))])        # 3000 x 1.07 = 3210
+    assert d["vat_to_add"] == 210.5
+
+
+def test_vehicle_tax_line_is_not_vat():
+    # a garage that renews the truck's tax: "ภาษีรถยนต์" is a cost line, not VAT -- the 7 % check still runs
+    tax = {"quantity": 0, "unit": "", "description": "ภาษีรถยนต์ประจำปี", "cost": 1000, "category": "อื่นๆ", "low_confidence_fields": []}
+    d = draft([_file(0, _bill(total_cost=4280, line_items=_bill()["line_items"] + [tax]))])     # (3000 + 1000) x 1.07
+    assert d["vat_to_add"] == 280
+
+
+def test_no_vat_guess_when_vat_line_read_or_sum_matches():
+    vat_line = {"quantity": 0, "unit": "", "description": "VAT 7%", "cost": 210, "category": "อื่นๆ", "low_confidence_fields": []}
+    with_vat = _bill(total_cost=3210, line_items=_bill()["line_items"] + [vat_line])
+    assert draft([_file(0, with_vat)])["vat_to_add"] is None
+    assert draft([_file(0, _bill())])["vat_to_add"] is None                      # lines = total
+    d = draft([_file(0, _bill(total_cost=3500))])                               # off, but not by 7 %
+    assert d["vat_to_add"] is None and any("ไม่ตรงกับยอดรวม" in w for w in d["warnings"])
+
+
 def test_buddhist_year_slip_is_corrected():
     d = draft([_file(0, _bill(date="2569-10-10"))])
     assert d["event"]["event_date"] == "2026-10-10"

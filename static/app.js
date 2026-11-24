@@ -8,6 +8,7 @@ const state = {
   billFiles: [],         // [{blob, name, type, url}]  -- the bill being checked (its files), sent with it when saved
   refFiles: [],          // [{blob, name, type, url}]  -- stored as-is, never extracted
   pickBills: [],         // the bill files picked on the page, not read yet (they become bills in the queue: billqueue.js)
+  pickOrderMoved: false, // the picked bills were put in order by hand (↑ ↓): new ones go to the end, no re-sorting
   pickRefs: [],          // the other photos picked on the page (they go with the bill, or with the mechanic's own entry)
   draft: null,
   totalManual: false,     // true once the user types their own header total -- stop auto-following the line sum
@@ -179,16 +180,38 @@ async function addFiles(list, target, allowPdf) {
     const blob = isPdf ? f : await prepareImage(f);
     target.push({ blob, name: f.name, type: isPdf ? "application/pdf" : blob.type || "image/jpeg", url: URL.createObjectURL(blob) });
   }
+  if (target === state.pickBills && !state.pickOrderMoved) sortPickedBills();
+  renderPicked();
+}
+
+// The bill photos are read top to bottom, and the page with the lines is usually the one taken first (owner, 24 Nov 2026): picked photos are
+// put in the order of the number in their name (S__6234329_0.jpg before S__6234330_0.jpg, IMG_0099 before IMG_0100). ↑ ↓ change it by
+// hand; once moved by hand, photos added later go to the end instead of re-sorting the list.
+const fileNameOrder = (a, b) => a.name.localeCompare(b.name, "en", { numeric: true, sensitivity: "base" });
+function sortPickedBills() { state.pickBills.sort(fileNameOrder); }
+
+function movePicked(i, d) {
+  const j = i + d, list = state.pickBills;
+  if (j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  state.pickOrderMoved = true;
   renderPicked();
 }
 
 function renderPicked() {
   const list = $("billList");
+  const n = state.pickBills.length;
+  if (!n) state.pickOrderMoved = false;
   list.replaceChildren(...state.pickBills.map((f, i) =>
     el("li", {},
-      el("span", { class: "name", text: (f.type === "application/pdf" ? "📄 " : "🧾 ") + f.name }),
+      el("span", { class: "pick-no", text: String(i + 1) }),
+      f.type === "application/pdf" ? el("span", { class: "pick-thumb pdf", text: "PDF" }) : el("img", { class: "pick-thumb", src: f.url, alt: "" }),
+      el("span", { class: "name", text: f.name }),
       el("span", { class: "muted small", text: `${Math.max(1, Math.round(f.blob.size / 1024))} KB` }),
+      n > 1 ? el("button", { class: "btn small", type: "button", text: "↑", title: "เลื่อนขึ้น", disabled: i === 0, onclick: () => movePicked(i, -1) }) : null,
+      n > 1 ? el("button", { class: "btn small", type: "button", text: "↓", title: "เลื่อนลง", disabled: i === n - 1, onclick: () => movePicked(i, 1) }) : null,
       el("button", { class: "btn small", text: "ลบ", onclick: () => { state.pickBills.splice(i, 1); renderPicked(); } }))));
+  if ($("billOrderNote")) $("billOrderNote").hidden = n < 2;
   $("refThumbs").replaceChildren(...state.pickRefs.map((f, i) =>
     el("div", { class: "thumb" },
       el("img", { src: f.url, alt: f.name }),
@@ -396,7 +419,7 @@ function billBlock(bill, items) {
 // each bill"). Ticked, it is 7 % of all the lines on every photo and shows at once beside the total; type another amount and it
 // stays as typed (a bill that rounds its VAT its own way). A VAT line the reader found on a bill is taken out of that bill's table
 // and becomes this amount, so VAT is never counted twice. It is saved as one "VAT 7%" line (category อื่นๆ) like before.
-const VAT_LINE_RE = /^\s*(vat|ภาษีมูลค่าเพิ่ม|ภาษี)/i;
+const VAT_LINE_RE = /^\s*(vat|ภาษีมูลค่าเพิ่ม)/i;     // not plain "ภาษี": vehicle tax / withholding lines stay their own lines (same test as app/accounting.py)
 const VAT_RATE = 0.07;
 
 function takeVatLines(draft) {
@@ -414,6 +437,12 @@ function takeVatLines(draft) {
   state.vat = { on: found > 0, manual: found > 0, amount: round2(amount),
                 file: file ?? (okBills.length ? okBills[okBills.length - 1].file_index : 0) };
   renumber();
+  // no VAT line, but the lines + 7 % = the bill's total (server: batch.build_draft): the lines are before VAT -- tick it with that amount
+  if (!found && draft.vat_to_add) {
+    state.vat.on = true;
+    state.vat.amount = round2(draft.vat_to_add);
+    state.vat.manual = Math.abs(state.vat.amount - vatCalc()) > 0.005;        // the bill's own rounding, kept as written
+  }
 }
 
 const vatOn = () => !!(state.vat && state.vat.on);
