@@ -1,0 +1,970 @@
+"""
+บัญชี › กล่องรับไฟล์ › อ่านด้วย AI (phase 2; owner, 24 Nov 2026): a scan or a file no exact reader claims is read by Claude, page by page,
+ONLY when the owner clicks 'อ่านด้วย AI (N หน้า)' (the page count is shown first, app/inbox_r_scan.py). The engine (app/inbox.py) calls
+run() in a background thread and stores the preview it returns; the tokens spent are in preview["ai_usage"].
+
+What comes back depends on what the pages turn out to be -- never on the file name (HQ forgets to rename files; a name is a hint):
+
+* a branch's mid-month / end-of-month expense papers (the cover, handwritten รายการเบิก, fuel lists, mid-month advance lists, HR papers,
+  receipts attached as proof): the same BATCH structure data/acc_docs/*.py holds, run through app/acc_docs.build -- so every page's lines
+  are added up against the total written on it, and the cover's parts against the pages, exactly like the transcribed months. Booking
+  goes through acc_docs.import_batch, so the review screen (/api/accounts/docs/*: the scan beside the lines read from it) works for
+  these pages too; the page images are stored from bytes under the file (accdocs/inbox/<file id>/p<n>.jpg).
+  One file = one half's papers: batch key "docs:<month>:<branch>:<mid|end>". Re-dropping that half replaces it, never adds to it.
+* a single bill / invoice / statement (irrigation water, waterworks, an odd receipt): ONE suggested entry per bill (cost to accounts
+  payable 2100, so the cheque that pays it later is "pays an existing bill", never a second cost), for the owner to confirm.
+* a memo, a payslip, anything not for the books: store_only, with what it is.
+
+Month, branch and half are decided by votes of independent signals (cover date range weight 3, the majority of line dates 2, branch text
+on the papers 3, employee codes SB-FR / SB-PD = สระบุรี and SB-KK = แก่งคอย 2, truck plates matched to vehicles.branch 2, the file name
+0.5). Whenever they disagree the preview carries a conflict and the engine books nothing until the owner picks (owner, 24 Nov 2026).
+
+The raw page reads are kept in the preview (ai_pages), so answering a conflict rebuilds the preview from them (apply_choices) without
+paying for a second read.
+
+Large files: never one 20 MB PDF in one request -- each page goes as its own JPEG (about 2000 px on the long side), at most PARALLEL at a
+time. Same model, client, structured output and fallback as the bill readers (app/extraction.py, app/cash_fuel.py).
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import logging
+import re
+import threading
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
+from typing import Callable, Optional
+
+from app import inbox_common as ic
+from app.config import settings
+
+logger = logging.getLogger("vehicle_tracker.inbox_ai")
+
+KIND = "scan"                     # the previews made here are booked / unbooked by app/inbox_r_scan.py
+PARALLEL = 4                      # pages read at the same time (owner's account limits; a 29-page file takes ~8 rounds)
+MAX_PAGES = 60                    # the biggest monthly file seen is 32 pages; more than this is not one month's papers
+LONG_SIDE = 2000                  # px; what the cash-fuel reader sends for the same handwriting
+MAX_PARSE_ATTEMPTS = 2
+MAX_OUTPUT_TOKENS = 16000         # a 30-line handwritten page with thinking fits well inside this (non-streaming limit with margin)
+EFFORT = "high"                   # handwriting: the same effort the cash-fuel and bill readers use
+
+
+class InboxAIError(RuntimeError):
+    """str() is a Thai message safe to show the owner."""
+
+
+# ------------------------------------------------------------------ the chart the pages are booked to
+# The accounts the transcribed months (data/acc_docs/2026_*.py, Jan-Oct 2026: 4,000+ lines) actually used, with what the lines said --
+# the model picks one per line from this list only. PARTY is the party those months gave each account (the P&L drills down by party,
+# so the AI's lines land in the same rows as the transcribed ones).
+CHART = [
+    ("1500", "เงินเบิกล่วงหน้าพนักงาน (ไม่ใช่ค่าใช้จ่าย)", "เบิกกลางเดือน / เบิกล่วงหน้า ของพนักงาน"),
+    ("1510", "เงินกู้พนักงาน (ไม่ใช่ค่าใช้จ่าย)", "พนักงานยืมเงิน / กู้เงินโรงงาน"),
+    ("2400", "คืนเงินสะสมพนักงาน (ไม่ใช่ค่าใช้จ่าย)", "จ่ายคืนเงินสะสมให้คนลาออก"),
+    ("5050", "ซื้อน้ำแข็ง", "ค่าน้ำแข็งที่ซื้อมาขาย"),
+    ("5100", "ค่าไฟฟ้า", "ค่าไฟโรงงาน (การไฟฟ้า)"),
+    ("5200", "ค่าน้ำ - ชลประทาน", "ค่าน้ำชลประทาน"),
+    ("5210", "ค่าน้ำ - ประปา", "ค่าน้ำประปา"),
+    ("5300", "เกลือ", "ค่าเกลือ / เกลือล้างกรอง"),
+    ("5310", "แอมโมเนีย", "แอมโมเนีย"),
+    ("5320", "เคมีบำบัดน้ำ", "PAC คลอรีน โพลิเมอร์ ไส้กรอง RO กรวด / คาร์บอน test strip"),
+    ("5330", "ถุงและบรรจุภัณฑ์", "ถุงน้ำแข็ง กระสอบ"),
+    ("5400", "ค่าแรงฝ่ายผลิต", "ค่าแรงรายวัน ค่าแรงตกหล่น ช่างรายวัน"),
+    ("5410", "ค่าล่วงเวลา (โอที)", "OT / โอที พนักงาน ชั่วโมง"),
+    ("5500", "ซ่อมบำรุงเครื่องจักร", "ซ่อมเครื่องจักร ซ่อมบ่อ ปั๊ม มอเตอร์ ค่าบริการช่าง"),
+    ("5510", "อะไหล่และวัสดุโรงงาน", "ของใช้โรงงาน ถุงมือ น้ำยาล้างจาน กระดาษชำระ ล้อ สี เครื่องมือช่าง"),
+    ("6100", "ซ่อมรถ", "ซ่อมรถ อะไหล่รถ รถยก / ลากรถ"),
+    ("6110", "ยางรถ", "ปะยาง ยางรถ"),
+    ("6130", "น้ำมันเงินสด", "เติมน้ำมันรถ / รถยก / มอเตอร์ไซค์ (ค่าน้ำมันรถ)"),
+    ("6200", "ค่าแรงพนักงานขับรถ", "เบี้ยเลี้ยงคนขับ ค่าแรงเด็กรถ เบี้ยขยันคนขับ"),
+    ("6300", "ภาษีรถ / พรบ. / ตรวจสภาพ", "ค่าตรวจสภาพรถ ต่อภาษี พรบ."),
+    ("7100", "เงินเดือนสำนักงาน", "ค่าแรงเสมียน เงินเดือนออฟฟิศ"),
+    ("7110", "ประกันสังคม", "ประกันสังคม กองทุนเงินทดแทน"),
+    ("7120", "ค่าดำเนินการแรงงานต่างด้าว", "บัตรชมพู วีซ่า ใบอนุญาตทำงาน"),
+    ("7200", "โทรศัพท์และอินเทอร์เน็ต", "ค่าโทรศัพท์ WiFi"),
+    ("7300", "วัสดุสำนักงาน", "เครื่องเขียน กระดาษ หมึก ค่าส่งเอกสาร ไปรษณีย์"),
+    ("7400", "ค่าห้องพักพนักงาน", "ค่าห้องเช่า บ้านเช่า ค่าไฟบ้านพัก"),
+    ("7500", "ค่าธรรมเนียม / ใบอนุญาต", "ค่าโอนเงิน ค่าธรรมเนียมธนาคาร ภาษีป้าย ค่าขยะ อบต."),
+    ("7600", "ค่าทำบัญชีและภาษี", "ค่าทำบัญชี"),
+    ("7900", "อื่นๆ", "ข้าว น้ำ ขนม พนักงาน ของไหว้พระ ค่ารักษาพยาบาล อื่นๆ"),
+    ("7910", "ส่วย (ตำรวจ / ตม. / ตลาด)", "ตำรวจ จราจร ตม. ตลาด"),
+]
+ACCOUNTS = [c for c, _, _ in CHART]
+PARTY = {"1500": "เบิกกลางเดือน", "1510": "เงินกู้พนักงาน", "2400": "คืนเงินสะสมพนักงาน", "5050": "ซื้อน้ำแข็ง", "5100": "ค่าไฟฟ้า",
+         "5200": "ชลประทาน", "5210": "ประปา", "5300": "เกลือ", "5310": "แอมโมเนีย", "5320": "เคมีบำบัดน้ำ", "5330": "ถุงและบรรจุภัณฑ์",
+         "5400": "ค่าแรงรายวัน", "5410": "โอทีพนักงาน", "5500": "ซ่อมเครื่องจักร", "5510": "ของใช้โรงงาน", "6100": "ซ่อมรถ", "6110": "ปะยาง",
+         "6130": "น้ำมันเงินสด", "6200": "ค่าแรงคนขับ / เด็กรถ", "6300": "ตรวจสภาพรถ", "7100": "เงินเดือน", "7110": "ประกันสังคม",
+         "7120": "แรงงานต่างด้าว", "7200": "โทรศัพท์ / อินเทอร์เน็ต", "7300": "เครื่องเขียน / เอกสาร", "7400": "ค่าห้อง / บ้านเช่า",
+         "7500": "ธนาคาร (ค่าธรรมเนียม)", "7600": "ค่าทำบัญชี", "7900": "อื่นๆ", "7910": "ส่วย (ตำรวจ / ตม. / ตลาด)"}
+WAGES = {"5400", "5410", "6200", "7100"}
+PAGE_KINDS = ["cover", "expense", "fuel", "fuel_table", "advance", "memo", "payslip", "bill", "other"]
+KIND_TH = {"cover": "ใบปก / สรุปค่าใช้จ่าย", "expense": "รายการเบิก", "fuel": "เบิกค่าน้ำมัน", "fuel_table": "ตารางค่าน้ำมัน (พิมพ์)",
+           "advance": "เบิกกลางเดือน", "memo": "บันทึก / เอกสาร HR", "payslip": "สลิปเงินเดือน", "bill": "บิล / ใบแจ้งหนี้",
+           "other": "อื่นๆ", "error": "อ่านไม่สำเร็จ"}
+HALF_TH = {"mid": "กลางเดือน (26-10)", "end": "ปลายเดือน (11-25)"}
+BILL_FEEDS = [(re.compile(r"ชลประทาน"), "water_irrigation", "5200"), (re.compile(r"ประปา"), "water_city", "5210"),
+              (re.compile(r"การไฟฟ้า|PEA", re.I), "electricity", "5100")]
+
+# ------------------------------------------------------------------ what one page read looks like
+_num = {"anyOf": [{"type": "number"}, {"type": "null"}]}      # structured outputs take nullable as anyOf (app/purchase_extraction.py)
+_str = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+# The API compiles at most MAX_UNIONS nullable / anyOf fields per schema (24 Nov 2026: 19 were refused with a 400 before any page was
+# read). So only what is truly "maybe missing" is nullable; the bill and the cover parts are always there, with "" / 0 when not used.
+MAX_UNIONS = 16
+_LINE = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "date": {**_str, "description": "YYYY-MM-DD, Gregorian (2569 BE = 2026). A line without its own date has the date of the line above."},
+        "text": {"type": "string", "description": "รายการ as written (Thai). Advance lists: the person's name and code. Fuel table: the truck."},
+        "amount": {**_num, "description": "baht, a plain number"},
+        "plate": {**_str, "description": "vehicle plate as written on a fuel / tyre / repair line, e.g. '1ฒถ 2085', '84-4607'"},
+        "truck_number": {**_str, "description": "the fleet truck number, e.g. '(05)' -> '05'"},
+        "account": {"type": "string", "enum": ACCOUNTS},
+        "unsure": {"type": "boolean", "description": "true if the amount, date or truck could not be read with confidence"},
+    },
+    "required": ["date", "text", "amount", "plate", "truck_number", "account", "unsure"],
+}
+PAGE_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "page_kind": {"type": "string", "enum": PAGE_KINDS},
+        "title": {"type": "string", "description": "a short Thai title, as written on the page"},
+        "date_from": {**_str, "description": "first day the page covers, YYYY-MM-DD"},
+        "date_to": {**_str, "description": "last day the page covers, YYYY-MM-DD"},
+        "written_total": {**_num, "description": "the total WRITTEN on the page (often red ink at the bottom); a cover: its grand total"},
+        "cover_parts": {"type": "object", "additionalProperties": False,
+                        "description": "a cover's parts in baht; 0 for a part that is not on the cover, all 0 on other pages",
+                        "properties": {"expense": {"type": "number"}, "fuel": {"type": "number"}, "advance": {"type": "number"}},
+                        "required": ["expense", "fuel", "advance"]},
+        "lines": {"type": "array", "items": _LINE},
+        "branch_hints": {"type": "array", "items": {"type": "string"}},
+        "employee_codes": {"type": "array", "items": {"type": "string"}},
+        "bill": {"type": "object", "additionalProperties": False,
+                 "description": "for page_kind bill; on other pages every text empty, total null, account 7900",
+                 "properties": {"party": {"type": "string"}, "doc_no": {"type": "string"}, "date": {"type": "string"},
+                                "period_month": {"type": "string"}, "total": _num, "what": {"type": "string"},
+                                "account": {"type": "string", "enum": ACCOUNTS}},
+                 "required": ["party", "doc_no", "date", "period_month", "total", "what", "account"]},
+        "summary": {"type": "string", "description": "one short Thai line: what this page is"},
+        "person": {"type": "string", "description": "who a memo / payslip is about; empty if none"},
+    },
+    "required": ["page_kind", "title", "date_from", "date_to", "written_total", "cover_parts", "lines", "branch_hints",
+                 "employee_codes", "bill", "summary", "person"],
+}
+
+PROMPT = """You read ONE scanned page of a Thai ice factory's papers (company สระบุรีวารีเทพ; two branches: สระบุรี, code SRB / SB, and
+แก่งคอย, code KK). Most files are a branch's half-month expense papers sent to head office: the mid-month papers (กลางเดือน, the 26th to
+the 10th) or the end-of-month papers (ปลายเดือน / สิ้นเดือน, the 11th to the 25th). Other files are a single bill or invoice, a payslip,
+or HR papers. Read the page exactly as written; never invent, never add numbers up yourself.
+
+page_kind:
+- cover: the summary page of the half (สรุปค่าใช้จ่าย / รายการสรุป), totals per part. cover_parts: expense = the expense list total
+  (ค่าใช้จ่าย / รายการเบิก), fuel = the fuel total (ค่าน้ำมัน), advance = the mid-month advance total (เบิกกลางเดือน / เบิกล่วงหน้า);
+  0 for a part not on the cover (all 0 on pages that are not covers). written_total = the cover's grand total.
+- expense: a list of petty-cash spending (รายการเบิก): date, what, amount, who took it.
+- fuel: a list of fuel fills (เบิกค่าน้ำมัน): date, truck plate / number, amount, driver.
+- fuel_table: a TYPED table of fuel per truck for the month (a summary of the fuel lists).
+- advance: a list of employees taking their mid-month advance (เบิกกลางเดือน), one line per person (or its typed total); also the signed
+  copy of that list with deductions (หักส่วนกลาง, ค่าความผิด).
+- memo: an HR or office paper with no money to book: memo (บันทึกข้อความ), warning letter, resignation, attendance / fingerprint record,
+  per-person daily work grid, sack report.
+- payslip: a pay slip or a salary sheet.
+- bill: a bill, receipt, tax invoice or statement from a shop or a utility.
+- other: anything else.
+
+lines: ONLY for expense, fuel, advance and fuel_table pages (empty for the others), every line top to bottom.
+- date: dates are Buddhist Era, often short ("26/9", "1-10-69", "3/10/69"): 69 = 2569 BE = 2026; a day/month without a year takes the
+  year of the page header. Return YYYY-MM-DD Gregorian. A line with no date has the date of the line above. Fuel table lines: null.
+- amount: the baht amount as a number. A stray mark like ",1000" is 1000. null if unreadable.
+- plate / truck_number: on fuel, tyre and repair lines, as written ("84-4607 (31)" -> plate "84-4607", truck_number "31"); else null.
+- account: the best account from this chart (code - name - what such lines say):
+{chart}
+  Fuel lines are 6130. Advance-list lines are 1500.
+- unsure: true when the amount, date, plate or number could not be read with confidence.
+date_from / date_to: the period the page covers as written in its header or title (or its first and last line dates).
+written_total: the total written on the page as written (often red ink at the bottom of the amount column); null if none.
+branch_hints: copy exactly any text that names the BRANCH the paper belongs to ("สาขาเมืองสระบุรี", "[SRB]", "สาขาแก่งคอย", "KK").
+  Not the company name สระบุรีวารีเทพ on its own, not a province in an address.
+employee_codes: every employee code on the page (SB-FR076, SB-PD042, SB-KK012 ...).
+bill: filled ONLY for page_kind bill (on other pages: every text "", total null, account 7900): party = who issued it; doc_no;
+  date (YYYY-MM-DD); period_month = YYYY-MM of the month the bill is FOR when stated (ประจำเดือน / รอบการใช้), else "";
+  total = the amount to pay; what = what it is for, short Thai; account = best account.
+summary: one short Thai line saying what the page is (e.g. "หนังสือเตือน 21 ต.ค. 69 — ตีห้า (SB-FR068)").
+person: the people a memo / payslip is about, or ""."""
+
+
+def _system_prompt() -> str:
+    return PROMPT.replace("{chart}", "\n".join(f"  {c} - {n} - {t}" for c, n, t in CHART))
+
+
+# ------------------------------------------------------------------ the client (shared with the bill readers)
+def _client():
+    from app.extraction import _client_lazy
+    return _client_lazy()
+
+
+def _check_enabled() -> None:
+    if not settings.inbox_ai_enabled:
+        raise InboxAIError("การอ่านด้วย AI ปิดอยู่ (ตั้งค่า INBOX_AI_ENABLED)")
+    if not settings.anthropic_api_key:
+        raise InboxAIError("ยังไม่ได้ตั้งค่า ANTHROPIC_API_KEY — อ่านด้วย AI ไม่ได้")
+
+
+def _usage_of(r) -> dict:
+    u = getattr(r, "usage", None)
+    if u is None:
+        return {"input_tokens": 0, "output_tokens": 0}
+    total_in = (getattr(u, "input_tokens", 0) or 0) + (getattr(u, "cache_creation_input_tokens", 0) or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0)
+    return {"input_tokens": int(total_in), "output_tokens": int(getattr(u, "output_tokens", 0) or 0)}
+
+
+def read_page(jpeg: bytes, n: int, total: int) -> tuple[dict, list[dict]]:
+    """One page image -> (the page read, the usage of every call made for it). Retried once when the answer does not parse."""
+    from app.extraction import FALLBACK, MODEL, _content_block
+    usages, last = [], None
+    for attempt in range(1, MAX_PARSE_ATTEMPTS + 1):
+        try:
+            r = _client().beta.messages.create(
+                model=MODEL, max_tokens=MAX_OUTPUT_TOKENS, **FALLBACK,
+                system=[{"type": "text", "text": _system_prompt(), "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": [_content_block(jpeg, "image/jpeg"),
+                                                       {"type": "text", "text": f"Page {n} of {total}. Read this page."}]}],
+                output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": PAGE_SCHEMA}})
+            usages.append(_usage_of(r))
+            if r.stop_reason == "refusal":
+                raise ValueError("the model declined this page")
+            if r.stop_reason == "max_tokens":
+                raise ValueError(f"the answer was cut off at {MAX_OUTPUT_TOKENS} tokens")
+            out = json.loads(next(b.text for b in r.content if b.type == "text"))
+            if out.get("page_kind") not in PAGE_KINDS or not isinstance(out.get("lines"), list):
+                raise ValueError("no page_kind / lines")
+            return out, usages
+        except Exception as exc:                       # noqa: BLE001 -- retried once, then the page is reported, the file goes on
+            last = exc
+            logger.warning("inbox AI page %d attempt %d failed: %r", n, attempt, exc)
+            if _is_bad_request(exc):                   # the request itself is wrong: a retry gets the same 400, and so would every page
+                err = InboxAIError(f"AI ไม่รับคำขอ ({exc})")
+                err.usages, err.fatal = usages, True
+                raise err from exc
+    err = InboxAIError(f"อ่านหน้า {n} ไม่สำเร็จ ({last})")
+    err.usages = usages                                # a failed page still cost tokens: they are counted
+    raise err from last
+
+
+def _is_bad_request(exc: Exception) -> bool:
+    try:
+        import anthropic
+        return isinstance(exc, anthropic.BadRequestError)
+    except Exception:                                  # noqa: BLE001
+        return False
+
+
+# ------------------------------------------------------------------ pages of the file
+def is_pdf(name: str, data: bytes) -> bool:
+    return data[:5] == b"%PDF-" or name.lower().endswith(".pdf")
+
+
+def is_image(name: str, data: bytes) -> bool:
+    return (data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n" or data[8:12] == b"WEBP"
+            or name.lower().rsplit(".", 1)[-1] in ("jpg", "jpeg", "png", "webp", "heic"))
+
+
+def page_count(name: str, data: bytes) -> int:
+    """What the button says: PDF pages, 1 for a photo, 0 for a file the AI cannot read (a workbook, a Word file ...)."""
+    if is_pdf(name, data):
+        import pymupdf
+        try:
+            with pymupdf.open(stream=data, filetype="pdf") as doc:
+                return doc.page_count
+        except Exception:                              # noqa: BLE001
+            return 0
+    return 1 if is_image(name, data) else 0
+
+
+def _fit(img: bytes) -> bytes:
+    """A page image no bigger than LONG_SIDE on its long side, as JPEG (a 40 MB scan PDF renders huge pages; a phone photo is 12 MP)."""
+    from PIL import Image, ImageOps
+    im = ImageOps.exif_transpose(Image.open(io.BytesIO(img)))
+    if im.mode not in ("RGB", "L"):
+        im = im.convert("RGB")
+    if max(im.size) <= LONG_SIDE and img[:3] == b"\xff\xd8\xff" and len(img) < 3_500_000:
+        return img
+    im.thumbnail((LONG_SIDE, LONG_SIDE))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=85, optimize=True)
+    return buf.getvalue()
+
+
+def page_images(name: str, data: bytes) -> list[bytes]:
+    if is_pdf(name, data):
+        n = page_count(name, data)
+        if n == 0:
+            raise InboxAIError("เปิด PDF นี้ไม่ได้")
+        if n > MAX_PAGES:
+            raise InboxAIError(f"PDF มี {n} หน้า — อ่านด้วย AI ได้ไม่เกิน {MAX_PAGES} หน้าต่อไฟล์ (แยกไฟล์ก่อน)")
+        return [_fit(p) for p in ic.pdf_page_images(data, dpi=150)]
+    if is_image(name, data):
+        try:
+            return [_fit(data)]
+        except Exception as exc:                       # noqa: BLE001 -- e.g. HEIC without a decoder
+            raise InboxAIError("เปิดรูปนี้ไม่ได้ (ส่งเป็น JPG / PNG / PDF)") from exc
+    raise InboxAIError("AI อ่านได้เฉพาะไฟล์ PDF หรือรูปภาพ")
+
+
+def read_pages(images: list[bytes], on_progress: Optional[Callable] = None) -> tuple[list[dict], dict]:
+    """Every page read, at most PARALLEL at a time. A page that fails twice is kept as page_kind 'error' (the file still reads)."""
+    total, done, lock = len(images), [0], threading.Lock()
+    usage = {"model": None, "calls": 0, "input_tokens": 0, "output_tokens": 0}
+
+    stop = threading.Event()                          # set by a request the API refuses outright: the pages not started are skipped
+
+    def work(item):
+        n, jpeg = item
+        if stop.is_set():
+            return n, {"page_kind": "error", "error": "ไม่ได้อ่าน (หยุดเพราะ AI ไม่รับคำขอ)", "lines": []}, []
+        try:
+            out, used = read_page(jpeg, n, total)
+        except InboxAIError as exc:
+            if getattr(exc, "fatal", False):
+                stop.set()
+            out, used = {"page_kind": "error", "error": str(exc), "lines": [], "fatal": getattr(exc, "fatal", False)}, getattr(exc, "usages", [])
+        with lock:
+            done[0] += 1
+            if on_progress:
+                try:
+                    on_progress(done[0], total)
+                except Exception:                      # noqa: BLE001 -- progress is a nicety, never the reason a read fails
+                    pass
+        return n, out, used
+
+    with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
+        results = list(pool.map(work, enumerate(images, 1)))
+    from app.extraction import MODEL
+    usage["model"] = MODEL
+    reads = []
+    for n, out, used in results:
+        out["n"] = n
+        reads.append(out)
+        for u in used:
+            usage["calls"] += 1
+            usage["input_tokens"] += u["input_tokens"]
+            usage["output_tokens"] += u["output_tokens"]
+    fatal = next((r for r in reads if r.get("fatal")), None)
+    if fatal:                                          # nothing useful was read: the engine marks the file failed, with the reason
+        raise InboxAIError(fatal["error"])
+    return reads, usage
+
+
+# ------------------------------------------------------------------ the entry point the engine calls
+def run(file_row: dict, data: bytes, on_progress: Optional[Callable] = None) -> dict:
+    """file_row: the inbox_files row ({"id", "file_name", "choices" ...}). Reads every page with Claude and returns the PREVIEW
+    (inbox_common contract, kind "scan"). Raises InboxAIError (Thai) when AI is switched off or the file cannot be read at all.
+    on_progress(done, total) is called after each page."""
+    _check_enabled()
+    name = file_row.get("file_name") or file_row.get("name") or ""
+    images = page_images(name, data)
+    reads, usage = read_pages(images, on_progress)
+    stored, flags = {}, []
+    if file_row.get("id") and is_expense_document(reads):
+        from app import acc_docs
+        try:
+            stored = acc_docs.store_page_images(f"inbox/{file_row['id']}", {i: img for i, img in enumerate(images, 1)})
+        except Exception as exc:                       # noqa: BLE001 -- the books still book; the review screen shows no picture
+            logger.warning("inbox AI: storing page images failed: %r", exc)
+            flags.append("เก็บรูปหน้าเอกสารไม่สำเร็จ — หน้าตรวจจะไม่มีรูป")
+    preview = from_pages(reads, name, dict(file_row.get("choices") or {}), usage=usage, images=stored)
+    preview["flags"] = flags + preview["flags"]
+    return preview
+
+
+def apply_choices(preview: dict, choices: dict) -> dict:
+    """The owner answered a conflict: rebuild the preview from the stored page reads (no new API call)."""
+    if not preview.get("ai_pages"):
+        return preview
+    return from_pages(preview["ai_pages"], preview.get("file_name") or "", dict(choices or {}),
+                      usage=preview.get("ai_usage"), images=preview.get("ai_images") or {})
+
+
+# ------------------------------------------------------------------ hints from the file name (a hint, never a decision)
+_SHORT_MONTHS = ["มกรา", "กุมภา", "มีนา", "เมษา", "พฤษภา", "มิถุนา", "กรกฎา", "สิงหา", "กันยา", "ตุลา", "พฤศจิกา", "ธันวา"]
+
+
+def branch_of_text(text: str) -> Optional[str]:
+    t = re.sub(r"สระบุรีวารีเทพ|จ\.\s*สระบุรี|จังหวัดสระบุรี", "", text or "")
+    if re.search(r"แก่งคอย|(?<![A-Za-z-])KK(?![A-Za-z])", t):
+        return "แก่งคอย"
+    if re.search(r"สระบุรี|SRB", t):
+        return "สระบุรี"
+    return None
+
+
+def name_hints(name: str) -> dict:
+    """{"half", "month", "branch"} from the file name alone ('10-กลางเดือนตุลา69.pdf' -> mid, 2026-10). Calendar month = company month
+    here (the month a half is named after)."""
+    half = "mid" if "กลางเดือน" in name else ("end" if re.search(r"ปลายเดือน|สิ้นเดือน", name) else None)
+    month = ic.thai_month_in(name)
+    if not month:
+        for i, short in enumerate(_SHORT_MONTHS):
+            m = re.search(short + r"[ก-๙.]{0,6}\s*(25\d\d|\d\d)(?!\d)", name)
+            if m:
+                y = int(m.group(1))
+                month = f"{(y if y > 2400 else 2500 + y) - 543}-{i + 1:02d}"
+                break
+    return {"half": half, "month": month, "branch": branch_of_text(name)}
+
+
+def hint_text(h: dict) -> str:
+    parts = [HALF_TH[h["half"]] if h.get("half") else None, ic.month_label(h["month"]) if h.get("month") else None, h.get("branch")]
+    parts = [p for p in parts if p]
+    return ("คำใบ้จากชื่อไฟล์ (ยังไม่ได้ตรวจจากเนื้อหา): " + " · ".join(parts)) if parts else ""
+
+
+# ------------------------------------------------------------------ small helpers
+def _day(s) -> Optional[date]:
+    if not s:
+        return None
+    m = re.match(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})", str(s))
+    if m:
+        y = int(m.group(1))
+        y = y - 543 if y > 2400 else y
+        try:
+            d = date(y, int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+        return d if date(2020, 1, 1) <= d <= date(2040, 12, 31) else None
+    return ic.be_date(str(s))
+
+
+def half_of(d: date) -> str:
+    return "mid" if d.day >= 26 or d.day <= 10 else "end"
+
+
+def half_range(month: str, half: str) -> tuple[date, date]:
+    y, m = int(month[:4]), int(month[5:7])
+    py, pm = (y - 1, 12) if m == 1 else (y, m - 1)
+    return (date(py, pm, 26), date(y, m, 10)) if half == "mid" else (date(y, m, 11), date(y, m, 25))
+
+
+def month_range(month: str) -> tuple[date, date]:
+    return half_range(month, "mid")[0], half_range(month, "end")[1]
+
+
+def norm_plate(s) -> str:
+    return re.sub(r"[\s\-.]", "", str(s or ""))
+
+
+def match_truck(plate, number, vehicles: list[dict], branch: Optional[str]) -> tuple[Optional[dict], bool]:
+    """(vehicle, by_plate). A plate decides; a number alone only within the branch (numbers repeat across branches)."""
+    p = norm_plate(plate)
+    if p:
+        for v in vehicles:
+            if norm_plate(v.get("plate_number")) == p:
+                return v, True
+        digits = re.sub(r"\D", "", p)
+        if len(digits) >= 4:
+            hits = [v for v in vehicles if re.sub(r"\D", "", v.get("plate_number") or "").endswith(digits[-4:])]
+            mine = [v for v in hits if v.get("branch") == branch]
+            if len(mine) == 1:
+                return mine[0], True
+            if len(hits) == 1:
+                return hits[0], True
+    n = str(number or "").strip().lstrip("0")
+    if n.isdigit():
+        hits = [v for v in vehicles if str(v.get("vehicle_number") or "").lstrip("0") == n]
+        mine = [v for v in hits if v.get("branch") == branch]
+        if len(mine) == 1:
+            return mine[0], False
+        if len(hits) == 1 and not branch:
+            return hits[0], False
+    return None, False
+
+
+def role_of(account: str, unsure: bool = False) -> str:
+    if account in ("1500", "1510"):
+        return "advance"
+    if account == "2400":
+        return "pays_bill"
+    if account in WAGES:
+        return "wages"
+    if account == "7600":
+        return "tax"
+    if account == "7900" and unsure:
+        return "unknown"
+    return "cost"
+
+
+def pick(signals: list[dict], what: str, choices: dict, label: Callable[[str], str], title: str) -> tuple[Optional[str], list[dict]]:
+    """month_conflict for any key (branch, half): the owner's choice, else the weighted vote; disagreement -> a conflict."""
+    if choices.get(what):
+        return choices[what], []
+    best, against = ic.vote(signals, what)
+    if not against:
+        return best, []
+    seen = []
+    for v in [best] + [s["value"] for s in against]:
+        if v not in seen:
+            seen.append(v)
+    src = lambda v: ", ".join(s["source"] for s in signals if s.get("what") == what and s.get("value") == v)   # noqa: E731
+    return best, [{"key": what, "message": f"{title}ไม่ตรงกัน: " + " แต่ ".join(f"{src(v)} บอก {label(v)}" for v in seen),
+                   "options": [{"value": v, "label": f"{label(v)} ({src(v)})"} for v in seen], "default": best}]
+
+
+def _ask(what: str, message: str, options: list[tuple[str, str]], default: Optional[str] = None) -> dict:
+    return {"key": what, "message": message, "options": [{"value": v, "label": lb} for v, lb in options], "default": default or options[0][0]}
+
+
+def _recent_months(n: int = 3) -> list[str]:
+    cur = ic.company_month(date.today())
+    return [ic.shift_month(cur, -i) for i in range(n)]
+
+
+def _majority(values: list) -> Optional[str]:
+    c = Counter(v for v in values if v)
+    return c.most_common(1)[0][0] if c else None
+
+
+def _db_ready() -> bool:
+    from app import supabase
+    return supabase.configured()
+
+
+def _vehicles() -> list[dict]:
+    if not _db_ready():
+        return []
+    from app import supabase
+    try:
+        return supabase.select_all("vehicles", {"select": "id,vehicle_number,plate_number,branch", "order": "id.asc"})
+    except Exception:                                  # noqa: BLE001
+        return []
+
+
+def is_expense_document(reads: list[dict]) -> bool:
+    kinds = {r.get("page_kind") for r in reads}
+    return bool(kinds & {"expense", "fuel", "advance", "cover", "fuel_table"})
+
+
+# ------------------------------------------------------------------ the preview
+def from_pages(reads: list[dict], name: str, choices: dict, usage: Optional[dict] = None, images: Optional[dict] = None) -> dict:
+    """The page reads -> the PREVIEW. Reads the database (vehicles, earlier documents, existing entries), never writes."""
+    reads = sorted(reads, key=lambda r: r.get("n") or 0)
+    vehicles = _vehicles()
+    if is_expense_document(reads):
+        out = _expense_preview(reads, name, choices, vehicles)
+    elif any(r.get("page_kind") == "bill" and _is_bill(r.get("bill")) for r in reads):
+        out = _bill_preview(reads, name, choices, vehicles)
+    else:
+        out = _store_preview(reads, name, choices)
+    errors = [r for r in reads if r.get("page_kind") == "error"]
+    if errors:
+        out["flags"].insert(0, f"อ่านไม่สำเร็จ {len(errors)} หน้า: " + ", ".join(str(r["n"]) for r in errors) + " — ตรวจหน้าเหล่านี้เอง")
+    out.update({"needs_ai": False, "pages": len(reads), "ai_usage": usage, "ai": True, "ai_pages": reads, "ai_images": images or {},
+                "file_name": name, "page_kinds": [{"page": r.get("n"), "kind": r.get("page_kind"), "kind_th": KIND_TH.get(r.get("page_kind"), ""),
+                                                   "title": r.get("title") or r.get("error") or ""} for r in reads]})
+    return out
+
+
+def _branch_signals(reads: list[dict], vehicles: list[dict], hints: dict) -> list[dict]:
+    sig = []
+    on_cover = [branch_of_text(h) for r in reads if r.get("page_kind") == "cover" for h in r.get("branch_hints") or []]
+    on_pages = [branch_of_text(h) for r in reads if r.get("page_kind") != "cover" for h in r.get("branch_hints") or []]
+    if _majority(on_cover):
+        sig.append({"what": "branch", "source": "หน้าปก", "value": _majority(on_cover), "weight": 3})
+    elif _majority(on_pages):
+        sig.append({"what": "branch", "source": "ข้อความบนเอกสาร", "value": _majority(on_pages), "weight": 3})
+    codes = []
+    for r in reads:
+        for c in r.get("employee_codes") or []:
+            m = re.search(r"SB\s*-?\s*(FR|PD|KK)", str(c).upper())
+            if m:
+                codes.append("แก่งคอย" if m.group(1) == "KK" else "สระบุรี")
+    if _majority(codes):
+        sig.append({"what": "branch", "source": f"รหัสพนักงาน ({len(codes)})", "value": _majority(codes), "weight": 2})
+    trucks = []
+    for r in reads:
+        if r.get("page_kind") not in ("fuel", "expense", "fuel_table"):
+            continue
+        for ln in r.get("lines") or []:
+            v, by_plate = match_truck(ln.get("plate"), None, vehicles, None)
+            if v and by_plate and v.get("branch"):
+                trucks.append(v["branch"])
+    if _majority(trucks):
+        sig.append({"what": "branch", "source": f"ทะเบียนรถ ({len(trucks)} คัน-ครั้ง)", "value": _majority(trucks), "weight": 2})
+    if hints.get("branch"):
+        sig.append({"what": "branch", "source": "ชื่อไฟล์", "value": hints["branch"], "weight": 0.5})
+    return sig
+
+
+def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list[dict]) -> dict:
+    from app import acc_docs
+    hints = name_hints(name)
+    pv = ic.empty_preview(KIND, "เอกสารเบิกครึ่งเดือน (อ่านด้วย AI)")
+    covers = [r for r in reads if r.get("page_kind") == "cover"]
+    line_days = [d for r in reads if r.get("page_kind") in ("expense", "fuel") for ln in r.get("lines") or [] for d in [_day(ln.get("date"))] if d]
+    signals = []
+    for c in covers:
+        d = _day(c.get("date_to"))
+        if d:
+            signals.append({"what": "half", "source": f"หน้าปก (หน้า {c['n']})", "value": half_of(d), "weight": 3})
+            signals.append({"what": "month", "source": f"หน้าปก (หน้า {c['n']})", "value": ic.company_month(d), "weight": 3})
+    if line_days:
+        signals.append({"what": "half", "source": f"วันที่ในรายการ ({len(line_days)} บรรทัด)", "value": _majority([half_of(d) for d in line_days]), "weight": 2})
+        signals.append({"what": "month", "source": f"วันที่ในรายการ ({len(line_days)} บรรทัด)", "value": _majority([ic.company_month(d) for d in line_days]), "weight": 2})
+    if hints["half"]:
+        signals.append({"what": "half", "source": "ชื่อไฟล์", "value": hints["half"], "weight": 0.5})
+    if hints["month"]:
+        signals.append({"what": "month", "source": "ชื่อไฟล์", "value": hints["month"], "weight": 0.5})
+    signals += _branch_signals(reads, vehicles, hints)
+    pv["signals"] = signals
+
+    month, conflicts = ic.month_conflict(signals, choices)
+    if not month and not conflicts:
+        month = choices.get("month")
+        if not month:
+            opts = _recent_months()
+            conflicts.append(_ask("month", "ไม่พบวันที่ในเอกสาร — เลือกเดือน", [(m, ic.month_label(m)) for m in opts]))
+            month = opts[0]
+    else:
+        month = month or next((c["default"] for c in conflicts if c["key"] == "month"), None)
+    half, cf = pick(signals, "half", choices, lambda v: HALF_TH.get(v, v), "ครึ่งเดือน")
+    conflicts += cf
+    if not half:
+        conflicts.append(_ask("half", "บอกไม่ได้ว่าเป็นเอกสารกลางเดือนหรือปลายเดือน — เลือก", [("mid", HALF_TH["mid"]), ("end", HALF_TH["end"])]))
+        half = "mid"
+    branch, cf = pick(signals, "branch", choices, lambda v: v, "สาขา")
+    conflicts += cf
+    if not branch:
+        conflicts.append(_ask("branch", "ไม่พบสาขาในเอกสาร — เลือกสาขา", [(b, b) for b in ic.BRANCHES]))
+        branch = ic.BRANCHES[0]
+    pv.update({"month": month, "branch": branch, "half": half})
+    feed = "midmonth" if half == "mid" else "endmonth"
+    key = f"docs:{month}:{branch}:{half}"
+    pv["label"] = f"เอกสารเบิก{'กลางเดือน' if half == 'mid' else 'ปลายเดือน'} {branch} {ic.month_label(month)} (อ่านด้วย AI)"
+
+    batch, flags = _batch(reads, name, key, month, branch, half, feed, vehicles)
+    pv["flags"] += flags
+    try:
+        out = acc_docs.build(batch, vehicles)
+    except acc_docs.BadBatch as exc:
+        pv["flags"].append(f"สร้างรายการไม่ได้: {exc}")
+        pv["conflicts"] = conflicts
+        return pv
+    pv["flags"] += out["problems"]
+    pv["page_checks"] = [{"page": d["page"], "kind": d["kind"], "kind_th": KIND_TH.get(d["kind"], d["kind"]), "title": d.get("title"),
+                          "written_total": d.get("written_total"), "read_total": d.get("read_total"), "status": d.get("status")}
+                         for d in sorted(out["docs"], key=lambda d: d["page"])]
+
+    rows = []
+    for e in out["entries"]:
+        debit = e["lines"][0]
+        unsure = "(อ่านไม่ชัด)" in (e.get("description") or "")
+        rows.append({"date": e["entry_date"], "text": e["description"], "party": e["party"], "amount": float(debit["debit"]),
+                     "role": role_of(debit["account"], unsure), "account": debit["account"], "flag": "อ่านไม่ชัด" if unsure else None,
+                     "page": e["doc_page"], "branch": e["branch"]})
+    for d in out["docs"]:
+        if d["kind"] in ("memo", "other") or (d["kind"] == "cover" and d.get("read_total") is None):
+            rows.append({"date": d.get("date_from"), "text": f"หน้า {d['page']}: {d.get('title') or ''}" + (f" — {d['summary']}" if d.get("summary") else ""),
+                         "party": d.get("person"), "amount": 0.0, "role": "info", "account": None, "flag": None, "page": d["page"]})
+    written = [c["written_total"] for c in batch["covers"] if c.get("written_total") is not None]
+    if not written:
+        written = [p["written_total"] for p in batch["pages"] if p.get("written_total") is not None]
+    pv["batches"] = [{"key": key, "feed": feed, "source": feed, "branch": branch, "month": month,
+                      "title": f"{'เอกสารเบิกกลางเดือน' if half == 'mid' else 'เอกสารเบิกปลายเดือน'} {branch} {ic.month_label(month)}",
+                      "rows": rows, "file_total": round(sum(written), 2) if written else None,
+                      "rows_total": round(sum(r["amount"] for r in rows), 2), "entries": out["entries"]}]
+    pv["acc_docs_batch"] = batch
+
+    # The same half already in the books (the script's month batch, or this half from another file): the owner chooses.
+    old = _earlier_docs(key, branch, feed, month, half, name)
+    if old:
+        n_pages = sum(len(o["pages"]) for o in old)
+        edited = sum(o["edited"] for o in old)
+        where = ", ".join(f"{o['batch']} ({o['file_name'] or '-'}, {len(o['pages'])} หน้า)" for o in old)
+        choice = choices.get("replace_old")
+        if choice == "replace":
+            pv["replace_docs"] = [{"batch": o["batch"], "pages": o["pages"]} for o in old]
+            pv["flags"].append(f"จะลบของเดิม {n_pages} หน้า ({where}) แล้วลงไฟล์นี้แทน")
+        elif choice == "keep":
+            pv["store_only"] = True
+            pv["note"] = f"เก็บไว้กับเดือน ไม่ลงบัญชี — ใช้ของเดิมที่ลงไว้แล้ว ({where})"
+        else:
+            conflicts.append(_ask("replace_old", f"{HALF_TH[half]} {branch} {ic.month_label(month)} ลงบัญชีไว้แล้ว: {where}",
+                                  [("replace", "แทนที่ของเดิมด้วยไฟล์นี้" + (f" (มี {edited} หน้าที่แก้บนหน้าตรวจแล้ว — ที่แก้จะหาย)" if edited else "")),
+                                   ("keep", "เก็บของเดิม — ไฟล์นี้ไม่ลงบัญชี")], default="keep"))
+    pv["conflicts"] = conflicts
+    if not pv["note"]:
+        pv["note"] = (f"{len(reads)} หน้า: " + ", ".join(f"{KIND_TH.get(k, k)} {n}" for k, n in Counter(r.get('page_kind') for r in reads).most_common())
+                      + " — ทุกหน้าที่มีเงินเทียบยอดที่เขียนไว้กับยอดที่อ่านได้")
+    return pv
+
+
+def _batch(reads: list[dict], name: str, key: str, month: str, branch: str, half: str, feed: str, vehicles: list[dict]) -> tuple[dict, list[str]]:
+    """The page reads -> the BATCH acc_docs.build takes (the same shape as data/acc_docs/*.py), and what the reader noticed."""
+    h_from, h_to = half_range(month, half)
+    m_from, m_to = month_range(month)
+    batch = {"batch": key, "month": month, "branch": branch, "files": {"f": name}, "covers": [], "pages": [], "memos": [], "fuel_table": None}
+    flags: list[str] = []
+    ft = None
+
+    def memo(r, kind="other", title=None, summary=None):
+        batch["memos"].append({"page": r["n"], "file": "f", "file_page": r["n"], "kind": kind, "title": title or r.get("title") or KIND_TH.get(r.get("page_kind"), ""),
+                               "summary": summary if summary is not None else (r.get("summary") or r.get("error")), "person": r.get("person") or None})
+
+    for r in reads:
+        k, n = r.get("page_kind"), r["n"]
+        if k == "error":
+            memo(r, "other", "อ่านหน้านี้ไม่สำเร็จ")
+        elif k == "cover":
+            parts = {p: float(v) for p, v in (r.get("cover_parts") or {}).items() if v}       # 0 = part not on the cover
+            total = r.get("written_total") if r.get("written_total") is not None else (sum(parts.values()) if parts else None)
+            if not parts or total is None:
+                memo(r, "cover")
+                flags.append(f"หน้า {n}: ปกไม่มียอดแยกส่วน — ไม่ได้ใช้เทียบ")
+                continue
+            batch["covers"].append({"page": n, "file": "f", "file_page": n, "feed": feed, "title": r.get("title") or "สรุปค่าใช้จ่าย",
+                                    "from": (_day(r.get("date_from")) or h_from).isoformat(), "to": (_day(r.get("date_to")) or h_to).isoformat(),
+                                    "written_total": float(total), "parts": parts})
+        elif k in ("expense", "fuel"):
+            lines, last, unsure = [], None, 0
+            for i, ln in enumerate(r.get("lines") or [], 1):
+                d = _day(ln.get("date")) or last or _day(r.get("date_from"))
+                amt = ln.get("amount")
+                if amt is None or float(amt) <= 0:
+                    flags.append(f"หน้า {n} บรรทัด {i}: อ่านจำนวนเงินไม่ได้ ({ln.get('text') or '-'}) — ไม่ลงบัญชี")
+                    continue
+                if not d:
+                    d = h_from
+                    flags.append(f"หน้า {n} บรรทัด {i}: ไม่มีวันที่ — ใช้ {d.strftime('%d/%m/%Y')}")
+                elif not (m_from - timedelta(days=5) <= d <= m_to + timedelta(days=5)):
+                    flags.append(f"หน้า {n} บรรทัด {i}: วันที่ {d.strftime('%d/%m/%Y')} อยู่นอกเดือน {ic.month_label(month)} — ตรวจ")
+                last = d
+                acc = ln.get("account") if ln.get("account") in PARTY else "7900"
+                if k == "fuel":
+                    acc = "6130"
+                opt = {}
+                if ln.get("plate") or ln.get("truck_number"):
+                    v, _ = match_truck(ln.get("plate"), ln.get("truck_number"), vehicles, branch)
+                    opt["v"] = v["plate_number"] if v else (ln.get("plate") or ln.get("truck_number"))
+                text = (ln.get("text") or "-").strip()
+                if ln.get("unsure"):
+                    unsure += 1
+                    if "(อ่านไม่ชัด)" not in text:
+                        text += " (อ่านไม่ชัด)"
+                lines.append((f"{d.day}/{d.month}", text, round(float(amt), 2), acc, PARTY[acc], opt))
+            if not lines:
+                memo(r, "other")
+                flags.append(f"หน้า {n} ({KIND_TH[k]}): ไม่มีบรรทัดที่มีจำนวนเงิน")
+                continue
+            if unsure:
+                flags.append(f"หน้า {n}: อ่านไม่ชัด {unsure} บรรทัด")
+            batch["pages"].append({"page": n, "file": "f", "file_page": n, "feed": feed, "kind": k, "title": r.get("title") or KIND_TH[k],
+                                   "written_total": r.get("written_total"), "lines": lines, "note": "อ่านด้วย AI"})
+        elif k == "advance":
+            if half == "end":
+                # the end-of-month file carries the SIGNED copies of the mid-month advance list: the mid-month file already booked it
+                memo(r, "other", (r.get("title") or "เบิกกลางเดือน") + " (ฉบับเซ็นรับ)",
+                     (r.get("summary") or "") + " — ยอดเบิกลงไว้แล้วจากเอกสารกลางเดือน ไม่ลงซ้ำ")
+                continue
+            amounts = [float(ln["amount"]) for ln in r.get("lines") or [] if ln.get("amount") and float(ln["amount"]) > 0]
+            amount = round(sum(amounts), 2)
+            if amount <= 0:
+                if not r.get("written_total"):
+                    memo(r, "other")
+                    flags.append(f"หน้า {n} (เบิกกลางเดือน): อ่านยอดไม่ได้ — ไม่ลงบัญชี")
+                    continue
+                amount = float(r["written_total"])
+                flags.append(f"หน้า {n} (เบิกกลางเดือน): อ่านรายชื่อไม่ได้ ใช้ยอดที่เขียนไว้ {amount:,.0f}")
+            days = [d for ln in r.get("lines") or [] for d in [_day(ln.get("date"))] if d]
+            d = Counter(days).most_common(1)[0][0] if days else (_day(r.get("date_to")) or h_to)
+            who = f" ({len(amounts)} คน)" if len(amounts) > 1 else ""
+            batch["pages"].append({"page": n, "file": "f", "file_page": n, "feed": feed, "kind": "advance", "title": r.get("title") or "เบิกกลางเดือน",
+                                   "written_total": r.get("written_total"),
+                                   "lines": [(f"{d.day}/{d.month}", f"{r.get('title') or 'เบิกกลางเดือน'}{who}", amount, "1500", PARTY["1500"], {})],
+                                   "note": "อ่านด้วย AI: รวมทุกชื่อในหน้าเป็นบรรทัดเดียว"})
+        elif k == "fuel_table":
+            by_truck = (ft or {}).get("by_truck", {})
+            for ln in r.get("lines") or []:
+                if not ln.get("amount"):
+                    continue
+                v, _ = match_truck(ln.get("plate"), ln.get("truck_number"), vehicles, branch)
+                t = str(v["vehicle_number"]) if v else str(ln.get("truck_number") or ln.get("plate") or ln.get("text") or "?")
+                by_truck[t] = round(by_truck.get(t, 0) + float(ln["amount"]), 2)
+            if ft is None:
+                ft = {"page": n, "file": "f", "file_page": n, "title": r.get("title") or KIND_TH["fuel_table"], "written_total": r.get("written_total"),
+                      "by_truck": by_truck}
+            else:
+                ft["by_truck"] = by_truck
+                if r.get("written_total") is not None:
+                    ft["written_total"] = max(float(ft["written_total"] or 0), float(r["written_total"]))      # the grand total is on the last page
+                memo(r, "other", (r.get("title") or KIND_TH["fuel_table"]) + " (ต่อ)", f"รวมอยู่ในหน้า {ft['page']}")
+        else:
+            memo(r, "memo" if k in ("memo", "payslip") else "other")
+    if ft:
+        if ft["written_total"] is None:
+            ft["written_total"] = round(sum(ft["by_truck"].values()), 2)
+        batch["fuel_table"] = ft
+    return batch, flags
+
+
+def _earlier_docs(key: str, branch: str, feed: str, month: str, half: str, name: str) -> list[dict]:
+    """Pages already in acc_docs for this branch and half from another batch (the script's month batch) or from another file under the
+    same key: [{"batch", "file_name", "pages", "edited"}]. Every page of those files is taken over (their memos too)."""
+    if not _db_ready():
+        return []
+    from app import supabase
+    h_from, h_to = half_range(month, half)
+    try:
+        hits = supabase.select_all("acc_docs", {"select": "batch,file_name", "branch": f"eq.{branch}", "feed": f"eq.{feed}",
+                                                "date_from": f"lte.{h_to.isoformat()}", "date_to": f"gte.{h_from.isoformat()}", "order": "batch.asc"})
+        same = supabase.select("acc_docs", {"select": "batch,file_name", "batch": f"eq.{key}", "limit": "1"})
+    except Exception:                                  # noqa: BLE001 -- no acc_docs yet: nothing to replace
+        return []
+    files = {(h["batch"], h.get("file_name")) for h in hits if h["batch"] != key}
+    files |= {(s["batch"], s.get("file_name")) for s in same if s.get("file_name") != name}
+    out = []
+    for b, fn in sorted(files, key=lambda x: (x[0], x[1] or "")):
+        params = {"select": "page,edited_at", "batch": f"eq.{b}", "order": "page.asc"}
+        params["file_name"] = f"eq.{fn}" if fn else "is.null"
+        rows = supabase.select_all("acc_docs", params)
+        if rows:
+            out.append({"batch": b, "file_name": fn, "pages": [r["page"] for r in rows], "edited": sum(1 for r in rows if r.get("edited_at"))})
+    return out
+
+
+# ------------------------------------------------------------------ a single bill / invoice / statement
+def _bill_preview(reads: list[dict], name: str, choices: dict, vehicles: list[dict]) -> dict:
+    hints = name_hints(name)
+    pv = ic.empty_preview(KIND, "บิล / ใบแจ้งหนี้ (อ่านด้วย AI)")
+    bills: dict = {}
+    for r in reads:
+        b = r.get("bill")
+        if r.get("page_kind") != "bill" or not _is_bill(b):
+            continue
+        k = (re.sub(r"\s", "", b.get("party") or ""), (b.get("doc_no") or "").strip() or str(b.get("total")))
+        if k in bills:                                 # the same bill on two pages: one bill
+            bills[k]["pages"].append(r["n"])
+            for f in ("total", "date", "period_month", "what", "doc_no"):
+                bills[k][f] = bills[k].get(f) or b.get(f)
+        else:
+            bills[k] = {**b, "pages": [r["n"]]}
+    bills_l = list(bills.values())
+    signals = []
+    for b in bills_l:
+        pm = b.get("period_month") or ""
+        if re.match(r"^\d{4}-\d{2}$", pm):
+            y = int(pm[:4])
+            pm = f"{y - 543 if y > 2400 else y}{pm[4:]}"
+            signals.append({"what": "month", "source": f"เดือนที่ระบุบนบิล ({b.get('party') or '-'})", "value": pm, "weight": 3})
+        elif _day(b.get("date")):
+            signals.append({"what": "month", "source": f"วันที่บนบิล ({b.get('party') or '-'})", "value": ic.company_month(_day(b["date"])), "weight": 2})
+    if hints["month"]:
+        signals.append({"what": "month", "source": "ชื่อไฟล์", "value": hints["month"], "weight": 0.5})
+    signals += _branch_signals(reads, vehicles, hints)
+    pv["signals"] = signals
+    month, conflicts = ic.month_conflict(signals, choices)
+    if not month and not conflicts:
+        opts = _recent_months()
+        conflicts.append(_ask("month", "ไม่พบเดือนบนบิล — เลือกเดือน", [(m, ic.month_label(m)) for m in opts]))
+        month = opts[0]
+    month = month or next(c["default"] for c in conflicts if c["key"] == "month")
+    branch, cf = pick(signals, "branch", choices, lambda v: v, "สาขา")
+    conflicts += cf
+    if not branch:
+        conflicts.append(_ask("branch", "ไม่พบสาขาบนบิล — เลือกสาขา", [(b, b) for b in ic.BRANCHES]))
+        branch = ic.BRANCHES[0]
+    pv.update({"month": month, "branch": branch, "conflicts": conflicts})
+    m_from, m_to = month_range(month)
+    h = hashlib.sha1("|".join(sorted(f"{b.get('party')}|{b.get('doc_no')}|{b.get('total')}" for b in bills_l)).encode()).hexdigest()[:8]
+    key = f"bill:{month}:{branch}:{h}"
+    entries, rows, feeds = [], [], set()
+    for i, b in enumerate(bills_l, 1):
+        total = b.get("total")
+        if not total or float(total) <= 0:
+            pv["flags"].append(f"หน้า {', '.join(map(str, b['pages']))}: อ่านยอดเงินบนบิลไม่ได้ — ไม่ลงบัญชี")
+            continue
+        total = round(float(total), 2)
+        text = f"{b.get('party') or ''} {b.get('what') or ''}"
+        feed, acc = next(((f, a) for rx, f, a in BILL_FEEDS if rx.search(text)), (None, b.get("account") if b.get("account") in PARTY else "7900"))
+        if feed:
+            feeds.add(feed)
+        d = _day(b.get("date"))
+        when = d if d and m_from <= d <= m_to else m_to
+        desc = (b.get("what") or KIND_TH["bill"]) + (f" (บิลลงวันที่ {d.strftime('%d/%m/%Y')})" if d and d != when else "")
+        e = {"entry_date": when.isoformat(), "branch": branch, "source": feed or "manual", "source_id": f"{key}:{i}", "party": (b.get("party") or PARTY[acc])[:100],
+             "description": desc[:300], "doc_type": "bill", "doc_no": (b.get("doc_no") or None),
+             "lines": [{"account": acc, "debit": total, "credit": 0.0, "branch": branch, "vehicle_id": None, "memo": None},
+                       {"account": "2100", "debit": 0.0, "credit": total, "branch": branch, "vehicle_id": None, "memo": None}]}
+        dup = _already_booked(acc, total, branch, m_from, m_to)
+        rows.append({"date": e["entry_date"], "text": e["description"], "party": e["party"], "amount": total, "role": role_of(acc),
+                     "account": acc, "flag": dup, "page": b["pages"][0], "feed": feed})
+        if dup:
+            pv["flags"].append(f"{e['party']} {total:,.2f}: {dup}")
+        else:
+            entries.append(e)
+    if feeds & {"electricity"}:
+        pv["flags"].append("ค่าไฟ PEA มีตัวอ่านของตัวเอง (ไฟล์ PDF จาก PEA) — ถ้ามีไฟล์นั้นให้วางไฟล์นั้นแทน")
+    if rows and not entries:
+        pv["store_only"] = True
+        pv["note"] = "บิลนี้ลงบัญชีไว้แล้ว — เก็บไว้กับเดือนเป็นหลักฐาน ไม่ลงซ้ำ"
+    else:
+        pv["note"] = (f"บิล {len(rows)} ใบ — ลงเป็นค่าใช้จ่ายค้างจ่าย (เจ้าหนี้ 2100): เช็คที่จ่ายบิลนี้ภายหลังจะเป็น 'จ่ายบิลที่มีอยู่แล้ว' ไม่ใช่ค่าใช้จ่ายซ้ำ"
+                      " — ตรวจยอด หมวด และสาขาก่อนกดลงบัญชี")
+    feed = next(iter(feeds)) if len(feeds) == 1 else None
+    pv["label"] = "บิล / ใบแจ้งหนี้ (อ่านด้วย AI)" if not feed else f"บิล{_feed_th(feed)} (อ่านด้วย AI)"
+    if entries or rows:
+        pv["batches"] = [{"key": key, "feed": feed or "manual", "source": feed or "manual", "branch": branch, "month": month,
+                          "title": pv["label"], "rows": rows, "file_total": round(sum(r["amount"] for r in rows), 2),
+                          "rows_total": round(sum(r["amount"] for r in rows if not r["flag"]), 2), "entries": entries}]
+    return pv
+
+
+def _is_bill(b) -> bool:
+    return isinstance(b, dict) and bool(b.get("total") or (b.get("party") or "").strip())
+
+
+def _feed_th(feed: str) -> str:
+    from app.accounting import FEED_BY_KEY
+    return FEED_BY_KEY.get(feed, {}).get("th", "")
+
+
+def _already_booked(account: str, amount: float, branch: str, start: date, end: date) -> Optional[str]:
+    """The same cost already in the books this month (e.g. irrigation water paid from petty cash, on the expense list): one source
+    books a cost, the bill only proves it."""
+    if not _db_ready():
+        return None
+    from app import supabase
+    try:
+        lines = supabase.select_all("acc_lines", {"select": "entry_id,debit,branch", "account": f"eq.{account}",
+                                                  "and": f"(debit.gte.{amount - 1},debit.lte.{amount + 1})", "order": "id.asc"})
+        ids = [ln["entry_id"] for ln in lines if (ln.get("branch") or branch) == branch]
+        for i in range(0, len(ids), 100):
+            hit = supabase.select("acc_entries", {"select": "id,entry_date,source,description", "id": f"in.({','.join(ids[i:i + 100])})",
+                                                  "entry_date": f"gte.{start.isoformat()}", "and": f"(entry_date.lte.{end.isoformat()})", "limit": "1"})
+            if hit:
+                h = hit[0]
+                return f"ลงไว้แล้ว {_day(h['entry_date']).strftime('%d/%m/%Y')} ({h.get('source')}: {h.get('description') or '-'}) — ไม่ลงซ้ำ"
+    except Exception:                                  # noqa: BLE001 -- cannot check: let the owner see it unflagged
+        return None
+    return None
+
+
+# ------------------------------------------------------------------ not for the books
+def _store_preview(reads: list[dict], name: str, choices: dict) -> dict:
+    hints = name_hints(name)
+    kinds = Counter(r.get("page_kind") for r in reads)
+    what = ", ".join(f"{KIND_TH.get(k, k)} {n} หน้า" for k, n in kinds.most_common())
+    pv = ic.empty_preview(KIND, f"{KIND_TH.get(kinds.most_common(1)[0][0], 'เอกสาร')} (อ่านด้วย AI)", store_only=True)
+    days = [d for r in reads for d in (_day(r.get("date_to")), _day(r.get("date_from"))) if d]
+    signals = []
+    if days:
+        signals.append({"what": "month", "source": "วันที่บนเอกสาร", "value": _majority([ic.company_month(d) for d in days]), "weight": 2})
+    if hints["month"]:
+        signals.append({"what": "month", "source": "ชื่อไฟล์", "value": hints["month"], "weight": 0.5})
+    month, conflicts = ic.month_conflict(signals, choices)
+    pv.update({"signals": signals, "conflicts": conflicts, "month": month or next((c["default"] for c in conflicts), None)})
+    summaries = [f"หน้า {r['n']}: {r.get('summary') or r.get('title') or ''}" for r in reads if r.get("page_kind") != "error"]
+    pv["note"] = f"{what} — ไม่ใช่เอกสารลงบัญชี เก็บไว้กับเดือน"
+    pv["contents"] = summaries
+    return pv

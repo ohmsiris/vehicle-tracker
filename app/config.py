@@ -38,6 +38,9 @@ class Settings:
     # Optional second lock for the พนักงาน section (salaries, loans, warnings): when set, those pages and
     # endpoints also need this PIN. Empty = the app token alone opens them.
     hr_pin: str = ""
+    # บัญชี › กล่องรับไฟล์ › อ่านด้วย AI (owner, 24 Nov 2026): the drop box reads handwritten scans and unknown files with Claude, only
+    # when the owner clicks. On by default; INBOX_AI_ENABLED=0 switches the button off (app/inbox_ai.py then refuses with a Thai note).
+    inbox_ai_enabled: bool = True
 
 
 def load_settings() -> Settings:
@@ -50,6 +53,7 @@ def load_settings() -> Settings:
         max_files_per_batch=int(_env("MAX_FILES_PER_BATCH", "12")),
         max_file_bytes=int(_env("MAX_FILE_BYTES", str(20 * 1024 * 1024))),
         hr_pin=_env("HR_PIN"),
+        inbox_ai_enabled=_env("INBOX_AI_ENABLED", "1").lower() not in ("0", "false", "off", "no"),
     )
 
 
