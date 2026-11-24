@@ -9,7 +9,10 @@ product (e.g. "ซอง"):
     "ผลรวม :"  <weight total>  <qty total>     the day's total (amount total is the line just before it)
 A product may continue across pages without repeating its name. Weight-priced customers (CP: price 0.45 / kg) have a weight; the rest 0.
 
-parse() is pure and unit-tested; the totals check catches a misread.
+parse() is pure and unit-tested; the totals check catches a misread. It also returns each product's printed grand total ("totals") --
+the drop box (app/inbox_r_sales.py, 24 Nov 2026) shows them as the file's own total. text_of() turns the PDF bytes into the text parse()
+reads (the same extraction scripts/import_sales_program.py always used, so customer names -- and the books' keys -- do not change);
+branch_in() and printed_on() read the report's footer and print date.
 """
 import re
 
@@ -29,11 +32,39 @@ def _is_header(ln: str) -> bool:
     return ln in ("สินค้า / ลูกค้า", "ราคา/หน่วย", "ราคารวม", "จํานวน", "จำนวน", "หน่วย") or ln.startswith(("นํ", "น้ำหนัก")) and "Kg" in ln
 
 
+def text_of(data: bytes) -> str:
+    """The PDF's text, page by page (raw pymupdf text: no Thai clean-up, the names must stay exactly as earlier imports stored them)."""
+    import pymupdf
+    with pymupdf.open(stream=data, filetype="pdf") as doc:
+        return "\n=====PAGE\n".join(p.get_text() for p in doc)
+
+
+FOOTER = re.compile(r"บริษัท\s*สระบุรีวารีเทพ\s*จ\S*กัด[ \t]*(?:\(\s*สาขา\s*([^)\n]+?)\s*\))?")
+PRINTED = re.compile(r"พิมพ์วันที\S*\s*:\s*(\d{2})-(\d{2})-(\d{4})")
+
+
+def branch_in(text: str):
+    """The branch the report says it is from: its last line is the company name, with "(สาขาแก่งคอย)" after it for Kaeng Khoi and
+    nothing for the head office (Saraburi). None when the footer is not there."""
+    hits = FOOTER.findall(text or "")
+    if not hits:
+        return None
+    named = [h.strip() for h in hits if h and h.strip()]
+    return named[-1] if named else "สระบุรี"
+
+
+def printed_on(text: str):
+    """'พิมพ์วันที่ : 07-11-2026 21:43' -> '2026-11-07' (the report cannot hold a day after it was printed)."""
+    m = PRINTED.search(text or "")
+    return f"{m.group(3)}-{m.group(2)}-{m.group(1)}" if m else None
+
+
 def parse(text: str) -> dict:
-    """-> {"rows": [{date, product, customer, qty, unit, weight, price, amount}], "days": [{date, product, amount, qty}], "problems": [..]}"""
+    """-> {"rows": [{date, product, customer, qty, unit, weight, price, amount}], "days": [{date, product, amount, qty}],
+    "totals": [{product, amount, qty}] (the printed grand total of each product), "problems": [..]}"""
     lines = [ln.strip() for ln in text.splitlines()]
     lines = [ln for ln in lines if ln and not ln.startswith("=====PAGE") and not _is_header(ln)]
-    rows, days, problems = [], [], []
+    rows, days, totals, problems = [], [], [], []
     product, day = None, None
     i = 0
     while i < len(lines):
@@ -73,6 +104,7 @@ def parse(text: str) -> dict:
             s = round(sum(d["amount"] for d in days if d["product"] == product), 2)
             if abs(s - _num(ln)) > 1:
                 problems.append(f"{product}: days {s:,.2f} vs grand total {_num(ln):,.2f}")
+            totals.append({"product": product, "amount": _num(ln), "qty": _num(lines[i + 1])})
             i += 4
             continue
         if not NUM.match(ln) and not QTY.match(ln):
@@ -80,4 +112,4 @@ def parse(text: str) -> dict:
         else:
             problems.append(f"unread line near {day} {product}: {ln}")
         i += 1
-    return {"rows": rows, "days": days, "problems": problems}
+    return {"rows": rows, "days": days, "totals": totals, "problems": problems}
