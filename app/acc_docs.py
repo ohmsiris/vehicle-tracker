@@ -12,6 +12,13 @@ acc_entries.doc_id).
 
 The documents themselves are transcribed into data/acc_docs/<month>_<branch>.py (BATCH) and loaded with
 scripts/import_acc_docs.py. build() is pure and unit-tested.
+
+Two ways in (24 Nov 2026):
+* the script: one batch per branch-month ("2026-10-saraburi"), both halves' files in it, page images rendered from the PDFs on disk.
+* the drop box (app/inbox_ai.py): ONE dropped file = one half's papers, read by Claude page by page. Its batch key is
+  "docs:<month>:<branch>:<mid|end>", so re-dropping that half replaces only that half; its page images come as bytes and are stored
+  under the file (store_page_images), and import_batch(images=...) points each page at them. replace_docs lets the drop box take over
+  the pages an older import of the same half wrote (the owner chooses that; otherwise the half would be counted twice).
 """
 import json
 import re
@@ -123,19 +130,26 @@ def image_path(batch: str, page: int) -> str:
     return f"accdocs/{batch}/p{page}.jpg"
 
 
-def import_batch(batch: dict, force: bool = False) -> dict:
+def import_batch(batch: dict, force: bool = False, images: Optional[dict] = None, replace_docs: Optional[list] = None) -> dict:
     """Write one batch, replacing what an earlier import of the same batch wrote (its docs cascade to their entries). Refuses when
-    someone already fixed lines on the review screen (they would be lost) unless force."""
+    someone already fixed lines on the review screen (they would be lost) unless force.
+
+    images: {page: storage path} of page images already stored (the drop box stores them from bytes, store_page_images); without
+    it every page points at image_path(batch, page), where the script's --images puts them.
+    replace_docs: [{"batch": "2026-10-saraburi", "pages": [1, 2, ...]}] -- pages of OTHER batches this one takes over (the same half
+    imported earlier by the script). They are removed with their entries before the insert, so the half is never in the books twice."""
     from app.accounting import _insert_entries, _require
     _require()
     if not force and supabase.select("acc_docs", {"select": "page", "batch": f"eq.{batch['batch']}", "edited_at": "not.is.null", "limit": "1"}):
         raise BadBatch("มีหน้าที่แก้บนหน้าตรวจแล้ว — นำเข้าใหม่จะทับที่แก้ (ใช้ --force ถ้าตั้งใจ)")
     vehicles = supabase.select_all("vehicles", {"select": "id,vehicle_number,plate_number,branch", "order": "id.asc"})
     out = build(batch, vehicles)
+    paths = {int(k): v for k, v in images.items()} if images is not None else None       # keys come back as text from jsonb
     for d in out["docs"]:
-        d["image_path"] = image_path(batch["batch"], d["page"])
-    supabase.delete("acc_docs", {"batch": f"eq.{batch['batch']}"})
-    supabase.delete("acc_entries", {"source_id": f"like.{batch['batch']}:*"})
+        d["image_path"] = paths.get(d["page"]) if paths is not None else image_path(batch["batch"], d["page"])
+    for old in replace_docs or []:
+        remove_pages(old["batch"], old.get("pages"))
+    remove_batch(batch["batch"])
     cols = sorted({k for d in out["docs"] for k in d})
     rows = supabase.insert("acc_docs", [{k: d.get(k) for k in cols} for d in out["docs"]])
     ids = {r["page"]: r["id"] for r in rows}
@@ -150,6 +164,36 @@ def import_batch(batch: dict, force: bool = False) -> dict:
         except supabase.SupabaseError:          # schema_v52 not applied yet: the books still import
             pass
     return {"docs": len(rows), "entries": len(out["entries"]), "problems": out["problems"], "hr_suggestions": hr}
+
+
+def remove_batch(name: str) -> None:
+    """Everything one batch wrote: its docs (their entries cascade) and any entry of the batch left without a doc."""
+    supabase.delete("acc_docs", {"batch": f"eq.{name}"})
+    supabase.delete("acc_entries", {"source_id": f"like.{name}:*"})
+
+
+def remove_pages(name: str, pages: Optional[list] = None) -> None:
+    """Some pages of a batch (all of it when pages is None) with their entries."""
+    if pages is None:
+        remove_batch(name)
+        return
+    for i in range(0, len(pages), 100):
+        chunk = [int(p) for p in pages[i:i + 100]]
+        supabase.delete("acc_docs", {"batch": f"eq.{name}", "page": f"in.({','.join(str(p) for p in chunk)})"})
+        for p in chunk:
+            supabase.delete("acc_entries", {"source_id": f"like.{name}:p{p}:*"})
+
+
+def store_page_images(prefix: str, images: dict) -> dict:
+    """Page images given as BYTES ({page: jpeg}) -> stored in the private bucket under accdocs/<prefix>/p<page>.jpg, where the review
+    screen finds them once import_batch(images=...) points the pages there. Returns {page: path}. (The script renders its pages from
+    PDFs on disk instead: upload_images.)"""
+    out = {}
+    for page, jpeg in sorted(images.items()):
+        path = f"accdocs/{prefix}/p{int(page)}.jpg"
+        supabase.storage_upload(path, jpeg, "image/jpeg", upsert=True, bucket=supabase.PRIVATE_BUCKET)
+        out[int(page)] = path
+    return out
 
 
 # ------------------------------------------------------------------ fuel per truck against km
