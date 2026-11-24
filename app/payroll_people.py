@@ -55,6 +55,35 @@ def not_pay(row: dict) -> dict:
     return {**row, "parts": parts, "refund": round((row.get("refund") or 0) + moved, 2), "flags": [*row["flags"], f"ย้าย {moved:,.0f} ไปเป็นคืนสะสม/จ่ายค้าง ตามหมายเหตุของ HQ"]}
 
 
+def parse_bytes(group: str, data: bytes, name: str, month: str) -> dict:
+    """The drop box's entry point (owner, 24 Nov 2026: app/inbox_r_payroll.py): one dropped file given as BYTES ->
+    {"people": [rows, HQ's not-pay notes applied, "group" set], "extras": [{label, gross, deduct_total, net}], "total": {gross, ...} | None}.
+    extras = the sheet's rows with money but no SB- code (the petty-cash pay-back rows); total = the printed total row when the reader
+    finds one (factory only; the caller reads the others itself). The three readers open a PATH (the import scripts and read_month use
+    them that way), so the bytes go to a temporary file with the same extension for the length of the read -- the readers stay exactly
+    as tested."""
+    import os
+    import tempfile
+    ext = os.path.splitext(name)[1].lower() or ".pdf"
+    fd, path = tempfile.mkstemp(suffix=ext)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        if group == "factory":
+            full = factory.parse_file_full(path, month)
+            people, extras, total = full["people"], full["extras"], full["total"]
+        else:
+            people = READERS[group].parse_file(path, month)
+            extras = kk.extra_rows(path) if group == "kk" else []
+            total = None
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return {"people": [{**not_pay(r), "group": group} for r in people], "extras": extras, "total": total}
+
+
 def read_month(month: str) -> list[dict]:
     out = []
     for grp, rel in FILES.get(month, {}).items():
