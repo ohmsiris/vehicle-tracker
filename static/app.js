@@ -361,6 +361,8 @@ function render(draft, pickedVehicle) {
   // one block per bill file, photo beside its own rows
   const blocks = $("billBlocks");
   blocks.replaceChildren(...draft.bills.map((b) => billBlock(b, draft.line_items.filter((li) => li.file_index === b.file_index))));
+  takeVatLines(draft);
+  renderTotalsBox();
   updateTotals();
   $("evNext")._suggest();                          // now that the bill's lines are on the page, look again for an oil-change line
   tp.vehicleId = null; tp.picked = new Set(); tp.touched = false;      // a new bill: no wheels picked yet
@@ -384,64 +386,69 @@ function billBlock(bill, items) {
     right.append(
       el("div", { class: "tablewrap" }, el("table", { class: "lines" }, el("thead", {}, head), tbody)),
       el("div", { class: "addrow-bar" },
-        el("button", { class: "btn addrow", text: "+ เพิ่มรายการ", onclick: () => { tbody.append(lineRow({})); renumber(); linesChanged(); } }),
-        vatToggle(tbody)),
+        el("button", { class: "btn addrow", text: "+ เพิ่มรายการ", onclick: () => { tbody.append(lineRow({})); renumber(); linesChanged(); } })),
     );
   }
   return el("div", { class: "card bill" }, preview, right);
 }
 
-// ---- VAT: one tick adds the "VAT 7%" line of a bill (7 % of its other lines) and keeps it up to date as the lines change;
-// type your own amount in that line and it stays as typed; untick (or delete the line) to take it away. A VAT line the
-// reader already found counts as ticked, so the tick can never add VAT twice.
+// ---- VAT: ONE tick for the whole review, next to the total (owner, 24 Nov 2026 -- "VAT is always worked out from the total, not
+// each bill"). Ticked, it is 7 % of all the lines on every photo and shows at once beside the total; type another amount and it
+// stays as typed (a bill that rounds its VAT its own way). A VAT line the reader found on a bill is taken out of that bill's table
+// and becomes this amount, so VAT is never counted twice. It is saved as one "VAT 7%" line (category อื่นๆ) like before.
 const VAT_LINE_RE = /^\s*(vat|ภาษีมูลค่าเพิ่ม|ภาษี)/i;
-const vatRowOf = (tbody) => [...tbody.querySelectorAll("tr")].find((tr) => tr.dataset.vat);
-const rowTotal = (tr) => num(tr.querySelector("[data-f=line_total]").value);
+const VAT_RATE = 0.07;
 
-function vatToggle(tbody) {
-  for (const tr of tbody.querySelectorAll("tr")) {
-    if (VAT_LINE_RE.test(tr.querySelector("[data-f=description]").value) && !vatRowOf(tbody)) tr.dataset.vat = "manual";    // found on the bill: its amount is the bill's
-  }
-  const box = el("input", { type: "checkbox", id: `vat_${tbody.dataset.file}` });
-  box.checked = !!vatRowOf(tbody);
-  tbody._vatBox = box;
+function takeVatLines(draft) {
+  let found = 0, amount = 0, file = null;
+  document.querySelectorAll("#billBlocks tbody").forEach((tbody) => {
+    [...tbody.querySelectorAll("tr")].forEach((tr) => {
+      if (!VAT_LINE_RE.test(tr.querySelector("[data-f=description]").value)) return;
+      found++;
+      amount += num(tr.querySelector("[data-f=line_total]").value);
+      if (file === null) file = Number(tbody.dataset.file);
+      tr.remove();
+    });
+  });
+  const okBills = (draft.bills || []).filter((b) => b.ok);
+  state.vat = { on: found > 0, manual: found > 0, amount: round2(amount),
+                file: file ?? (okBills.length ? okBills[okBills.length - 1].file_index : 0) };
+  renumber();
+}
+
+const vatOn = () => !!(state.vat && state.vat.on);
+const vatCalc = () => round2(lineSum({ vat: false }) * VAT_RATE);
+
+// keeps an automatic VAT at 7 % of the lines as they change
+function syncVat() {
+  if (vatOn() && !state.vat.manual) state.vat.amount = vatCalc();
+}
+
+// the totals card: built once per bill (so typing in the VAT box keeps its focus), its numbers refreshed by updateTotals()
+function renderTotalsBox() {
+  if (!state.vat) state.vat = { on: false, manual: false, amount: 0, file: 0 };
+  const box = el("input", { type: "checkbox", id: "vatOn" });
+  box.checked = vatOn();
   box.addEventListener("change", () => {
-    const existing = vatRowOf(tbody);
-    if (!box.checked) { if (existing) existing.remove(); renumber(); linesChanged(); return; }
-    if (existing) return;
-    const tr = lineRow({ description: "VAT 7%", category: "อื่นๆ", line_total: round2(vatBase(tbody) * 0.07) });
-    tr.dataset.vat = "auto";
-    tr.dataset.catManual = "1";                         // not for the automatic category sorting
-    tr.addEventListener("input", (e) => { if (e.target.dataset.f === "line_total") tr.dataset.vat = "manual"; }, true);     // typed by hand: stop following the lines
-    tbody.append(tr);
-    renumber();
+    state.vat.on = box.checked;
+    state.vat.manual = false;
     linesChanged();
   });
-  return el("label", { class: "mgcheck vat-toggle" }, box, "บิลนี้ยังไม่รวม VAT — เพิ่มบรรทัด VAT 7% ให้ (คิดจากรายการทุกรูปของบิลนี้)");
-}
-
-// What the VAT of this photo's VAT line is 7 % of (owner, 15 Nov 2026): a bill over several photos has its VAT once, on one page, so
-// it is every photo's lines -- this photo and the photos either side of it up to (not including) another photo that has its own
-// VAT line (a separate receipt with its VAT already on it). With one VAT line on the review, that is all the photos.
-function vatBase(tbody) {
-  const all = [...document.querySelectorAll("#billBlocks tbody")];
-  const i = all.indexOf(tbody);
-  if (i < 0) return [...tbody.querySelectorAll("tr")].filter((tr) => !tr.dataset.vat).reduce((s, tr) => s + rowTotal(tr), 0);
-  let a = i, b = i;
-  while (a > 0 && !vatRowOf(all[a - 1])) a--;
-  while (b < all.length - 1 && !vatRowOf(all[b + 1])) b++;
-  return all.slice(a, b + 1).flatMap((t) => [...t.querySelectorAll("tr")]).filter((tr) => !tr.dataset.vat).reduce((s, tr) => s + rowTotal(tr), 0);
-}
-
-// keeps the automatic VAT lines at 7 % of their bill's other lines (on every photo of it), and each tick in step with its table
-function syncVat() {
-  document.querySelectorAll("#billBlocks tbody").forEach((tbody) => {
-    const row = vatRowOf(tbody);
-    if (row && row.dataset.vat === "auto") {
-      row.querySelector("[data-f=line_total]").value = String(round2(vatBase(tbody) * 0.07));
-    }
-    if (tbody._vatBox) tbody._vatBox.checked = !!row;
+  const amt = el("input", { type: "number", id: "vatAmount", step: "0.01", inputmode: "decimal", class: "vat-amount" });
+  amt.addEventListener("input", () => {
+    state.vat.manual = true;
+    state.vat.amount = round2(num(amt.value));
+    linesChanged();
   });
+  const reset = el("button", { type: "button", class: "btn small", id: "vatReset", onclick: () => { state.vat.manual = false; linesChanged(); } });
+  $("totalsBox").replaceChildren(
+    el("div", { class: "totals-main" },
+      el("span", {}, el("span", { id: "subLabel", text: "ผลรวมรายการ " }), el("span", { class: "big", id: "subSum" })),
+      el("span", { id: "vatPart", class: "vat-part" }, "VAT 7% ", amt, reset),
+      el("span", { id: "grandPart" }, "รวมทั้งสิ้น ", el("span", { class: "big", id: "grandSum" }))),
+    el("label", { class: "mgcheck vat-toggle" }, box, "บิลยังไม่รวม VAT — บวก VAT 7% จากยอดรวม"),
+    el("div", { id: "totalsMismatch", class: "totals-mismatch" }),
+  );
 }
 
 // `hooks` lets another page (the bill editor on the truck history) reuse this exact row with its own
@@ -486,7 +493,7 @@ function renumber() {
 }
 
 // --------------------------------------------------------------- totals + payload
-function readLines() {
+function readLines({ vat = true } = {}) {
   const out = [];
   document.querySelectorAll("#billBlocks tbody").forEach((tbody) => {
     tbody.querySelectorAll("tr").forEach((tr) => {
@@ -504,6 +511,10 @@ function readLines() {
       });
     });
   });
+  if (vat && vatOn() && state.vat.amount) {      // the one VAT of the whole review (see renderTotalsBox)
+    out.push({ file_index: state.vat.file, description: "VAT 7%", category: "อื่นๆ", quantity: null, unit: null, unit_cost: null,
+               line_total: state.vat.amount });
+  }
   return out.map((l, i) => ({ line_number: i + 1, ...l }));
 }
 
@@ -567,7 +578,7 @@ async function recategorize(trs) {
 }
 
 const round2 = (n) => Math.round(n * 100) / 100;
-const lineSum = () => readLines().reduce((s, l) => s + (l.line_total || 0), 0);
+const lineSum = (opts) => readLines(opts).reduce((s, l) => s + (l.line_total || 0), 0);
 
 // Any edit to the line items: the header total follows the new sum, unless
 // the user has typed their own total (then it's theirs to keep).
@@ -591,15 +602,28 @@ function updateTotals() {
   // time the two differ is the moment the page opens -- the total the model
   // read hasn't been replaced yet; the top warning box already explains that
   // mismatch -- or after you type your own total. Show it only then.
-  const parts = [el("span", {}, "ผลรวมรายการ ", el("span", { class: "big", text: fmtMoney(sum) }))];
+  if (!$("subSum")) renderTotalsBox();
+  const on = vatOn();
+  $("subLabel").textContent = on ? "ก่อน VAT " : "ผลรวมรายการ ";
+  $("subSum").textContent = fmtMoney(lineSum({ vat: false }));
+  $("vatPart").hidden = !on;
+  $("grandPart").hidden = !on;
+  $("grandSum").textContent = fmtMoney(sum);
+  const amt = $("vatAmount");
+  if (document.activeElement !== amt) amt.value = on ? String(state.vat.amount) : "";
+  const calc = vatCalc();
+  const off = on && Math.abs(calc - state.vat.amount) > 0.005;     // typed (or read off the bill) and not 7 % of the lines
+  $("vatReset").hidden = !off;
+  $("vatReset").textContent = `ใช้ 7% = ${fmtMoney(calc)}`;
+  const parts = [];
   if (Math.abs(header - sum) > 0.005) {
     parts.push(el("span", {}, "ยอดรวมที่ตั้งไว้ ", el("span", { class: "big", text: fmtMoney(header) })));
     parts.push(el("button", {
-      class: "btn", text: "ตั้งยอดรวม = ผลรวมรายการ",
+      class: "btn", text: on ? "ตั้งยอดรวม = รวมทั้งสิ้น" : "ตั้งยอดรวม = ผลรวมรายการ",
       onclick: () => { state.totalManual = false; linesChanged(); },
     }));
   }
-  $("totalsBox").replaceChildren(...parts);
+  $("totalsMismatch").replaceChildren(...parts);
 }
 
 function buildPayload() {

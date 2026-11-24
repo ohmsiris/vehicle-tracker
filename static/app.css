@@ -189,7 +189,12 @@ table.lines td.cat select { min-width: 140px; }
 .addrow-bar .addrow { margin-top: 0; }
 .vat-toggle { margin: 0; }
 
-.totals { display: flex; flex-wrap: wrap; gap: 10px 30px; align-items: baseline; background: var(--accent-soft); border-color: transparent; }
+.totals { display: flex; flex-direction: column; gap: 10px; background: var(--accent-soft); border-color: transparent; }
+.totals-main, .totals-mismatch { display: flex; flex-wrap: wrap; gap: 10px 30px; align-items: baseline; }
+.totals-mismatch:empty { display: none; }
+.totals .vat-part { display: inline-flex; align-items: baseline; gap: 8px; }
+.totals .vat-part[hidden], .totals #grandPart[hidden], .totals #vatReset[hidden] { display: none; }
+.totals .vat-amount { width: 120px; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .totals .big { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .totals .bad { color: var(--bad); font-weight: 700; }
 .totals .good { color: var(--ok); font-weight: 700; }
