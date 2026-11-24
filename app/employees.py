@@ -296,16 +296,14 @@ def get_employee(employee_id: str) -> dict:
 
 # ---- เปลี่ยนตำแหน่ง (owner, 24 Nov 2026): promote / demote / move someone so the old position stays on record. One row of employee_role_changes per
 # change (old and new position and branch, the day, why), then the employee's position / branch follow. "แก้ไข" stays for typos and keeps no history.
-ROLE_KINDS = {"promote": "เลื่อนตำแหน่ง", "demote": "ลดตำแหน่ง", "move": "ย้ายงาน"}
+ROLE_KINDS = {"change": "เปลี่ยนตำแหน่ง", "promote": "เลื่อนตำแหน่ง", "demote": "ลดตำแหน่ง", "move": "ย้ายงาน"}    # new ones are all "change" (schema_v91)
 
 
 def clean_role_change(data: dict, *, existing: dict, today: Optional[date] = None) -> dict:
     today = today or today_th()
     if existing.get("status") == "resigned":
         raise InvalidEmployee("คนนี้ลาออกไปแล้ว — กด “กลับเข้าทำงาน” ก่อน")
-    kind = _clean(data.get("kind"), 10)
-    if kind not in ROLE_KINDS:
-        raise InvalidEmployee("เลือก เลื่อนตำแหน่ง / ลดตำแหน่ง / ย้ายงาน")
+    kind = "change"                                    # no promote / demote to pick (owner: often it is neither)
     position = _clean(data.get("position"), 60) or None
     branch = _clean(data.get("branch"), 40) or existing.get("branch")
     if branch not in BRANCHES:

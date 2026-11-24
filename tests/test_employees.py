@@ -264,13 +264,12 @@ def test_the_driver_positions():
 def test_a_role_change_keeps_the_old_position_and_branch():
     e = emp(E1, start_date="2025-01-01")
     c = em.clean_role_change({"kind": "move", "position": " พนักงานขับรถหน้าโรง ", "change_date": "2026-10-20", "reason": " ปัญหาสุขภาพ "}, existing=e, today=TODAY)
-    assert c == {"employee_id": E1, "change_date": "2026-10-20", "kind": "move", "from_position": "พนักงานขับรถสาย", "to_position": "พนักงานขับรถหน้าโรง",
+    assert c == {"employee_id": E1, "change_date": "2026-10-20", "kind": "change", "from_position": "พนักงานขับรถสาย", "to_position": "พนักงานขับรถหน้าโรง",
                  "from_branch": "สระบุรี", "to_branch": "สระบุรี", "reason": "ปัญหาสุขภาพ"}
     assert em.clean_role_change({"kind": "promote", "position": "หัวหน้างาน"}, existing=e, today=TODAY)["change_date"] == "2026-10-26"     # default today
 
 
 @pytest.mark.parametrize("data,frag", [
-    ({"kind": "x", "position": "ช่าง"}, "เลื่อนตำแหน่ง"),
     ({"kind": "promote", "position": ""}, "ตำแหน่งใหม่"),
     ({"kind": "promote", "position": "พนักงานขับรถสาย"}, "เหมือนเดิม"),
     ({"kind": "move", "position": "ช่าง", "branch": "ที่อื่น"}, "สาขา"),
@@ -290,4 +289,4 @@ def test_changing_role_writes_the_history_then_the_employee(fake, monkeypatch):
     out = em.change_role(E1, {"kind": "move", "position": "พนักงานขับรถหน้าโรง", "reason": "ปัญหาสุขภาพ"})
     assert d.t["employees"][0]["position"] == "พนักงานขับรถหน้าโรง"
     assert [(r["from_position"], r["to_position"]) for r in d.t["employee_role_changes"]] == [("พนักงานขับรถสาย", "พนักงานขับรถหน้าโรง")]
-    assert out["position"] == "พนักงานขับรถหน้าโรง" and out["role_changes"][0]["kind_text"] == "ย้ายงาน"
+    assert out["position"] == "พนักงานขับรถหน้าโรง" and out["role_changes"][0]["kind_text"] == "เปลี่ยนตำแหน่ง"

@@ -393,8 +393,7 @@ function roleHistoryCard(e) {
     rows.length ? el("div", { class: "role-hist" }, ...rows.map((r) => el("div", { class: "role-row" },
       el("div", { class: "role-when small muted", text: beDate(r.change_date) }),
       el("div", { class: "role-what" },
-        el("span", { class: `badge ${r.kind === "promote" ? "ok" : r.kind === "demote" ? "warn" : ""}`.trim(), text: r.kind_text }),
-        el("span", { text: ` ${r.from_position || "–"} → ${r.to_position || "–"}` }),
+        el("span", { text: `${r.from_position || "–"} → ${r.to_position || "–"}` }),
         r.from_branch !== r.to_branch ? el("span", { class: "muted small", text: ` · สาขา ${r.from_branch || "–"} → ${r.to_branch || "–"}` }) : null,
         r.reason ? el("div", { class: "muted small", text: r.reason }) : null),
       el("button", { class: "linkbtn small", type: "button", text: "ลบ", title: "ลบรายการนี้ (บันทึกผิด) — ตำแหน่งปัจจุบันไม่เปลี่ยน", onclick: () => deleteRoleChange(r) }))))
@@ -405,7 +404,6 @@ function openRoleDialog() {
   const e = emp.current;
   $("emoTitle").textContent = `เปลี่ยนตำแหน่ง — ${empLabel(e)}`;
   $("emoNow").textContent = `ตอนนี้: ${e.position || "ยังไม่ระบุตำแหน่ง"} · สาขา${e.branch} — ตำแหน่งเดิมจะถูกเก็บไว้ใน “ประวัติตำแหน่ง”`;
-  document.querySelector('input[name="emoKind"][value="promote"]').checked = true;
   const positions = [...new Set([...(emp.positions || []), ...(emp.all || []).map((x) => x.position).filter(Boolean)])];
   fill($("emoPositions"), ...positions.map((p) => el("option", { value: p })));
   $("emoPosition").value = "";
@@ -423,7 +421,7 @@ async function submitRoleChange() {
   $("emoSave").disabled = true;
   try {
     emp.current = await api(`/api/employees/${emp.current.id}/role`, jsonOpts("POST", {
-      kind: document.querySelector('input[name="emoKind"]:checked').value, position: $("emoPosition").value, branch: $("emoBranch").value,
+      position: $("emoPosition").value, branch: $("emoBranch").value,
       change_date: $("emoDate").value || null, reason: $("emoReason").value }));
     $("empRoleDialog").close();
     emp.loaded = false;
