@@ -1716,6 +1716,61 @@ dialog.acx-review { width: min(1600px, 98vw); max-width: 96vw; height: 92vh; pad
 .acx-file { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); max-width: 100%; }
 .acx-file a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 
+/* บัญชี › กล่องรับไฟล์ (inbox.js) */
+.ibx-drop { padding: 22px 16px; display: grid; gap: 4px; }
+.ibx-msgs { margin-top: 8px; display: grid; gap: 2px; }
+.ibx-file { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.ibx-file.booked .ibx-name { color: var(--text); }
+.ibx-main { min-width: 0; }
+.ibx-name { font-weight: 650; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.ibx-other { color: var(--accent); font-weight: 600; }
+.ibx-num { text-align: right; display: grid; gap: 3px; justify-items: end; }
+.ibx-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+dialog.ibx-dialog { width: min(1100px, 96vw); max-width: 96vw; max-height: 92vh; padding: 14px 18px; }
+.ibx-signals { margin: 2px 0; }
+.ibx-conflict { border: 1px solid var(--warn-line); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 8px 12px; margin: 10px 0 6px; }
+.ibx-conflict legend { padding: 0 4px; }
+.ibx-radio { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 14px; cursor: pointer; }
+.ibx-flags { background: var(--flag-bg); border: 1px solid var(--flag-line); border-radius: var(--radius-sm); padding: 6px 12px 6px 28px; margin: 8px 0; }
+.ibx-batch { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; margin: 10px 0; }
+.ibx-batch-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.ibx-rolesum { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0; font-size: 13px; }
+.ibx-rows { margin-top: 6px; }
+.ibx-r { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto 50px 110px; gap: 8px; align-items: center; padding: 5px 2px; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.ibx-r > strong { text-align: right; }
+.ibx-r > .ibx-role { justify-self: start; }
+.ibx-r.head { border-bottom: 1px solid var(--line-strong); }
+.ibx-r.flagged { background: var(--flag-bg); }
+.ibx-text { min-width: 0; overflow-wrap: anywhere; }
+.ibx-role { display: inline-flex; gap: 4px; align-items: baseline; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); color: var(--text-2); white-space: nowrap; }
+.ibx-role.cost, .ibx-role.wages { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.ibx-role.revenue { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.ibx-role.unknown { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.ibx-role.noncost { background: transparent; border-style: dashed; border-color: var(--line-strong); }
+.ibx-role em { font-style: normal; font-weight: 650; color: var(--muted); }
+.ibx-check { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.ibx-dot { width: 12px; height: 12px; border-radius: 50%; margin-top: 5px; background: var(--muted); }
+.ibx-check.ok .ibx-dot { background: var(--ok); }
+.ibx-check.warn .ibx-dot { background: var(--warn); }
+.ibx-check.bad .ibx-dot { background: var(--bad); }
+.ibx-nums { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.ibx-check-rows summary { cursor: pointer; color: var(--accent); margin-top: 4px; }
+.ibx-table { overflow-x: auto; max-width: 100%; }
+.ibx-table table { border-collapse: collapse; margin-top: 6px; }
+.ibx-table th, .ibx-table td { padding: 3px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.acx-src { font-size: 13px; }
+.acx-src.waiting { color: var(--warn); }
+@media (max-width: 760px) {
+  .ibx-file { grid-template-columns: minmax(0, 1fr); }
+  .ibx-num { text-align: left; justify-items: start; }
+  .ibx-r { grid-template-columns: 74px minmax(0, 1fr) 90px; }
+  .ibx-r > :nth-child(3) { grid-column: 2; grid-row: 2; justify-self: start; }
+  .ibx-r > :nth-child(4) { display: none; }
+  .ibx-r > strong { grid-column: 3; grid-row: 1; }
+  .ibx-r.head > :nth-child(3) { display: none; }
+  dialog.ibx-dialog { padding: 12px; }
+}
+
 /* บัญชี › ค่าไฟฟ้า */
 .acx-elec { margin: 10px 0 16px; }
 .acx-elec-row { display: grid; grid-template-columns: 70px repeat(8, minmax(0, 1fr)); gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--line); font-size: 14px; }

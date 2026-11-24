@@ -1190,6 +1190,102 @@ def api_accounts_feed_mark(body: dict = Body(...), x_app_token: str = Header(def
     return _acc_call(accounting.mark_feed, body)
 
 
+# --------------------------------------------------------------------------------------------- บัญชี › กล่องรับไฟล์ (app/inbox.py)
+# Drop any monthly document; the app works out what it is, its branch and month from the content, shows a preview and books only on
+# ลงบัญชี (owner, 24 Nov 2026). Mutating paths are only reachable with the ลงข้อมูล menu (users.py: the P&L menu has no /api/accounts/inbox).
+def _inbox_call(fn, *args, **kwargs):
+    from app import inbox
+    try:
+        return _acc_call(fn, *args, **kwargs)
+    except inbox.NotFound as exc:
+        raise HTTPException(404, str(exc))
+    except inbox.InboxError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@app.post("/api/accounts/inbox")
+def api_inbox_upload(files: list[UploadFile] = File(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Drop files: each is stored once (same file again -> the row it already has), identified from its content and read (not booked)."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    raws = _read_uploads(files, inbox.MAX_FILES)
+    return {"files": _inbox_call(inbox.upload, raws, _who(x_app_token or token))}
+
+
+@app.get("/api/accounts/inbox")
+def api_inbox_list(month: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The month's dropped files plus everything not booked yet (any month), newest first."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    return _inbox_call(inbox.list_files, month)
+
+
+@app.get("/api/accounts/inbox/{file_id}")
+def api_inbox_one(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """One dropped file with its whole preview (the ดูก่อนลงบัญชี dialog)."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    return _inbox_call(inbox.get, file_id)
+
+
+@app.get("/api/accounts/inbox/{file_id}/file")
+def api_inbox_file(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    """The dropped file itself (private bucket, served through the app)."""
+    from urllib.parse import quote as _q
+    from app import inbox
+    _check_token(x_app_token, token)
+    data, mime, name = _inbox_call(inbox.download, file_id)
+    return Response(content=data, media_type=mime, headers={"Content-Disposition": f"inline; filename*=UTF-8''{_q(name)}",
+                                                            "Cache-Control": "private, max-age=3600"})
+
+
+@app.post("/api/accounts/inbox/{file_id}/choose")
+def api_inbox_choose(file_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The owner's answer to a conflict ({"choices": {"month": "2026-11"}}): read again with it."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    return _inbox_call(inbox.choose, file_id, body.get("choices") if isinstance(body.get("choices"), dict) else {})
+
+
+@app.post("/api/accounts/inbox/{file_id}/book")
+def api_inbox_book(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import inbox
+    _check_token(x_app_token, token)
+    return _inbox_call(inbox.book, file_id)
+
+
+@app.post("/api/accounts/inbox/{file_id}/reread")
+def api_inbox_reread(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    from app import inbox
+    _check_token(x_app_token, token)
+    return _inbox_call(inbox.reread, file_id)
+
+
+@app.post("/api/accounts/inbox/{file_id}/ai")
+def api_inbox_ai(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """อ่านด้วย AI (only on the owner's click; runs in the background, the page polls the list)."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    return _inbox_call(inbox.ai, file_id)
+
+
+@app.delete("/api/accounts/inbox/{file_id}")
+def api_inbox_delete(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """ลบ: what it booked is taken back, then the file and its row are deleted."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    _inbox_call(inbox.remove, file_id)
+    return {"ok": True}
+
+
+@app.get("/api/accounts/checks")
+def api_accounts_checks(month: str, branch: str = "", x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """ตรวจความถูกต้อง: the proofs that nothing is counted twice (app/acc_checks.py)."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    return _inbox_call(inbox.checks, month, branch)
+
+
 @app.get("/api/tyre-stock")
 def api_tyre_stock(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """ยางสำรอง: on hand per size, minimums, the latest moves."""
