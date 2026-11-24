@@ -13,6 +13,11 @@ tax invoices in the company's name), Cr 2100 owed to the station. The branch is 
 every card-fuel line is on Saraburi's sheet and Saraburi pays it, so it is Saraburi's cost even for a truck the app files under
 Kaeng Khoi (trucks move between the plants; the truck keeps its branch in the app). Cash fuel on Kaeng Khoi's papers stays there.
 build is pure and unit-tested.
+
+Keys: source_id "fuel:<station>:<month>:<plate>" -- the scripts and the Drivers sheet booked Bangchak's two stations (NM, ห้วยบง) as ONE
+entry per plate per month. The drop box (app/inbox_r_fuel.py, 24 Nov 2026) reads each station's file on its own, so it passes sub=<station>
+and the key becomes "fuel:bangchak:<month>:<station>:<plate>": dropping one station's file replaces that station only. PT keeps the old
+key (one file has every PT fill).
 """
 import re
 from datetime import date
@@ -41,7 +46,8 @@ def find_vehicle(key: str, by: dict, vehicles: list[dict]):
     return None
 
 
-def build(month: str, station: str, by_plate: dict, vehicles: list[dict], source_note: str = "", payer: str = PAYER) -> dict:
+def build(month: str, station: str, by_plate: dict, vehicles: list[dict], source_note: str = "", payer: str = PAYER, sub: str = "") -> dict:
+    """sub: an extra key segment after the month (the Bangchak station, from the drop box); "" keeps the scripts' keys."""
     by = {norm_plate(v["plate_number"]): v for v in vehicles if v.get("plate_number")}
     y, m = (int(x) for x in month.split("-"))
     entries, flags = [], []
@@ -51,14 +57,14 @@ def build(month: str, station: str, by_plate: dict, vehicles: list[dict], source
             continue
         v = find_vehicle(plate, by, vehicles)
         if not v:
-            flags.append(f"{STATIONS[station]} {month}: ไม่พบรถทะเบียน {plate} ({amount:,.2f}) — ลงไว้ไม่ผูกกับรถ")
+            flags.append(f"{STATIONS[station]}{(' ' + sub) if sub else ''} {month}: ไม่พบรถทะเบียน {plate} ({amount:,.2f}) — ลงไว้ไม่ผูกกับรถ")
         branch = payer
         vat = round(amount * 7 / 107, 2)
         lines = [("6120", round(amount - vat, 2), 0.0), ("1400", vat, 0.0), ("2100", 0.0, amount)]
         label = f"#{v['vehicle_number']} · {v['plate_number']}" if v else plate
         entries.append({"entry_date": date(y, m, 25).isoformat(), "branch": branch, "source": "card_fuel",
-                        "source_id": f"fuel:{station}:{month}:{norm_plate(plate)}", "party": STATIONS[station], "doc_type": "tax_invoice", "doc_no": None,
-                        "description": f"น้ำมัน{STATIONS[station]} {label} {m:02d}/{y + 543}" + (f" · {source_note}" if source_note else ""),
+                        "source_id": f"fuel:{station}:{month}:{(sub + ':') if sub else ''}{norm_plate(plate)}", "party": STATIONS[station], "doc_type": "tax_invoice", "doc_no": None,
+                        "description": f"น้ำมัน{STATIONS[station]}{(' ' + sub) if sub else ''} {label} {m:02d}/{y + 543}" + (f" · {source_note}" if source_note else ""),
                         "lines": [{"account": a, "debit": d, "credit": c, "branch": branch, "vehicle_id": (v or {}).get("id"), "machine_id": None,
                                    "memo": None} for a, d, c in lines]})
     return {"entries": entries, "flags": flags}
