@@ -61,11 +61,27 @@ JOBS: list[dict] = [
     dict(key="screw_overhaul", name="โอเวอร์ฮอลสกรูและเครื่องบด (จาระบี ลูกปืน ซีล เกียร์)", programs=(TUBE,), months=12, hours=None, level="ควรทำ", event_kind="เปลี่ยนอะไหล่", reset_by=(), guess=True,
          with_oil=False, note="ไม่มีมิเตอร์ จึงนับเป็นเดือน · อัดจาระบี เปลี่ยนลูกปืนและซีล ตรวจเกียร์/ใบมีด · ถ้าลูกปืนยังดี ค่อยยืดเป็น 18–24 เดือน"),
 ]
-# Jobs taken out of the plan; their past reports keep their name. แวคคั่มฟรีซเซอร์ is done when the ice is thin, will not come
-# out or the freezer leaks (a repair); the safety-switch test is off for now; the screw grease is part of the screw overhaul.
-RETIRED = {"freezer_vac": "แวคคั่มฟรีซเซอร์", "safety": "ทดสอบสวิตช์ความปลอดภัย (HP / LP / แรงดันน้ำมัน)",
-           "screw_grease": "จาระบีมอเตอร์ / ลูกปืนสกรูและเครื่องบด"}
+# Jobs with no due date (owner, 24 Nov 2026): done when needed, so they are in the tick list ("+ บันทึกว่าทำแล้ว") and the machine page says
+# when they were last done, but they are never due, late or counted. kinds = the machines that have the part (a freezer: the tube machines).
+ON_DEMAND: list[dict] = [
+    dict(key="freezer_vac", name="แวคคั่มฟรีซเซอร์", kinds=("เครื่อง",), event_kind="ทำความสะอาด",
+         note="ทำเมื่อจำเป็น — น้ำแข็งบาง ไม่หลุด หรือฟรีซเซอร์รั่ว"),
+]
+ON_DEMAND_BY_KEY = {j["key"]: j for j in ON_DEMAND}
+# Jobs taken out of the plan; their past reports keep their name. The safety-switch test is off for now; the screw grease is part of the screw overhaul.
+RETIRED = {"safety": "ทดสอบสวิตช์ความปลอดภัย (HP / LP / แรงดันน้ำมัน)", "screw_grease": "จาระบีมอเตอร์ / ลูกปืนสกรูและเครื่องบด"}
 JOB_BY_KEY = {j["key"]: j for j in JOBS}
+
+
+def on_demand_for(machine: dict, events: list[dict]) -> list[dict]:
+    """The when-needed jobs this machine has, each with the date it was last done (None = no record)."""
+    out = []
+    for j in ON_DEMAND:
+        if (machine.get("kind") or "เครื่อง") not in j["kinds"]:
+            continue
+        dates = [str(e["event_date"])[:10] for e in events if e.get("job_key") == j["key"] and e.get("event_date")]
+        out.append({"key": j["key"], "name": j["name"], "note": j["note"], "last_date": max(dates) if dates else None})
+    return out
 
 DEFAULT_PROGRAMS = [
     {"code": TUBE, "label": "Tube — เครื่องน้ำแข็งหลอด", "step_months": 3, "sort_order": 1},
@@ -282,7 +298,7 @@ def plan_for_machine(machine: dict, program: dict, events: list[dict], readings:
                                        "none": sum(1 for j in statuses if j["state"] == "none"), "ok": sum(1 for j in statuses if j["state"] == "ok")},
            "next": next((j for j in ordered if j["state"] in ("never", "late", "soon")), None), "rate": rate, "hours_now": now,
            "program": {"code": program["code"], "label": program["label"], "step_months": program["step_months"]},
-           "visit": oil_visit(statuses, jobs, rate["per_day"])}
+           "visit": oil_visit(statuses, jobs, rate["per_day"]), "on_demand": on_demand_for(machine, events)}
     if with_chart:
         out["chart"] = build_chart(statuses, jobs, rate["per_day"], program["step_months"], today)
     return out
@@ -337,7 +353,7 @@ def clean_jobs_done(data: dict, program_jobs: list[dict], *, today: date) -> dic
         raise InvalidMachinery(f"วันที่: ปี {d.year} ดูเหมือนเป็น พ.ศ. แต่ช่องนี้ต้องเป็น ค.ศ. (ปี {d.year - 543})")
     if d > today:
         raise InvalidMachinery("วันที่เป็นวันในอนาคต")
-    known = {j["key"] for j in program_jobs} | set(JOB_BY_KEY)
+    known = {j["key"] for j in program_jobs} | set(JOB_BY_KEY) | set(ON_DEMAND_BY_KEY)
     keys = []
     for k in data.get("job_keys") or []:
         if k not in known:
@@ -400,7 +416,8 @@ def overview(today: Optional[date] = None) -> dict:
         program = programs[program_code_for(m, programs)]
         plan = plan_for_machine(m, program, [e for e in events if e.get("machine_id") == m["id"]], [r for r in readings if r["machine_id"] == m["id"]], today)
         rows.append({**m, "plan": plan})
-    return {"ready": True, "machines": rows, "jobs": [{"key": j["key"], "name": j["name"]} for j in JOBS] + [{"key": k, "name": n, "retired": True} for k, n in RETIRED.items()],
+    return {"ready": True, "machines": rows, "jobs": [{"key": j["key"], "name": j["name"]} for j in JOBS] + [{"key": j["key"], "name": j["name"], "on_demand": True} for j in ON_DEMAND]
+            + [{"key": k, "name": n, "retired": True} for k, n in RETIRED.items()],
             "today": today.isoformat()}
 
 
@@ -514,7 +531,7 @@ def jobs_done(machine_id: str, data: dict, today: Optional[date] = None) -> dict
     ids = []
     many = len(clean["job_keys"]) > 1
     for i, key in enumerate(clean["job_keys"]):
-        job = JOB_BY_KEY[key]
+        job = JOB_BY_KEY.get(key) or ON_DEMAND_BY_KEY[key]
         notes = clean["notes"]
         if many and clean["cost"] and i == 0:
             notes = " · ".join(filter(None, [notes, f"ค่าใช้จ่ายรวมทุกงานที่ทำวันนี้ ({len(clean['job_keys'])} งาน)"]))

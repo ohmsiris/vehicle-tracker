@@ -21,7 +21,7 @@ def overview():
     for m in (M1, SONG):
         p = progs[mp.program_code_for(m, progs)]
         rows.append({**m, "plan": mp.plan_for_machine(m, p, [{"machine_id": m["id"], "job_key": "oil", "event_date": "2026-06-17", "created_at": "x"}], [], TODAY)})
-    return {"ready": True, "machines": rows, "jobs": [{"key": j["key"], "name": j["name"]} for j in mp.JOBS] + [{"key": k, "name": n} for k, n in mp.RETIRED.items()], "today": TODAY.isoformat()}
+    return {"ready": True, "machines": rows, "jobs": [{"key": j["key"], "name": j["name"]} for j in mp.JOBS + mp.ON_DEMAND] + [{"key": k, "name": n} for k, n in mp.RETIRED.items()], "today": TODAY.isoformat()}
 
 
 def test_pm_list_is_one_landscape_page_with_a_dot_per_machine():

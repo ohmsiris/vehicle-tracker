@@ -130,7 +130,7 @@ async function renderMachinePlan(m) {
       el("div", { class: "muted small", text: `${plan.jobs.length} งาน · ตารางแบ่งรอบละ ${plan.program.step_months} เดือน` })),
     el("a", { class: "muted small", href: "#machine-plan", text: "เปลี่ยนโปรแกรม / แก้รอบงาน ได้ที่ แผนซ่อมบำรุงเครื่องจักร" }));
   fill($("mdChart"), machineChart(plan.chart));
-  fill($("mdPlanList"), ...plan.jobs.map((j) => machinePlanRow(j, m)));
+  fill($("mdPlanList"), ...plan.jobs.map((j) => machinePlanRow(j, m)), ...(plan.on_demand || []).map((j) => onDemandRow(j, m)));
   renderMachineMeter(res, m);
 }
 
@@ -169,6 +169,15 @@ function machinePlanRow(j, m) {
     el("button", { class: "btn small", type: "button", text: "ทำแล้ว", onclick: () => openJobsDone(m, [j.key]) }));
 }
 
+// a when-needed job (แวคคั่มฟรีซเซอร์): when it was last done, no due date and no state
+function onDemandRow(j, m) {
+  return el("div", { class: "planrow ok" },
+    el("div", { class: "pl-main" }, el("div", { class: "pl-name" }, el("strong", { text: j.name })), el("div", { class: "muted small", text: j.note })),
+    el("div", { class: "pl-when small" }, el("div", { text: j.last_date ? `ทำล่าสุด ${beDate(j.last_date)}` : "ทำล่าสุด: ไม่มีบันทึก" }), el("div", { class: "muted", text: "ไม่มีกำหนด" })),
+    el("div", { class: "pl-state" }, el("span", { class: "badge", text: "ทำเมื่อจำเป็น" })),
+    el("button", { class: "btn small", type: "button", text: "ทำแล้ว", onclick: () => openJobsDone(m, [j.key]) }));
+}
+
 function renderMachineMeter(res, m) {
   const r = res.plan.rate, h = res.plan.hours_now;
   fill($("mdMeter"),
@@ -191,9 +200,10 @@ function openJobsDone(m, preset = []) {
   const jobs = mpn.plan.plan.chart ? mpn.plan.plan.chart.rows : mpn.plan.plan.jobs;
   const d = mpn.jd = { done_date: todayISO(), job_keys: new Set(preset), performed_by: "", cost: "", hours_at: "", notes: "" };
   $("jdTitle").textContent = `บันทึกบำรุงรักษา (ติ๊ก) — ${m.name}`;
-  const picks = jobs.map((j) => el("label", { class: "pl-pick" },
+  const pick = (j, tag) => el("label", { class: "pl-pick" },
     el("input", { type: "checkbox", checked: d.job_keys.has(j.key), onchange: (e) => { if (e.target.checked) d.job_keys.add(j.key); else d.job_keys.delete(j.key); } }),
-    el("span", { text: j.name })));
+    el("span", {}, j.name, tag ? el("span", { class: "muted small", text: ` (${tag})` }) : null));
+  const picks = [...jobs.map((j) => pick(j)), ...(mpn.plan.plan.on_demand || []).map((j) => pick(j, "ทำเมื่อจำเป็น"))];     // no due date: ticked when done
   fill($("jdBody"),
     el("p", { class: "muted small", text: "ติ๊กงานที่ทำในวันเดียวกัน — ระบบนับรอบใหม่ของแต่ละงานจากวันที่นี้ และบันทึกลง “บันทึกซ่อมบำรุง” ด้วย" }),
     el("div", { class: "pl-picks" }, ...picks),

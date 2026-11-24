@@ -266,3 +266,16 @@ def test_a_machine_mechanic_is_checked():
             mm.clean_mechanic(bad, others=[{"name": "ช่างจรูญ"}])
     edit = mm.clean_mechanic({"phone": "081"}, existing={"id": "a", "name": "ช่างจรูญ"}, others=[])
     assert edit == {"phone": "081"}                                         # an edit changes only what it was given
+
+
+def test_freezer_vacuum_is_a_when_needed_job_on_tube_machines_only():
+    ev = [{"job_key": "freezer_vac", "event_date": "2026-03-02"}, {"job_key": "freezer_vac", "event_date": "2026-09-10"}]
+    tube = mp.on_demand_for({"kind": "เครื่อง"}, ev)
+    assert tube == [{"key": "freezer_vac", "name": "แวคคั่มฟรีซเซอร์", "note": mp.ON_DEMAND[0]["note"], "last_date": "2026-09-10"}]
+    assert mp.on_demand_for({"kind": "บ่อซอง"}, ev) == []
+    assert mp.on_demand_for({"kind": "เครื่อง"}, [])[0]["last_date"] is None
+
+
+def test_a_when_needed_job_can_be_ticked():
+    c = mp.clean_jobs_done({"done_date": "2026-11-20", "job_keys": ["freezer_vac"]}, [], today=date(2026, 11, 24))
+    assert c["job_keys"] == ["freezer_vac"]
