@@ -28,6 +28,7 @@ def test_the_dealership_km_for_small_and_big():
     assert (small["fuel_filter"], big["fuel_filter"]) == (40_000, 20_000)
     assert (small["air_filter"], big["air_filter"]) == (40_000, 80_000)
     assert (small["wheel_grease"], big["wheel_grease"]) == (30_000, 20_000)
+    assert big["wheel_hub_grease"] == 60_000 and "wheel_hub_grease" not in small        # big trucks only (owner, 24 Nov 2026)
     for key in ("gearbox_oil", "diff_oil", "brake_clutch_fluid", "power_steering", "coolant"):
         assert small[key] == 40_000 and big[key] == 40_000
     assert small["valve_adjust"] == 100_000 and big["valve_adjust"] == 80_000      # small: only the Isuzu 2.5 gets it (ONLY_FOR)
@@ -830,3 +831,23 @@ def test_in_queue_lists_waiting_trucks_once(monkeypatch):
     monkeypatch.setattr(supabase, "select_all", fake)
     assert sp._in_queue() == {"v1": {"problem": "ถึงรอบบำรุง: น้ำมันเครื่อง", "since": "2026-11-24"}}
     assert seen == {"table": "repair_requests", "status": "eq.open"}
+
+
+@pytest.mark.parametrize("line,big,small", [
+    ("เปลี่ยนจารบีล้อ", "wheel_hub_grease", "wheel_grease"),
+    ("จาระบีลูกปืนล้อ", "wheel_hub_grease", "wheel_grease"),
+    ("ล้างจารบีล้อหน้า-หลัง", "wheel_hub_grease", "wheel_grease"),
+    ("อัดจารบีล้อ", "wheel_grease", "wheel_grease"),           # pumped in at the nipples: the greasing of every point
+    ("อัดจารบีทุกจุด", "wheel_grease", "wheel_grease"),
+    ("ค่าอัดจาระบี", "wheel_grease", "wheel_grease"),
+])
+def test_a_big_trucks_wheel_grease_change_is_its_own_item(line, big, small):
+    assert sp.classify_line(line, sp.BIG) == big
+    assert sp.classify_line(line, sp.SMALL) == small
+
+
+def test_wheel_hub_grease_comes_every_third_oil_change_on_big_trucks_only():
+    b6 = {i["key"]: i for i in sp.effective_plan(sp.merge_groups(None)["B6"])}
+    assert b6["wheel_hub_grease"]["interval_km"] == 60_000 and b6["wheel_hub_grease"]["interval_months"] == 18
+    assert b6["wheel_hub_grease"]["label"] == "เปลี่ยนจารบีล้อ" and "wheel_grease" in b6
+    assert "wheel_hub_grease" not in {i["key"] for i in sp.effective_plan(sp.merge_groups(None)["S2"])}

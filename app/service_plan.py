@@ -92,6 +92,7 @@ ITEMS = {
     "brake_clutch_fluid": ("น้ำมันเบรก / คลัตช์", "ช่วงล่าง / ส่งกำลัง"),
     "power_steering": ("น้ำมันพาวเวอร์", "ช่วงล่าง / ส่งกำลัง"),
     "wheel_grease": ("อัดจารบีทุกจุด", "ช่วงล่าง / ส่งกำลัง"),
+    "wheel_hub_grease": ("เปลี่ยนจารบีล้อ", "ช่วงล่าง / ส่งกำลัง"),       # big trucks: the hubs opened and the bearings' grease changed (owner, 24 Nov 2026)
     "chassis_check": ("เช็คช่วงล่าง", "ช่วงล่าง / ส่งกำลัง"),
 }
 
@@ -136,6 +137,7 @@ DEFAULT_KM = {
         "brake_clutch_fluid": 40_000,
         "power_steering": 40_000,
         "wheel_grease": 20_000,            # with every oil change
+        "wheel_hub_grease": 60_000,        # every third oil change (owner, 24 Nov 2026) -- on top of the greasing of every point
         "engine_flush": 60_000,            # about once a year in B4
         "chassis_check": 20_000,           # at every oil change
     },
@@ -287,6 +289,18 @@ _COOLANT_CHANGE = re.compile(r"^\s*(?:ค่า)?\s*(?:เปลี่ยน\s*�
 _SMALL_ONLY = [("wheel_grease", re.compile(r"(?:ซีล|ลูกปืน)\s*(?:ลูกปืน\s*)?ล้อ"))]
 _CHECK_ONLY = re.compile(r"^\s*(?:ตรวจ|เช็ค|เช็ก)")
 _REAL_WORK = re.compile(r"เปลี่ยน|ซีล|จา(?:ร|ระ)บี")
+# A big truck's WHEEL grease ("เปลี่ยนจารบีล้อ", "จาระบีลูกปืนล้อ", "ล้างจารบีล้อ") is its own item, every 60,000; "อัดจารบี(ล้อ)" -- pumped in at
+# the nipples -- stays the greasing of every point. A small truck (or no truck) keeps reading both as its one wheel-grease item.
+_HUB_GREASE = re.compile(r"จา(?:ร|ระ)บี\s*(?:ลูกปืน)?\s*ล้อ")
+_INJECT = re.compile(r"^\s*(?:ค่า)?\s*อัด")
+
+
+def _big_wheel(key: str, text: str, rule_set: Optional[str]) -> str:
+    if key != "wheel_grease" or _INJECT.match(text):
+        return key
+    if (rule_set == BIG and _HUB_GREASE.search(text)) or (rule_set != SMALL and text == ITEMS["wheel_hub_grease"][0]):   # the item's own name (a job recorded here)
+        return "wheel_hub_grease"
+    return key
 
 
 def classify_line(description: Optional[str], rule_set: Optional[str] = None) -> Optional[str]:
@@ -299,7 +313,7 @@ def classify_line(description: Optional[str], rule_set: Optional[str] = None) ->
         return None
     for key, pattern in _COMPILED:
         if pattern.match(text):
-            return key
+            return _big_wheel(key, text, rule_set)
     for key, pattern in _ANYWHERE:
         if pattern.search(text):
             return key

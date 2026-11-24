@@ -709,6 +709,7 @@ const PL_SHOP = [               // [tick id, the plan item it follows, the words
   ["injector_washers", "injector_washers", "เปลี่ยนแหวนรองหัวฉีด", "job"],
   ["valve_adjust", "valve_adjust", "ปรับตั้งวาล์ว", "job"],
   ["intake_manifold", "intake_manifold", "ล้างท่อร่วมไอดี", "job"],
+  ["wheel_hub_grease", "wheel_hub_grease", "เปลี่ยนจารบีล้อ", "job"],
   ["wheel_grease", "wheel_grease", null, "check"],
   ["chassis_check", "chassis_check", "เช็คช่วงล่าง", "check"],
   ["engine_flush", "engine_flush", "เช็คฟลัชชิ่งน้ำมันเครื่อง", "ask"],
