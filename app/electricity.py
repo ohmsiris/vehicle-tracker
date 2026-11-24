@@ -68,7 +68,15 @@ def read_upload(name: str, data: bytes, branch: str, file_id: str) -> Optional[d
         bill = pea_bill.parse_pdf(data)
     except pea_bill.NotPeaBill:
         return None
-    return save_bill(bill, branch, file_id)
+    return save_bill(bill, meter_branch(bill, branch), file_id)
+
+
+def meter_branch(bill: dict, uploaded_on: str) -> str:
+    """A meter belongs to one branch: its earlier bills say which, whatever row the PDF was uploaded on (24 Nov 2026: Kaeng Khoi's meter 150 was
+    re-uploaded on the Saraburi row and its 2.2M booked to Saraburi). A meter seen for the first time takes the row's branch."""
+    known = supabase.select("elec_bills", {"select": "branch", "ca_no": f"eq.{bill.get('ca_no')}", "invoice_no": f"neq.{bill['invoice_no']}",
+                                           "order": "bill_period.desc", "limit": "1"}) if bill.get("ca_no") else []
+    return known[0]["branch"] if known and known[0].get("branch") else uploaded_on
 
 
 def month_view(b: dict) -> dict:

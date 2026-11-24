@@ -154,3 +154,16 @@ def test_estimated_month():
     assert b["estimated"] is True
     assert (b["kwh_peak"], b["kwh_offpeak"], b["kwh_holiday"], b["kwh_total"]) == (233730.0, 229500.0, 236490.0, 699720.0)
     assert (b["demand_peak_kw"], b["kvar_max"], b["total"]) == (1056.0, 864.0, 2621193.24)
+
+
+def test_a_meter_keeps_the_branch_of_its_earlier_bills(monkeypatch):
+    from app import electricity, supabase
+    seen = {}
+
+    def fake(table, params):
+        seen.update(params)
+        return [{"branch": "แก่งคอย"}] if params["ca_no"] == "eq.020000150" else []
+    monkeypatch.setattr(supabase, "select", fake)
+    assert electricity.meter_branch({"ca_no": "020000150", "invoice_no": "318011438490"}, "สระบุรี") == "แก่งคอย"     # uploaded on the wrong row
+    assert seen["invoice_no"] == "neq.318011438490"                                                                       # not its own earlier copy
+    assert electricity.meter_branch({"ca_no": "020000999", "invoice_no": "1"}, "สระบุรี") == "สระบุรี"                  # a new meter: the row's branch
