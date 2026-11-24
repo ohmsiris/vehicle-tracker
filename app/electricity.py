@@ -49,6 +49,12 @@ def save_bill(bill: dict, branch: str, file_id: Optional[str] = None) -> dict:
     return {"invoice_no": bill["invoice_no"], "meter": bill.get("address"), "period": bill["bill_period"], "total": bill["total"]}
 
 
+def delete_bill(invoice_no: str) -> None:
+    """Take one stored bill back out (the drop box's unbook): its elec_bills row and its pea:<invoice> entry."""
+    supabase.delete("elec_bills", {"invoice_no": f"eq.{invoice_no}"})
+    supabase.delete("acc_entries", {"source_id": f"eq.pea:{invoice_no}"})
+
+
 def read_upload(name: str, data: bytes, branch: str, file_id: str) -> Optional[dict]:
     """Called for each file uploaded on the electricity row: a PEA PDF is read and saved; a PEA AMR report (.xls, 15-minute kWh) is saved
     to the meter's readings (the branch comes from the meter's bills when there are any); anything else is just kept."""
