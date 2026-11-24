@@ -258,3 +258,36 @@ def test_an_employee_on_a_truck_cannot_be_deleted_but_a_mistake_takes_its_driver
 def test_the_driver_positions():
     assert all(em.is_driver_position(p) for p in ("พนักงานขับรถ", "พนักงานขับรถสาย", "พนักงานขับรถหน้าโรง"))
     assert not any(em.is_driver_position(p) for p in ("ผลิต", "", None, "ช่าง"))
+
+
+# ---- เปลี่ยนตำแหน่ง: the old position stays on record
+def test_a_role_change_keeps_the_old_position_and_branch():
+    e = emp(E1, start_date="2025-01-01")
+    c = em.clean_role_change({"kind": "move", "position": " พนักงานขับรถหน้าโรง ", "change_date": "2026-10-20", "reason": " ปัญหาสุขภาพ "}, existing=e, today=TODAY)
+    assert c == {"employee_id": E1, "change_date": "2026-10-20", "kind": "move", "from_position": "พนักงานขับรถสาย", "to_position": "พนักงานขับรถหน้าโรง",
+                 "from_branch": "สระบุรี", "to_branch": "สระบุรี", "reason": "ปัญหาสุขภาพ"}
+    assert em.clean_role_change({"kind": "promote", "position": "หัวหน้างาน"}, existing=e, today=TODAY)["change_date"] == "2026-10-26"     # default today
+
+
+@pytest.mark.parametrize("data,frag", [
+    ({"kind": "x", "position": "ช่าง"}, "เลื่อนตำแหน่ง"),
+    ({"kind": "promote", "position": ""}, "ตำแหน่งใหม่"),
+    ({"kind": "promote", "position": "พนักงานขับรถสาย"}, "เหมือนเดิม"),
+    ({"kind": "move", "position": "ช่าง", "branch": "ที่อื่น"}, "สาขา"),
+    ({"kind": "move", "position": "ช่าง", "change_date": "2024-01-01"}, "วันเริ่มงาน"),
+])
+def test_a_role_change_is_refused_when_it_makes_no_sense(data, frag):
+    with pytest.raises(em.InvalidEmployee, match=frag):
+        em.clean_role_change(data, existing=emp(E1, start_date="2025-01-01"), today=TODAY)
+    with pytest.raises(em.InvalidEmployee, match="ลาออก"):
+        em.clean_role_change({"kind": "move", "position": "ช่าง"}, existing=emp(E1, status="resigned"), today=TODAY)
+
+
+def test_changing_role_writes_the_history_then_the_employee(fake, monkeypatch):
+    d = fake(employees=[emp(E1)])
+    d.t["employee_role_changes"] = []
+    monkeypatch.setattr(em.supabase, "select_all", lambda table, params: [dict(r) for r in d.t[table] if r.get("employee_id") == params["employee_id"][3:]])
+    out = em.change_role(E1, {"kind": "move", "position": "พนักงานขับรถหน้าโรง", "reason": "ปัญหาสุขภาพ"})
+    assert d.t["employees"][0]["position"] == "พนักงานขับรถหน้าโรง"
+    assert [(r["from_position"], r["to_position"]) for r in d.t["employee_role_changes"]] == [("พนักงานขับรถสาย", "พนักงานขับรถหน้าโรง")]
+    assert out["position"] == "พนักงานขับรถหน้าโรง" and out["role_changes"][0]["kind_text"] == "ย้ายงาน"

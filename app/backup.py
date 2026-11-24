@@ -82,6 +82,7 @@ TABLES: dict[str, str] = {
     "stock_item_aliases": "id.asc",
     "stock_moves": "id.asc",
     "employees": "id.asc",
+    "employee_role_changes": "id.asc",
     "employee_loans": "id.asc",
     "employee_loan_entries": "id.asc",
     "employee_documents": "id.asc",

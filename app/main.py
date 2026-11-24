@@ -719,6 +719,20 @@ def api_edit_employee(employee_id: str, body: dict = Body(...), x_app_token: str
     return _hr_call(x_hr_pin, employees.edit_employee, employee_id, body)
 
 
+@app.post("/api/employees/{employee_id}/role")
+def api_change_role(employee_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""),
+                    x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, employees.change_role, employee_id, body)
+
+
+@app.delete("/api/employees/{employee_id}/role/{change_id}")
+def api_delete_role_change(employee_id: str, change_id: int, x_app_token: str = Header(default=""), token: str = Query(default=""),
+                           x_hr_pin: str = Header(default="")) -> dict:
+    _check_token(x_app_token, token)
+    return _hr_call(x_hr_pin, employees.delete_role_change, employee_id, change_id)
+
+
 @app.post("/api/employees/{employee_id}/resign")
 def api_resign_employee(employee_id: str, body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default=""),
                         x_hr_pin: str = Header(default="")) -> dict:

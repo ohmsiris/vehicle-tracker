@@ -290,7 +290,61 @@ def _get(employee_id: str) -> dict:
 
 def get_employee(employee_id: str) -> dict:
     _require()
-    return present(_get(employee_id), _drivers())
+    row = _get(employee_id)
+    return {**present(row, _drivers()), "role_changes": role_changes(row["id"])}
+
+
+# ---- เปลี่ยนตำแหน่ง (owner, 24 Nov 2026): promote / demote / move someone so the old position stays on record. One row of employee_role_changes per
+# change (old and new position and branch, the day, why), then the employee's position / branch follow. "แก้ไข" stays for typos and keeps no history.
+ROLE_KINDS = {"promote": "เลื่อนตำแหน่ง", "demote": "ลดตำแหน่ง", "move": "ย้ายงาน"}
+
+
+def clean_role_change(data: dict, *, existing: dict, today: Optional[date] = None) -> dict:
+    today = today or today_th()
+    if existing.get("status") == "resigned":
+        raise InvalidEmployee("คนนี้ลาออกไปแล้ว — กด “กลับเข้าทำงาน” ก่อน")
+    kind = _clean(data.get("kind"), 10)
+    if kind not in ROLE_KINDS:
+        raise InvalidEmployee("เลือก เลื่อนตำแหน่ง / ลดตำแหน่ง / ย้ายงาน")
+    position = _clean(data.get("position"), 60) or None
+    branch = _clean(data.get("branch"), 40) or existing.get("branch")
+    if branch not in BRANCHES:
+        raise InvalidEmployee("เลือกสาขาให้ถูกต้อง")
+    if not position:
+        raise InvalidEmployee("ใส่ตำแหน่งใหม่ด้วย")
+    if position == (existing.get("position") or None) and branch == existing.get("branch"):
+        raise InvalidEmployee("ตำแหน่งและสาขาเหมือนเดิม — ไม่มีอะไรเปลี่ยน")
+    when = _date(data.get("change_date"), "วันที่มีผล", today=today, allow_future_days=60) or today.isoformat()
+    if existing.get("start_date") and when < existing["start_date"]:
+        raise InvalidEmployee("วันที่มีผลต้องไม่ก่อนวันเริ่มงาน")
+    return {"employee_id": existing["id"], "change_date": when, "kind": kind, "from_position": existing.get("position") or None, "to_position": position,
+            "from_branch": existing.get("branch"), "to_branch": branch, "reason": _clean(data.get("reason"), 300) or None}
+
+
+def role_changes(employee_id: str) -> list[dict]:
+    try:
+        rows = supabase.select_all("employee_role_changes", {"select": "*", "employee_id": f"eq.{employee_id}", "order": "change_date.desc,id.desc"})
+    except supabase.SupabaseError:
+        return []                                               # schema_v90 not run yet: the page still opens
+    return [{**r, "kind_text": ROLE_KINDS.get(r.get("kind"), r.get("kind") or "")} for r in rows]
+
+
+def change_role(employee_id: str, data: dict) -> dict:
+    _require()
+    existing = _get(employee_id)
+    change = clean_role_change(data, existing=existing)
+    supabase.insert("employee_role_changes", [change])
+    supabase.update("employees", {"id": f"eq.{existing['id']}"}, {"position": change["to_position"], "branch": change["to_branch"]})
+    sync_driver(_get(existing["id"]))
+    return get_employee(existing["id"])
+
+
+def delete_role_change(employee_id: str, change_id: int) -> dict:
+    """Takes a change off the history (recorded by mistake). The person's position is NOT put back -- fix it with แก้ไข if needed."""
+    _require()
+    existing = _get(employee_id)
+    supabase.delete("employee_role_changes", {"id": f"eq.{int(change_id)}", "employee_id": f"eq.{existing['id']}"})
+    return get_employee(existing["id"])
 
 
 # ---- the driver record: ONE place to edit. A พนักงานขับรถ is also a row of `drivers` (who drives which truck, who to call); that row is made and

@@ -1488,6 +1488,32 @@
   </div>
 </dialog>
 
+<!-- เปลี่ยนตำแหน่ง: promote / demote / move, the old position kept in the history (employee_role_changes) -->
+<dialog id="empRoleDialog">
+  <h3 id="emoTitle">เปลี่ยนตำแหน่ง</h3>
+  <p class="muted small" id="emoNow"></p>
+  <div class="bu-modes" role="radiogroup" aria-label="ประเภท">
+    <label><input type="radio" name="emoKind" value="promote" checked> เลื่อนตำแหน่ง</label>
+    <label><input type="radio" name="emoKind" value="demote"> ลดตำแหน่ง</label>
+    <label><input type="radio" name="emoKind" value="move"> ย้ายงาน</label>
+  </div>
+  <label for="emoPosition">ตำแหน่งใหม่</label>
+  <input id="emoPosition" type="text" maxlength="60" list="emoPositions" autocomplete="off" placeholder="พิมพ์ หรือเลือกจากรายการ">
+  <datalist id="emoPositions"></datalist>
+  <label for="emoBranch">สาขา</label>
+  <select id="emoBranch"></select>
+  <label for="emoDate">วันที่มีผล</label>
+  <input id="emoDate" type="date">
+  <div id="emoDateCap" class="datecap"></div>
+  <label for="emoReason">เหตุผล <span class="muted small">(ไม่บังคับ)</span></label>
+  <input id="emoReason" type="text" maxlength="300" autocomplete="off" placeholder="เช่น ปัญหาสุขภาพ / ผลงานดี / ขาดคนที่หน้าโรง">
+  <p class="error" id="emoError" hidden></p>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="emoCancel">ยกเลิก</button>
+    <button type="button" class="btn primary" id="emoSave">บันทึก</button>
+  </div>
+</dialog>
+
 <!-- One request's story: reported -> sent -> back -> bill -->
 <dialog id="reqDialog">
   <h3 id="reqDlgTitle"></h3>

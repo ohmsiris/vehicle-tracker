@@ -2420,3 +2420,9 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .dd-ph.unsent { border-style: dashed; }
 .dd-in.dd-sug { background: var(--accent-soft); }
 .dd-in.dd-auto { background: var(--surface-2); color: var(--text); font-weight: 600; border-style: dashed; cursor: default; }
+
+/* พนักงาน › ประวัติตำแหน่ง */
+.role-hist { display: flex; flex-direction: column; }
+.role-row { display: grid; grid-template-columns: 110px 1fr auto; gap: 4px 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); }
+.role-row:first-child { border-top: 0; }
+@media (max-width: 560px) { .role-row { grid-template-columns: 1fr auto; } .role-when { grid-column: 1 / -1; } }

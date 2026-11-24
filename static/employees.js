@@ -226,7 +226,8 @@ function renderEmployee() {
     el("div", { class: "tk-badges" }, off ? el("span", { class: "badge", text: "ลาออกแล้ว" }) : el("span", { class: "badge ok", text: "ทำงานอยู่" }),
       e.position ? el("span", { class: "badge shop", text: e.position }) : null));
   const btn = (text, onclick, cls = "") => el("button", { class: `btn${cls ? ` ${cls}` : ""}`, type: "button", text, onclick });
-  fill($("empActions"), off ? btn("กลับเข้าทำงาน", reinstateEmployee) : btn("ลาออก", openResignDialog), btn("ลบ (เพิ่มผิด)", deleteEmployee, "danger"), btn("แก้ไข", () => openEmpDialog(e), "primary"));
+  fill($("empActions"), off ? btn("กลับเข้าทำงาน", reinstateEmployee) : btn("ลาออก", openResignDialog), btn("ลบ (เพิ่มผิด)", deleteEmployee, "danger"),
+    off ? null : btn("เปลี่ยนตำแหน่ง", openRoleDialog), btn("แก้ไข", () => openEmpDialog(e), "primary"));
   const card = (title, ...rows) => el("section", { class: "card tkcard" }, el("h3", { text: title }), ...rows.filter(Boolean));
   const soon = (title, text) => el("section", { class: "card tkcard hsoon" }, el("div", { class: "hsoon-tag", text: "เร็วๆ นี้" }), el("h3", { text: title }), el("p", { class: "muted small", text }));
   fill($("empBody"),
@@ -236,6 +237,7 @@ function renderEmployee() {
     card("การทำงาน", kvAll("สถานะ", off ? "ลาออกแล้ว" : "ทำงานอยู่"), kvAll("วันเริ่มงาน", e.start_date ? beDate(e.start_date) : ""),
       kvAll("อายุงาน", tenure(e.start_date, e.end_date) + (off ? "" : e.start_date ? " (ถึงวันนี้)" : "")),
       off ? kvAll("วันที่ลาออก", e.end_date ? beDate(e.end_date) : "") : null, off ? kvAll("เหตุผล", e.end_reason) : null, kvAll("หมายเหตุ", e.notes)),
+    roleHistoryCard(e),
     el("section", { class: "card tkcard" }, el("h3", { text: "ค่าจ้าง / ทดลองงาน" }), el("div", { id: "empRatesBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     el("section", { class: "card tkcard" }, el("h3", { text: "เงินกู้ / หักเงินเดือน" }), el("div", { id: "empLoansBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     el("section", { class: "card tkcard" }, el("h3", { text: "ใบเตือน / บันทึกข้อความ" }), el("div", { id: "empDocsBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
@@ -384,6 +386,66 @@ async function saveEmployee() {
   }
 }
 
+// ------------------------------------------------------------------ เปลี่ยนตำแหน่ง: promote / demote / move, the old position kept (owner, 24 Nov 2026)
+function roleHistoryCard(e) {
+  const rows = e.role_changes || [];
+  return el("section", { class: "card tkcard" }, el("h3", { text: "ประวัติตำแหน่ง" }),
+    rows.length ? el("div", { class: "role-hist" }, ...rows.map((r) => el("div", { class: "role-row" },
+      el("div", { class: "role-when small muted", text: beDate(r.change_date) }),
+      el("div", { class: "role-what" },
+        el("span", { class: `badge ${r.kind === "promote" ? "ok" : r.kind === "demote" ? "warn" : ""}`.trim(), text: r.kind_text }),
+        el("span", { text: ` ${r.from_position || "–"} → ${r.to_position || "–"}` }),
+        r.from_branch !== r.to_branch ? el("span", { class: "muted small", text: ` · สาขา ${r.from_branch || "–"} → ${r.to_branch || "–"}` }) : null,
+        r.reason ? el("div", { class: "muted small", text: r.reason }) : null),
+      el("button", { class: "linkbtn small", type: "button", text: "ลบ", title: "ลบรายการนี้ (บันทึกผิด) — ตำแหน่งปัจจุบันไม่เปลี่ยน", onclick: () => deleteRoleChange(r) }))))
+      : el("p", { class: "muted small", text: e.start_date ? `เริ่มงาน ${beDate(e.start_date)} ในตำแหน่ง${e.position ? ` ${e.position}` : "ปัจจุบัน"} — ยังไม่เคยเปลี่ยนตำแหน่ง (กด “เปลี่ยนตำแหน่ง” เพื่อบันทึก)` : "ยังไม่เคยเปลี่ยนตำแหน่ง — กด “เปลี่ยนตำแหน่ง” เพื่อบันทึก ตำแหน่งเดิมจะถูกเก็บไว้ที่นี่" }));
+}
+
+function openRoleDialog() {
+  const e = emp.current;
+  $("emoTitle").textContent = `เปลี่ยนตำแหน่ง — ${empLabel(e)}`;
+  $("emoNow").textContent = `ตอนนี้: ${e.position || "ยังไม่ระบุตำแหน่ง"} · สาขา${e.branch} — ตำแหน่งเดิมจะถูกเก็บไว้ใน “ประวัติตำแหน่ง”`;
+  document.querySelector('input[name="emoKind"][value="promote"]').checked = true;
+  const positions = [...new Set([...(emp.positions || []), ...(emp.all || []).map((x) => x.position).filter(Boolean)])];
+  fill($("emoPositions"), ...positions.map((p) => el("option", { value: p })));
+  $("emoPosition").value = "";
+  fill($("emoBranch"), ...(emp.branches || [e.branch]).map((b) => el("option", { value: b, text: b })));
+  $("emoBranch").value = e.branch;
+  $("emoDate").value = todayISO();
+  $("emoDateCap").textContent = dateCaption($("emoDate").value);
+  $("emoReason").value = "";
+  showErr("emoError", "");
+  $("empRoleDialog").showModal();
+  $("emoPosition").focus();
+}
+
+async function submitRoleChange() {
+  $("emoSave").disabled = true;
+  try {
+    emp.current = await api(`/api/employees/${emp.current.id}/role`, jsonOpts("POST", {
+      kind: document.querySelector('input[name="emoKind"]:checked').value, position: $("emoPosition").value, branch: $("emoBranch").value,
+      change_date: $("emoDate").value || null, reason: $("emoReason").value }));
+    $("empRoleDialog").close();
+    emp.loaded = false;
+    await empLoad();
+    renderEmployee();
+  } catch (err) {
+    showErr("emoError", err.message);
+  } finally {
+    $("emoSave").disabled = false;
+  }
+}
+
+async function deleteRoleChange(r) {
+  if (!confirm(`ลบ “${r.kind_text} ${r.from_position || "–"} → ${r.to_position || "–"}” (${beDate(r.change_date)}) ออกจากประวัติ?\n\nใช้เมื่อบันทึกผิดเท่านั้น — ตำแหน่งปัจจุบันจะไม่ถูกเปลี่ยนกลับ (แก้ได้ที่ “แก้ไข”)`)) return;
+  try {
+    emp.current = await api(`/api/employees/${emp.current.id}/role/${r.id}`, { method: "DELETE" });
+    renderEmployee();
+  } catch (err) {
+    showErr("empDetailError", err.message);
+  }
+}
+
 // ------------------------------------------------------------------ leaving / back / mistake
 function openResignDialog() {
   $("emrDate").value = todayISO();
@@ -466,6 +528,9 @@ function initEmployees() {
   bindDateField($("rtFrom"), $("rtFromCap"));
   $("emrCancel").addEventListener("click", () => $("empResignDialog").close());
   $("emrSave").addEventListener("click", submitResign);
+  $("emoCancel").addEventListener("click", () => $("empRoleDialog").close());
+  $("emoSave").addEventListener("click", submitRoleChange);
+  bindDateField($("emoDate"), $("emoDateCap"));
   bindDateField($("emrDate"), $("emrDateCap"));
   $("hrPinSave").addEventListener("click", submitHrPin);
   $("hrPin").addEventListener("keydown", (ev) => { if (ev.key === "Enter") submitHrPin(); });
