@@ -1,7 +1,9 @@
 "use strict";
 
 // บัญชี › งบกำไรขาดทุน (#accounts): the company month (26th - 25th, named after the 25th) or one half (26-10 / 11-25), per branch or both.
-//   * the checklist: what should come in this half and whether it has (bills already in the app = automatic ✓)
+//   * the checklist: what should come in this half and whether it has (bills already in the app = automatic ✓). Since 24 Nov 2026 it is
+//     an automatic status board: a row turns done by itself from what is booked (its sources, or a file booked from the drop box,
+//     inbox.js) and names the dropped file(s) it came from; the per-row แนบไฟล์ button gave way to the drop box (old files stay listed)
 //   * the P&L in standard lines (Revenue, Cost of goods sold, Selling & delivery, Administrative) that open level by level:
 //     line -> account -> shop -> each bill (a truck bill opens its page)
 //   * "+ บันทึกรายการ" for a cost that is not in the app yet (electricity, water, a document ...)
@@ -89,18 +91,23 @@ function renderAccounts() {
   const periodKey = `${d.month}-${half || 0}`;
   const feeds = el("div", { class: "card acx-feeds" },
     el("h3", { text: `What's needed this period · สิ่งที่ต้องใส่งวดนี้ (${beDate(d.start)} – ${beDate(d.end)})` }),
+    el("p", { class: "muted small", text: "ขึ้นเครื่องหมายถูกเองเมื่อลงบัญชีแล้ว (จากไฟล์ในกล่องรับไฟล์ด้านบน หรือที่ใส่เอง) · กดชื่อไฟล์เพื่อดูว่าลงอะไรไป" }),
     ...d.feeds.map((f) => {
-      const icon = f.state === "auto" ? "✓" : f.state === "done" ? "✓" : f.state === "none" ? "–" : f.state === "received" ? "📎" : "○";
+      const icon = f.state === "auto" || f.state === "done" ? "✓" : f.state === "none" ? "–" : f.state === "received" ? "•" : "○";
       const myFiles = f.from !== "program" ? (d.files || []).filter((x) => x.feed === f.key && (!half || Number(x.period.slice(-1)) === Number(half))) : [];
+      const drops = f.dropped || [];
+      const waiting = drops.filter((x) => !x.booked).length;
       return el("div", { class: `acx-feed ${f.state}` },
         el("span", { class: "acx-feed-icon", text: icon }),
         el("div", {}, el("strong", { text: f.en }), el("span", { class: "muted small", text: ` · ${f.th} · ${ACX_FROM[f.from]}` }),
           el("div", { class: "small muted", text: f.state === "auto" ? `อยู่ในโปรแกรมแล้ว · ${f.entries} รายการ · ${baht(f.total)} ฿${f.note ? ` · ${f.note}` : ""}`
-            : f.state === "done" ? `ใส่แล้ว${f.entries ? ` · ${f.entries} รายการ · ${baht(f.total)} ฿` : ""}` : f.state === "none" ? "ไม่มีในงวดนี้"
-            : f.state === "received" ? "ได้รับไฟล์แล้ว · ยังไม่ได้ลงตัวเลข" : "ยังไม่ได้ใส่" }),
+            : f.state === "done" ? `ลงบัญชีแล้ว${f.entries ? ` · ${f.entries} รายการ · ${baht(f.total)} ฿` : ""}${waiting ? ` · อีก ${waiting} ไฟล์ยังไม่ได้ลงบัญชี` : ""}`
+            : f.state === "none" ? "ไม่มีในงวดนี้"
+            : f.state === "received" ? (drops.length ? "ได้รับไฟล์แล้ว · ยังไม่ได้ลงบัญชี (กด ลงบัญชี ที่กล่องรับไฟล์ด้านบน)" : "ได้รับไฟล์แล้ว · ยังไม่ได้ลงตัวเลข") : "ยังไม่ได้ใส่ — โยนไฟล์ลงกล่องด้านบน" }),
+          drops.length ? el("div", { class: "acx-files" }, ...drops.map((x) => el("button", { class: `linkbtn small acx-src${x.booked ? "" : " waiting"}`, type: "button",
+            title: x.booked ? "ลงบัญชีจากไฟล์นี้" : "ไฟล์นี้ยังไม่ได้ลงบัญชี", text: `${x.booked ? "จากไฟล์" : "รอลงบัญชี"}: ${x.file_name}`, onclick: () => ibxPreview(x.id) }))) : null,
           myFiles.length ? el("div", { class: "acx-files" }, ...myFiles.map(acxFileChip)) : null),
         f.from !== "program" ? el("div", { class: "acx-feed-actions" },
-          el("button", { class: "btn small", type: "button", text: "📎 แนบไฟล์", onclick: () => acxUpload(f) }),
           el("button", { class: "btn small", type: "button", text: "+ ใส่", onclick: () => acxAddDialog({ feed: f.key, account: f.account }) }),
           el("button", { class: "btn small", type: "button", text: f.state === "none" ? "ยกเลิก" : "ไม่มีงวดนี้",
             onclick: () => acxMark(f.key, periodKey, f.state === "none" ? "" : "none") })) : null);
@@ -126,13 +133,16 @@ function renderAccounts() {
           () => pt.entries.map((e) => acxEntry(e)))))))]).filter(Boolean),
     el("div", { class: `acx-line acx-total ${p.net_profit < 0 ? "neg" : "pos"}` }, el("span", { text: "Net profit · กำไรสุทธิ" }),
       el("span", { class: "acx-pct", text: acxPct(p.net_profit, p.revenue) }), el("strong", { text: acxMoney(p.net_profit) })));
-  const toIn = el("p", { class: "muted small" }, "ยังขาดอะไรอยู่ ดูและแนบไฟล์ได้ที่ ", el("a", { href: "#accounts-in", text: "ลงข้อมูล / แนบไฟล์" }),
+  const toIn = el("p", { class: "muted small" }, "ยังขาดอะไรอยู่ ดูและโยนไฟล์ได้ที่ ", el("a", { href: "#accounts-in", text: "ลงข้อมูล / แนบไฟล์" }),
     ` (${d.feeds.filter((f) => f.state === "missing" || f.state === "received").length} รายการยังไม่ครบ)`);
   const toOut = el("p", { class: "muted small" }, "ดูผลที่ ", el("a", { href: "#accounts", text: "งบกำไรขาดทุน" }));
   const toElec = (d.electricity || []).length ? el("p", { class: "muted small" }, "ค่าไฟแยกมิเตอร์ กราฟ demand / Peak / power factor: ", el("a", { href: "#electricity", text: "หน้าค่าไฟฟ้า" })) : null;
   const toRoutes = el("p", { class: "muted small" }, "กำไรต่อคัน / น้ำมันต่อคัน: ", el("a", { href: "#routes", text: "หน้ารถสาย" }), " · ภาพรวมทั้งปี: เลือก \"ทั้งปี\" ที่ช่องเดือน");
   acx.rev = p.revenue;
-  if (acx.mode === "in") fill($("acxBody"), toOut, feeds, acxDocs(d.docs || []), acxFuel(d.fuel));
+  if (acx.mode === "in") {                                   // the drop box first (inbox.js), then the board it fills
+    fill($("acxBody"), ibxDropCard(), ibxListCard(), toOut, feeds, ibxChecksCard(), acxDocs(d.docs || []), acxFuel(d.fuel));
+    ibxLoad();
+  }
   else fill($("acxBody"), summary, toIn, toElec, toRoutes, tree);
 }
 
@@ -345,26 +355,7 @@ async function acxReview(docId) {
 }
 
 
-// แนบไฟล์: keep the paper behind a checklist row (PDF / photo / Excel) for this period. Monthly rows are filed under their own half.
-function acxUpload(f) {
-  const month = $("acxMonth").value;
-  const half = $("acxHalf").value || String(f.half || 0);
-  const pick = el("input", { type: "file", multiple: true, accept: ".pdf,.jpg,.jpeg,.png,.webp,.heic,.xls,.xlsx,.csv" });
-  pick.onchange = async () => {
-    if (!pick.files.length) return;
-    const fd = new FormData();
-    for (const file of pick.files) fd.append("files", file);
-    fd.append("feed", f.key);
-    fd.append("period", `${month}-${half}`);
-    fd.append("branch", $("acxBranch").value || "all");
-    showErr("acxError", "");
-    try { await api("/api/accounts/files", { method: "POST", body: fd }); }
-    catch (err) { showErr("acxError", `แนบไฟล์ไม่สำเร็จ: ${err.message}`); return; }
-    await loadAccounts();
-  };
-  pick.click();
-}
-
+// Files attached the old way (per checklist row, before the drop box): still listed, still openable and removable.
 function acxFileChip(x) {
   const kb = x.byte_size ? (x.byte_size > 1048576 ? `${(x.byte_size / 1048576).toFixed(1)} MB` : `${Math.round(x.byte_size / 1024)} KB`) : "";
   return el("span", { class: "acx-file" },

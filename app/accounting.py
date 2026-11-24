@@ -47,6 +47,14 @@ FEEDS = [
     {"key": "hq_salary", "from": "hq", "half": 2, "en": "Salaries (HQ)", "th": "เงินเดือน (HQ)", "account": "5400"},
 ]
 FEED_BY_KEY = {f["key"]: f for f in FEEDS}
+# Which acc_entries sources fill each checklist row (owner, 24 Nov 2026: "the checklist becomes an automatic status board"). A row was
+# only ever matched to a source of its own name, so the fuel card booked by acc_cardfuel (source "card_fuel") and HQ salaries booked by
+# acc_payroll (source "payroll") never ticked their rows. A typed cost ("+ ใส่") keeps the row's own key as its source.
+FEED_SOURCES = {"fuel_card": ("fuel_card", "card_fuel"), "hq_salary": ("hq_salary", "payroll")}
+
+
+def feed_sources(key: str) -> tuple:
+    return FEED_SOURCES.get(key, (key,))
 _probe = {"at": 0.0, "ok": False}
 
 
@@ -241,19 +249,27 @@ def pnl_tree(rows: list[dict], accounts: dict) -> dict:
             "net_profit": round(operating - tot["finance"], 2)}
 
 
-def feed_status(half: Optional[int], counts: dict, marks: dict, missing_amount: int = 0, files: Optional[dict] = None) -> list[dict]:
-    """The checklist: for each expected feed, whether this period has it. counts = {feed: (entries, total)}; marks = {feed: status};
-    files = {feed: number of files attached} -- files but no amounts yet = "received" (the paper is in, not yet entered)."""
-    files = files or {}
+def feed_status(half: Optional[int], counts: dict, marks: dict, missing_amount: int = 0, files: Optional[dict] = None,
+                dropped: Optional[dict] = None) -> list[dict]:
+    """The checklist: for each expected feed, whether this period has it. counts = {source: (entries, total)} (summed over the feed's
+    sources, FEED_SOURCES); marks = {feed: status}; files = {feed: number of files attached the old way (แนบไฟล์)}; dropped = {feed:
+    [{id, file_name, status, booked}]} from the drop box (inbox.feed_files). A row turns done by itself from booked data -- entries of
+    its sources, or a dropped file that booked it -- and says which file(s) it came from. Files but nothing booked = "received"."""
+    files, dropped = files or {}, dropped or {}
     out = []
     for f in FEEDS:
         if half and f["half"] and f["half"] != half:
             continue
-        n, total = counts.get(f["key"], (0, 0.0))
+        n, total = 0, 0.0
+        for src in feed_sources(f["key"]):
+            a, b = counts.get(src, (0, 0.0))
+            n, total = n + a, total + b
         mark = marks.get(f["key"])
-        state = ("auto" if f["from"] == "program" else "done" if n or mark == "done" else "none" if mark == "none"
-                 else "received" if files.get(f["key"]) else "missing")
-        out.append({**f, "entries": n, "total": round(total, 2), "state": state, "mark": mark, "files": files.get(f["key"], 0),
+        drops = dropped.get(f["key"], [])
+        booked = [d for d in drops if d.get("booked")]
+        state = ("auto" if f["from"] == "program" else "done" if n or booked or mark == "done" else "none" if mark == "none"
+                 else "received" if files.get(f["key"]) or drops else "missing")
+        out.append({**f, "entries": n, "total": round(total, 2), "state": state, "mark": mark, "files": files.get(f["key"], 0), "dropped": drops,
                     "note": f"บิล {missing_amount} ใบไม่มียอดเงิน — ไม่ได้นับ" if f["key"] == "truck_bill" and missing_amount else None})
     return out
 
@@ -360,6 +376,12 @@ def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
     for fl in files:
         if not half or int(fl["period"][-1]) in (half, 0):
             file_counts[fl["feed"]] = file_counts.get(fl["feed"], 0) + 1
+    dropped: dict = {}
+    try:
+        from app import inbox
+        dropped = inbox.feed_files(month, branch)
+    except supabase.SupabaseError:          # schema_v92 (inbox_files) not applied yet
+        pass
     try:
         from app import acc_docs
         docs = acc_docs.docs_for(start, end, branch)
@@ -367,7 +389,7 @@ def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
     except supabase.SupabaseError:          # schema_v42 not applied yet: the page works without the documents
         pass
     return {"month": month, "half": half, "branch": branch, "start": start.isoformat(), "end": end.isoformat(), "docs": docs, "fuel": fuel, "files": files, "electricity": elec,
-            "pnl": pnl_tree(rows, accounts), "feeds": feed_status(half, counts, marks, _missing_amount(start, end), file_counts),
+            "pnl": pnl_tree(rows, accounts), "feeds": feed_status(half, counts, marks, _missing_amount(start, end), file_counts, dropped),
             "accounts": [{"code": a["code"], "en": a["name_en"], "th": a["name_th"], "kind": a["kind"], "section": a["section"]} for a in accounts.values() if a["active"]],
             "branches": list(BRANCHES)}
 

@@ -30,6 +30,8 @@ PW_TRIES, LOCK_MINUTES, INVITE_DAYS, MIN_PW = 5, 10, 7, 8
 GROUPS = ["หน้าแรก", "บัญชี", "รถสาย", "ผู้จัดการ", "พนักงาน", "รถ", "เครื่องจักร"]
 _BILL = ['/api/events', '/api/categorize', '/api/summarize']
 _TRUCK = ['/api/vehicles', '/api/drivers', '/api/tyres', '/api/plan/']
+_ACC_PNL = ['/api/accounts/report', '/api/accounts/year', '/api/accounts/unit-cost', '/api/accounts/entries', '/api/accounts/docs',
+            '/api/accounts/files', '/api/accounts/feed-mark', '/api/accounts/checks']
 MENUS = {
     "sales_sheets": {"label": "ใบขายรถสาย (มือถือ)", "group": "รถสาย", "pos": 2, "nav": ["navSalesSheets"], "hash": "#sales-sheets", "api": ["/api/sales-routes"]},
     "routes": {"label": "รถสาย · กำไรต่อคัน", "group": "รถสาย", "pos": 1, "nav": ["navRoutes"], "hash": "#routes", "api": ["/api/routes"]},
@@ -45,7 +47,9 @@ MENUS = {
     "electricity": {"label": "ค่าไฟฟ้า", "group": "บัญชี", "pos": 2, "nav": ["navElectricity"], "hash": "#electricity", "api": ["/api/electricity"]},
     "payables": {"label": "เจ้าหนี้ร้านค้า", "group": "บัญชี", "pos": 4, "nav": ["navPayables"], "hash": "#payables", "also": ["#event=", "#purchase-new"],
                  "api": ["/api/payables", "/api/purchases", *_BILL]},
-    "accounts": {"label": "งบกำไรขาดทุน", "group": "บัญชี", "pos": 5, "nav": ["navAccounts"], "hash": "#accounts", "also": ["#event="], "api": ["/api/accounts/", *_BILL]},
+    # งบกำไรขาดทุน alone reads the books but does not feed them: every /api/accounts/ path it had, EXCEPT the drop box (/api/accounts/inbox),
+    # which books and removes whole files -- that is ลงข้อมูล's job (owner, 24 Nov 2026). The checks are read-only, so both menus have them.
+    "accounts": {"label": "งบกำไรขาดทุน", "group": "บัญชี", "pos": 5, "nav": ["navAccounts"], "hash": "#accounts", "also": ["#event="], "api": [*_ACC_PNL, *_BILL]},
     "licences": {"label": "ใบอนุญาต · เอกสาร", "group": "ผู้จัดการ", "pos": 1, "nav": ["navLicences"], "hash": "#licences", "api": ["/api/licences"]},
     "mgr_board": {"label": "บอร์ดของฉัน", "group": "ผู้จัดการ", "pos": 2, "nav": ["navMgr"], "hash": "#mgr", "api": ["/api/mgr/board", "/api/mgr/tickets", "/api/today"]},
     "mgr_calendar": {"label": "ปฏิทิน", "group": "ผู้จัดการ", "pos": 3, "nav": ["navMgrCal"], "hash": "#mgr-calendar",
