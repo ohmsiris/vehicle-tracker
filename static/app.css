@@ -338,8 +338,8 @@ table.fleet .badge { margin-right: 4px; }
 
 .shell { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); align-items: start; }
 .sidebar {
-  position: sticky; top: var(--topbar-h); height: calc(100vh - var(--topbar-h)); overflow-y: auto;
-  background: var(--surface); border-right: 1px solid var(--line); padding: 16px 12px;
+  position: sticky; top: var(--topbar-h); height: calc(100vh - var(--topbar-h)); height: calc(100dvh - var(--topbar-h)); overflow-y: auto;
+  overscroll-behavior: contain; background: var(--surface); border-right: 1px solid var(--line); padding: 16px 12px;
 }
 .scrim { display: none; }
 .side-group { margin-bottom: 10px; }
@@ -368,7 +368,11 @@ i.soon, .mgdue.soon { margin-left: auto; font-style: normal; font-size: 11px; fo
 @media (max-width: 900px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar {
-    position: fixed; top: var(--topbar-h); left: 0; z-index: 20; width: min(290px, 85vw); height: calc(100vh - var(--topbar-h));
+    /* top AND bottom pinned (not a 100vh height): iPhone Safari counts the space behind its bottom bar in 100vh, so the last menus
+       (บิลซื้อของ, เทียบราคา, สต็อก) sat under the bar and could not be scrolled to (owner, 25 Nov 2026). The bottom padding leaves room
+       for the bar / home indicator. */
+    position: fixed; top: var(--topbar-h); bottom: 0; left: 0; z-index: 20; width: min(290px, 85vw); height: auto;
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
     transform: translateX(-100%); transition: transform .2s; box-shadow: var(--shadow-md);
   }
   body.side-open .sidebar { transform: none; }
