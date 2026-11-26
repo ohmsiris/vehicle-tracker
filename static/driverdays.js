@@ -1,8 +1,9 @@
 "use strict";
 
-// ยอดขายรายวัน (คิดเงินเดือน) -- owner, 16 Nov 2026. Driver by driver, half-month by half-month (26–10, 11–25): one row per day, a column per
+// ยอดขายรายวัน (คิดเงินเดือน) -- owner, 16 Nov 2026. Driver by driver, one WHOLE company month per page (26th – 25th; owner, 26 Nov 2026 --
+// it was half-month by half-month): one row per day, a column per
 // product (the totals at the bottom of the paper sales sheet) and the money brought in that day. Tab goes to the next box, Enter (or the
-// arrows) up / down a column, Ctrl+S saves. Server: app/driver_days.py. Hash: #driver-days/<employee id>/<company month>/<half>.
+// arrows) up / down a column, Ctrl+S saves. Server: app/driver_days.py (half = 0 = the whole month). Hash: #driver-days/<employee id>/<company month>.
 
 const dd_ = { ov: null, sheet: null, emp: null, month: null, half: null, dirty: false, saving: false };
 const DD_DOW = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
@@ -13,28 +14,29 @@ const ddMonthTH = (month) => `${ELEC_TH[Number(month.slice(5, 7)) - 1]} ${Number
 
 window.addEventListener("beforeunload", (e) => { if (dd_.dirty) { e.preventDefault(); e.returnValue = ""; } });
 
-function ddHash(emp, month, half) { return `#driver-days/${emp || ""}/${month}/${half}`; }
-function ddGo(emp, month, half) {
+function ddHash(emp, month) { return `#driver-days/${emp || ""}/${month}`; }
+function ddGo(emp, month) {
   if (dd_.dirty && !confirm("ยังไม่ได้บันทึกตัวเลขของหน้านี้ — ออกโดยไม่บันทึก?")) return;
   dd_.dirty = false;
-  goHash(ddHash(emp, month, half));
+  goHash(ddHash(emp, month));
 }
-function ddShift(month, half, step) {               // the half-month before / after
-  let y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7)), h = half + step;
-  if (h === 0) { h = 2; m -= 1; } else if (h === 3) { h = 1; m += 1; }
+function ddShift(month, step) {                     // the company month before / after
+  let y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7)) + step;
   if (m === 0) { m = 12; y -= 1; } else if (m === 13) { m = 1; y += 1; }
-  return [`${y}-${String(m).padStart(2, "0")}`, h];
+  return `${y}-${String(m).padStart(2, "0")}`;
 }
+// a truck number with its branch when it is not Saraburi's (both branches have a #6)
+const ddTruck = (x) => (x.truck ? `#${x.truck}${x.branch && x.branch !== "สระบุรี" ? ` ${x.branch}` : ""}` : "");
 
 async function openDriverDays(sub = "") {
   showView("driverDays");
   showErr("ddError", "");
-  const [emp, month, half] = (sub || "").split("/");
-  if (dd_.dirty && (emp || null) === dd_.emp && month === dd_.month && Number(half) === dd_.half) return;     // same page, keep what is typed
+  const [emp, month] = (sub || "").split("/");             // an old link may carry a half after the month: the whole month is shown
+  if (dd_.dirty && (emp || null) === dd_.emp && month === dd_.month) return;     // same page, keep what is typed
   dd_.dirty = false;
   if (!dd_.ov) fill($("ddBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
   try {
-    dd_.ov = await api(month && half ? `/api/driver-days?month=${encodeURIComponent(month)}&half=${encodeURIComponent(half)}` : "/api/driver-days");
+    dd_.ov = await api(month ? `/api/driver-days?month=${encodeURIComponent(month)}&half=0` : "/api/driver-days?half=0");
   } catch (err) { fill($("ddBody"), null); showErr("ddError", `โหลดไม่สำเร็จ: ${err.message}`); return; }
   dd_.month = dd_.ov.month; dd_.half = dd_.ov.half; dd_.emp = emp || null; dd_.sheet = null;
   if (dd_.emp) {
@@ -46,27 +48,20 @@ async function openDriverDays(sub = "") {
 
 function ddRender() {
   const ov = dd_.ov;
-  const [pm, ph] = ddShift(ov.month, ov.half, -1), [nm, nh] = ddShift(ov.month, ov.half, 1);
-  const halfBtn = (h, text) => el("button", { type: "button", class: `segbtn${ov.half === h ? " active" : ""}`, text, onclick: () => ddGo(dd_.emp, ov.month, h) });
-  const prevEnd = ddShift(ov.month, 1, -1)[0];
   const period = el("div", { class: "dd-period" },
-    el("button", { class: "btn small", type: "button", title: "งวดก่อน", text: "‹", onclick: () => ddGo(dd_.emp, pm, ph) }),
-    el("b", { text: `งวด ${ddDMY(ov.start)} – ${ddDMY(ov.end)}` }),
-    el("button", { class: "btn small", type: "button", title: "งวดถัดไป", text: "›", onclick: () => ddGo(dd_.emp, nm, nh) }),
-    el("div", { class: "seg dd-seg" }, halfBtn(1, `26 ${ELEC_TH[Number(prevEnd.slice(5, 7)) - 1]} – 10 ${ELEC_TH[Number(ov.month.slice(5, 7)) - 1]}`),
-      halfBtn(2, `11 – 25 ${ELEC_TH[Number(ov.month.slice(5, 7)) - 1]}`)),
-    el("span", { class: "muted small", text: `รอบเดือน ${ddMonthTH(ov.month)}` }),
+    el("button", { class: "btn small", type: "button", title: "เดือนก่อน", text: "‹", onclick: () => ddGo(dd_.emp, ddShift(ov.month, -1)) }),
+    el("b", { text: `เดือน ${ddMonthTH(ov.month)} · ${ddDMY(ov.start)} – ${ddDMY(ov.end)}` }),
+    el("button", { class: "btn small", type: "button", title: "เดือนถัดไป", text: "›", onclick: () => ddGo(dd_.emp, ddShift(ov.month, 1)) }),
     el("span", { class: "dd-export" },
-      el("button", { class: "btn small", type: "button", text: "ส่งออก Excel งวดนี้", onclick: (e) => ddExport(ov.half, e.target) }),
-      el("button", { class: "btn small", type: "button", text: "ทั้งเดือน", onclick: (e) => ddExport(0, e.target) })));
+      el("button", { class: "btn small", type: "button", text: "ส่งออก Excel ทั้งเดือน", onclick: (e) => ddExport(0, e.target) })));
   const chips = el("div", { class: "dd-chips" }, ...ov.drivers.map((d) => el("button", {
-    type: "button", class: `dd-chip${d.id === dd_.emp ? " on" : ""}`, onclick: () => ddGo(d.id, ov.month, ov.half) },
-    d.truck ? el("span", { class: "truckno", text: `#${d.truck}` }) : null,
+    type: "button", class: `dd-chip${d.id === dd_.emp ? " on" : ""}`, onclick: () => ddGo(d.id, ov.month) },
+    d.truck ? el("span", { class: "truckno", text: ddTruck(d) }) : null,
     el("span", { text: d.nickname || d.name.split(" ")[0] }),
     el("span", { class: `dd-count${d.filled ? (d.filled >= ov.days ? " full" : " part") : ""}`, text: `${d.filled}/${ov.days}` }))));
-  if (!ov.drivers.length) chips.append(el("p", { class: "muted small", text: "ไม่พบพนักงานตำแหน่ง “พนักงานขับรถสาย” ที่ยังทำงานอยู่ (สาขาสระบุรี)" }));
+  if (!ov.drivers.length) chips.append(el("p", { class: "muted small", text: "ไม่พบพนักงานตำแหน่ง “พนักงานขับรถสาย” ที่ยังทำงานอยู่" }));
   fill($("ddBody"), el("section", { class: "card dd-top" }, period, chips),
-    dd_.sheet ? ddSheet() : el("p", { class: "muted dd-pick", text: "เลือกคนขับด้านบนเพื่อกรอกยอดของงวดนี้" }), ddSummary());
+    dd_.sheet ? ddSheet() : el("p", { class: "muted dd-pick", text: "เลือกคนขับด้านบนเพื่อกรอกยอดของเดือนนี้" }), ddSummary());
   if (dd_.sheet) { const first = document.querySelector("#ddBody .dd-in"); if (first) first.focus(); }
 }
 
@@ -199,7 +194,7 @@ function ddStatus() {
   if (dd_.dirty) { st.className = "small dd-unsaved"; st.textContent = "ยังไม่ได้บันทึก"; return; }
   const at = dd_.sheet.saved_at;
   st.className = "small muted";
-  st.textContent = at ? `บันทึกล่าสุด ${ddDMY(at.slice(0, 10))} ${new Date(at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}` : "ยังไม่มีข้อมูลของงวดนี้";
+  st.textContent = at ? `บันทึกล่าสุด ${ddDMY(at.slice(0, 10))} ${new Date(at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}` : "ยังไม่มีข้อมูลของเดือนนี้";
 }
 
 function ddKey(e) {
@@ -238,14 +233,14 @@ async function ddSave() {
 }
 
 
-// สรุปงวด: every driver -- the days they drove, days off (the spare's days included), the spare's days, what they sold, the money
+// สรุปเดือน: every driver -- the days they drove, days off (the spare's days included), the spare's days, what they sold, the money
 function ddSummary() {
   const ov = dd_.ov, list = ov.summary || [];
   if (!list.length) return null;
   const prods = ov.products;
   const sum = (f) => list.reduce((a, x) => a + f(x), 0);
-  const rows = list.map((x) => el("tr", { class: x.id === dd_.emp ? "on" : "", onclick: () => { if (x.kind !== "หน้าโรง") ddGo(x.id, ov.month, ov.half); } },
-    el("td", {}, x.truck ? el("span", { class: "truckno", text: `#${x.truck}` }) : el("span", { class: "muted small", text: x.kind === "หน้าโรง" ? "หน้าโรง" : "" }), ` ${x.nickname || x.name.split(" ")[0]}`),
+  const rows = list.map((x) => el("tr", { class: x.id === dd_.emp ? "on" : "", onclick: () => { if (x.kind !== "หน้าโรง") ddGo(x.id, ov.month); } },
+    el("td", {}, x.truck ? el("span", { class: "truckno", text: ddTruck(x) }) : el("span", { class: "muted small", text: x.kind === "หน้าโรง" ? "หน้าโรง" : "" }), ` ${x.nickname || x.name.split(" ")[0]}`),
     el("td", { class: "r", text: String(x.days_worked) }),
     el("td", { class: "r", title: x.off_dates.map(ddDMY).join(", "), text: String(x.days_off) }),
     el("td", { class: "r", title: x.spare_dates.map(ddDMY).join(", "), text: x.spare_days ? String(x.spare_days) : "–" }),
@@ -253,7 +248,7 @@ function ddSummary() {
     ...prods.map((p) => el("td", { class: "r", text: x.qty[p.key] ? elN(x.qty[p.key]) : "–" })),
     el("td", { class: "r" }, el("b", { text: elN(x.money, x.money % 1 ? 2 : 0) }))));
   return el("section", { class: "card dd-sum" },
-    el("h3", { text: `สรุปงวด ${ddDMY(ov.start)} – ${ddDMY(ov.end)}` }),
+    el("h3", { text: `สรุปเดือน ${ddMonthTH(ov.month)} · ${ddDMY(ov.start)} – ${ddDMY(ov.end)}` }),
     el("div", { class: "lc-wrap" }, el("table", { class: "lc-table dd-sumtable" },
       el("thead", {}, el("tr", {}, ...["คนขับ", "ขับ (วัน)", "หยุด", "สำรองขับรถคันนี้", "ไปเป็นสำรอง", ...prods.map((p) => p.label), "เงินที่ได้"].map((h, i) => el("th", { class: i ? "r" : "", text: h })))),
       el("tbody", {}, ...rows),

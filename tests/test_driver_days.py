@@ -136,3 +136,44 @@ def test_phone_sheet_figures_are_offered_day_by_day():
     ], days)
     assert got == {"2026-11-11": {"qty": {"zong": 3, "lod": 73, "mo": 11}, "money": 4877.0, "sent": True},
                    "2026-11-13": {"qty": {"lod": 40}, "money": 3970.0, "sent": False}}
+
+
+# ---- one whole month per page (owner, 26 Nov 2026), and an old half-month page can never wipe the other half
+def test_half_zero_is_the_whole_company_month():
+    assert dd._check_period("2026-11", 0) == ("2026-11", 0) and dd._check_period("2026-11", None) == ("2026-11", 0)
+    days = dd.days_of("2026-11", 0)
+    assert (days[0], days[-1], len(days)) == (date(2026, 10, 26), date(2026, 11, 25), 31)
+    rows = dd.clean_rows([{"day": "2026-10-27", "money": 100}, {"day": "2026-11-20", "money": 200}], "2026-11", 0)
+    assert [r["day"] for r in rows] == ["2026-10-27", "2026-11-20"]
+    with pytest.raises(dd.DriverDaysError):
+        dd._check_period("2026-11", 3)
+
+
+def test_saving_replaces_only_the_period_the_page_showed(monkeypatch):
+    deleted, inserted = [], []
+    monkeypatch.setattr(dd, "_employee", lambda i: {"id": i, "full_name": "x", "nickname": ""})
+    monkeypatch.setattr(dd, "spares", lambda: [])
+    monkeypatch.setattr(dd, "split_ids", lambda: set())
+    monkeypatch.setattr(dd.supabase, "delete", lambda t, m: deleted.append(m))
+    monkeypatch.setattr(dd.supabase, "insert", lambda t, rows: inserted.extend(rows))
+    monkeypatch.setattr(dd, "sheet", lambda e, m, h: {"half": h})
+    E = "11111111-1111-1111-1111-111111111111"
+    dd.save(E, "2026-11", 2, [{"day": "2026-11-20", "money": 5}])          # an old half-month page: only 11-25 is replaced
+    assert deleted[-1]["day"] == "gte.2026-11-11" and deleted[-1]["and"] == "(day.lte.2026-11-25)"
+    dd.save(E, "2026-11", 0, [{"day": "2026-10-27", "money": 5}])          # the new page: the whole month
+    assert deleted[-1]["day"] == "gte.2026-10-26" and deleted[-1]["and"] == "(day.lte.2026-11-25)"
+    with pytest.raises(dd.DriverDaysError):                                # a half-month page cannot save a day outside its half
+        dd.save(E, "2026-11", 2, [{"day": "2026-10-27", "money": 5}])
+
+
+def test_route_drivers_of_both_branches_with_their_own_trucks(monkeypatch):
+    tables = {
+        "drivers": [{"id": "d1", "name": "สมชาย ใจดี"}, {"id": "d2", "name": "หนึ่ง ชื่นชม"}],
+        "vehicles": [{"vehicle_number": "6", "main_driver_id": "d1", "usage": "รถสาย", "branch": "สระบุรี"},
+                     {"vehicle_number": "6", "main_driver_id": "d2", "usage": "รถสาย", "branch": "แก่งคอย"}],
+        "employees": [{"id": "e2", "code": "SB-KK004", "full_name": "หนึ่ง ชื่นชม", "nickname": "หนึ่ง", "branch": "แก่งคอย"},
+                      {"id": "e1", "code": "SB-PD001", "full_name": "สมชาย ใจดี", "nickname": "ชาย", "branch": "สระบุรี"}],
+    }
+    monkeypatch.setattr(dd.supabase, "select_all", lambda t, p: tables[t])
+    got = dd.drivers()
+    assert [(d["id"], d["truck"], d["branch"]) for d in got] == [("e1", "6", "สระบุรี"), ("e2", "6", "แก่งคอย")]     # Saraburi first

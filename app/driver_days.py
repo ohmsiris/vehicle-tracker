@@ -6,7 +6,10 @@ A spare driver (owner, 17 Nov 2026): a day is ticked สำรองขับ wh
 commission -- so that day counts for nobody: the truck's driver has the day off and its sales are not his. The summary and the Excel
 export (a summary tab, then a tab per driver, a row per day) show the days driven, days off and the spare's days.
 
-Half-months are the pay periods: 26th - 10th, then 11th - 25th (a company month "2026-11" = 26 Oct - 25 Nov; accounting.period_bounds).
+The page shows the WHOLE company month on one sheet (owner, 26 Nov 2026: "full page for the whole month is much better"): half = 0. Half-months
+(1 = 26th - 10th, 2 = 11th - 25th) still work for an old page left open: a half-month save replaces only that half, so a stale tab can never
+wipe the other half (a company month "2026-11" = 26 Oct - 25 Nov; accounting.period_bounds). Route drivers of BOTH branches are listed
+(owner, 26 Nov 2026: หนึ่ง ชื่นชม, Kaeng Khoi's route truck); a truck number is shown with its branch when it is not Saraburi.
 One row per driver per day (route_driver_days, schema_v78): qty {product: number}, money (baht). A day left completely empty has no row."""
 import re
 from datetime import date, timedelta
@@ -37,7 +40,7 @@ def period_of(d: date) -> tuple[str, int]:
 
 
 def days_of(month: str, half: int) -> list[date]:
-    start, end = period_bounds(month, half)
+    start, end = period_bounds(month, half or None)
     return [start + timedelta(days=i) for i in range((end - start).days + 1)]
 
 
@@ -45,11 +48,11 @@ def _check_period(month: str, half) -> tuple[str, int]:
     if not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", str(month or "")):
         raise DriverDaysError("เดือนไม่ถูกต้อง")
     try:
-        half = int(half)
+        half = int(half or 0)
     except (TypeError, ValueError):
-        half = 0
-    if half not in (1, 2):
-        raise DriverDaysError("งวดไม่ถูกต้อง (1 = 26–10, 2 = 11–25)")
+        raise DriverDaysError("งวดไม่ถูกต้อง (0 = ทั้งเดือน, 1 = 26–10, 2 = 11–25)")
+    if half not in (0, 1, 2):
+        raise DriverDaysError("งวดไม่ถูกต้อง (0 = ทั้งเดือน, 1 = 26–10, 2 = 11–25)")
     return month, half
 
 
@@ -73,7 +76,7 @@ def _number(v, label: str, whole: bool = False) -> Optional[float]:
 
 def clean_rows(rows: list, month: str, half: int, owner: Optional[str] = None, spares: Optional[set] = None, split: bool = False) -> list[dict]:
     """What the page sent -> the rows to keep: [{day, qty, money, spare}], only days with at least one figure or ticked สำรองขับ, only
-    days of this half-month."""
+    days of this period (the month, or the half an old page asked for)."""
     allowed = {d.isoformat() for d in days_of(month, half)}
     keys = [k for k, _ in PRODUCTS]
     labels = dict(PRODUCTS)
@@ -147,6 +150,7 @@ def summarize(rows: list[dict], people: list[dict], days: list[str]) -> list[dic
             continue                                              # a หน้าโรง driver is listed only when he drove as the spare
         off = [d for d in days if d not in a["own"] and d not in a["as_spare"]]
         out.append({"id": a["id"], "name": a["name"], "nickname": a.get("nickname") or "", "truck": a.get("truck"), "kind": a.get("kind") or "สาย",
+                    "branch": a.get("branch") or BRANCH,
                     "days_worked": len(a["own"]), "spare_days": len(a["spare"]), "as_spare_days": len(a["as_spare"]), "days_off": len(off),
                     "off_dates": off, "spare_dates": sorted(a["spare"]), "as_spare_dates": sorted(a["as_spare"]), "qty": a["qty"],
                     "money": round(a["money"], 2)})
@@ -165,20 +169,23 @@ def spares() -> list[dict]:
 
 
 def drivers() -> list[dict]:
-    """The รถสาย drivers (active, Saraburi), with the number of the truck each drives now (the truck's main driver)."""
+    """The รถสาย drivers (active, both branches), with the truck each drives now (the truck's main driver) and their branch. Saraburi first;
+    a truck number is matched within the driver's own branch (both branches have a #6)."""
     # a truck's main driver is a row of the drivers list (fleet), matched to the employee by full name -- as น้ำมันเงินสด does
     names = {d["id"]: re.sub(r"\s+", " ", d.get("name") or "").strip() for d in supabase.select_all("drivers", {"select": "id,name", "order": "id.asc"})}
     trucks = {}
-    for v in supabase.select_all("vehicles", {"select": "vehicle_number,main_driver_id,usage", "active": "eq.true", "branch": f"eq.{BRANCH}", "order": "id.asc"}):
+    for v in supabase.select_all("vehicles", {"select": "vehicle_number,main_driver_id,usage,branch", "active": "eq.true", "order": "id.asc"}):
         name = names.get(v.get("main_driver_id"))
-        if name and v.get("vehicle_number") and (name not in trucks or v.get("usage") == "รถสาย"):
-            trucks[name] = v["vehicle_number"]
+        key = (v.get("branch"), name)
+        if name and v.get("vehicle_number") and (key not in trucks or v.get("usage") == "รถสาย"):
+            trucks[key] = v["vehicle_number"]
     out = []
-    for e in supabase.select_all("employees", {"select": "id,code,full_name,nickname", "branch": f"eq.{BRANCH}", "status": "eq.active",
+    for e in supabase.select_all("employees", {"select": "id,code,full_name,nickname,branch", "status": "eq.active",
                                                "position": f"eq.{POSITION}", "order": "full_name.asc"}):
-        out.append({"id": e["id"], "code": e.get("code") or "", "name": e["full_name"], "nickname": e.get("nickname") or "",
-                    "truck": trucks.get(re.sub(r"\s+", " ", e["full_name"] or "").strip())})
-    out.sort(key=lambda x: (int(x["truck"]) if str(x["truck"] or "").isdigit() else 999, x["name"]))
+        branch = e.get("branch") or BRANCH
+        out.append({"id": e["id"], "code": e.get("code") or "", "name": e["full_name"], "nickname": e.get("nickname") or "", "branch": branch,
+                    "truck": trucks.get((branch, re.sub(r"\s+", " ", e["full_name"] or "").strip()))})
+    out.sort(key=lambda x: (x["branch"] != BRANCH, x["branch"], int(x["truck"]) if str(x["truck"] or "").isdigit() else 999, x["name"]))
     return out
 
 
@@ -200,7 +207,7 @@ def split_ids() -> set:
 
 
 def _saved(employee_id: str, month: str, half: int) -> list[dict]:
-    start, end = period_bounds(month, half)
+    start, end = period_bounds(month, half or None)
     return supabase.select_all("route_driver_days", {"select": "day,qty,money,spare,spare_by,money_parts,updated_at", "employee_id": f"eq.{employee_id}",
                                                      "day": f"gte.{start.isoformat()}", "and": f"(day.lte.{end.isoformat()})", "order": "day.asc"})
 
@@ -233,8 +240,9 @@ def phone_suggestions(sale_days: list[dict], days: list[str]) -> dict:
 def _phone_days(employee_id: str, full_name: str, start: date, end: date) -> dict:
     """This driver's phone sheets in the period: the routes whose truck he drives (fleet list), or whose driver / phone login carries his name."""
     try:
-        truck = next((d["truck"] for d in drivers() if d["id"] == employee_id), None)
-        routes = supabase.select_all("sale_routes", {"select": "id,truck_no,driver_name", "branch": f"eq.{BRANCH}", "order": "id.asc"})
+        me_ = next((d for d in drivers() if d["id"] == employee_id), {})
+        truck, branch = me_.get("truck"), me_.get("branch") or BRANCH
+        routes = supabase.select_all("sale_routes", {"select": "id,truck_no,driver_name", "branch": f"eq.{branch}", "order": "id.asc"})
         logins = supabase.select_all("sale_drivers", {"select": "route_id,name", "order": "id.asc"})
         me = _norm(full_name)
         ids = sorted({r["id"] for r in routes if (truck and str(r.get("truck_no") or "") == str(truck)) or _norm(r.get("driver_name")) == me}
@@ -251,7 +259,7 @@ def _phone_days(employee_id: str, full_name: str, start: date, end: date) -> dic
 def overview(month: str, half) -> dict:
     """The page's list: every driver, how many days of this half-month each already has, and the period's summary."""
     month, half = _check_period(month, half)
-    start, end = period_bounds(month, half)
+    start, end = period_bounds(month, half or None)
     rows = _period_rows(start, end)
     filled: dict = {}
     for r in rows:
@@ -276,7 +284,7 @@ def sheet(employee_id: str, month: str, half) -> dict:
              "parts": (saved.get(d.isoformat()) or {}).get("money_parts") or {}}
             for d in days_of(month, half)]
     last = max((r["updated_at"] for r in saved.values() if r.get("updated_at")), default=None)
-    start, end = period_bounds(month, half)
+    start, end = period_bounds(month, half or None)
     return {"phone": _phone_days(employee_id, emp["full_name"], start, end),"employee_id": employee_id, "name": emp["full_name"], "nickname": emp.get("nickname") or "", "month": month, "half": half,
             "split": employee_id in split_ids(), "parts": [{"key": k, "label": lab} for k, lab in PARTS],
             "products": [{"key": k, "label": lab} for k, lab in PRODUCTS], "rows": rows,
@@ -290,7 +298,7 @@ def save(employee_id: str, month: str, half, rows: list) -> dict:
     _employee(employee_id)
     keep = clean_rows(rows, month, half, owner=employee_id, spares={p["id"] for p in spares() if p["kind"] == "หน้าโรง"},
                       split=employee_id in split_ids())
-    start, end = period_bounds(month, half)
+    start, end = period_bounds(month, half or None)
     supabase.delete("route_driver_days", {"employee_id": f"eq.{employee_id}", "day": f"gte.{start.isoformat()}", "and": f"(day.lte.{end.isoformat()})"})
     if keep:
         supabase.insert("route_driver_days", [{"employee_id": employee_id, **r} for r in keep])
@@ -355,7 +363,7 @@ def export(month: str, half) -> tuple[bytes, str]:
     ws["A1"], ws["A2"] = "ยอดขายรถสาย สรุป", f"งวด {title} · วันสำรองขับไม่นับยอด (คนขับสำรองไม่ได้ค่าคอม)"
     ws["A1"].font, ws["A2"].font = head_font, body
     header = ["คนขับ", "รถ", "วันที่ขับ", "หยุด", "สำรองขับรถคันนี้", "ไปเป็นสำรอง", *labels, "เงินที่ได้ (บาท)"]
-    data = [[f"{x['name']}" + (f" ({x['nickname']})" if x["nickname"] else ""), f"#{x['truck']}" if x["truck"] else ("หน้าโรง" if x["kind"] == "หน้าโรง" else ""),
+    data = [[f"{x['name']}" + (f" ({x['nickname']})" if x["nickname"] else ""), (f"#{x['truck']}" + (f" {x['branch']}" if x.get("branch") and x["branch"] != BRANCH else "")) if x["truck"] else ("หน้าโรง" if x["kind"] == "หน้าโรง" else ""),
              x["days_worked"], x["days_off"], x["spare_days"], x["as_spare_days"], *[x["qty"][k] for k in keys], x["money"]] for x in summary]
     tot = ["รวม", "", sum(x["days_worked"] for x in summary), "", sum(x["spare_days"] for x in summary), sum(x["as_spare_days"] for x in summary),
            *[sum(x["qty"][k] for x in summary) for k in keys], round(sum(x["money"] for x in summary), 2)]

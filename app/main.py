@@ -2643,11 +2643,11 @@ def _dd_call(fn, *args):
 
 @app.get("/api/driver-days")
 def api_driver_days(month: str = Query(default=""), half: int = Query(default=0), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
-    """Every รถสาย driver and how many days of this half-month each has."""
+    """Every รถสาย driver and how many days of the month (or half-month) each has."""
     from app import driver_days, mgr
     _check_token(x_app_token, token)
-    if not month or not half:
-        month, half = driver_days.period_of(mgr.today_th())
+    if not month:                                     # this company month, whole (half = 0); an old page may still ask for a half
+        month = driver_days.period_of(mgr.today_th())[0]
     return _dd_call(driver_days.overview, month, half)
 
 
