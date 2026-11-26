@@ -12,10 +12,19 @@ this module is everything around them:
   titles, payroll PDF names may be stale), store_only -> stored, needs_ai -> needs_ai, else read. Booking sets booked.
 * book: refused while a conflict is open. reader.book() REPLACES by batch key (re-dropping never doubles); the row keeps the keys it
   booked. When a later file books a key an older file had booked, the older row gives that key up (superseded) -- so removing the old
-  file later can never delete what the new one booked. A reader may ask for "rebook" (a PEA bill stored after the cheque run that paid
-  it: the cheque turns from a 5100 cost into "pays an existing bill"): every booked file of that kind and month is re-read and re-booked.
-* reread: read again with the stored choices (a reader got better, or the employees list changed); a booked file is re-booked.
-* remove: unbook (only the keys this file still owns), delete the stored file, delete the row.
+  file later can never delete what the new one booked. A row that lost ALL its keys becomes status "stored" with preview
+  superseded_by / superseded_keys (row_view: superseded, superseded_by); a row that lost some stays booked and is only ever re-booked
+  with the batches it still owns. ลงบัญชี on a fully superseded file is the owner's explicit "take the keys back". A reader may ask for
+  "rebook" (a PEA bill stored after the cheque run that paid it: the cheque turns from a 5100 cost into "pays an existing bill"): every
+  booked file of that kind and month is re-read and re-booked; a rebook that fails is reported (rebook_failed), never silently undone.
+  The new booking is written FIRST; only the keys the earlier booking of this file held and the new one does not are then taken back.
+  A reader's ValueError (acc_docs.BadBatch ...) is a Thai InboxError and the row is left as it was.
+* one action per file at a time: book / choose / reread / remove / ai hold a per-file lock; a second one is refused (Busy, 409).
+* reread / choose: read again (a reader got better, the employees list changed, the owner answered). A booked file is re-booked only
+  when the new read can book; otherwise the booking stays exactly as it is and the new read waits in preview["pending"] (row_view
+  pending + its conflicts) for the owner.
+* remove: unbook (only the keys this file still owns; a reader's unbook may ask for rebooks, which run after), delete the stored file
+  and the AI page images, delete the row.
 * ai: only when the server has an Anthropic key and the owner clicked (the page shows the page count first). Runs in a background
   thread (status ai_running, the page polls every 3 s); app/inbox_ai.run gives the preview and the tokens used (ai_usage).
 * checks: app/acc_checks.run(month, branch) -- the proofs that nothing is counted twice -- or a "not available yet" placeholder.
@@ -31,8 +40,10 @@ from __future__ import annotations
 import hashlib
 import importlib
 import logging
+import re
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -43,6 +54,11 @@ logger = logging.getLogger("vehicle_tracker.inbox")
 
 TABLE = "inbox_files"
 MAX_FILES = 30                     # per request (the page sends big drops a few files at a time)
+MAX_FILE_BYTES = 50 * 1024 * 1024  # per file, the same as the accounting-files bucket (scans of a whole month are big)
+TOO_BIG = f"ไฟล์ใหญ่เกิน {MAX_FILE_BYTES // (1024 * 1024)} MB ไม่ได้เก็บ (แยกไฟล์หรือลดขนาดก่อน)"
+BUSY = "ไฟล์นี้กำลังทำรายการอยู่ รอสักครู่"
+PAY_HIDDEN = "ไฟล์เงินเดือนรายคน — เปิดได้เฉพาะผู้มีเมนูรายชื่อพนักงาน (รวมค่าจ้าง)"
+INLINE_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif"}   # the only types /file shows in the browser
 SCAN_READER = "inbox_r_scan"
 TYPES = {  # extension -> media type; anything else is still accepted (the PEA AMR exports have no extension) as octet-stream
     ".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".heic": "image/heic",
@@ -52,6 +68,10 @@ TYPES = {  # extension -> media type; anything else is still accepted (the PEA A
 STATUS_LABEL = {"read": "อ่านแล้ว รอลงบัญชี", "booked": "ลงบัญชีแล้ว", "needs_choice": "ต้องเลือกเดือน", "stored": "เก็บไว้ ไม่ลงบัญชี",
                 "needs_ai": "อ่านด้วย AI ได้", "ai_running": "AI กำลังอ่าน...", "failed": "อ่านไม่สำเร็จ"}
 _AI_STALE = "AI หยุดกลางคัน (เซิร์ฟเวอร์เริ่มใหม่) — กดอ่านด้วย AI อีกครั้ง"
+# A booked file read again whose new read cannot book: the booking stays, the new read waits (preview["pending"]).
+PENDING_MSG = {"needs_choice": "อ่านใหม่แล้วมีเรื่องต้องเลือก — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิมจนกว่าจะเลือก",
+               "stored": "อ่านใหม่แล้วเป็นไฟล์เก็บไว้ ไม่ลงบัญชี — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิม (ลบไฟล์ถ้าไม่ต้องการ)",
+               "needs_ai": "อ่านใหม่แล้วต้องให้ AI อ่าน — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิม"}
 
 
 class InboxError(ValueError):
@@ -60,6 +80,14 @@ class InboxError(ValueError):
 
 class NotFound(InboxError):
     """No such dropped file (404)."""
+
+
+class Busy(InboxError):
+    """Another action on this file is running right now (409)."""
+
+
+class Forbidden(InboxError):
+    """This person may not see this file (403): a payroll sheet without the employees menu."""
 
 
 # ------------------------------------------------------------------ the readers (lazy: a missing one is skipped)
@@ -167,6 +195,13 @@ def status_of(preview: dict) -> str:
     return "read"
 
 
+def fully_superseded(preview: dict) -> bool:
+    """Did newer files take over EVERY batch key of this preview? (Then the file is kept as "stored", not waiting to be booked.)"""
+    taken = set(preview.get("superseded_keys") or [])
+    keys = [b.get("key") for b in preview.get("batches") or []]
+    return bool(preview.get("superseded_by")) and bool(keys) and all(k in taken for k in keys)
+
+
 def file_values(kind: str, preview: dict, error: Optional[str]) -> dict:
     """The inbox_files columns that follow from a read (status / month / branches / preview / error)."""
     branches = sorted({b.get("branch") for b in preview.get("batches") or [] if b.get("branch")})
@@ -175,7 +210,10 @@ def file_values(kind: str, preview: dict, error: Optional[str]) -> dict:
     month = preview.get("month")
     if not month and preview.get("store_only"):
         month = next((c.get("default") for c in preview.get("conflicts") or [] if c.get("key") == "month"), None)
-    return {"kind": kind, "status": "failed" if error else status_of(preview), "month": month, "branches": branches,
+    status = "failed" if error else status_of(preview)
+    if status == "read" and fully_superseded(preview):           # read again, but a newer file still owns everything it would book
+        status = "stored"
+    return {"kind": kind, "status": status, "month": month, "branches": branches,
             "preview": preview, "error": error, "ai_usage": preview.get("ai_usage")}
 
 
@@ -192,6 +230,31 @@ def superseded(rows: list[dict], keys: list[str], my_id: str) -> list[tuple[str,
     return out
 
 
+def supersede_values(other: dict, keep: list[str], by_name: str) -> dict:
+    """The columns of an older booked row after a newer file took some (or all) of its keys: it remembers which keys and by whom; with
+    none left it is kept as "stored" (superseded), never shown as waiting to be booked."""
+    p = dict(other.get("preview") or {})
+    taken = [k for k in other.get("batches") or [] if k not in set(keep)]
+    p["superseded_keys"] = sorted(set(p.get("superseded_keys") or []) | set(taken))
+    p["superseded_by"] = by_name
+    values = {"batches": list(keep), "preview": p}
+    if not keep:
+        values.update(status="stored", booked_at=None, booked_total=None, error=None)
+    return values
+
+
+def base_preview(row: dict) -> dict:
+    """The preview the row's booking stands on (without a re-read waiting for the owner)."""
+    p = row.get("preview") or {}
+    return {k: v for k, v in p.items() if k != "pending"} if "pending" in p else p
+
+
+def pending_of(row: dict) -> Optional[dict]:
+    """{"kind", "status", "preview", "choices"} of a re-read of a booked file that could not book, or None."""
+    pend = (row.get("preview") or {}).get("pending")
+    return pend if isinstance(pend, dict) and isinstance(pend.get("preview"), dict) else None
+
+
 def rebook_targets(requests: list[dict], rows: list[dict], exclude: set) -> list[dict]:
     """The booked files a booking asked to re-book ({"kind", "month"} each), not the ones already done in this round."""
     want = {(q.get("kind"), q.get("month")) for q in requests or [] if q.get("kind") and q.get("month")}
@@ -203,8 +266,13 @@ def rebook_targets(requests: list[dict], rows: list[dict], exclude: set) -> list
     return out
 
 
+def valid_month(v) -> bool:
+    return bool(re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", str(v or "")))
+
+
 def clean_choices(preview: dict, old: dict, new: dict) -> dict:
-    """The owner's answers merged with earlier ones. An answer to an open conflict must be one of its options."""
+    """The owner's answers merged with earlier ones. An answer to an open conflict must be one of its options -- except a month
+    question with no options (no month found in the file): then any real month (YYYY-MM) the owner picks is accepted."""
     if not isinstance(new, dict) or not new:
         raise InboxError("ยังไม่ได้เลือก")
     open_ = {c.get("key"): c for c in preview.get("conflicts") or []}
@@ -212,7 +280,10 @@ def clean_choices(preview: dict, old: dict, new: dict) -> dict:
     for k, v in new.items():
         k, v = str(k), (None if v in (None, "") else str(v))
         c = open_.get(k)
-        if c is not None and v is not None and v not in {str(o.get("value")) for o in c.get("options") or []}:
+        if c is not None and v is not None and k == "month" and not c.get("options"):
+            if not valid_month(v):
+                raise InboxError("เดือนไม่ถูกต้อง — เลือกเดือนใหม่")
+        elif c is not None and v is not None and v not in {str(o.get("value")) for o in c.get("options") or []}:
             raise InboxError("ตัวเลือกไม่ถูกต้อง — เปิดดูไฟล์แล้วเลือกใหม่")
         if c is None and k not in out:
             raise InboxError("ไฟล์นี้ไม่มีเรื่องให้เลือกแล้ว — กดอ่านใหม่")
@@ -235,9 +306,59 @@ def apply_choices(preview: dict, choices: dict) -> dict:
 
 def owned_preview(row: dict) -> dict:
     """The row's preview cut down to the batches it still owns (a newer file may have taken some over)."""
-    p = row.get("preview") or {}
+    p = base_preview(row)
     keep = set(row.get("batches") or [])
     return {**p, "batches": [b for b in p.get("batches") or [] if b.get("key") in keep]}
+
+
+def stale_part(old: dict, keys: list[str]) -> dict:
+    """What an earlier booking (old: its owned preview) held that the new booking (keys) does not: the batches to take back once the
+    new booking stood. A key the new booking replaces itself -- the same key, or one that starts with it + ":" -- is left alone."""
+    new = set(keys)
+    gone = [b for b in old.get("batches") or [] if b.get("key") not in new and not any(k.startswith(f"{b.get('key')}:") for k in new)]
+    return {**old, "batches": gone}
+
+
+def hide_pay(preview: dict) -> dict:
+    """A payroll preview without anyone's pay: the per-person wage rows become one total row, employee_pay_months rows are dropped.
+    For a person who can open ลงข้อมูล but not รายชื่อพนักงาน (รวมค่าจ้าง)."""
+    def cut(p: dict) -> dict:
+        out = {**p, "batches": []}
+        for b in p.get("batches") or []:
+            rows = b.get("rows") or []
+            people = [r for r in rows if r.get("role") == "wages" and r.get("code")]
+            rest = [r for r in rows if not (r.get("role") == "wages" and r.get("code"))]
+            if people:
+                rest.insert(0, {"date": people[0].get("date"), "text": f"ค่าจ้างรวม {len(people)} คน (รายคนดูได้ที่เมนูรายชื่อพนักงาน)",
+                                "party": None, "amount": round(sum(float(r.get("amount") or 0) for r in people), 2), "role": "wages",
+                                "account": people[0].get("account"), "flag": None})
+            nb = {**b, "rows": rest}
+            if "pay_months" in nb:
+                nb["pay_months"] = None
+            out["batches"].append(nb)
+        return out
+    out = cut(preview or {})
+    pend = (preview or {}).get("pending")
+    if isinstance(pend, dict) and isinstance(pend.get("preview"), dict):
+        out["pending"] = {**pend, "preview": cut(pend["preview"])}
+    return out
+
+
+def serve_as(mime: Optional[str]) -> tuple[str, bool]:
+    """(the media type /file sends, shown inline?). Only PDFs and pictures are shown in the browser; anything else (an .html dropped in
+    the box ...) is a download, never active content on the app's own address."""
+    m = (mime or "").lower()
+    return (m, True) if m in INLINE_TYPES else ("application/octet-stream", False)
+
+
+def ai_image_paths(preview: Optional[dict]) -> list[str]:
+    """The AI page images of a preview (and of a re-read waiting in it) -- only the drop box's own (accdocs/inbox/...)."""
+    out: list = []
+    for p in (preview or {}, ((preview or {}).get("pending") or {}).get("preview") or {}):
+        imgs = p.get("ai_images") if isinstance(p, dict) else None
+        vals = imgs.values() if isinstance(imgs, dict) else (imgs if isinstance(imgs, list) else [])
+        out += [v for v in vals if isinstance(v, str) and v.startswith("accdocs/inbox/") and v not in out]
+    return out
 
 
 def _num(x) -> Optional[float]:
@@ -249,19 +370,26 @@ def _num(x) -> Optional[float]:
 
 def row_view(row: dict, running: Optional[set] = None) -> dict:
     """One dropped file as the list shows it (the full preview stays on the server until the owner opens it)."""
-    p = row.get("preview") or {}
+    p = base_preview(row)
+    pend = pending_of(row)
     batches = p.get("batches") or []
     status, error = row.get("status"), row.get("error")
     if status == "ai_running" and running is not None and row["id"] not in running:
         status, error = "failed", _AI_STALE         # the job died with the server: offer the button again
     ft = [_num(b.get("file_total")) for b in batches]
     rt = [_num(b.get("rows_total")) for b in batches]
+    sup_by = p.get("superseded_by") or None
     return {"id": row["id"], "file_name": row.get("file_name"), "kind": row.get("kind"), "label": p.get("label") or row.get("kind") or "ไฟล์",
             "status": status, "status_label": STATUS_LABEL.get(status, status), "month": row.get("month"), "branches": row.get("branches") or [],
             "uploaded_at": row.get("uploaded_at"), "uploaded_by": row.get("uploaded_by"), "booked_at": row.get("booked_at"),
             "booked_total": _num(row.get("booked_total")), "error": error, "ai_usage": row.get("ai_usage"), "note": p.get("note") or "",
             "pages": p.get("pages"), "needs_ai": bool(p.get("needs_ai")), "store_only": bool(p.get("store_only")),
-            "conflicts": p.get("conflicts") or [], "choices": row.get("choices") or {}, "flags": len(p.get("flags") or []),
+            "superseded": bool(sup_by) and status == "stored", "superseded_by": sup_by,
+            "remove_note": p.get("remove_note") or "",
+            "pending": ({"status": pend.get("status"), "status_label": STATUS_LABEL.get(pend.get("status"), pend.get("status")),
+                         "message": PENDING_MSG.get(pend.get("status"), ""), "note": (pend["preview"].get("note") or "")} if pend else None),
+            "conflicts": ((pend["preview"] if pend else p).get("conflicts") or []),
+            "choices": (pend.get("choices") if pend else None) or row.get("choices") or {}, "flags": len(p.get("flags") or []),
             "mime_type": row.get("mime_type"), "byte_size": row.get("byte_size"),
             "batches": [{"key": b.get("key"), "feed": b.get("feed"), "branch": b.get("branch"), "month": b.get("month"), "title": b.get("title"),
                          "file_total": _num(b.get("file_total")), "rows_total": _num(b.get("rows_total")), "rows": len(b.get("rows") or []),
@@ -275,12 +403,14 @@ def files_by_feed(rows: list[dict], branch: str = "") -> dict:
     feed through its batches (their branch must match when one branch is shown); booked = that batch is booked by this file."""
     out: dict = {}
     for r in rows:
-        if r.get("status") in ("failed", "ai_running", "needs_ai", "stored"):
+        if r.get("status") in ("failed", "ai_running", "needs_ai", "stored"):     # stored includes a file a newer one replaced
             continue
         owned = set(r.get("batches") or [])
-        for b in (r.get("preview") or {}).get("batches") or []:
+        p = base_preview(r)
+        taken = set(p.get("superseded_keys") or [])
+        for b in p.get("batches") or []:
             feed = b.get("feed")
-            if not feed or (branch and b.get("branch") and b.get("branch") != branch):
+            if not feed or b.get("key") in taken or (branch and b.get("branch") and b.get("branch") != branch):
                 continue
             lst = out.setdefault(feed, [])
             booked = r.get("status") == "booked" and b.get("key") in owned
@@ -297,11 +427,33 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _get(file_id: str) -> dict:
+def _check_id(file_id: str) -> str:
     try:
-        uuid.UUID(str(file_id))
+        return str(uuid.UUID(str(file_id)))
     except ValueError:
         raise NotFound("ไม่พบไฟล์นี้")
+
+
+# One action per file at a time (two clicks on ลงบัญชี, two tabs, a rebook from another file): the second one is refused, never queued.
+_file_locks: dict = {}
+_file_locks_guard = threading.Lock()
+
+
+@contextmanager
+def _busy(file_id: str):
+    fid = _check_id(file_id)
+    with _file_locks_guard:
+        lock = _file_locks.setdefault(fid, threading.RLock())     # re-entrant: book() from reread() on the same thread
+    if not lock.acquire(blocking=False):
+        raise Busy(BUSY)
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def _get(file_id: str) -> dict:
+    _check_id(file_id)
     rows = supabase.select(TABLE, {"select": "*", "id": f"eq.{file_id}", "limit": "1"})
     if not rows:
         raise NotFound("ไม่พบไฟล์นี้ (อาจถูกลบไปแล้ว)")
@@ -339,9 +491,10 @@ def fix_name(name: str) -> str:
     return name
 
 
-def upload(files: list[tuple[str, bytes]], who: str = "") -> list[dict]:
+def upload(files: list[tuple[str, Optional[bytes]]], who: str = "") -> list[dict]:
     """Store, identify and read each dropped file. Returns one row per file (row_view) with a Thai "message"; a file already in the box
-    returns its existing row (dedupe by sha256), an empty file is refused on its own without failing the others."""
+    returns its existing row (dedupe by sha256). An empty file, or one over MAX_FILE_BYTES (data None: main.py stopped reading it), is
+    refused on its own without failing the others."""
     if not files:
         raise InboxError("เลือกไฟล์อย่างน้อยหนึ่งไฟล์")
     if len(files) > MAX_FILES:
@@ -350,6 +503,9 @@ def upload(files: list[tuple[str, bytes]], who: str = "") -> list[dict]:
     out, seen = [], {}
     for name, data in files:
         name = fix_name(name or "file")[:200]
+        if data is None or len(data) > MAX_FILE_BYTES:
+            out.append({"id": None, "file_name": name, "status": "failed", "status_label": STATUS_LABEL["failed"], "message": f"{name}: {TOO_BIG}"})
+            continue
         if not data:
             out.append({"id": None, "file_name": name, "status": "failed", "status_label": STATUS_LABEL["failed"], "message": f"{name}: ไฟล์ว่าง ไม่ได้เก็บ"})
             continue
@@ -392,110 +548,213 @@ def _store_new(name: str, data: bytes, sha: str, who: str, readers: list) -> dic
     return {**v, "message": f"{name}: {msg}"}
 
 
-def get(file_id: str) -> dict:
-    """One file with its full preview (the preview dialog) and the role names."""
-    row = _get(file_id)
-    return {**row_view(row, _running_ids()), "preview": row.get("preview") or {}, "roles": ic.ROLES}
+def _is_payroll(row: dict) -> bool:
+    return row.get("kind") == "payroll" or (pending_of(row) or {}).get("kind") == "payroll"
 
 
-def download(file_id: str) -> tuple[bytes, str, str]:
+def get(file_id: str, see_pay: bool = True) -> dict:
+    """One file with its full preview (the preview dialog) and the role names. see_pay False (no employees menu): a payroll file shows
+    its totals only."""
     row = _get(file_id)
-    return _download(row), row.get("mime_type") or "application/octet-stream", row.get("file_name") or "file"
+    preview = row.get("preview") or {}
+    if not see_pay and _is_payroll(row):
+        preview = hide_pay(preview)
+    pend = pending_of({"preview": preview})
+    return {**row_view(row, _running_ids()), "preview": base_preview({"preview": preview}),
+            "pending_preview": pend["preview"] if pend else None, "roles": ic.ROLES}
+
+
+def download(file_id: str, see_pay: bool = True) -> tuple[bytes, str, str, bool]:
+    """(bytes, media type to send, file name, show inline?). Only PDFs and pictures are shown inline (serve_as)."""
+    row = _get(file_id)
+    if not see_pay and _is_payroll(row):
+        raise Forbidden(PAY_HIDDEN)
+    media, inline = serve_as(row.get("mime_type"))
+    return _download(row), media, row.get("file_name") or "file", inline
+
+
+def _refuse_running(row: dict) -> None:
+    """A live AI read blocks the file; a row left in ai_running by a restart (its job is gone) does not."""
+    if row.get("status") == "ai_running" and row["id"] in _running_ids():
+        raise InboxError("AI กำลังอ่านไฟล์นี้อยู่ — รอสักครู่")
 
 
 def choose(file_id: str, choices: dict) -> dict:
-    """The owner's answer to a conflict (e.g. {"month": "2026-11"}): read again with it; a booked file is re-booked."""
-    row = _get(file_id)
-    if row.get("status") == "ai_running":
-        raise InboxError("AI กำลังอ่านไฟล์นี้อยู่ — รอสักครู่")
-    merged = clean_choices(row.get("preview") or {}, row.get("choices") or {}, choices)
-    return _reprocess(row, merged, set())
+    """The owner's answer to a conflict (e.g. {"month": "2026-11"}): read again with it; a booked file is re-booked when it can."""
+    with _busy(file_id):
+        row = _get(file_id)
+        _refuse_running(row)
+        pend = pending_of(row)
+        if pend:                                           # a booked file's re-read is waiting: the question is the re-read's
+            merged = clean_choices(pend["preview"], pend.get("choices") or {}, choices)
+        else:
+            merged = clean_choices(row.get("preview") or {}, row.get("choices") or {}, choices)
+        return _reprocess(row, merged, {row["id"]})[0]
 
 
 def reread(file_id: str) -> dict:
-    row = _get(file_id)
-    if row.get("status") == "ai_running":
-        raise InboxError("AI กำลังอ่านไฟล์นี้อยู่ — รอสักครู่")
-    return _reprocess(row, row.get("choices") or {}, set())
+    with _busy(file_id):
+        row = _get(file_id)
+        _refuse_running(row)
+        pend = pending_of(row)
+        return _reprocess(row, (pend.get("choices") if pend else None) or row.get("choices") or {}, {row["id"]})[0]
 
 
 def _ai_read(row: dict) -> bool:
     """Was this file's preview made by the AI? (Then re-reading does not run the AI again: choices are applied to what it read.)"""
-    p = row.get("preview") or {}
+    p = base_preview(row)
     return bool(row.get("ai_usage") or p.get("ai_usage")) and not p.get("needs_ai")
 
 
-def _reprocess(row: dict, choices: dict, visited: set) -> dict:
+def _carry(base: dict, new: dict) -> dict:
+    """What a new read keeps from the old preview: which of its keys newer files took over."""
+    if base.get("superseded_by"):
+        return {**new, "superseded_by": base["superseded_by"], "superseded_keys": list(base.get("superseded_keys") or [])}
+    return new
+
+
+def _reprocess(row: dict, choices: dict, visited: set) -> tuple[dict, bool]:
+    """Read the file again (with these choices). (row_view, did it book?).
+    Not booked: the new read replaces the old one. Booked: READ FIRST. Only a read that can book replaces the booking (the new booking
+    is written, then whatever the old one held and the new one does not is taken back). A read with a question, a store-only read or a
+    failed read leaves the booking exactly as it is; the question waits in preview["pending"] for the owner."""
     was_booked = row.get("status") == "booked"
+    base = base_preview(row)
     if _ai_read(row):
         ai = _optional("inbox_ai")
         fn = getattr(ai, "apply_choices", None) if ai else None
-        preview = _normal(fn(row.get("preview") or {}, choices) if fn else apply_choices(row.get("preview") or {}, choices), None)
+        preview = _normal(fn(base, choices) if fn else apply_choices(base, choices), None)
         kind, error = row.get("kind") or preview.get("kind"), None
     else:
         kind, preview, error = read_file(row["file_name"], _download(row), choices)
-    if error and was_booked:                               # keep what is booked rather than lose it to a failed read
-        raise InboxError(f"{error} — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิม")
-    if was_booked:
-        _unbook(row)
+    preview = _carry(base, {k: v for k, v in preview.items() if k != "pending"})
     values = {**file_values(kind, preview, error), "choices": choices, "ai_usage": row.get("ai_usage") or preview.get("ai_usage")}
-    if was_booked:
-        values.update(batches=[], booked_total=None, booked_at=None)
-    saved = _save(row["id"], values)
-    if was_booked and saved.get("status") == "read":
-        return book(row["id"], visited)
-    return row_view(saved, _running_ids())
+    if not was_booked:
+        return row_view(_save(row["id"], values), _running_ids()), False
+    if error:                                              # keep what is booked rather than lose it to a failed read
+        raise InboxError(f"{error} — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิม")
+    if values["status"] != "read":
+        parked = {**base, "pending": {"kind": kind, "status": values["status"], "preview": preview, "choices": choices}}
+        saved = _save(row["id"], {"preview": parked})
+        return {**row_view(saved, _running_ids()), "message": PENDING_MSG.get(values["status"], "")}, False
+    new_row = {**row, "kind": kind, "preview": preview, "choices": choices}
+    return _book(new_row, visited, old=row, extra=values), True
 
 
-def _unbook(row: dict) -> None:
+def _unbook_preview(kind: Optional[str], preview: dict) -> dict:
+    """The reader's unbook (or the default one) of these batches. A reader may answer {"rebook": [...]}: the caller runs those."""
+    if not preview.get("batches"):
+        return {}
+    reader = reader_for(kind)
+    fn = getattr(reader, "unbook", None) if reader else None
+    res = (fn or ic.unbook_batches)(preview)
+    return res if isinstance(res, dict) else {}
+
+
+def _unbook(row: dict) -> dict:
     """Remove what this file booked (only the keys it still owns)."""
     if not row.get("batches"):
-        return
-    reader = reader_for(row.get("kind"))
-    fn = getattr(reader, "unbook", None) if reader else None
-    (fn or ic.unbook_batches)(owned_preview(row))
+        return {}
+    return _unbook_preview(row.get("kind"), owned_preview(row))
 
 
-def book(file_id: str, visited: Optional[set] = None) -> dict:
-    """ลงบัญชี: the reader books the preview (replacing by batch key), the row records what it booked; then the rebooks it asked for."""
-    visited = set() if visited is None else visited
-    visited.add(file_id)
-    row = _get(file_id)
-    p = row.get("preview") or {}
+def _bookable(row: dict) -> None:
+    """Refuse ลงบัญชี with the reason, in Thai."""
+    p = base_preview(row)
     status = row.get("status")
+    pend = pending_of(row)
+    if pend:
+        raise InboxError(PENDING_MSG.get(pend.get("status"), "อ่านใหม่แล้วยังลงบัญชีไม่ได้") +
+                         (" (" + " · ".join(c.get("message", "") for c in pend["preview"].get("conflicts") or []) + ")"
+                          if pend["preview"].get("conflicts") else ""))
     if p.get("conflicts") or status == "needs_choice":
         raise InboxError("ยังมีเรื่องที่ต้องเลือกก่อน (" + " · ".join(c.get("message", "") for c in p.get("conflicts") or []) + ")")
-    if status == "stored" or p.get("store_only"):
+    take_back = status == "stored" and fully_superseded(p)
+    if (status == "stored" or p.get("store_only")) and not take_back:
         raise InboxError("ไฟล์นี้เก็บไว้เฉย ๆ ไม่ลงบัญชี" + (f" — {p['note']}" if p.get("note") else ""))
     if status in ("needs_ai", "ai_running") or p.get("needs_ai"):
         raise InboxError("ไฟล์นี้ยังไม่ได้อ่าน — กดอ่านด้วย AI ก่อน")
     if status == "failed":
         raise InboxError("ไฟล์นี้อ่านไม่สำเร็จ — กดอ่านใหม่")
-    if not p.get("batches"):
-        raise InboxError("ไม่มีรายการให้ลงบัญชีในไฟล์นี้")
+
+
+def book(file_id: str, visited: Optional[set] = None) -> dict:
+    """ลงบัญชี: the reader books the preview (replacing by batch key), the row records what it booked; then the rebooks it asked for.
+    On a fully superseded file this is the owner taking its keys back from the newer file."""
+    with _busy(file_id):
+        row = _get(file_id)
+        _bookable(row)
+        visited = set() if visited is None else visited
+        return _book(row, visited, old=row if row.get("status") == "booked" else None)
+
+
+def _book(row: dict, visited: set, old: Optional[dict] = None, extra: Optional[dict] = None) -> dict:
+    """Book row["preview"] (the caller checked it may be booked). old: the row as booked before (its owned batches are taken back
+    AFTER the new booking stood, and only those the new one does not replace). extra: columns to save with it (a re-read's)."""
+    fid = row["id"]
+    visited.add(fid)
+    p = base_preview(row)
+    take_back = row.get("status") == "stored" and fully_superseded(p)
+    taken = set() if take_back else set(p.get("superseded_keys") or [])
+    batches = [b for b in p.get("batches") or [] if b.get("key") not in taken]     # never take a key back from a newer file silently
+    if not batches and not p.get("books_without_batches"):
+        raise InboxError("ไม่มีรายการให้ลงบัญชีในไฟล์นี้" + (" (ไฟล์ที่ใหม่กว่าแทนที่ไปหมดแล้ว)" if taken and p.get("batches") else ""))
     reader = reader_for(row.get("kind"))
     if reader is None and not _ai_read(row):
         raise InboxError("ยังไม่มีตัวลงบัญชีของไฟล์ประเภทนี้ในระบบ")
-    if status == "booked":                                 # booking again: first take back what it booked (keys may have changed)
-        _unbook(row)
-    res = (reader.book(p, file_id) if reader is not None else ic.book_batches(p)) or {}
-    keys = list(res.get("batches") or [b["key"] for b in p.get("batches") or []])
-    for other_id, keep in superseded(_rows_with_keys(keys), keys, file_id):
-        _save(other_id, {"batches": keep, **({} if keep else {"status": "read", "booked_at": None, "booked_total": None,
-                                                              "error": f"ถูกแทนที่ด้วย {row.get('file_name')}"})})
-    saved = _save(file_id, {"status": "booked", "batches": keys, "booked_total": _num(res.get("booked")), "booked_at": _now(), "error": None})
-    rebooked = 0
-    if res.get("rebook"):
-        months = sorted({q.get("month") for q in res["rebook"] if q.get("month")})
-        cands = _booked_rows(months)
-        for r in rebook_targets(res["rebook"], cands, visited):
-            visited.add(r["id"])
-            try:
-                _reprocess(r, r.get("choices") or {}, visited)
-                rebooked += 1
-            except InboxError:
-                logger.warning("rebook of %s refused", r["id"])
-    return {**row_view(saved, _running_ids()), "rebooked": rebooked}
+    to_book = {**p, "batches": batches}
+    try:
+        res = (reader.book(to_book, fid) if reader is not None else ic.book_batches(to_book)) or {}
+    except InboxError:
+        raise
+    except ValueError as exc:                              # the reader's own Thai refusal (acc_docs.BadBatch, InvalidEntry ...)
+        logger.warning("inbox book refused for %s: %s", fid, exc)
+        raise InboxError(_thai_error("ลงบัญชีไม่สำเร็จ", exc) + (" — ของที่ลงบัญชีไว้ก่อนหน้ายังไม่ถูกถอน" if old is not None else ""))
+    keys = list(res.get("batches") or [b["key"] for b in batches])
+    unbooked = _unbook_preview((old or {}).get("kind"), stale_part(owned_preview(old), keys)) if old is not None and old.get("batches") else {}
+    for other in _rows_with_keys(keys):
+        if other["id"] == fid or other.get("status") != "booked":
+            continue
+        keep = [k for k in other.get("batches") or [] if k not in set(keys)]
+        if keep != list(other.get("batches") or []):
+            _save(other["id"], supersede_values(other, keep, row.get("file_name") or ""))
+    newp = {k: v for k, v in p.items() if k not in ("superseded_keys", "superseded_by")}
+    still = [k for k in (p.get("superseded_keys") or []) if k not in set(keys)] if not take_back else []
+    if still:
+        newp.update(superseded_keys=still, superseded_by=p.get("superseded_by"))
+    values = {**(extra or {}), "status": "booked", "batches": keys, "booked_total": _num(res.get("booked")), "booked_at": _now(),
+              "error": None, "preview": newp}
+    saved = _save(fid, values)
+    rebooked, failed = _run_rebooks(list(res.get("rebook") or []) + list(unbooked.get("rebook") or []), visited)
+    return {**row_view(saved, _running_ids()), "rebooked": rebooked, "rebook_failed": failed}
+
+
+def _run_rebooks(requests: list[dict], visited: set) -> tuple[int, list[dict]]:
+    """Re-read and re-book the booked files these requests name. (how many booked again, [{id, file_name, error}] of those that did
+    not). A failure is reported, never raised: what asked for the rebook stays done."""
+    requests = [q for q in requests or [] if isinstance(q, dict) and q.get("kind") and q.get("month")]
+    if not requests:
+        return 0, []
+    months = sorted({q["month"] for q in requests})
+    n, failed = 0, []
+    for r in rebook_targets(requests, _booked_rows(months), visited):
+        visited.add(r["id"])
+        try:
+            with _busy(r["id"]):
+                fresh = _get(r["id"])
+                if fresh.get("status") != "booked":
+                    continue
+                pend = pending_of(fresh)
+                v, ok = _reprocess(fresh, (pend.get("choices") if pend else None) or fresh.get("choices") or {}, visited)
+            if ok:
+                n += 1
+            else:
+                failed.append({"id": r["id"], "file_name": r.get("file_name"), "error": v.get("message") or "ลงบัญชีใหม่ไม่ได้ — เปิดดูไฟล์"})
+        except Exception as exc:                           # noqa: BLE001 -- reported to the page, logged here
+            logger.exception("rebook of %s failed", r["id"])
+            msg = str(exc) if isinstance(exc, InboxError) else _thai_error("ลงบัญชีใหม่ไม่สำเร็จ", exc)
+            failed.append({"id": r["id"], "file_name": r.get("file_name"), "error": msg})
+    return n, failed
 
 
 def _booked_rows(months: Optional[list] = None) -> list[dict]:
@@ -510,17 +769,32 @@ def _rows_with_keys(keys: list[str]) -> list[dict]:
     if not keys:
         return []
     arr = "{" + ",".join('"' + k.replace("\\", "\\\\").replace('"', '\\"') + '"' for k in keys) + "}"
-    return supabase.select_all(TABLE, {"select": "id,status,batches", "status": "eq.booked", "batches": f"ov.{arr}", "order": "uploaded_at.asc"})
+    return supabase.select_all(TABLE, {"select": "id,status,batches,preview,file_name", "status": "eq.booked", "batches": f"ov.{arr}",
+                                       "order": "uploaded_at.asc"})
 
 
-def remove(file_id: str) -> None:
-    row = _get(file_id)
-    if row.get("status") == "ai_running" and row["id"] in _running_ids():
-        raise InboxError("AI กำลังอ่านไฟล์นี้อยู่ — รอให้เสร็จก่อนจึงลบได้")
-    if row.get("status") == "booked":
-        _unbook(row)
-    supabase.storage_delete([row["storage_path"]], bucket=supabase.ACCOUNTING_BUCKET)
-    supabase.delete(TABLE, {"id": f"eq.{file_id}"})
+def _delete_ai_images(paths: list[str]) -> None:
+    """The AI page images (private bucket). Never fails the action that asked: a leftover picture is only storage."""
+    if not paths:
+        return
+    try:
+        supabase.storage_delete(list(paths), bucket=supabase.PRIVATE_BUCKET)
+    except Exception:                                      # noqa: BLE001
+        logger.exception("could not delete inbox AI page images %s", paths[:3])
+
+
+def remove(file_id: str) -> dict:
+    """ลบ: take back what it booked (only the keys it still owns), run the rebooks that asks for, delete the file, its AI page images
+    and the row. Returns {"rebooked", "rebook_failed"}."""
+    with _busy(file_id):
+        row = _get(file_id)
+        _refuse_running(row)
+        res = _unbook(row) if row.get("status") == "booked" else {}
+        supabase.storage_delete([row["storage_path"]], bucket=supabase.ACCOUNTING_BUCKET)
+        _delete_ai_images(ai_image_paths(row.get("preview")))
+        supabase.delete(TABLE, {"id": f"eq.{row['id']}"})
+        n, failed = _run_rebooks(list(res.get("rebook") or []), {row["id"]})
+    return {"rebooked": n, "rebook_failed": failed}
 
 
 def list_files(month: str = "") -> dict:
@@ -573,22 +847,23 @@ def ai(file_id: str) -> dict:
     mod = _optional("inbox_ai")
     if mod is None:
         raise InboxError("ส่วนอ่านด้วย AI ยังไม่พร้อม")
-    row = _get(file_id)
-    if row["id"] in _running_ids():
-        raise InboxError("AI กำลังอ่านไฟล์นี้อยู่")
-    p = row.get("preview") or {}
-    if row.get("status") not in ("needs_ai", "failed", "ai_running") and not p.get("needs_ai"):
-        raise InboxError("ไฟล์นี้อ่านได้แล้ว ไม่ต้องใช้ AI")
-    with _jobs_lock:
-        _jobs[row["id"]] = {"done": 0, "total": p.get("pages") or 0}
-    try:
-        saved = _save(row["id"], {"status": "ai_running", "error": None})
-    except Exception:
-        with _jobs_lock:
-            _jobs.pop(row["id"], None)
-        raise
-    _spawn(_ai_job, mod, row)
-    return row_view(saved, _running_ids())
+    with _busy(file_id):
+        row = _get(file_id)
+        p = base_preview(row)
+        if row.get("status") not in ("needs_ai", "failed", "ai_running") and not p.get("needs_ai"):
+            raise InboxError("ไฟล์นี้อ่านได้แล้ว ไม่ต้องใช้ AI")
+        with _jobs_lock:                                   # check and claim in one step: two clicks never start two reads
+            if row["id"] in _jobs:
+                raise InboxError("AI กำลังอ่านไฟล์นี้อยู่")
+            _jobs[row["id"]] = {"done": 0, "total": p.get("pages") or 0}
+        try:
+            saved = _save(row["id"], {"status": "ai_running", "error": None})
+        except Exception:
+            with _jobs_lock:
+                _jobs.pop(row["id"], None)
+            raise
+        _spawn(_ai_job, mod, row)
+        return row_view(saved, _running_ids())
 
 
 def _ai_job(mod, row: dict) -> None:
@@ -605,10 +880,15 @@ def _ai_job(mod, row: dict) -> None:
         values["ai_usage"] = preview.get("ai_usage")
         values["choices"] = {}
         _save(fid, values)
+        new = set(ai_image_paths(preview))                 # a re-run: the pictures of the earlier read that this one did not rewrite
+        _delete_ai_images([x for x in ai_image_paths(row.get("preview")) if x not in new])
     except Exception as exc:
         logger.exception("inbox AI read failed for %s", fid)
         try:
-            _save(fid, {"status": "failed", "error": _thai_error("AI อ่านไม่สำเร็จ", exc)})
+            failed = {"status": "failed", "error": _thai_error("AI อ่านไม่สำเร็จ", exc)}
+            if getattr(exc, "usage", None):                 # a read that failed partway still spent tokens: keep the count (review, 26 Nov 2026)
+                failed["ai_usage"] = exc.usage
+            _save(fid, failed)
         except Exception:
             logger.exception("could not record the AI failure for %s", fid)
     finally:

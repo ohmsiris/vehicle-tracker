@@ -13,6 +13,9 @@ from her book (the cash for petty cash, mid-month advances, cash wages) -- sorte
 * a cheque that pays a stored PEA bill clears that bill (within 1 baht as it is, or within 1,000 with the difference flagged);
 * a cheque whose note names a factory purchase bill the app already booked ('#PC6906-081' = purchase_bills.bill_no, Cr 2100 owed to
   the shop) pays that bill (Dr 2100) -- 24 Nov 2026, the oil bill PC6906-081 had been counted twice, as the bill and as the cheque;
+* a cost row that pays a bill the drop box read with AI ('bill:<month>:<branch>:<hash>:<n>', Cr 2100, not yet paid by another run)
+  pays that bill (Dr 2100) when the cheque's note names its number, or its amount is within 1 baht and the payee looks like the
+  bill's party -- the entry says "อ้างอิง bill:..." so the checks (app/acc_checks) see the bill paid (review 26 Nov 2026);
 * anything the rules do not know goes to 7900 flagged.
 Accrual date: a row with its own day (12/9/69) uses it; a row that names its month ("08/69") is booked on the 25th of that month;
 other supplier bills are last month's bills (the run on the 20th pays them), so the 25th of the month before the run.
@@ -182,7 +185,7 @@ def purchase_refs(row: dict, purchases: dict) -> list[dict]:
     text = _norm(f"{row.get('what')} {row.get('note')}")
     out = []
     for key, bill in purchases.items():
-        if len(key) < 5:
+        if len(key) < 5 or str(key).startswith(AI_KEY):
             continue
         for m in re.finditer(re.escape(key), text):
             before = text[m.start() - 1] if m.start() else ""
@@ -191,6 +194,70 @@ def purchase_refs(row: dict, purchases: dict) -> list[dict]:
                 out.append(bill)
                 break
     return out
+
+
+AI_KEY = "~AI:"          # purchases-dict key prefix of an AI-read bill (load_refs); never a bill number (no shop writes '~')
+AI_REF = "อ้างอิง"        # the cheque entry names the AI bill it pays: '... · จ่ายบิล <party> (อ้างอิง bill:2026-10:แก่งคอย:ab12cd34:1)'
+_AI_SID = re.compile(r"bill:[^\s,()·]+")
+
+
+def ai_bills_of(purchases: Optional[dict]) -> list[dict]:
+    """The AI-read bills load_refs() put in the purchases dict (the drop box passes refs[0], refs[1] only)."""
+    return [v for k, v in (purchases or {}).items() if str(k).startswith(AI_KEY) and isinstance(v, dict)]
+
+
+def _alike_payee(row: dict, bill: dict) -> bool:
+    from app.acc_checks import norm_name, similar
+    from app.inbox_ai import BILL_FEEDS
+    mine = [row.get("payee"), row.get("what")]
+    theirs = [bill.get("party"), bill.get("what")]
+    if any(similar(x, y) for x in mine for y in theirs):
+        return True
+    tm, tt = " ".join(str(x or "") for x in mine), " ".join(str(x or "") for x in theirs)
+    if any(rx.search(tm) and rx.search(tt) for rx, _, _ in BILL_FEEDS):
+        return True
+    a, b = norm_name(tm), norm_name(tt)
+    if not a or not b:
+        return False
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, a, b, autojunk=False).find_longest_match(0, len(a), 0, len(b)).size >= 6
+
+
+def ai_bill_refs(row: dict, ai_bills: list[dict], batch: str, run_month: str, used: set, branch: Optional[str] = None) -> list[dict]:
+    """The open AI-read bill(s) a cheque row pays: its bill number in the row's text / note (as a whole token), else ONE bill of the
+    same amount (within 1 baht) whose party or what looks like the payee / the row. Open = Cr 2100 not cleared by a cheque of
+    another batch (a re-read of this batch may match it again), not matched by an earlier row of this batch, and the bill is of the
+    run's month or up to 3 months before (the run on the 20th pays last month's bills; a late payment a little later). A match by
+    amount and name only takes a bill of the sheet's branch; a bill number in the note may name the other branch's bill (flagged)."""
+    if not ai_bills:
+        return []
+    lo = shift_month(run_month, -3)
+    cands = [b for b in ai_bills if b["source_id"] not in used and lo <= (b.get("month") or "") <= run_month
+             and not (set(b.get("paid_by") or []) - {batch})]
+    text = _norm(f"{row.get('what')} {row.get('note')}")
+    by_doc = []
+    for b in cands:
+        key = _norm(b.get("doc_no") or "")
+        if len(key) < 4:
+            continue
+        for m in re.finditer(re.escape(key), text):
+            before = text[m.start() - 1] if m.start() else ""
+            after = text[m.end()] if m.end() < len(text) else ""
+            if not before.isalnum() and not after.isalnum():
+                by_doc.append(b)
+                break
+    if by_doc:
+        return by_doc
+    amt = float(row.get("amount") or 0)
+    near = sorted((abs(float(b["total"]) - amt), b["source_id"], b) for b in cands
+                  if abs(float(b["total"]) - amt) <= 1.0 and (not branch or not b.get("branch") or b["branch"] == branch)
+                  and _alike_payee(row, b))
+    return [near[0][2]] if near else []
+
+
+def shift_month(month: str, n: int) -> str:
+    y, m = int(month[:4]), int(month[5:7]) - 1 + n
+    return f"{y + m // 12}-{m % 12 + 1:02d}"
 
 
 def owed(bill: dict) -> bool:
@@ -206,10 +273,13 @@ def build(rows: list[dict], *, branch: str, file_month: date, batch: str, bills:
           purchases: Optional[dict] = None) -> dict:
     """bills = {total: invoice no. or (invoice no., bill period)} of PEA bills already stored: a cheque for that amount (to within
     1 baht, 24 Nov 2026: 835,380.25 paid on a 835,380.28 bill) pays the bill (Dr 2100) instead of being the cost again.
-    purchases = {normalised bill_no: purchase_bills row}: a cheque whose note names an owed purchase bill pays it (Dr 2100).
-    Returns {"entries", "flags", "matched": [{"row", "pea" | "purchase", "period"}]} -- what each row was matched to."""
+    purchases = {normalised bill_no: purchase_bills row}: a cheque whose note names an owed purchase bill pays it (Dr 2100). It may
+    also hold the open AI-read bills (keys AI_KEY + source_id, see load_refs): a cost row that names one, or has its amount and a
+    similar payee, pays it (Dr 2100) instead of being the cost a second time (review 26 Nov 2026).
+    Returns {"entries", "flags", "matched": [{"row", "pea" | "purchase" | "bill", "period"}]} -- what each row was matched to."""
     entries, flags, seen, matched = [], [], {}, []
     bills = bills or {}
+    ai_bills, ai_used, run = ai_bills_of(purchases), set(), f"{file_month:%Y-%m}"
     for r in rows:
         c = classify(r)
         bank = paid_from(r)
@@ -237,6 +307,11 @@ def build(rows: list[dict], *, branch: str, file_month: date, batch: str, bills:
                 matched.append({"row": rid, "pea": inv, "period": period})
         elif c["kind"] in ("cost", "unknown"):
             paid_bills = [b for b in purchase_refs(r, purchases or {}) if owed(b)]
+            if not paid_bills:
+                for b in ai_bill_refs(r, ai_bills, batch, run, ai_used, branch):
+                    ai_used.add(b["source_id"])
+                    paid_bills.append({"bill_no": b.get("doc_no") or b.get("party") or "-", "total": b["total"], "branch": b.get("branch"),
+                                       "ai_ref": b["source_id"], "period": b.get("month")})
         if inv:
             c = {"kind": "pays_bill", "account": "2100", "vat": 0.0}
             when, est = r["cheque_date"] or when, False
@@ -245,8 +320,14 @@ def build(rows: list[dict], *, branch: str, file_month: date, batch: str, bills:
         elif paid_bills:
             bill_total = round(sum(float(b["total"]) for b in paid_bills), 2)
             nos = ", ".join(str(b.get("bill_no")) for b in paid_bills)
+            refs = [b["ai_ref"] for b in paid_bills if b.get("ai_ref")]
+            if refs:
+                nos += f" ({AI_REF} {', '.join(refs)})"
             for b in paid_bills:
-                matched.append({"row": rid, "purchase": b.get("bill_no"), "period": None})
+                if b.get("ai_ref"):
+                    matched.append({"row": rid, "bill": b["ai_ref"], "period": b.get("period")})
+                else:
+                    matched.append({"row": rid, "purchase": b.get("bill_no"), "period": None})
                 if b.get("branch") and b["branch"] != branch:
                     flags.append(f"แถว {r['no']}: บิล {b.get('bill_no')} อยู่สาขา{b['branch']} แต่เช็คอยู่ชีท{branch}")
             when, est = r["cheque_date"] or when, False
@@ -339,7 +420,9 @@ def printed_total(rows: list[list]) -> Optional[float]:
 
 def load_refs() -> tuple[dict, dict]:
     """(PEA bills, purchase bills) to match cheque rows against -- READ only. bills = {what was paid: (invoice no., bill period)};
-    purchases = {normalised bill_no: purchase_bills row}. Missing tables (an old database) give empty dicts."""
+    purchases = {normalised bill_no: purchase_bills row}, plus the AI-read bills of the drop box (Cr 2100) under keys AI_KEY +
+    source_id (ai_bills_of reads them back; they ride in this dict because the drop-box cheque reader passes refs[0], refs[1]).
+    Missing tables (an old database) give empty dicts."""
     bills, purchases = {}, {}
     try:
         bills = {round(float(x["total"]) - float(x.get("deposit_interest") or 0), 2): (x["invoice_no"], x["bill_period"])   # what was paid
@@ -351,7 +434,40 @@ def load_refs() -> tuple[dict, dict]:
                                                                                             "order": "id.asc"}) if x.get("bill_no")}
     except supabase.SupabaseError:
         pass
+    try:
+        for b in load_ai_bills():
+            purchases[AI_KEY + b["source_id"]] = b
+    except supabase.SupabaseError:
+        pass
     return bills, purchases
+
+
+def ai_bill_entry(e: dict) -> Optional[dict]:
+    """An acc_entries row of an AI-read bill (with its lines) -> {"source_id", "month", "branch", "party", "what", "doc_no", "total"}
+    (what it owes on 2100), or None when it owes nothing."""
+    sid = str(e.get("source_id") or "")
+    m = re.match(r"^bill:(\d{4}-\d{2}):", sid)
+    total = round(sum(float(ln.get("credit") or 0) for ln in e.get("lines") or [] if ln.get("account") == "2100"), 2)
+    if not m or total <= 0:
+        return None
+    return {"ai_bill": True, "source_id": sid, "month": m.group(1), "branch": e.get("branch"), "party": e.get("party") or "",
+            "what": str(e.get("description") or "").split(" · ")[0], "doc_no": e.get("doc_no"), "total": total, "paid_by": []}
+
+
+def load_ai_bills() -> list[dict]:
+    """The AI-read bills in the books ('bill:' entries owing on 2100), each with the cheque batches that already pay it ("paid_by":
+    batch keys of the hq_cheques entries whose description names it with AI_REF)."""
+    rows = supabase.select_all("acc_entries", {"select": "id,entry_date,branch,source_id,party,description,doc_no,lines:acc_lines(account,credit)",
+                                               "source_id": "like.bill:*", "order": "id.asc"})
+    out = {b["source_id"]: b for b in (ai_bill_entry(e) for e in rows) if b}
+    if not out:
+        return []
+    for p in supabase.select_all("acc_entries", {"select": "source_id,description", "source": "eq.hq_cheques",
+                                                 "description": f"like.*{AI_REF} bill:*", "order": "id.asc"}):
+        for ref in _AI_SID.findall(str(p.get("description") or "")):
+            if ref in out:
+                out[ref]["paid_by"].append(str(p.get("source_id") or "").rsplit(":", 1)[0])
+    return list(out.values())
 
 
 def import_sheets(sheets: dict, file_month: Optional[date] = None, branch: str = "สระบุรี", write: bool = False,

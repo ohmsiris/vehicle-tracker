@@ -13,18 +13,26 @@ VEHICLES = [{"id": 1, "plate_number": "1ฒถ 2090", "vehicle_number": 12, "bra
 
 
 class FakeDB:
-    """select_all / select / delete / insert against in-memory tables; every write is recorded."""
+    """select_all / select / delete / insert and the storage calls against in-memory tables and files; every write is recorded."""
 
     def __init__(self, tables=None):
         self.tables = {"vehicles": VEHICLES, **(tables or {})}
         self.deleted, self.inserted = [], []
+        self.files, self.uploads = {}, []
 
     def select_all(self, table, params=None, page=1000):
         rows = self.tables.get(table, [])
-        like = (params or {}).get("source_id", "")
-        if like.startswith("like."):
-            pre = like[5:].rstrip("*")
-            rows = [r for r in rows if (r.get("source_id") or "").startswith(pre)]
+        for col, cond in (params or {}).items():
+            if col not in ("source_id", "entry_id", "id") or not isinstance(cond, str):
+                continue                                                  # other filters are ignored (the sales tests rely on it)
+            if cond.startswith("like."):
+                pre = cond[5:].rstrip("*")
+                rows = [r for r in rows if str(r.get(col) or "").startswith(pre)]
+            elif cond.startswith("in.("):
+                want = set(cond[4:-1].split(","))
+                rows = [r for r in rows if str(r.get(col)) in want]
+            elif cond.startswith("eq."):
+                rows = [r for r in rows if str(r.get(col)) == cond[3:]]
         return list(rows)
 
     def select(self, table, params=None):
@@ -32,17 +40,37 @@ class FakeDB:
 
     def delete(self, table, match):
         self.deleted.append((table, dict(match)))
+        keep = self.tables.get(table)
+        if keep is None:
+            return
+        gone = {id(r) for r in self.select_all(table, match)}
+        self.tables[table] = [r for r in keep if id(r) not in gone]
 
     def insert(self, table, rows, **kw):
         self.inserted.append((table, list(rows)))
         return rows
 
+    def storage_upload(self, path, data, content_type, upsert=False, bucket=None):
+        assert bucket == supabase.ACCOUNTING_BUCKET                       # the private bucket, never the public one
+        self.uploads.append(path)
+        self.files[path] = data
+
+    def storage_download(self, path, bucket=None):
+        if path not in self.files:
+            raise supabase.SupabaseError(f"storage download {path}: 404")
+        return self.files[path]
+
+    def storage_delete(self, paths, bucket=None):
+        for path in paths:
+            self.files.pop(path, None)
+
 
 @pytest.fixture
 def db(monkeypatch):
     fake = FakeDB()
-    for name in ("select_all", "select", "delete", "insert"):
+    for name in ("select_all", "select", "delete", "insert", "storage_upload", "storage_download", "storage_delete"):
         monkeypatch.setattr(supabase, name, getattr(fake, name))
+    monkeypatch.setattr(supabase, "update", lambda *a, **k: pytest.fail("the fuel reader never updates rows"))
     monkeypatch.setattr(accounting, "_require", lambda: None)
     got = []
     monkeypatch.setattr(accounting, "_insert_entries", lambda es: got.extend(es))
@@ -159,6 +187,93 @@ def test_bangchak_month_from_rows_station_in_key(db):
     assert ("acc_entries", {"source_id": "eq.fuel:bangchak:2026-10:NM"}) in db.deleted
     assert ("acc_entries", {"source_id": "like.fuel:bangchak:2026-10:NM:*"}) in db.deleted
     assert len(db.entries) == 2
+    assert out["legacy_removed"] == 1 and db.uploads == ["inbox/legacy/fuel-bangchak-2026-10.json"]
+
+
+# ------------------------------------------------------------------ the scripts' combined entries come back when the files go
+LEGACY = [{"id": "a1", "source_id": "fuel:bangchak:2026-10:842051", "entry_date": "2026-10-25", "branch": "สระบุรี", "source": "card_fuel",
+           "party": "บางจาก", "description": "น้ำมันบางจาก ต.ค. 69 84-2051", "doc_type": None, "doc_no": None},
+          {"id": "a3", "source_id": "fuel:bangchak:2026-10:est-25", "entry_date": "2026-10-25", "branch": "สระบุรี", "source": "card_fuel",
+           "party": "บางจาก", "description": "ประมาณการ", "doc_type": None, "doc_no": None}]
+LINES = [{"id": 1, "entry_id": "a1", "account": "6120", "debit": 100.0, "credit": 0.0, "branch": "สระบุรี", "vehicle_id": 2,
+          "machine_id": None, "memo": None},
+         {"id": 2, "entry_id": "a1", "account": "2100", "debit": 0.0, "credit": 100.0, "branch": "สระบุรี", "vehicle_id": None,
+          "machine_id": None, "memo": None},
+         {"id": 3, "entry_id": "a3", "account": "6120", "debit": 50.0, "credit": 0.0, "branch": "สระบุรี", "vehicle_id": None,
+          "machine_id": None, "memo": "est"}]
+
+
+def _legacy_db(db):
+    db.tables["acc_entries"] = [dict(r) for r in LEGACY]
+    db.tables["acc_lines"] = [dict(r) for r in LINES]
+
+
+def _station(db, station):
+    """What a booked station file leaves in the books (its entries' source_ids)."""
+    db.tables["acc_entries"].append({"id": f"s-{station}", "source_id": f"fuel:bangchak:2026-10:{station}:842051"})
+
+
+def test_removing_the_only_station_file_puts_the_old_entries_back(db):
+    _legacy_db(db)
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_25กย-25ตค69.xlsx", _bc_file()))
+    assert "ห้วยบง" in p["remove_note"] and "กลับมา" in p["remove_note"] and any("เก็บสำเนา" in x for x in p["flags"])
+    out = fuel.book(p, "file-1")
+    assert out["legacy_removed"] == 2 and not fuel._legacy_bangchak("2026-10")
+    db.entries.clear()
+    fuel.unbook(p)                                                             # the NM file is removed, ห้วยบง was never booked
+    back = {e["source_id"]: e for e in db.entries}
+    assert set(back) == {"fuel:bangchak:2026-10:842051", "fuel:bangchak:2026-10:est-25"}
+    a1 = back["fuel:bangchak:2026-10:842051"]
+    assert (a1["entry_date"], a1["branch"], a1["party"]) == ("2026-10-25", "สระบุรี", "บางจาก")
+    assert [(ln["account"], ln["debit"], ln["credit"], ln["vehicle_id"]) for ln in a1["lines"]] == [("6120", 100.0, 0.0, 2), ("2100", 0.0, 100.0, None)]
+    assert back["fuel:bangchak:2026-10:est-25"]["lines"][0]["memo"] == "est"
+    assert db.files == {}                                                      # the copy is used once
+
+
+def test_with_the_other_station_still_booked_the_copy_waits_for_the_last_file(db):
+    _legacy_db(db)
+    nm = fuel.read(sniff_file("เติมน้ำมัน_NM_25กย-25ตค69.xlsx", _bc_file()))
+    fuel.book(nm, "file-nm")
+    _station(db, "ห้วยบง")                                                     # the ห้วยบง file is booked too
+    hb = fuel.read(sniff_file("เติมน้ำมัน_ห้วยบง_25กย-25ตค69.xlsx", _bc_file(title="สาขาห้วยบง — งวด 25/9/69 – 25/10/69")))
+    assert "remove_note" in hb and any("เก็บสำเนา" in x for x in hb["flags"])  # the page can warn on this file too
+    db.entries.clear()
+    fuel.unbook(nm)                                                            # NM removed while ห้วยบง is booked: nothing comes back
+    assert db.entries == [] and "inbox/legacy/fuel-bangchak-2026-10.json" in db.files
+    db.tables["acc_entries"] = [r for r in db.tables["acc_entries"] if ":ห้วยบง:" not in r["source_id"]]
+    fuel.unbook(hb)                                                            # the last station file goes: the month comes back
+    assert sorted(e["source_id"] for e in db.entries) == ["fuel:bangchak:2026-10:842051", "fuel:bangchak:2026-10:est-25"]
+
+
+def test_booking_a_second_file_of_the_month_keeps_the_first_copy(db):
+    _legacy_db(db)
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_25กย-25ตค69.xlsx", _bc_file()))
+    fuel.book(p, "file-1")
+    first = db.files["inbox/legacy/fuel-bangchak-2026-10.json"]
+    out = fuel.book(p, "file-2")                                               # a newer NM file (or the same one re-booked)
+    assert out["legacy_removed"] == 0 and db.files["inbox/legacy/fuel-bangchak-2026-10.json"] == first and len(db.uploads) == 1
+
+
+def test_no_copy_no_restore_and_the_copy_is_written_before_anything_is_deleted(db, monkeypatch):
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_25กย-25ตค69.xlsx", _bc_file()))
+    assert "remove_note" not in p
+    fuel.unbook(p)                                                             # never booked over old entries: nothing to put back
+    assert db.entries == []
+    _legacy_db(db)
+
+    def broken(*a, **k):
+        raise supabase.SupabaseError("storage down")
+    monkeypatch.setattr(supabase, "storage_upload", broken)
+    with pytest.raises(supabase.SupabaseError):
+        fuel.book(p, "file-1")
+    assert len(fuel._legacy_bangchak("2026-10")) == 2 and not any(str(m.get("id", "")).startswith("in.") for t, m in db.deleted)
+
+
+def test_pt_files_never_touch_the_bangchak_copy(db):
+    p = fuel.read(sniff_file("PT export.xlsx", _pt_file()))
+    fuel.book(p, "file-1")
+    fuel.unbook(p)
+    assert db.uploads == [] and db.files == {}
 
 
 def test_bangchak_disagreements_are_conflicts(db):

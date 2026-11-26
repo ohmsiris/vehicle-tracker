@@ -52,6 +52,7 @@ class FakeDB:
 
     def __init__(self):
         self.rows, self.files, self.calls = {}, {}, []
+        self.private_deleted = []                 # AI page images deleted from the private bucket
         self.clock = 0
 
     @staticmethod
@@ -118,6 +119,9 @@ class FakeDB:
         return self.files[path]
 
     def storage_delete(self, paths, bucket=supabase.STORAGE_BUCKET):
+        if bucket == supabase.PRIVATE_BUCKET:
+            self.private_deleted += list(paths)
+            return
         assert bucket == supabase.ACCOUNTING_BUCKET
         for p in paths:
             self.files.pop(p, None)
@@ -309,9 +313,9 @@ def test_booking_replaces_and_a_conflict_must_be_answered_first(db, readers):
     assert v["status"] == "read" and v["month"] == "2026-10" and db.rows[fid]["choices"] == {"month": "2026-10"}
     v = inbox.book(fid)
     assert v["status"] == "booked" and v["booked_total"] == 845_000.0 and db.rows[fid]["batches"] == ["cheque-2026-10-สระบุรี"]
-    # changing the answer on a booked file: what it booked is taken back, then booked again under the new key
+    # changing the answer on a booked file: booked under the new key FIRST, then the old key it no longer holds is taken back
     inbox.choose(fid, {"month": "2026-11"})
-    assert log[-2:] == [("unbook", ["cheque-2026-10-สระบุรี"]), ("book", fid, ["cheque-2026-11-สระบุรี"])]
+    assert log[-2:] == [("book", fid, ["cheque-2026-11-สระบุรี"]), ("unbook", ["cheque-2026-10-สระบุรี"])]
     assert db.rows[fid]["status"] == "booked" and db.rows[fid]["batches"] == ["cheque-2026-11-สระบุรี"]
 
 
@@ -322,7 +326,9 @@ def test_a_newer_file_takes_over_the_key_so_removing_the_old_one_deletes_nothing
     b = inbox.upload([("เช็ค v2.xls", b"v2")])[0]["id"]
     inbox.book(a)
     inbox.book(b)
-    assert db.rows[a]["status"] == "read" and db.rows[a]["batches"] == [] and "แทนที่" in db.rows[a]["error"]
+    assert db.rows[a]["status"] == "stored" and db.rows[a]["batches"] == []
+    va = inbox.row_view(db.rows[a])
+    assert va["superseded"] is True and va["superseded_by"] == "เช็ค v2.xls" and inbox.row_view(db.rows[b])["superseded"] is False
     log.clear()
     inbox.remove(a)
     assert log == [] and a not in db.rows and f"inbox/{a}.xls" not in db.files        # nothing unbooked: v2 owns the key
@@ -341,8 +347,8 @@ def test_rebook_re_reads_and_re_books_the_booked_files_it_names(db, readers):
     p = inbox.upload([("PEA.pdf", b"PEA bill")])[0]["id"]
     log.clear()
     v = inbox.book(p)
-    assert v["rebooked"] == 1
-    assert log == [("book", p, ["pea-1"]), ("unbook", ["cheque-2026-11-สระบุรี"]), ("book", c, ["cheque-2026-11-สระบุรี"])]
+    assert v["rebooked"] == 1 and v["rebook_failed"] == []
+    assert log == [("book", p, ["pea-1"]), ("book", c, ["cheque-2026-11-สระบุรี"])]      # same key: the reader's book replaces it
 
 
 def test_store_only_needs_ai_and_failed_files_cannot_be_booked(db, readers):
@@ -464,12 +470,13 @@ def test_routes_upload_list_book_and_map_errors_to_thai_4xx(db, readers, monkeyp
     assert one["preview"]["batches"][0]["rows"][0]["role"] == "cost" and one["roles"]["funding"].startswith("เติมเงินสดย่อย")
     f = c.get(f"/api/accounts/inbox/{fid}/file?token=secret")
     assert f.status_code == 200 and f.content == b"abc"
+    assert f.headers["content-type"] == "application/octet-stream" and f.headers["content-disposition"].startswith("attachment")
     assert c.post(f"/api/accounts/inbox/{got[1]['id']}/book", headers=h).status_code == 422
     assert c.post(f"/api/accounts/inbox/{fid}/book", headers=h).json()["status"] == "booked"
     assert c.post(f"/api/accounts/inbox/{fid}/choose", headers=h, json={"choices": {"month": "2026-07"}}).status_code == 422
     assert c.post("/api/accounts/inbox/00000000-0000-0000-0000-000000000000/reread", headers=h).status_code == 404
     assert c.post(f"/api/accounts/inbox/{got[1]['id']}/ai", headers=h).status_code == 422          # no AI key on the server
-    assert c.delete(f"/api/accounts/inbox/{fid}", headers=h).json() == {"ok": True} and fid not in db.rows
+    assert c.delete(f"/api/accounts/inbox/{fid}", headers=h).json() == {"ok": True, "rebooked": 0, "rebook_failed": []} and fid not in db.rows
     monkeypatch.setattr(inbox, "_optional", lambda name: type("M", (), {"run": staticmethod(lambda m, b: {"checks": [{"key": "x", "state": "ok"}]})})()
                         if name == "acc_checks" else None)
     assert c.get("/api/accounts/checks?month=2026-11", headers=h).json() == {"available": True, "checks": [{"key": "x", "state": "ok"}], "note": ""}
@@ -505,3 +512,377 @@ def test_thai_file_names_sent_in_the_windows_code_page_are_put_back():
     garbled = "สรุปเงินเดือน.pdf".encode("cp874").decode("latin-1")
     assert inbox.fix_name(garbled) == "สรุปเงินเดือน.pdf"
     assert inbox.fix_name("สรุป.pdf") == "สรุป.pdf" and inbox.fix_name("Oct.pdf") == "Oct.pdf"
+
+
+# ------------------------------------------------------------------ review fixes (26 Nov 2026)
+def _thread(fn, *args):
+    """Run fn in another thread (a second request); (result, exception)."""
+    import threading
+    box = {}
+
+    def go():
+        try:
+            box["out"] = fn(*args)
+        except Exception as exc:          # noqa: BLE001
+            box["exc"] = exc
+    t = threading.Thread(target=go)
+    t.start()
+    t.join(5)
+    return box.get("out"), box.get("exc")
+
+
+def test_a_second_action_on_the_same_file_is_refused_while_one_runs(db, readers):
+    log = []
+    readers.append(cheque_reader(log))
+    fid = inbox.upload([("เช็ค.xls", b"x")])[0]["id"]
+    with inbox._busy(fid):                                       # the first ลงบัญชี is still running
+        for fn in (inbox.book, inbox.reread, inbox.remove):
+            _out, exc = _thread(fn, fid)
+            assert isinstance(exc, inbox.Busy) and str(exc) == inbox.BUSY
+        _out, exc = _thread(inbox.choose, fid, {"month": "2026-11"})
+        assert isinstance(exc, inbox.Busy)
+    assert log == [] and db.rows[fid]["status"] == "read"
+    assert inbox.book(fid)["status"] == "booked" and log == [("book", fid, ["cheque-2026-11-สระบุรี"])]
+
+
+def test_a_busy_file_answers_409_in_thai(db, readers, monkeypatch):
+    readers.append(cheque_reader([]))
+    fid = inbox.upload([("เช็ค.xls", b"x")])[0]["id"]
+    c = _client(monkeypatch)
+    with inbox._busy(fid):
+        r, _exc = _thread(lambda: c.post(f"/api/accounts/inbox/{fid}/book", headers={"X-App-Token": "secret"}))
+    assert r.status_code == 409 and r.json()["detail"] == inbox.BUSY
+
+
+def test_two_ai_clicks_never_start_two_reads(db, readers, monkeypatch):
+    from app.config import settings
+    object.__setattr__(settings, "anthropic_api_key", "test-key")
+    fid = inbox.upload([("scan.pdf", b"%PDF-1.4 scan")])[0]["id"]
+    monkeypatch.setattr(inbox, "_optional", lambda name: types.SimpleNamespace(run=lambda *a: None) if name == "inbox_ai" else None)
+    started = []
+    monkeypatch.setattr(inbox, "_spawn", lambda fn, *a: started.append(a))       # the job keeps running
+    try:
+        inbox.ai(fid)
+        with pytest.raises(inbox.InboxError, match="กำลังอ่าน"):
+            inbox.ai(fid)
+        assert len(started) == 1
+    finally:
+        inbox._jobs.clear()
+
+
+def _booked_cheque(db, readers, log, **kw):
+    r = cheque_reader(log, **kw)
+    readers.append(r)
+    fid = inbox.upload([("เช็ค.xls", b"x")])[0]["id"]
+    inbox.book(fid)
+    log.clear()
+    return r, fid
+
+
+def test_a_reread_that_cannot_book_keeps_the_booking_and_waits_for_the_owner(db, readers):
+    log = []
+    r, fid = _booked_cheque(db, readers, log)
+    conflict = [{"key": "month", "message": "หัวกระดาษบอก ต.ค.", "options": [{"value": "2026-10"}, {"value": "2026-11"}], "default": "2026-11"}]
+    r.read = lambda f: ic.empty_preview("cheques", r.LABEL, month=f.choices.get("month") or "2026-11",
+                                        conflicts=[] if f.choices.get("month") else conflict,
+                                        batches=[batch(f"cheque-{f.choices.get('month') or '2026-11'}-สระบุรี")])
+    v = inbox.reread(fid)
+    row = db.rows[fid]
+    assert log == [] and row["status"] == "booked" and row["batches"] == ["cheque-2026-11-สระบุรี"]      # nothing taken out of the books
+    assert v["status"] == "booked" and v["pending"]["status"] == "needs_choice" and v["conflicts"] == conflict and "ยังอยู่" in v["message"]
+    assert inbox.owned_preview(row)["batches"][0]["key"] == "cheque-2026-11-สระบุรี"      # the booked preview is still the one to unbook
+    with pytest.raises(inbox.InboxError, match="ต้องเลือก"):
+        inbox.book(fid)
+    v = inbox.choose(fid, {"month": "2026-10"})                   # the answer: book the new key first, then take the old one back
+    assert log == [("book", fid, ["cheque-2026-10-สระบุรี"]), ("unbook", ["cheque-2026-11-สระบุรี"])]
+    assert v["status"] == "booked" and v["pending"] is None and db.rows[fid]["choices"] == {"month": "2026-10"}
+    assert "pending" not in db.rows[fid]["preview"]
+
+
+def test_a_reread_that_turns_store_only_keeps_the_booking(db, readers):
+    log = []
+    r, fid = _booked_cheque(db, readers, log)
+    r.read = lambda f: ic.empty_preview("cheques", r.LABEL, store_only=True, note="สำเนา")
+    v = inbox.reread(fid)
+    assert log == [] and db.rows[fid]["status"] == "booked" and v["pending"]["status"] == "stored" and "rebooked" not in v
+
+
+def test_a_reader_refusal_while_booking_is_thai_and_leaves_the_row_as_it_was(db, readers, monkeypatch):
+    from app import acc_docs
+    log = []
+    r = cheque_reader(log)
+    readers.append(r)
+    fid = inbox.upload([("เช็ค.xls", b"x")])[0]["id"]
+
+    def refuse(p, file_id):
+        raise acc_docs.BadBatch("มีคนแก้รายการบนหน้าตรวจแล้ว")
+    r.book = refuse
+    with pytest.raises(inbox.InboxError, match="มีคนแก้รายการ"):
+        inbox.book(fid)
+    assert db.rows[fid]["status"] == "read" and db.rows[fid]["batches"] == []
+    c = _client(monkeypatch)
+    resp = c.post(f"/api/accounts/inbox/{fid}/book", headers={"X-App-Token": "secret"})
+    assert resp.status_code == 422 and "มีคนแก้รายการ" in resp.json()["detail"]
+    # a booked file whose re-book is refused keeps its booking: nothing was unbooked before the reader said no
+    r.book = lambda p, file_id: {"batches": [b["key"] for b in p["batches"]], "booked": 1.0, "rebook": []}
+    inbox.book(fid)
+    r.book = refuse
+    with pytest.raises(inbox.InboxError):
+        inbox.reread(fid)
+    assert db.rows[fid]["status"] == "booked" and db.rows[fid]["batches"] == ["cheque-2026-11-สระบุรี"] and log == []
+
+
+def _pea(log, **kw):
+    return fake_reader("pea_bill", lambda f: 0.95 if f.data.startswith(b"PEA") else 0,
+                       {"month": "2026-11", "batches": [batch("pea-1", feed="electricity")]}, log=log, **kw)
+
+
+def test_a_failed_rebook_is_reported_and_undoes_nothing(db, readers):
+    log = []
+    cheq = cheque_reader(log)
+    readers.append(cheq)
+    readers.append(_pea(log, rebook=[{"kind": "cheques", "month": "2026-11"}]))
+    c = inbox.upload([("เช็ค.xls", b"cheque")])[0]["id"]
+    inbox.book(c)
+
+    def crash(p, file_id):
+        raise RuntimeError("connection reset")
+    cheq.book = crash
+    p = inbox.upload([("PEA.pdf", b"PEA bill")])[0]["id"]
+    log.clear()
+    v = inbox.book(p)
+    assert v["status"] == "booked" and v["rebooked"] == 0 and len(v["rebook_failed"]) == 1 and v["rebook_failed"][0]["id"] == c
+    assert db.rows[c]["status"] == "booked" and db.rows[c]["batches"] == ["cheque-2026-11-สระบุรี"] and log == [("book", p, ["pea-1"])]
+
+
+def test_a_rebook_that_cannot_book_is_not_counted(db, readers):
+    log = []
+    cheq = cheque_reader(log)
+    readers.append(cheq)
+    readers.append(_pea(log, rebook=[{"kind": "cheques", "month": "2026-11"}]))
+    c = inbox.upload([("เช็ค.xls", b"cheque")])[0]["id"]
+    inbox.book(c)
+    cheq.read = lambda f: ic.empty_preview("cheques", cheq.LABEL, conflicts=[{"key": "month", "message": "?", "options": []}])
+    v = inbox.book(inbox.upload([("PEA.pdf", b"PEA bill")])[0]["id"])
+    assert v["rebooked"] == 0 and v["rebook_failed"][0]["id"] == c and db.rows[c]["status"] == "booked"
+
+
+def test_an_unbook_may_ask_for_rebooks_and_remove_runs_them(db, readers):
+    """Removing a booked PEA bill: the cheque run that paid it is re-booked (it becomes a cost again)."""
+    log = []
+    readers.append(cheque_reader(log))
+    pea = _pea(log)
+
+    def unbook(p):
+        log.append(("unbook", [b["key"] for b in p["batches"]]))
+        return {"rebook": [{"kind": "cheques", "month": "2026-11"}]}
+    pea.unbook = unbook
+    readers.append(pea)
+    c = inbox.upload([("เช็ค.xls", b"cheque")])[0]["id"]
+    inbox.book(c)
+    p = inbox.upload([("PEA.pdf", b"PEA bill")])[0]["id"]
+    inbox.book(p)
+    log.clear()
+    out = inbox.remove(p)
+    assert out == {"rebooked": 1, "rebook_failed": []} and p not in db.rows
+    assert log == [("unbook", ["pea-1"]), ("book", c, ["cheque-2026-11-สระบุรี"])]
+
+
+def key_reader(log):
+    """A file books the keys its bytes name (b"k1,k2")."""
+    return fake_reader("cheques", 0.9, lambda f: {"month": "2026-11", "batches": [batch(k) for k in f.data.decode().split(",") if k]}, log=log)
+
+
+def test_a_partly_superseded_file_only_ever_rebooks_what_it_still_owns(db, readers):
+    log = []
+    readers.append(key_reader(log))
+    a = inbox.upload([("A.xls", b"k1,k2")])[0]["id"]
+    b = inbox.upload([("B.xls", b"k1")])[0]["id"]
+    inbox.book(a)
+    inbox.book(b)
+    ra = db.rows[a]
+    assert ra["status"] == "booked" and ra["batches"] == ["k2"] and ra["preview"]["superseded_keys"] == ["k1"]
+    va = inbox.row_view(ra)
+    assert va["superseded"] is False and va["superseded_by"] == "B.xls"
+    log.clear()
+    inbox.book(a)                                                # booking A again never takes k1 back from B
+    assert log == [("book", a, ["k2"])] and db.rows[b]["batches"] == ["k1"] and db.rows[a]["batches"] == ["k2"]
+    log.clear()
+    inbox.reread(a)
+    assert log == [("book", a, ["k2"])] and db.rows[b]["batches"] == ["k1"]
+    feed = inbox.files_by_feed(list(db.rows.values()))["hq_cheques"]
+    assert {x["id"]: x["booked"] for x in feed} == {a: True, b: True}
+
+
+def test_a_fully_superseded_file_is_kept_out_of_the_checklist_and_only_the_owner_takes_it_back(db, readers):
+    log = []
+    readers.append(key_reader(log))
+    a = inbox.upload([("A.xls", b"k1")])[0]["id"]
+    b = inbox.upload([("B.xls", b"k1,")])[0]["id"]               # different bytes, same key
+    inbox.book(a)
+    inbox.book(b)
+    assert db.rows[a]["status"] == "stored" and inbox.row_view(db.rows[a])["superseded"] is True
+    assert [x["id"] for x in inbox.files_by_feed(list(db.rows.values()))["hq_cheques"]] == [b]
+    inbox.reread(a)                                              # read again: still replaced, still not waiting
+    assert db.rows[a]["status"] == "stored" and inbox.row_view(db.rows[a])["superseded_by"] == "B.xls"
+    log.clear()
+    v = inbox.book(a)                                            # ลงบัญชี on it = the owner takes the key back
+    assert v["status"] == "booked" and v["superseded_by"] is None and db.rows[a]["batches"] == ["k1"] and log == [("book", a, ["k1"])]
+    assert db.rows[b]["status"] == "stored" and inbox.row_view(db.rows[b])["superseded_by"] == "A.xls"
+
+
+def test_an_amr_report_books_without_batches(db, readers):
+    log = []
+    readers.append(fake_reader("pea_bill", 0.9, {"month": "2026-11", "books_without_batches": True,
+                                                 "amr": {"ca_no": "1", "month": "2026-11"}}, log=log,
+                               book_result={"batches": [], "booked": 0.0, "rebook": []}))
+    fid = inbox.upload([("kWh123.xls", b"<html>amr")])[0]["id"]
+    v = inbox.book(fid)
+    assert v["status"] == "booked" and db.rows[fid]["batches"] == [] and log == [("book", fid, [])]
+    inbox.remove(fid)
+    assert log == [("book", fid, [])]                            # nothing to take back
+
+
+def test_a_month_question_without_options_takes_any_real_month():
+    p = {"conflicts": [{"key": "month", "message": "ไม่พบเดือน", "options": []}]}
+    assert inbox.clean_choices(p, {}, {"month": "2026-09"}) == {"month": "2026-09"}
+    for bad in ("2026-13", "26-09", "พ.ย."):
+        with pytest.raises(inbox.InboxError):
+            inbox.clean_choices(p, {}, {"month": bad})
+    with pytest.raises(inbox.InboxError):                        # with options, only an option
+        inbox.clean_choices({"conflicts": [{"key": "month", "options": [{"value": "2026-10"}]}]}, {}, {"month": "2026-09"})
+
+
+def test_a_row_left_in_ai_running_by_a_restart_can_be_read_again(db, readers):
+    readers.append(cheque_reader([]))
+    fid = inbox.upload([("เช็ค.xls", b"x")])[0]["id"]
+    db.rows[fid]["status"] = "ai_running"                        # no job in this process: the server restarted
+    assert inbox.reread(fid)["status"] == "read"
+    db.rows[fid]["status"] = "ai_running"
+    inbox._jobs[fid] = {"done": 0, "total": 1}
+    try:
+        with pytest.raises(inbox.InboxError, match="AI กำลังอ่าน"):
+            inbox.reread(fid)
+    finally:
+        inbox._jobs.clear()
+
+
+def test_ai_page_images_are_deleted_with_the_file_and_after_a_re_run(db, readers, monkeypatch):
+    from app.config import settings
+    object.__setattr__(settings, "anthropic_api_key", "test-key")
+    fid = inbox.upload([("scan.pdf", b"%PDF-1.4 scan")])[0]["id"]
+    imgs = {"1": f"accdocs/inbox/{fid}/p1.jpg", "2": f"accdocs/inbox/{fid}/p2.jpg"}
+
+    def run(row, data, on_progress):
+        return ic.empty_preview("scan", "เอกสาร", month="2026-11", batches=[batch("mid", feed="midmonth")],
+                                ai_usage={"calls": 1}, ai_images=dict(imgs))
+    monkeypatch.setattr(inbox, "_optional", lambda name: types.SimpleNamespace(run=run) if name == "inbox_ai" else None)
+    monkeypatch.setattr(inbox, "_spawn", lambda fn, *a: fn(*a))
+    inbox.ai(fid)
+    assert db.private_deleted == []
+    db.rows[fid]["status"] = "failed"                            # read again with AI: this time one page
+    imgs.pop("2")
+    inbox.ai(fid)
+    assert db.private_deleted == [f"accdocs/inbox/{fid}/p2.jpg"]
+    db.rows[fid]["preview"]["ai_images"]["9"] = "accdocs/2026-11-สระบุรี/p9.jpg"     # never a script batch's picture
+    inbox.remove(fid)
+    assert db.private_deleted == [f"accdocs/inbox/{fid}/p2.jpg", f"accdocs/inbox/{fid}/p1.jpg"]
+
+
+def test_only_pdfs_and_pictures_open_in_the_browser(db, readers, monkeypatch):
+    assert inbox.serve_as("text/html") == ("application/octet-stream", False)
+    assert inbox.serve_as("image/svg+xml") == ("application/octet-stream", False)
+    assert inbox.serve_as("application/pdf") == ("application/pdf", True) and inbox.serve_as("image/png") == ("image/png", True)
+    c = _client(monkeypatch)
+    h = {"X-App-Token": "secret"}
+    got = c.post("/api/accounts/inbox", headers=h, files=[("files", ("x.html", b"<script>alert(1)</script>", "text/html")),
+                                                          ("files", ("a.pdf", b"%PDF-1.4 a", "application/pdf"))]).json()["files"]
+    page = c.get(f"/api/accounts/inbox/{got[0]['id']}/file?token=secret")
+    assert page.headers["content-type"] == "application/octet-stream" and page.headers["content-disposition"].startswith("attachment")
+    assert page.headers["content-security-policy"] == "sandbox" and page.headers["x-content-type-options"] == "nosniff"
+    pdf = c.get(f"/api/accounts/inbox/{got[1]['id']}/file?token=secret")
+    assert pdf.headers["content-type"] == "application/pdf" and pdf.headers["content-disposition"].startswith("inline")
+    assert pdf.headers["x-content-type-options"] == "nosniff"
+
+
+def test_one_file_over_the_limit_is_refused_on_its_own_in_thai(db, readers, monkeypatch):
+    readers.append(cheque_reader([]))
+    monkeypatch.setattr(inbox, "MAX_FILE_BYTES", 10)
+    c = _client(monkeypatch)
+    r = c.post("/api/accounts/inbox", headers={"X-App-Token": "secret"},
+               files=[("files", ("big.pdf", b"%PDF-1.4 " + b"x" * 50, "application/pdf")), ("files", ("เช็ค.xls", b"small", "application/vnd.ms-excel"))])
+    assert r.status_code == 200, r.text
+    big, ok = r.json()["files"]
+    assert big["status"] == "failed" and big["id"] is None and "ใหญ่เกิน" in big["message"] and ok["status"] == "read"
+    assert len(db.rows) == 1
+    assert inbox.upload([("x.pdf", None)])[0]["message"].startswith("x.pdf: ไฟล์ใหญ่เกิน")
+    assert inbox.MAX_FILE_BYTES == 10
+
+
+PAY_ID = "11111111-1111-1111-1111-111111111111"
+
+
+def _payroll_row(db):
+    rows = [{"date": "2026-11-25", "text": "D001 สมชาย · 26 วัน", "party": "สมชาย", "amount": 12000.0, "role": "wages", "account": "5200", "code": "D001"},
+            {"date": "2026-11-25", "text": "D002 สมหญิง · 26 วัน", "party": "สมหญิง", "amount": 13000.0, "role": "wages", "account": "5200", "code": "D002"},
+            {"date": "2026-11-25", "text": "คืนเงินสดย่อย", "party": "เงินสดย่อย", "amount": 500.0, "role": "funding", "account": "1100"}]
+    b = {**batch("payroll:2026-11:DRV", feed="hq_salary"), "rows": rows, "pay_months": {"rows": [{"code": "D001", "name": "สมชาย", "net": 11000}]}}
+    db.rows[PAY_ID] = {"id": PAY_ID, "file_name": "เงินเดือน.pdf", "kind": "payroll", "status": "read", "storage_path": f"inbox/{PAY_ID}.pdf",
+                       "mime_type": "application/pdf", "batches": [], "choices": {}, "branches": [], "_t": 0, "sha256": "x",
+                       "preview": ic.empty_preview("payroll", "เงินเดือน", month="2026-11", batches=[b])}
+    db.files[f"inbox/{PAY_ID}.pdf"] = b"%PDF-1.4 pay"
+    return db.rows[PAY_ID]
+
+
+def test_per_person_pay_needs_the_employees_menu(db, readers, monkeypatch):
+    hidden = inbox.hide_pay(_payroll_row(db)["preview"])
+    rows = hidden["batches"][0]["rows"]
+    assert [r["text"].startswith("ค่าจ้างรวม 2 คน") for r in rows] == [True, False] and rows[0]["amount"] == 25000.0
+    assert hidden["batches"][0]["pay_months"] is None and "สมชาย" not in str(hidden)
+    assert users.sees_pay({"role": "staff", "menus": ["accounts_in", "employees"]}) and users.sees_pay({"role": "owner", "menus": []})
+    assert not users.sees_pay({"role": "staff", "menus": ["accounts_in"]}) and not users.sees_pay(None)
+    staff = {"id": 1, "name": "บัญชี", "role": "staff", "menus": ["accounts_in"], "active": True}
+    who = {"u_staff": staff, "u_hr": {**staff, "menus": ["accounts_in", "employees"]}}
+    monkeypatch.setattr(users, "session_user", lambda t: who.get(t))
+    c = _client(monkeypatch)
+    one = c.get(f"/api/accounts/inbox/{PAY_ID}", headers={"X-App-Token": "u_staff"})
+    assert one.status_code == 200, one.text
+    assert "สมชาย" not in str(one.json()["preview"]) and one.json()["preview"]["batches"][0]["rows"][0]["amount"] == 25000.0
+    denied = c.get(f"/api/accounts/inbox/{PAY_ID}/file?token=u_staff")
+    assert denied.status_code == 403 and "พนักงาน" in denied.json()["detail"]
+    full = c.get(f"/api/accounts/inbox/{PAY_ID}", headers={"X-App-Token": "u_hr"}).json()
+    assert "สมชาย" in str(full["preview"]) and c.get(f"/api/accounts/inbox/{PAY_ID}/file?token=u_hr").status_code == 200
+    assert "สมชาย" in str(c.get(f"/api/accounts/inbox/{PAY_ID}", headers={"X-App-Token": "secret"}).json()["preview"])
+
+
+def test_sync_program_runs_once_for_overlapping_report_loads(monkeypatch):
+    import threading
+    import time as _t
+    from datetime import date
+    calls = []
+
+    def slow(lo, hi):
+        calls.append((lo, hi))
+        _t.sleep(0.2)
+        return 7
+    monkeypatch.setattr(acc, "_require", lambda: None)
+    monkeypatch.setattr(acc, "_sync_program", slow)
+    acc._sync_done.clear()
+    try:
+        d1, d2 = date(2026, 10, 26), date(2026, 11, 25)
+        ts = [threading.Thread(target=acc.sync_program, args=(d1, d2)) for _ in range(3)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(5)
+        assert calls == [("2026-10-26", "2026-11-25")]           # serialized; the 2nd and 3rd saw a fresh run and skipped it
+        assert acc.sync_program(d1, d2) == 7 and len(calls) == 1
+        assert acc.sync_program(d1, d2, force=True) == 7 and len(calls) == 2
+    finally:
+        acc._sync_done.clear()
+
+
+def test_the_accounting_files_bucket_is_backed_up():
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "scripts" / "backup.py").read_text(encoding="utf-8")
+    assert '(supabase.ACCOUNTING_BUCKET, "files_accounting")' in src

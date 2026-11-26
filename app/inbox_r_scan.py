@@ -10,12 +10,15 @@
 * book / unbook: for previews made by app/inbox_ai.py, keyed on what the preview holds:
     - an expense document (preview["acc_docs_batch"]): through app/acc_docs (pages + entries + the review screen), replacing that
       half's batch and, when the owner chose "replace", the pages an older import of the same half wrote;
-    - single bills: inbox_common.book_batches (entries only), asking the engine to re-book the month's cheques so a cheque that pays
-      this bill turns into "pays an existing bill".
+    - single bills: inbox_common.book_batches (entries only), asking the engine to re-book the cheque run of the NEXT month (the HQ
+      run on the 20th pays last month's bills: shift_month(month, 1)) so the cheque that pays this bill turns into "pays an existing
+      bill" (app/acc_cheques matches open 'bill:' entries by amount and party, or by the bill number in the cheque's note). unbook asks
+      for the same rebook, so removing the bill turns that cheque back into the cost.
 """
 from __future__ import annotations
 
 import hashlib
+from typing import Optional
 
 from app import inbox_ai
 from app import inbox_common as ic
@@ -78,16 +81,25 @@ def book(preview: dict, file_id: str) -> dict:
         b = preview["batches"][0]
         return {"batches": [batch["batch"]], "booked": round(sum(ic.entry_amount(e) for e in b.get("entries") or []), 2), "rebook": []}
     out = ic.book_batches(preview)
-    if any(r.get("role") == "cost" for b in preview["batches"] for r in b.get("rows") or []):
-        out["rebook"] = [{"kind": "cheques", "month": preview.get("month")}]
+    out["rebook"] = _cheque_rebook(preview)
     return out
 
 
-def unbook(preview: dict) -> None:
-    """Undo what book() wrote. Pages of an OLDER import this file replaced are not brought back (re-run that import if needed)."""
+def _cheque_rebook(preview: dict) -> list[dict]:
+    """The cheque run that would pay these bills: next month's (review 26 Nov 2026: the bill month itself never holds that cheque)."""
+    months = sorted({b.get("month") or preview.get("month") for b in preview.get("batches") or []
+                     if b.get("entries") and str(b.get("key") or "").startswith("bill:")} - {None})
+    return [{"kind": "cheques", "month": ic.shift_month(m, 1)} for m in months]
+
+
+def unbook(preview: dict) -> Optional[dict]:
+    """Undo what book() wrote. Pages of an OLDER import this file replaced are not brought back (re-run that import if needed).
+    A bill's removal asks for the same cheque rebook as its booking: the cheque that paid it becomes the cost again."""
     from app import acc_docs
     batch = preview.get("acc_docs_batch")
     if batch:
         acc_docs.remove_batch(batch["batch"])
-        return
+        return None
     ic.unbook_batches(preview)
+    rebook = _cheque_rebook(preview)
+    return {"rebook": rebook} if rebook else None

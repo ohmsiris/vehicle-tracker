@@ -215,6 +215,53 @@ def test_slips_cash_lists_and_sign_sheets_are_kept_not_booked(monkeypatch):
     assert p["store_only"] and p["batches"] == [] and p["month"] == "2026-10" and "สลิป" in p["note"] and p["group"] == "DRV"
 
 
+def _slip(monkeypatch, title_month="กรกฎาคม 2569", pay_date="01/09/2569"):
+    text = (f"บริษัท สระบุรีวารีเทพ จำกัด\nสลิปเงินเดือน\nประจำเดือน : {title_month}\n"
+            + "".join(f"รหัส :\nSB-PD{i:03d}\nวันที่จ่าย\n{pay_date}\n" for i in range(1, 6)))
+    header = text.split("\nรหัส")[0]
+    monkeypatch.setattr(R, "_pdf_parts", lambda data: {"text": text, "header": header, "lines": text.splitlines()})
+    return text
+
+
+def test_a_stale_slip_heading_does_not_outweigh_the_pay_date_and_the_name(monkeypatch):
+    """Drivers' slips of Aug (corrected) and Sep 2569: headed July, paid 01/09 and 01/10/2569 -- filed under Aug / Sep, and said."""
+    text = _slip(monkeypatch)
+    p = R.read(Dropped(name="สลิป พขร. สระบุรี สิงหาคม 2569 -.pdf", data=b"%PDF-", ext=".pdf", text=text))
+    assert p["store_only"] and p["batches"] == [] and p["month"] == "2026-08"
+    assert p["conflicts"] and p["conflicts"][0]["key"] == "month" and p["conflicts"][0]["default"] == "2026-08"
+    assert any("ก.ค. 2569" in x and "เก็บไว้กับเดือน ส.ค. 2569" in x for x in p["flags"])
+    assert {s["source"]: s.get("weight") for s in p["signals"] if s["what"] == "month"} == {"หัวกระดาษ": R.W_TITLE_PAPER, "วันที่จ่าย": 1.0,
+                                                                                           "ชื่อไฟล์": 0.5}
+    text = _slip(monkeypatch, pay_date="01/10/2569")
+    p = R.read(Dropped(name="สลิป พขร. สระบุรี กันยายน 2569 -.pdf", data=b"%PDF-", ext=".pdf", text=text))
+    assert p["month"] == "2026-09"
+    # the pay date alone still beats a stale heading; the heading alone still beats the file name
+    text = _slip(monkeypatch)
+    assert R.read(Dropped(name="x.pdf", data=b"%PDF-", ext=".pdf", text=text))["month"] == "2026-08"
+    text = _slip(monkeypatch, title_month="ตุลาคม 2569", pay_date="")
+    assert R.read(Dropped(name="สลิป กันยายน 2569.pdf", data=b"%PDF-", ext=".pdf", text=text))["month"] == "2026-10"
+
+
+def test_a_summary_title_still_outweighs_the_print_date(monkeypatch):
+    """Only the kept papers lose weight: a summary's title (3) still beats its print date (1) and name (0.5) -- then it is a conflict."""
+    p = R.read(_drv_pdf(monkeypatch, header=SUMMARY_HEAD.replace("01/11/2569", "01/12/2569")))
+    assert [c["key"] for c in p["conflicts"]] == ["month"] and p["conflicts"][0]["default"] == "2026-10" and p["month"] is None
+
+
+REAL_SLIPS = "E:/Saraburi/ClaudeCode/CP Accounting/เงินเดือน/รายละเอียดเงินเดือน 2569/"
+
+
+@pytest.mark.parametrize("path, month", [("08-แก้ไข-จัดส่ง/สลิป พขร. สระบุรี สิงหาคม 2569 -.pdf", "2026-08"),
+                                         ("09/สลิป พขร. สระบุรี กันยายน 2569 -.pdf", "2026-09")])
+def test_real_driver_slips_headed_july_file_under_their_month(monkeypatch, path, month):
+    if not os.path.exists(REAL_SLIPS + path):
+        pytest.skip("sample payroll files not on this machine")
+    monkeypatch.setattr(supabase, "configured", lambda: False)
+    p = R.read(sniff_file(os.path.basename(path), open(REAL_SLIPS + path, "rb").read()))
+    assert p["doc"] == "slip" and p["store_only"] and p["month"] == month and p["group"] == "DRV"
+    assert any("ก.ค. 2569" in x for x in p["flags"])
+
+
 # ------------------------------------------------------------------ the workbook
 def test_workbook_main_sheet_header_and_total_row():
     rows = [["บจ. สระบุรีวารีเทพ สาขาแก่งคอย เงินเดือนพนักงาน เดือน ตุลาคม 2569"], ["ที่", "scan", "รายชื่อ", "รวมรับ", "รวมจ่าย", "คงเหลือ"],

@@ -20,8 +20,11 @@ READER MODULES (app/inbox_r_*.py, listed in READERS below). Each one exposes:
                                            # "rebook": [{"kind": "cheques", "month": "2026-11"}] asks the engine to re-read and re-book
                                            # already-booked files of that kind and month (e.g. a PEA bill stored after the cheque run
                                            # that paid it: the cheque must turn from a 5100 cost into "pays an existing bill").
-    def unbook(preview: dict) -> None      # OPTIONAL. Default (unbook_batches): delete acc_entries whose source_id == key or like key:*.
+    def unbook(preview: dict) -> Optional[dict]
+                                           # OPTIONAL. Default (unbook_batches): delete acc_entries whose source_id == key or like key:*.
                                            # A reader with side tables (elec_bills, employee_pay_months, sales_lines, acc_docs) defines it.
+                                           # It may return {"rebook": [...]} (removing a PEA bill re-books the cheque run that paid it).
+                                           # A preview with "books_without_batches": True (PEA AMR readings) may be booked with no batches.
 
 PREVIEW (a plain dict, stored as jsonb in inbox_files.preview):
 

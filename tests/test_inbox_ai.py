@@ -446,12 +446,12 @@ def test_water_bill_is_one_suggested_cost_to_accounts_payable(monkeypatch):
     assert e["entry_date"] == "2026-10-25"                             # the bill (3 Nov) is for October: booked to October
     assert [(ln["account"], ln["debit"], ln["credit"]) for ln in e["lines"]] == [("5200", 5320.5, 0.0), ("2100", 0.0, 5320.5)]
     out = inbox_r_scan.book(pv, "f9")
-    assert out["booked"] == 5320.5 and out["rebook"] == [{"kind": "cheques", "month": "2026-10"}]
+    assert out["booked"] == 5320.5 and out["rebook"] == [{"kind": "cheques", "month": "2026-11"}]    # next month's run pays it
     assert out == {**out, "batches": [b["key"]]}
     n = len(db.t["acc_entries"])
     inbox_r_scan.book(pv, "f9")
     assert len(db.t["acc_entries"]) == n                               # re-drop replaces
-    inbox_r_scan.unbook(pv)
+    assert inbox_r_scan.unbook(pv) == {"rebook": [{"kind": "cheques", "month": "2026-11"}]}    # the cheque that paid it is the cost again
     assert not db.t["acc_entries"]
 
 
@@ -485,3 +485,96 @@ def test_book_refuses_a_preview_not_yet_read_by_ai(no_db):
     pv = inbox_r_scan.read(ic.sniff_file("x.pdf", pdf(2)))
     with pytest.raises(ValueError, match="อ่านด้วย AI"):
         inbox_r_scan.book(pv, "x")
+
+
+# ------------------------------------------------------------------ review fixes (26 Nov 2026)
+def test_replace_never_takes_over_next_months_half(monkeypatch):
+    def doc(batch, page, feed, d_from, d_to, file_name="mid.pdf"):
+        return {"id": f"{batch}-{page}", "batch": batch, "feed": feed, "branch": "สระบุรี", "file_name": file_name, "page": page,
+                "kind": "expense", "date_from": d_from, "date_to": d_to, "edited_at": None}
+    old = [doc("2026-11-saraburi", 2, "midmonth", "2026-10-26", "2026-11-10"),
+           doc("2026-12-saraburi", 5, "midmonth", "2026-11-08", "2026-12-10", "dec-mid.pdf")]     # next month's list starts on the 8th
+    entries = [{"id": "n5", "source_id": "2026-12-saraburi:p5:l1", "doc_id": "2026-12-saraburi-5"}]
+    db = FakeDB(vehicles=VEH, acc_docs=old, acc_entries=entries)
+    use_db(monkeypatch, db)
+    reads = [{**p, "n": i} for i, p in enumerate(MID_PAGES, 1)]
+    pv = inbox_ai.from_pages(reads, "x.pdf", {})
+    c = next(c for c in pv["conflicts"] if c["key"] == "replace_old")
+    assert "2026-11-saraburi" in c["message"] and "2026-12-saraburi" not in c["message"]
+    rep = inbox_ai.apply_choices(pv, {"replace_old": "replace"})
+    assert rep["replace_docs"] == [{"batch": "2026-11-saraburi", "pages": [2]}]
+    inbox_r_scan.book(rep, "f1")
+    assert ("2026-12-saraburi", 5) in {(d["batch"], d["page"]) for d in db.t["acc_docs"]}             # December stays in the books
+    assert any(e["source_id"] == "2026-12-saraburi:p5:l1" for e in db.t["acc_entries"])
+    assert inbox_ai.batch_month("docs:2026-11:สระบุรี:mid") == "2026-11" and inbox_ai.batch_month("2026-12-saraburi") == "2026-12"
+
+
+def test_one_replace_option_per_earlier_batch(monkeypatch):
+    old = [{"id": "a2", "batch": "2026-11-saraburi", "feed": "midmonth", "branch": "สระบุรี", "file_name": "mid.pdf", "page": 2, "kind": "expense",
+            "date_from": "2026-10-26", "date_to": "2026-11-10", "edited_at": None},
+           {"id": "b1", "batch": "docs:2026-11:สระบุรี:mid", "feed": "midmonth", "branch": "สระบุรี", "file_name": "other scan.pdf", "page": 1,
+            "kind": "expense", "date_from": "2026-10-26", "date_to": "2026-11-05", "edited_at": "2026-11-20"}]
+    use_db(monkeypatch, FakeDB(vehicles=VEH, acc_docs=old))
+    pv = inbox_ai.from_pages([{**p, "n": i} for i, p in enumerate(MID_PAGES, 1)], "x.pdf", {})
+    c = next(c for c in pv["conflicts"] if c["key"] == "replace_old")
+    values = [o["value"] for o in c["options"]]
+    assert values == ["replace", "replace:2026-11-saraburi", "replace:docs:2026-11:สระบุรี:mid", "keep"]
+    assert "ที่แก้จะหาย" in c["options"][2]["label"] and "ที่แก้จะหาย" not in c["options"][1]["label"]
+    one = inbox_ai.apply_choices(pv, {"replace_old": "replace:2026-11-saraburi"})
+    assert one["replace_docs"] == [{"batch": "2026-11-saraburi", "pages": [2]}] and not one["conflicts"]
+    assert any("ชุดอื่น" in f for f in one["flags"])
+
+
+def test_rereading_a_booked_ai_bill_keeps_it_booked(monkeypatch):
+    db = FakeDB(vehicles=VEH)
+    use_db(monkeypatch, db)
+    reads = [{**WATER, "n": 1}]
+    pv = inbox_ai.from_pages(reads, "scan.jpg", {})
+    inbox_r_scan.book(pv, "f9")
+    again = inbox_ai.apply_choices(pv, {})                             # อ่านใหม่ / a choice: its own entry is not "already booked"
+    assert not again["store_only"] and len(again["batches"][0]["entries"]) == 1 and not again["batches"][0]["rows"][0]["flag"]
+    moved = inbox_ai.apply_choices(pv, {"month": "2026-11"})           # booked under another month key: still its own
+    assert not moved["store_only"]
+
+
+def test_same_account_and_amount_alone_is_not_already_booked(monkeypatch):
+    db = FakeDB(vehicles=VEH, acc_entries=[{"id": "e1", "entry_date": "2026-10-12", "source": "midmonth", "source_id": "2026-10-kaengkhoi:p3:l2",
+                                            "party": "ร้านช่างแดง", "description": "ซ่อมท่อหน้าโรง"}],
+                acc_lines=[{"id": "l1", "entry_id": "e1", "account": "5200", "debit": 5320.5, "branch": "แก่งคอย"}])
+    use_db(monkeypatch, db)
+    pv = inbox_ai.from_pages([{**WATER, "n": 1}], "scan.jpg", {})
+    assert not pv["store_only"] and len(pv["batches"][0]["entries"]) == 1
+    assert inbox_ai.alike_bill({"party": "x", "doc_no": "W-12345"}, {"description": "จ่ายบิล W12345"})          # the bill number decides
+
+
+PEA_SCAN = page("bill", title="ใบแจ้งค่าไฟฟ้า", branch_hints=["สาขาเมืองสระบุรี"],
+                bill={"party": "การไฟฟ้าส่วนภูมิภาค", "doc_no": "318011438503", "date": "2026-11-05", "period_month": "2026-10",
+                      "total": 835380.28, "what": "ค่าไฟฟ้า ต.ค. 69", "account": "5100"})
+
+
+def test_an_ai_read_pea_bill_is_never_booked(no_db):
+    pv = inbox_ai.from_pages([{**PEA_SCAN, "n": 1}], "scan.pdf", {})
+    assert pv["store_only"] and "PDF" in pv["note"] and "PEA" in pv["note"]
+    assert pv["batches"][0]["entries"] == [] and pv["batches"][0]["rows"][0]["role"] == "info"
+    assert inbox_r_scan.book(pv, "f1") == {"batches": [], "booked": 0.0, "rebook": []}
+    both = inbox_ai.from_pages([{**PEA_SCAN, "n": 1}, {**WATER, "n": 2, "branch_hints": ["สาขาเมืองสระบุรี"]}], "scan.pdf", {})
+    assert not both["store_only"] and [e["source"] for e in both["batches"][0]["entries"]] == ["water_irrigation"]
+
+
+def test_tokens_spent_are_kept_when_the_read_fails(monkeypatch, no_db, ai_on):
+    import anthropic
+    import httpx2
+    err = anthropic.BadRequestError("bad", response=httpx2.Response(400, request=httpx2.Request("POST", "https://x")), body=None)
+    client = FakeClient(MID_PAGES, fail={2: err}, delay=0.02)
+    use_client(monkeypatch, client)
+    monkeypatch.setattr(inbox_ai, "PARALLEL", 1)
+    with pytest.raises(inbox_ai.InboxAIError) as e:
+        inbox_ai.run({"file_name": "x.pdf"}, pdf(4))
+    assert e.value.usage["calls"] == 1 and e.value.usage["input_tokens"] == 1050 and e.value.usage["model"] == "claude-opus-5-5"
+    assert [p["n"] for p in e.value.partial_pages] == [1] and e.value.partial_pages[0]["page_kind"] == "cover"
+
+    use_client(monkeypatch, FakeClient(MID_PAGES))
+    monkeypatch.setattr(inbox_ai, "from_pages", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")))
+    with pytest.raises(inbox_ai.InboxAIError, match="สร้างรายการไม่สำเร็จ") as e:
+        inbox_ai.run({"file_name": "x.pdf"}, pdf(4))
+    assert e.value.usage["calls"] == 4 and len(e.value.partial_pages) == 4

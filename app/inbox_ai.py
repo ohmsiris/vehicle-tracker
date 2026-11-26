@@ -12,7 +12,9 @@ What comes back depends on what the pages turn out to be -- never on the file na
   these pages too; the page images are stored from bytes under the file (accdocs/inbox/<file id>/p<n>.jpg).
   One file = one half's papers: batch key "docs:<month>:<branch>:<mid|end>". Re-dropping that half replaces it, never adds to it.
 * a single bill / invoice / statement (irrigation water, waterworks, an odd receipt): ONE suggested entry per bill (cost to accounts
-  payable 2100, so the cheque that pays it later is "pays an existing bill", never a second cost), for the owner to confirm.
+  payable 2100, so the cheque that pays it later is "pays an existing bill", never a second cost: app/acc_cheques matches the
+  next month's HQ cheque to it by amount and payee, or by the bill number in the cheque's note), for the owner to confirm. A PEA
+  electricity bill is never booked from an AI read (stored only, the note says to drop PEA's own PDF: the PEA reader books it).
 * a memo, a payslip, anything not for the books: store_only, with what it is.
 
 Month, branch and half are decided by votes of independent signals (cover date range weight 3, the majority of line dates 2, branch text
@@ -53,7 +55,11 @@ EFFORT = "high"                   # handwriting: the same effort the cash-fuel a
 
 
 class InboxAIError(RuntimeError):
-    """str() is a Thai message safe to show the owner."""
+    """str() is a Thai message safe to show the owner. A read that failed after pages were already sent carries what was spent:
+    `usage` (the same shape as preview["ai_usage"]) and `partial_pages` (the page reads that did come back) -- the engine saves both,
+    so a failed read never loses the tokens it cost (review 26 Nov 2026)."""
+    usage: Optional[dict] = None
+    partial_pages: Optional[list] = None
 
 
 # ------------------------------------------------------------------ the chart the pages are booked to
@@ -354,7 +360,9 @@ def read_pages(images: list[bytes], on_progress: Optional[Callable] = None) -> t
             usage["output_tokens"] += u["output_tokens"]
     fatal = next((r for r in reads if r.get("fatal")), None)
     if fatal:                                          # nothing useful was read: the engine marks the file failed, with the reason
-        raise InboxAIError(fatal["error"])
+        err = InboxAIError(fatal["error"])
+        err.usage, err.partial_pages = usage, [r for r in reads if r.get("page_kind") != "error"]
+        raise err
     return reads, usage
 
 
@@ -375,7 +383,13 @@ def run(file_row: dict, data: bytes, on_progress: Optional[Callable] = None) -> 
         except Exception as exc:                       # noqa: BLE001 -- the books still book; the review screen shows no picture
             logger.warning("inbox AI: storing page images failed: %r", exc)
             flags.append("เก็บรูปหน้าเอกสารไม่สำเร็จ — หน้าตรวจจะไม่มีรูป")
-    preview = from_pages(reads, name, dict(file_row.get("choices") or {}), usage=usage, images=stored)
+    try:
+        preview = from_pages(reads, name, dict(file_row.get("choices") or {}), usage=usage, images=stored)
+    except Exception as exc:                           # noqa: BLE001 -- the pages were read and paid for: hand them back with the error
+        logger.exception("inbox AI: building the preview failed")
+        err = InboxAIError(f"อ่านหน้าเอกสารได้แล้ว แต่สร้างรายการไม่สำเร็จ ({exc})")
+        err.usage, err.partial_pages = usage, reads
+        raise err from exc
     preview["flags"] = flags + preview["flags"]
     return preview
 
@@ -450,6 +464,12 @@ def half_range(month: str, half: str) -> tuple[date, date]:
 
 def month_range(month: str) -> tuple[date, date]:
     return half_range(month, "mid")[0], half_range(month, "end")[1]
+
+
+def batch_month(batch: str) -> Optional[str]:
+    """The company month an acc_docs batch belongs to: the script's '2026-11-saraburi' or the drop box's 'docs:2026-11:สระบุรี:mid'."""
+    m = re.match(r"^(?:docs:)?(\d{4}-\d{2})(?=[-:])", str(batch or ""))
+    return m.group(1) if m else None
 
 
 def norm_plate(s) -> str:
@@ -679,20 +699,29 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
     # The same half already in the books (the script's month batch, or this half from another file): the owner chooses.
     old = _earlier_docs(key, branch, feed, month, half, name)
     if old:
-        n_pages = sum(len(o["pages"]) for o in old)
         edited = sum(o["edited"] for o in old)
         where = ", ".join(f"{o['batch']} ({o['file_name'] or '-'}, {len(o['pages'])} หน้า)" for o in old)
         choice = choices.get("replace_old")
-        if choice == "replace":
-            pv["replace_docs"] = [{"batch": o["batch"], "pages": o["pages"]} for o in old]
-            pv["flags"].append(f"จะลบของเดิม {n_pages} หน้า ({where}) แล้วลงไฟล์นี้แทน")
+        one = next((o for o in old if choice == f"replace:{o['batch']}"), None) if str(choice or "").startswith("replace:") else None
+        if choice == "replace" or one:
+            take = [one] if one else old
+            pv["replace_docs"] = [{"batch": o["batch"], "pages": o["pages"]} for o in take]
+            pv["flags"].append(f"จะลบของเดิม {sum(len(o['pages']) for o in take)} หน้า ("
+                               + ", ".join(f"{o['batch']} ({o['file_name'] or '-'}, {len(o['pages'])} หน้า)" for o in take) + ") แล้วลงไฟล์นี้แทน")
+            if one and len(old) > 1:
+                pv["flags"].append("ของเดิมชุดอื่นของครึ่งเดือนนี้ยังอยู่ในบัญชี — ตรวจว่าไม่นับซ้ำ")
         elif choice == "keep":
             pv["store_only"] = True
             pv["note"] = f"เก็บไว้กับเดือน ไม่ลงบัญชี — ใช้ของเดิมที่ลงไว้แล้ว ({where})"
         else:
-            conflicts.append(_ask("replace_old", f"{HALF_TH[half]} {branch} {ic.month_label(month)} ลงบัญชีไว้แล้ว: {where}",
-                                  [("replace", "แทนที่ของเดิมด้วยไฟล์นี้" + (f" (มี {edited} หน้าที่แก้บนหน้าตรวจแล้ว — ที่แก้จะหาย)" if edited else "")),
-                                   ("keep", "เก็บของเดิม — ไฟล์นี้ไม่ลงบัญชี")], default="keep"))
+            def warn_edited(n):
+                return f" (มี {n} หน้าที่แก้บนหน้าตรวจแล้ว — ที่แก้จะหาย)" if n else ""
+            opts = [("replace", ("แทนที่ของเดิมทั้งหมดด้วยไฟล์นี้" if len(old) > 1 else "แทนที่ของเดิมด้วยไฟล์นี้") + warn_edited(edited))]
+            if len(old) > 1:                           # one option per earlier batch too: the owner may want to take over only one of them
+                opts += [(f"replace:{o['batch']}", f"แทนที่เฉพาะ {o['batch']} ({o['file_name'] or '-'}, {len(o['pages'])} หน้า)" + warn_edited(o["edited"]))
+                         for o in old]
+            opts.append(("keep", "เก็บของเดิม — ไฟล์นี้ไม่ลงบัญชี"))
+            conflicts.append(_ask("replace_old", f"{HALF_TH[half]} {branch} {ic.month_label(month)} ลงบัญชีไว้แล้ว: {where}", opts, default="keep"))
     pv["conflicts"] = conflicts
     if not pv["note"]:
         pv["note"] = (f"{len(reads)} หน้า: " + ", ".join(f"{KIND_TH.get(k, k)} {n}" for k, n in Counter(r.get('page_kind') for r in reads).most_common())
@@ -810,7 +839,10 @@ def _batch(reads: list[dict], name: str, key: str, month: str, branch: str, half
 
 def _earlier_docs(key: str, branch: str, feed: str, month: str, half: str, name: str) -> list[dict]:
     """Pages already in acc_docs for this branch and half from another batch (the script's month batch) or from another file under the
-    same key: [{"batch", "file_name", "pages", "edited"}]. Every page of those files is taken over (their memos too)."""
+    same key: [{"batch", "file_name", "pages", "edited"}]. Every page of those files is taken over (their memos too).
+    Only batches of the SAME company month count (the script's '<month>-<branch>' batch, or a drop-box 'docs:<month>:...' key): a page
+    of next month's papers whose dates spill into this half (a mid-month list starting on the 8th) is never taken over -- 'replace'
+    would delete next month's half from the books (review 26 Nov 2026)."""
     if not _db_ready():
         return []
     from app import supabase
@@ -821,7 +853,7 @@ def _earlier_docs(key: str, branch: str, feed: str, month: str, half: str, name:
         same = supabase.select("acc_docs", {"select": "batch,file_name", "batch": f"eq.{key}", "limit": "1"})
     except Exception:                                  # noqa: BLE001 -- no acc_docs yet: nothing to replace
         return []
-    files = {(h["batch"], h.get("file_name")) for h in hits if h["batch"] != key}
+    files = {(h["batch"], h.get("file_name")) for h in hits if h["batch"] != key and batch_month(h["batch"]) == month}
     files |= {(s["batch"], s.get("file_name")) for s in same if s.get("file_name") != name}
     out = []
     for b, fn in sorted(files, key=lambda x: (x[0], x[1] or "")):
@@ -878,7 +910,7 @@ def _bill_preview(reads: list[dict], name: str, choices: dict, vehicles: list[di
     m_from, m_to = month_range(month)
     h = hashlib.sha1("|".join(sorted(f"{b.get('party')}|{b.get('doc_no')}|{b.get('total')}" for b in bills_l)).encode()).hexdigest()[:8]
     key = f"bill:{month}:{branch}:{h}"
-    entries, rows, feeds = [], [], set()
+    entries, rows, feeds, pea = [], [], set(), 0
     for i, b in enumerate(bills_l, 1):
         total = b.get("total")
         if not total or float(total) <= 0:
@@ -896,28 +928,42 @@ def _bill_preview(reads: list[dict], name: str, choices: dict, vehicles: list[di
              "description": desc[:300], "doc_type": "bill", "doc_no": (b.get("doc_no") or None),
              "lines": [{"account": acc, "debit": total, "credit": 0.0, "branch": branch, "vehicle_id": None, "memo": None},
                        {"account": "2100", "debit": 0.0, "credit": total, "branch": branch, "vehicle_id": None, "memo": None}]}
-        dup = _already_booked(acc, total, branch, m_from, m_to)
+        if feed == "electricity":
+            # never booked from an AI read: the PEA reader books the bill as pea:<invoice> (elec_bills + the cheque that pays it); a
+            # 'bill:' copy would be a second electricity cost the cheque never clears (review 26 Nov 2026)
+            pea += 1
+            rows.append({"date": e["entry_date"], "text": e["description"], "party": e["party"], "amount": total, "role": "info",
+                         "account": acc, "flag": "ค่าไฟ PEA — ไม่ลงจากการอ่านด้วย AI", "page": b["pages"][0], "feed": feed})
+            continue
+        dup = _already_booked(acc, total, branch, m_from, m_to, bill=b, own=h)
         rows.append({"date": e["entry_date"], "text": e["description"], "party": e["party"], "amount": total, "role": role_of(acc),
                      "account": acc, "flag": dup, "page": b["pages"][0], "feed": feed})
         if dup:
             pv["flags"].append(f"{e['party']} {total:,.2f}: {dup}")
         else:
             entries.append(e)
-    if feeds & {"electricity"}:
-        pv["flags"].append("ค่าไฟ PEA มีตัวอ่านของตัวเอง (ไฟล์ PDF จาก PEA) — ถ้ามีไฟล์นั้นให้วางไฟล์นั้นแทน")
+    if pea:
+        pv["flags"].append(PEA_NOTE)
     if rows and not entries:
         pv["store_only"] = True
-        pv["note"] = "บิลนี้ลงบัญชีไว้แล้ว — เก็บไว้กับเดือนเป็นหลักฐาน ไม่ลงซ้ำ"
+        pv["note"] = PEA_NOTE if pea == len(rows) else "บิลนี้ลงบัญชีไว้แล้ว — เก็บไว้กับเดือนเป็นหลักฐาน ไม่ลงซ้ำ"
     else:
-        pv["note"] = (f"บิล {len(rows)} ใบ — ลงเป็นค่าใช้จ่ายค้างจ่าย (เจ้าหนี้ 2100): เช็คที่จ่ายบิลนี้ภายหลังจะเป็น 'จ่ายบิลที่มีอยู่แล้ว' ไม่ใช่ค่าใช้จ่ายซ้ำ"
+        pv["note"] = (f"บิล {len(rows)} ใบ — ลงเป็นค่าใช้จ่ายค้างจ่าย (เจ้าหนี้ 2100): เช็ค HQ รอบเดือนถัดไปที่จ่ายบิลนี้ (ยอดตรงภายใน 1 บาทและชื่อผู้รับคล้ายกัน หรือมีเลขที่บิลในหมายเหตุ)"
+                      " จะเป็น 'จ่ายบิลที่มีอยู่แล้ว' ไม่ใช่ค่าใช้จ่ายซ้ำ"
                       " — ตรวจยอด หมวด และสาขาก่อนกดลงบัญชี")
     feed = next(iter(feeds)) if len(feeds) == 1 else None
     pv["label"] = "บิล / ใบแจ้งหนี้ (อ่านด้วย AI)" if not feed else f"บิล{_feed_th(feed)} (อ่านด้วย AI)"
     if entries or rows:
         pv["batches"] = [{"key": key, "feed": feed or "manual", "source": feed or "manual", "branch": branch, "month": month,
-                          "title": pv["label"], "rows": rows, "file_total": round(sum(r["amount"] for r in rows), 2),
+                          "title": pv["label"], "rows": rows,
+                          # a bill left out (PEA, or already booked) is not a short read: no file total then, the flags say why
+                          "file_total": round(sum(r["amount"] for r in rows), 2) if all(not r["flag"] for r in rows) else None,
                           "rows_total": round(sum(r["amount"] for r in rows if not r["flag"]), 2), "entries": entries}]
     return pv
+
+
+PEA_NOTE = ("ใบแจ้งค่าไฟ PEA — ไม่ลงบัญชีจากการอ่านด้วย AI (กันค่าไฟนับซ้ำ): ให้วางไฟล์ PDF ใบแจ้งหนี้ที่ดาวน์โหลดจาก PEA ลงกล่องรับไฟล์แทน "
+            "ตัวอ่าน PEA จะลงบิลและจับคู่กับเช็คที่จ่ายให้เอง — ไฟล์นี้เก็บไว้กับเดือนเป็นหลักฐาน")
 
 
 def _is_bill(b) -> bool:
@@ -929,9 +975,42 @@ def _feed_th(feed: str) -> str:
     return FEED_BY_KEY.get(feed, {}).get("th", "")
 
 
-def _already_booked(account: str, amount: float, branch: str, start: date, end: date) -> Optional[str]:
+def _own_entry(source_id, own: Optional[str]) -> bool:
+    """An entry this same bill booked earlier ('bill:<month>:<branch>:<hash>:<n>', whatever month / branch it was booked under)."""
+    return bool(own) and re.match(rf"^bill:[^:]+:[^:]+:{re.escape(own)}(?::|$)", str(source_id or "")) is not None
+
+
+def _longest_common(a: str, b: str) -> int:
+    from difflib import SequenceMatcher
+    if not a or not b:
+        return 0
+    return SequenceMatcher(None, a, b, autojunk=False).find_longest_match(0, len(a), 0, len(b)).size
+
+
+def alike_bill(bill: dict, entry: dict) -> bool:
+    """Is this booked entry the same bill? The same document number, or a similar party / what (company words, spaces and tone
+    marks ignored), or the same utility named on both (ชลประทาน / ประปา / การไฟฟ้า). An entry of the same account and amount alone
+    is not enough: two different 1,200-baht purchases are two costs."""
+    from app.acc_checks import norm_doc, norm_name, similar
+    doc = norm_doc(bill.get("doc_no"))
+    if doc and (doc == norm_doc(entry.get("doc_no")) or doc in re.sub(r"[^0-9A-Z]", "", str(entry.get("description") or "").upper())):
+        return True
+    mine = [bill.get("party"), bill.get("what")]
+    theirs = [entry.get("party"), entry.get("description")]
+    if any(similar(x, y) for x in mine for y in theirs):
+        return True
+    tb, te = " ".join(str(x or "") for x in mine), " ".join(str(x or "") for x in theirs)
+    if any(rx.search(tb) and rx.search(te) for rx, _, _ in BILL_FEEDS):
+        return True
+    return _longest_common(norm_name(tb), norm_name(te)) >= 6
+
+
+def _already_booked(account: str, amount: float, branch: str, start: date, end: date, bill: Optional[dict] = None,
+                    own: Optional[str] = None) -> Optional[str]:
     """The same cost already in the books this month (e.g. irrigation water paid from petty cash, on the expense list): one source
-    books a cost, the bill only proves it."""
+    books a cost, the bill only proves it. `own` = this bill's hash: what this same bill booked before is never 'already booked'
+    (re-reading or answering a question on a booked AI bill would otherwise turn it into stored-only and unbook it for good --
+    review 26 Nov 2026). `bill` = the bill read: the entry must look like it (alike_bill), not just share the account and amount."""
     if not _db_ready():
         return None
     from app import supabase
@@ -940,10 +1019,12 @@ def _already_booked(account: str, amount: float, branch: str, start: date, end: 
                                                   "and": f"(debit.gte.{amount - 1},debit.lte.{amount + 1})", "order": "id.asc"})
         ids = [ln["entry_id"] for ln in lines if (ln.get("branch") or branch) == branch]
         for i in range(0, len(ids), 100):
-            hit = supabase.select("acc_entries", {"select": "id,entry_date,source,description", "id": f"in.({','.join(ids[i:i + 100])})",
-                                                  "entry_date": f"gte.{start.isoformat()}", "and": f"(entry_date.lte.{end.isoformat()})", "limit": "1"})
-            if hit:
-                h = hit[0]
+            hits = supabase.select("acc_entries", {"select": "id,entry_date,source,source_id,party,description,doc_no",
+                                                   "id": f"in.({','.join(ids[i:i + 100])})",
+                                                   "entry_date": f"gte.{start.isoformat()}", "and": f"(entry_date.lte.{end.isoformat()})"})
+            for h in hits:
+                if _own_entry(h.get("source_id"), own) or (bill is not None and not alike_bill(bill, h)):
+                    continue
                 return f"ลงไว้แล้ว {_day(h['entry_date']).strftime('%d/%m/%Y')} ({h.get('source')}: {h.get('description') or '-'}) — ไม่ลงซ้ำ"
     except Exception:                                  # noqa: BLE001 -- cannot check: let the owner see it unflagged
         return None

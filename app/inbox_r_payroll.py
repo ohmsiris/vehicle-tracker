@@ -28,6 +28,9 @@ WHICH MONTH (the company month, 26th-25th, named after the 25th -- HQ's "ตุ�
     the half-month period printed in the body ("คืนสำรองค่าใช้จ่าย11-25/10/2569", "ค่าใช้จ่าย 11-25/10/69"; weight 2),
     the print date at the top of a Saraburi summary ("01/11/2569" = printed after the 25th of October -> October; weight 1),
     the file name (weight 0.5).
+  On the papers kept with the month (slip / cash list / sign sheet) the title weighs only 0.75 and a slip's date is its pay date: the
+  drivers' slips of Aug (corrected) and Sep 2569 are headed "ประจำเดือน : กรกฎาคม 2569" but paid 01/09 and 01/10/2569. A stored paper
+  files under the month the other signals give, and the disagreement is a flag (a stored file asks no question).
   Any disagreement is a conflict (month_conflict): the owner picks. And if the same group already has a month booked with exactly these
   totals, the file is most likely that month's file again under a stale name: a "duplicate" conflict, default "keep, do not book".
 
@@ -84,6 +87,9 @@ ALIAS = {"SB-KK073": "SB-KK073S"}                                         # the 
 CODE = re.compile(r"SB-(?:FR|PD|KK)\d+[A-Z]?", re.I)
 
 W_TITLE, W_PERIOD, W_PRINTED, W_NAME = 3.0, 2.0, 1.0, 0.5
+W_TITLE_PAPER = 0.75        # the title of a slip / cash list / sign sheet: HQ copies these sheets and leaves the old heading (the
+                            # drivers' slips of Aug (corrected) and Sep 2569 still say "ประจำเดือน : กรกฎาคม 2569"), so the pay date and
+                            # the period in the body outweigh it; alone it still beats the file name
 W_CODES, W_PEOPLE = 3.0, 3.0
 
 # the deduction keys of the per-person readers, in acc_payroll.DEDUCTIONS order (their accounts)
@@ -411,8 +417,9 @@ def read(f: Dropped) -> dict:
         sig.append({"what": "group", "source": "ชื่อไฟล์", "value": g_name, "weight": W_NAME})
     m_title, m_period, m_name = title_month(parts["header"]), period_month(parts["text"]), name_month(f.name)
     m_printed = printed_month(parts["header"] if xlsx else parts["text"]) if kind in ("summary", "slip") else None
-    for src, val, w in (("หัวกระดาษ", m_title, W_TITLE), ("งวด 11-25 ในเนื้อหา", m_period, W_PERIOD),
-                        ("วันที่พิมพ์", m_printed, W_PRINTED), ("ชื่อไฟล์", m_name, W_NAME)):
+    w_title = W_TITLE if kind == "summary" else W_TITLE_PAPER
+    for src, val, w in (("หัวกระดาษ", m_title, w_title), ("งวด 11-25 ในเนื้อหา", m_period, W_PERIOD),
+                        ("วันที่จ่าย" if kind == "slip" else "วันที่พิมพ์", m_printed, W_PRINTED), ("ชื่อไฟล์", m_name, W_NAME)):
         if val:
             sig.append({"what": "month", "source": src, "value": val, "weight": w})
     month, mconf = month_conflict(sig, choices)
@@ -424,6 +431,11 @@ def read(f: Dropped) -> dict:
     p["group"] = use_grp
 
     if kind != "summary":
+        # kept, never booked: it files under the month most signals give (the engine shows no question for a stored file), and a
+        # disagreement is said in a flag so the owner sees the heading was stale
+        if mconf and use_month:
+            p["month"] = use_month
+            p["flags"].append(f"{mconf[0]['message']} — เก็บไว้กับเดือน {month_label(use_month)} (หัวกระดาษของเอกสารนี้มักไม่ได้แก้)")
         p.update(store_only=True, note=NOTES[kind] + (f" ({GROUP_TH[use_grp]} {month_label(use_month)})" if use_grp else ""))
         return p
     if not use_grp or not use_month:

@@ -15,6 +15,7 @@ The owner's rules (Nov 2026):
 Pure functions (period_of, period_bounds, truck_entry, purchase_entry, manual_entry, pnl_tree, feed_status) are unit-tested.
 """
 import re
+import threading
 import time
 import uuid
 from datetime import date, timedelta
@@ -297,11 +298,30 @@ def _insert_entries(entries: list[dict]) -> None:
         supabase.insert("acc_lines", lines[i:i + 400])
 
 
-def sync_program(start: date, end: date) -> int:
+SYNC_FRESH_SECONDS = 20.0
+_sync_lock = threading.Lock()
+_sync_done: dict = {}                     # (from, to) -> (time.monotonic() it finished, entries written)
+
+
+def sync_program(start: date, end: date, force: bool = False) -> int:
     """Rebuild the entries of the bills already in the app (truck repairs, factory purchases) for these days -- so the books always
-    match the app, edits and deletes included. Typed / imported entries are not touched."""
+    match the app, edits and deletes included. Typed / imported entries are not touched.
+    It is delete-then-insert, so two runs at once would both insert (every drop-box action reloads the report): runs are serialized
+    by a process lock, and a run for the same days finished less than SYNC_FRESH_SECONDS ago is not repeated (force=True repeats it)."""
     _require()
     lo, hi = start.isoformat(), end.isoformat()
+    with _sync_lock:
+        hit = _sync_done.get((lo, hi))
+        if hit and not force and time.monotonic() - hit[0] < SYNC_FRESH_SECONDS:
+            return hit[1]
+        n = _sync_program(lo, hi)
+        if len(_sync_done) > 200:
+            _sync_done.clear()
+        _sync_done[(lo, hi)] = (time.monotonic(), n)
+        return n
+
+
+def _sync_program(lo: str, hi: str) -> int:
     events = supabase.select_all("maintenance_events", {"select": "id,vehicle_id,event_date,vendor,performed_by,branch,total_cost,summary",
                                                         "status": "eq.confirmed", "event_date": f"gte.{lo}", "and": f"(event_date.lte.{hi})", "order": "id.asc"})
     lines_by: dict = {}

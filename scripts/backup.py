@@ -22,9 +22,11 @@ def main() -> int:
     if not supabase.configured():
         print("SUPABASE_URL / SUPABASE_SERVICE_KEY are not set (.env).")
         return 2
-    # every stored file: the bill photos keep their folder (backups/files); the private bucket (ID cards, cash-fuel pages) gets its own
+    # every stored file: the bill photos keep their folder (backups/files); the private bucket (ID cards, cash-fuel pages) gets its own,
+    # and so do the files dropped in บัญชี › ลงข้อมูล (accounting-files: payroll / cheque sheets, scans)
     m = run_backup(supabase.select_all, supabase.storage_download, ROOT / "backups",
-                   buckets=((supabase.STORAGE_BUCKET, "files"), (supabase.PRIVATE_BUCKET, "files_private")),
+                   buckets=((supabase.STORAGE_BUCKET, "files"), (supabase.PRIVATE_BUCKET, "files_private"),
+                            (supabase.ACCOUNTING_BUCKET, "files_accounting")),
                    list_bucket=supabase.storage_list_all, download_from=lambda path, bucket: supabase.storage_download(path, bucket=bucket))
     print("Rows   :", ", ".join(f"{t} {n}" for t, n in m["rows"].items()))
     if m.get("tables_not_in_this_database"):

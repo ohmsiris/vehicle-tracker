@@ -24,6 +24,11 @@ Three kinds of file land here:
      plate per month, "fuel:bangchak:<month>:<plate>" -- that cannot be split by station, so it cannot be reproduced. Booking a station's
      file therefore also deletes those old combined entries of that month (and says so in the preview first): the other station's fuel
      for that month is then missing until its own file is dropped too.
+     Nothing is lost for good: before deleting them, book() keeps a copy (lines and all) in the private accounting bucket,
+     inbox/legacy/fuel-bangchak-<month>.json (one per month; the engine rewrites the row's preview after booking, so it cannot live
+     there). Removing a station file (unbook) puts them back once no station file of that month is left in the books -- with the other
+     station's file still booked they would count that station twice, so the copy waits for that one to go too. The preview's
+     "remove_note" says this in Thai for the remove confirmation.
 
   3. The Bangchak Reader PDFs (สรุปรายคนขับ portrait / landscape, ตารางรายวัน) are the SAME fills as the workbook, printed. They are
      recognised and kept with the month, never booked: reading the PDF as well as the workbook is how card fuel got counted twice.
@@ -396,7 +401,7 @@ def _bc_file_total(rows: list) -> tuple[Optional[float], Optional[float]]:
 def _legacy_bangchak(month: str) -> list[dict]:
     """The scripts' Bangchak entries of a month: one per plate for both stations, "fuel:bangchak:<month>:<plate>" (no station)."""
     from app import supabase
-    rows = supabase.select_all("acc_entries", {"select": "id,source_id", "source_id": f"like.fuel:bangchak:{month}:*", "order": "id.asc"})
+    rows = supabase.select_all("acc_entries", {"select": "*", "source_id": f"like.fuel:bangchak:{month}:*", "order": "id.asc"})
     pre = f"fuel:bangchak:{month}:"
     # the drop box's own keys have one more segment ("<station>:<plate>"); a plate never holds a ":"
     return [r for r in rows if (r.get("source_id") or "").startswith(pre) and ":" not in r["source_id"][len(pre):]]
@@ -485,27 +490,140 @@ def read_bangchak(f: Dropped) -> dict:
     if legacy:
         other = [s for s in BC_STATIONS if s != station][0]
         p["flags"].append(f"{month_label(month)} มีรายการบางจากแบบเก่า {len(legacy)} รายการ (รวม 2 สถานีต่อทะเบียน แยกสถานีไม่ได้) — "
-                          f"จะถูกลบเมื่อลงบัญชีไฟล์นี้ ต้องลงไฟล์ของสถานี {other} เดือนเดียวกันด้วย")
+                          f"จะถูกลบเมื่อลงบัญชีไฟล์นี้ ต้องลงไฟล์ของสถานี {other} เดือนเดียวกันด้วย (ระบบเก็บสำเนาไว้: ถ้าลบไฟล์นี้ออก"
+                          f"ก่อนลงไฟล์ของ {other} รายการเดิมจะกลับมา)")
+        p["remove_note"] = legacy_remove_note(month, station)
+    elif _has_copy(month):
+        p["flags"].append(f"รายการบางจากแบบเก่าของ {month_label(month)} ถูกลบไปตอนลงไฟล์บางจากก่อนหน้า (เก็บสำเนาไว้) — "
+                          "จะกลับมาเมื่อไม่มีไฟล์บางจากของเดือนนี้ลงบัญชีอยู่เลย")
+        p["remove_note"] = legacy_remove_note(month, station)
     p["legacy"] = [r["source_id"] for r in legacy]
     p["note"] = f"บางจาก {station} งวด {dmy(lo)}–{dmy(hi)} → {month_label(month)}"
     return p
 
 
+# ------------------------------------------------------------------ the scripts' combined Bangchak entries: deleted, kept, put back
+COPY_DIR = "inbox/legacy"              # in the PRIVATE accounting bucket: one JSON copy per month, fuel-bangchak-<month>.json
+
+
+def legacy_remove_note(month: str, station: str) -> str:
+    """What the page can say before the owner removes a Bangchak station file that took the month's old combined entries."""
+    other = [s for s in BC_STATIONS if s != station][0]
+    return (f"ไฟล์นี้ลบรายการบางจากแบบเก่าของ {month_label(month)} (รวม 2 สถานี) — ลบไฟล์นี้แล้วรายการเดิมจะกลับมา "
+            f"ถ้ายังไม่ได้ลงไฟล์ของสถานี {other} เดือนเดียวกัน ถ้าลงแล้ว ค่าน้ำมันบางจาก {station} เดือนนี้จะหายไปจนกว่าจะลงไฟล์ใหม่")
+
+
+def _bc_parts(key: str) -> Optional[tuple[str, str]]:
+    """'fuel:bangchak:2026-10:NM' -> ('2026-10', 'NM'); None for any other key."""
+    parts = key.split(":")
+    if len(parts) == 4 and parts[:2] == ["fuel", "bangchak"] and parts[3] in BC_STATIONS:
+        return parts[2], parts[3]
+    return None
+
+
+def _copy_path(month: str) -> str:
+    return f"{COPY_DIR}/fuel-bangchak-{month}.json"
+
+
+def _snapshot(legacy: list[dict]) -> list[dict]:
+    """The legacy entries with their lines, in the shape accounting._insert_entries takes (so they can be put back as they were)."""
+    from app import supabase
+    ids = [r["id"] for r in legacy if r.get("id") is not None]
+    lines: dict = defaultdict(list)
+    for i in range(0, len(ids), 100):
+        for ln in supabase.select_all("acc_lines", {"select": "*", "entry_id": f"in.({','.join(str(x) for x in ids[i:i + 100])})"}):
+            lines[ln.get("entry_id")].append({k: ln.get(k) for k in ("account", "debit", "credit", "branch", "vehicle_id", "machine_id", "memo")})
+    out = []
+    for r in legacy:
+        e = {k: r.get(k) for k in ("entry_date", "branch", "source", "source_id", "party", "description", "doc_type", "doc_no")}
+        if r.get("doc_id"):
+            e["doc_id"] = r["doc_id"]
+        e["lines"] = lines.get(r.get("id"), [])
+        out.append(e)
+    return out
+
+
+def _save_copy(month: str, entries: list[dict]) -> None:
+    import json
+    from app import supabase
+    data = json.dumps({"month": month, "entries": entries}, ensure_ascii=False, default=str).encode("utf-8")
+    supabase.storage_upload(_copy_path(month), data, "application/json", upsert=True, bucket=supabase.ACCOUNTING_BUCKET)
+
+
+def _load_copy(month: str) -> Optional[list[dict]]:
+    """The kept copy of a month's old combined entries, or None (never kept, already put back, or the store cannot be read)."""
+    import json
+    from app import supabase
+    try:
+        data = supabase.storage_download(_copy_path(month), bucket=supabase.ACCOUNTING_BUCKET)
+    except supabase.SupabaseError:
+        return None
+    try:
+        return list(json.loads(data.decode("utf-8")).get("entries") or []) or None
+    except (ValueError, AttributeError):
+        return None
+
+
+def _has_copy(month: str) -> bool:
+    """For the preview only: never lets a storage hiccup stop a file from being read."""
+    try:
+        return bool(_load_copy(month))
+    except Exception:
+        return False
+
+
+def _station_entries(month: str) -> bool:
+    """Is any station file's Bangchak fuel of this month in the books ("fuel:bangchak:<month>:<station>:<plate>")?"""
+    from app import supabase
+    pre = f"fuel:bangchak:{month}:"
+    rows = supabase.select_all("acc_entries", {"select": "id,source_id", "source_id": f"like.{pre}*", "order": "id.asc"})
+    return any((r.get("source_id") or "")[len(pre):].split(":", 1)[0] in BC_STATIONS
+               and ":" in (r.get("source_id") or "")[len(pre):] for r in rows)
+
+
 def book(preview: dict, file_id: str) -> dict:
-    """Replace this file's batches; for a Bangchak station file also delete the scripts' combined (both-station) entries of the month."""
+    """Replace this file's batches; for a Bangchak station file also delete the scripts' combined (both-station) entries of the month --
+    after keeping a copy of them (lines and all), so removing the station files of the month puts them back."""
     from app import supabase
     from app.accounting import _require
     _require()
+    removed = 0
     for b in preview.get("batches") or []:
-        if b["key"].startswith("fuel:bangchak:"):
-            ids = [r["id"] for r in _legacy_bangchak(b["month"])]
-            for i in range(0, len(ids), 100):
-                supabase.delete("acc_entries", {"id": f"in.({','.join(str(x) for x in ids[i:i + 100])})"})
-    return book_batches(preview)
+        got = _bc_parts(b["key"])
+        if not got:
+            continue
+        legacy = _legacy_bangchak(got[0])
+        if not legacy:
+            continue                                  # already taken by an earlier station file: its copy is kept as it is
+        _save_copy(got[0], _snapshot(legacy))         # the copy first: if it cannot be written, nothing is deleted
+        ids = [r["id"] for r in legacy]
+        for i in range(0, len(ids), 100):
+            supabase.delete("acc_entries", {"id": f"in.({','.join(str(x) for x in ids[i:i + 100])})"})
+        removed += len(ids)
+    res = book_batches(preview)
+    res["legacy_removed"] = removed
+    return res
 
 
 def unbook(preview: dict) -> None:
+    """Delete this file's batches; then, when no station file of the month is left in the books, the month's old combined Bangchak
+    entries come back from the kept copy (with the other station's file still booked they would count that station twice: the copy
+    waits for that file to be removed too)."""
+    from app import supabase
+    from app.accounting import _insert_entries
     unbook_batches(preview)
+    for b in preview.get("batches") or []:
+        got = _bc_parts(b["key"])
+        if not got:
+            continue
+        month = got[0]
+        if _station_entries(month) or _legacy_bangchak(month):
+            continue
+        snap = _load_copy(month)
+        if not snap:
+            continue
+        _insert_entries(snap)
+        supabase.storage_delete([_copy_path(month)], bucket=supabase.ACCOUNTING_BUCKET)
 
 
 # ------------------------------------------------------------------ 3. Bangchak Reader PDFs: store only

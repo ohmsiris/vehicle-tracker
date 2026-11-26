@@ -13,9 +13,12 @@
      the owner is asked. If the address and the meter's history disagree, that is a conflict too.
    * Booking it asks the engine to re-book the cheque run of the FOLLOWING month (the run on the ~20th pays last month's bill): a
      cheque run booked before this bill was stored booked its PEA row as a 5100 cost; re-read now, that row pays this bill (Dr 2100).
-   * Unbook: the elec_bills row and its pea:<invoice> entry.
+   * Unbook: the elec_bills row and its pea:<invoice> entry -- and, like booking, the cheque run of the following month is re-booked
+     (returned as {"rebook": [...]}, run by the engine): its PEA row paid this bill (Dr 2100); with the bill gone it must turn back into
+     the month's electricity cost (Dr 5100), or that month's power would vanish from the books.
 2. The AMR report ("kWh<CA><time>.xls", really an HTML page; 15-minute kWh per meter): app/amr.parse / amr.save into
-   elec_amr_readings (upsert per slot, so loading a month again replaces it). It is not money: no ledger rows, no batches.
+   elec_amr_readings (upsert per slot, so loading a month again replaces it). It is not money: no ledger rows, no batches -- the
+   preview says "books_without_batches": True so the engine still lets ลงบัญชี save the readings.
 """
 from __future__ import annotations
 
@@ -175,6 +178,7 @@ def _read_amr(f: Dropped) -> dict:
     p.update(month=rep["month"], signals=signals, conflicts=conflicts,
              note=f"รายงาน AMR (ไฟราย 15 นาที) มิเตอร์ {meter} เดือน {m:02d}/{y + 543} · {len(days)} วัน · {len(rep['rows'])} ช่วง · "
                   f"{kwh:,} หน่วย · ไม่ลงบัญชี (เก็บเป็นข้อมูลการใช้ไฟ)",
+             books_without_batches=True,
              amr={"ca_no": rep.get("ca_no"), "meter_no": rep.get("meter_no"), "month": rep["month"], "branch": branch,
                   "rows": [[r["slot_start"], r["tou"], r["kwh"]] for r in rep["rows"]]})
     return p
@@ -215,8 +219,17 @@ def book(preview: dict, file_id: str) -> dict:
     return {"batches": keys, "booked": round(total, 2), "rebook": rebook}
 
 
-def unbook(preview: dict) -> None:
-    """A bill: its elec_bills row and its pea:<invoice> entry. An AMR report: nothing (readings are data, and the same month comes again)."""
+def unbook(preview: dict) -> dict:
+    """A bill: its elec_bills row and its pea:<invoice> entry, then the engine re-books the cheque run of the following month (the run that
+    paid this bill booked its PEA row as "pays an existing bill"; re-read without the bill it books the cost again). An AMR report:
+    nothing (readings are data, and the same month comes again)."""
+    rebook = []
     for b in preview.get("batches") or []:
-        inv = (b.get("bill") or {}).get("invoice_no") or b["key"].split(":", 1)[1]
+        bill = b.get("bill") or {}
+        inv = bill.get("invoice_no") or b["key"].split(":", 1)[1]
         electricity.delete_bill(inv)
+        period = bill.get("bill_period") or b.get("month")
+        nxt = {"kind": "cheques", "month": shift_month(period, 1)} if period else None
+        if nxt and nxt not in rebook:
+            rebook.append(nxt)
+    return {"rebook": rebook}

@@ -18,7 +18,9 @@ run(month, branch="") -> {"month", "branch", "checks": [...]}: six checks, each 
   3. bills        บิลค้างจ่ายถูกจ่ายครบ -- account 2100, bill by bill: a PEA bill (source electricity, source_id pea:<invoice>) against
                   the cheque rows that pay it (Dr 2100, "จ่ายใบแจ้ง PEA <invoice>" in the description, any month); factory purchase and
                   truck repair bills against the payments ticked on #payables; anything else owed (card fuel: the stations' monthly
-                  bills have no payer in the app yet) is shown as info with its amount, never bad. Overpaid / paid twice / a payment
+                  bills have no payer in the app yet) is shown as info with its amount, never bad. Bills read by AI ('bill:' keys)
+                  against the cheque that names them ("อ้างอิง bill:..."); electricity that is not a 'pea:' bill = warn (nothing
+                  pays it, and the PEA bill books the same cost). Overpaid / paid twice / a payment
                   for a bill that is not in the books = bad; a PEA bill still unpaid after a later cheque run is in = warn.
                   elec_bills is cross-checked too: every stored PEA bill of the month must have its entry, with the same amount.
   4. file_totals  ยอดรวมของแต่ละไฟล์ตรงกับที่ลงบัญชี -- every booked drop-box file of the month (inbox_files, status booked): the
@@ -40,7 +42,10 @@ run(month, branch="") -> {"month", "branch", "checks": [...]}: six checks, each 
                   an account that is new this month (>= 20,000).
 
 Every check: {"key", "branch", "title" (Thai), "state": ok / warn / bad / info, "summary" (Thai, one line with the numbers),
-"numbers": {...}, "rows": [{"text", "amount", "source", "source_id", "entry_id", "date"}] (at most 50, biggest first)}.
+"numbers": [{"label": Thai, "value": number, "kind": "money" | "count" | "pct"}] (a flat LIST, what the page shows as tiles),
+"rows": [{"date": "YYYY-MM-DD" | None, "text": Thai, "amount": number | None, "source": Thai label of the source, ...}] (at most 50,
+biggest first; extra keys -- source_key, source_id, entry_id, side, pair -- are for links, the page shows the four above),
+"data": {...} (the same numbers by key, for code and tests)}.
 
 The work is in pure functions on plain rows (entries with their lines) -- unit-tested in tests/test_inbox_checks.py with fake rows. The
 database part (_load) only READS: acc_accounts, acc_lines joined with acc_entries, elec_bills, inbox_files, the #payables tables.
@@ -53,7 +58,7 @@ from difflib import SequenceMatcher
 from typing import Optional
 
 from app import supabase
-from app.inbox_common import BRANCHES, entry_amount, month_label, shift_month
+from app.inbox_common import BRANCHES, company_month, entry_amount, month_label, shift_month
 
 # ------------------------------------------------------------------ constants
 CLEARING = ("2100", "1100", "1500", "1510", "1600", "2400")   # opened on one side, cleared on the other: a Dr/Cr pair here is not a double
@@ -128,8 +133,60 @@ def short_desc(desc: Optional[str]) -> str:
     return str(desc or "").split(" · ")[0].strip()
 
 
-def check(key: str, branch: str, state: str, summary: str, numbers: dict, rows: list[dict]) -> dict:
-    return {"key": key, "branch": branch, "title": TITLES[key], "state": state, "summary": summary, "numbers": numbers, "rows": top_rows(rows)}
+# the numbers of every check as the page shows them: key -> (Thai label, kind); a check may relabel a key (NUMBER_LABELS_BY_CHECK)
+NUMBER_LABELS = {
+    "in": ("เงินเข้า", "money"), "out": ("จ่ายออก", "money"), "diff": ("ต่าง", "money"), "pct": ("ต่าง", "pct"),
+    "mid_in": ("กลางเดือน: เช็คเติม", "money"), "mid_out": ("กลางเดือน: เอกสารเบิก", "money"),
+    "end_in_next_run": ("สิ้นเดือน: เช็คเติม (รอบเดือนถัดไป)", "money"), "end_out": ("สิ้นเดือน: เอกสารเบิก", "money"),
+    "cash_wages": ("เงินเดือนสด (ส่วนที่เหลือ)", "money"),
+    "pea_owed": ("ค่าไฟ PEA ค้างจ่าย", "money"), "pea_paid": ("ค่าไฟ PEA จ่ายแล้ว", "money"), "pea_unpaid": ("ค่าไฟ PEA ยังไม่จ่าย", "money"),
+    "ai_owed": ("บิลที่อ่านด้วย AI", "money"), "ai_unpaid": ("บิลที่อ่านด้วย AI ยังไม่จ่าย", "money"),
+    "shop_owed": ("บิลร้านค้า", "money"), "shop_unpaid": ("บิลร้านค้ายังไม่จ่าย", "money"),
+    "unknown_payments": ("จ่ายบิลไม่ระบุใบ", "money"), "elec_other": ("ค่าไฟที่ไม่ได้มาจากใบแจ้ง PEA", "money"),
+    "batches": ("ชุดข้อมูล", "count"), "bad": ("ชุดที่ไม่ตรง", "count"), "edited": ("ชุดที่แก้บนหน้าตรวจ", "count"),
+    "pairs": ("คู่ที่อาจนับซ้ำ", "count"), "total": ("ยอดรวมคู่ที่อาจนับซ้ำ", "money"), "by_document": ("คู่ที่เลขเอกสารซ้ำ", "count"),
+    "months": ("เดือนที่ใช้เทียบ", "count"), "warn": ("หมวดที่ต่างจากปกติมาก", "count"),
+}
+NUMBER_LABELS_BY_CHECK = {"advances": {"in": "เบิกไป", "out": "หักคืน"}}
+BY_SOURCE_LABELS = {"in_by_source": "เงินเข้า", "out_by_source": "จ่ายออก", "no_payer": "ค้างจ่าย ยังไม่มีผู้จ่ายในแอป"}
+
+
+def numbers_list(key: str, data: dict) -> list[dict]:
+    """The check's numbers by key -> [{"label", "value", "kind"}]: Thai labels, money / count / pct, flat (a by-source dict becomes one
+    number per source, a list of months its count). Text values (the account code), empty values and per-account details (those are
+    in the rows) are left out."""
+    out = []
+    relabel = NUMBER_LABELS_BY_CHECK.get(key, {})
+    for k, v in (data or {}).items():
+        if k in BY_SOURCE_LABELS and isinstance(v, dict):
+            out += [{"label": f"{BY_SOURCE_LABELS[k]}: {source_th(src)}", "value": round(float(x), 2), "kind": "money"}
+                    for src, x in sorted(v.items(), key=lambda kv: -abs(kv[1] or 0)) if isinstance(x, (int, float))]
+            continue
+        if k not in NUMBER_LABELS:
+            continue
+        label, kind = NUMBER_LABELS[k]
+        if isinstance(v, list):
+            v = len(v)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        out.append({"label": relabel.get(k, label), "value": int(v) if kind == "count" else round(float(v), 2), "kind": kind})
+    return out
+
+
+def shape_row(r: dict) -> dict:
+    """A check row as the page shows it: date, text, amount and the source as a Thai label (the code stays as source_key)."""
+    code = r.get("source")
+    amount = r.get("amount")
+    return {**r, "date": (str(r["date"])[:10] if r.get("date") else None), "text": str(r.get("text") or ""),
+            "amount": (round(float(amount), 2) if isinstance(amount, (int, float)) and not isinstance(amount, bool) else None),
+            "source": source_th(code) if code else "", "source_key": code}
+
+
+def check(key: str, branch: str, state: str, summary: str, data: dict, rows: list[dict], ordered: bool = False) -> dict:
+    """One check in the shape the page renders (module docstring). ordered = the rows are already in the order to show."""
+    rows = rows[:MAX_ROWS] if ordered else top_rows(rows)
+    return {"key": key, "branch": branch, "title": TITLES[key], "state": state, "summary": summary,
+            "numbers": numbers_list(key, data), "data": data, "rows": [shape_row(r) for r in rows]}
 
 
 # ------------------------------------------------------------------ 1 + 2: an account that must net out (pure)
@@ -186,9 +243,8 @@ def net_check(key: str, entries: list[dict], account: str, branch: str, start: d
     # the individual entries after the per-source totals: every money-in row (few: the cheques), then the biggest money-out rows
     rows += sorted((dict(r, side="in") for r in s["in_rows"]), key=lambda r: -r["amount"])
     rows += sorted((dict(r, side="out") for r in s["out_rows"]), key=lambda r: -r["amount"])
-    return {"key": key, "branch": branch, "title": TITLES[key], "state": state, "summary": summary,
-            "numbers": {"account": account, "in": tin, "out": tout, "diff": diff, "pct": round(pct, 2), "in_by_source": s["in"], "out_by_source": s["out"]},
-            "rows": rows[:MAX_ROWS]}
+    return check(key, branch, state, summary, {"account": account, "in": tin, "out": tout, "diff": diff, "pct": round(pct, 2),
+                                               "in_by_source": s["in"], "out_by_source": s["out"]}, rows, ordered=True)
 
 
 MID_FUND = re.compile(r"เบิกกลางเดือน")                       # คชจ.+เบิกกลางเดือน, ... เบิกกลางเดือนไม่พอ: the mid-month papers' cash
@@ -212,8 +268,28 @@ def label_month(entry: dict) -> Optional[str]:
     return f"{y}-{mo:02d}" if 1 <= mo <= 12 else None
 
 
-def _papers_out(entries: list[dict], source: str, branch: str, start: date, end: date) -> float:
-    return round(sum(sum_lines(e, "1100", "credit", branch) for e in entries if e.get("source") == source and in_bounds(e, start, end)), 2)
+_SCRIPT_BATCH = re.compile(r"^(\d{4}-\d{2})-[a-z]")              # '2026-07-saraburi:p12:l3' (data/acc_docs, the script)
+_DOCS_BATCH = re.compile(r"^docs:(\d{4}-\d{2}):")                 # 'docs:2026-07:สระบุรี:mid:p2:l1' (the drop box)
+
+
+def paper_month(entry: dict) -> Optional[str]:
+    """The company month of the papers an entry came from: its batch's month ('<month>-<branch>:' or 'docs:<month>:<branch>:<half>:'),
+    else the month of its date. A half's papers carry lines dated before the half (a receipt of the 24th in the next month's mid-month
+    list): counted by line date they fell into the wrong month -- false red for Saraburi 2026-07 (review 26 Nov 2026)."""
+    sid = str(entry.get("source_id") or "")
+    m = _DOCS_BATCH.match(sid) or _SCRIPT_BATCH.match(sid)
+    if m:
+        return m.group(1)
+    d = str(entry.get("entry_date") or "")[:10]
+    try:
+        return company_month(date.fromisoformat(d))
+    except ValueError:
+        return None
+
+
+def _papers_out(entries: list[dict], source: str, branch: str, month: str) -> float:
+    """What one kind of papers (mid / end of month) of this company month paid out of petty cash -- by the batch, not the line date."""
+    return round(sum(sum_lines(e, "1100", "credit", branch) for e in entries if e.get("source") == source and paper_month(e) == month), 2)
 
 
 def _short_state(want: float, got: float) -> str:
@@ -245,9 +321,9 @@ def petty_cash(window: list[dict], branch: str, month: str) -> dict:
                 if in_bounds(x, s, e) and sum_lines(x, "1100", "debit", branch) and x.get("source") not in ("midmonth", "endmonth")]
     this, prev, nxt = funding(start, end), funding(p_start, p_end), funding(n_start, n_end)
     mid_in = round(sum(a for _, a, k in this if k == "mid"), 2)
-    mid_out = _papers_out(window, "midmonth", branch, start, end)
+    mid_out = _papers_out(window, "midmonth", branch, month)
     end_in = round(sum(a for _, a, k in nxt if k == "end"), 2)
-    end_out = _papers_out(window, "endmonth", branch, start, end)
+    end_out = _papers_out(window, "endmonth", branch, month)
     states, rows = [balance_state(mid_in, mid_out)], []
     rows.append({"text": f"กลางเดือน: เช็คเติม {baht(mid_in)} · เอกสารเบิกกลางเดือน {baht(mid_out)} · ต่าง {mid_in - mid_out:+,.0f}",
                  "amount": round(mid_in - mid_out, 2), "source": "midmonth", "source_id": None, "entry_id": None, "date": None})
@@ -285,11 +361,10 @@ def petty_cash(window: list[dict], branch: str, month: str) -> dict:
     rows += [{"text": f"จ่ายออก: {source_th(src)}", "amount": v, "source": src, "source_id": None, "entry_id": None, "date": None, "side": "out"}
              for src, v in sorted(raw["out"].items(), key=lambda kv: -kv[1])]
     rows += sorted((dict(r, side="in") for r in raw["in_rows"]), key=lambda r: -r["amount"])
-    return {"key": "petty_cash", "branch": branch, "title": TITLES["petty_cash"], "state": state, "summary": summary,
-            "numbers": {"account": "1100", "in": tin, "out": tout, "diff": round(tin - tout, 2), "in_by_source": raw["in"], "out_by_source": raw["out"],
-                        "mid_in": mid_in, "mid_out": mid_out, "end_in_next_run": end_in, "end_out": end_out,
-                        "cash_wages": round(end_in - end_out, 2) if end_in else None},
-            "rows": rows[:MAX_ROWS]}
+    return check("petty_cash", branch, state, summary,
+                 {"account": "1100", "mid_in": mid_in, "mid_out": mid_out, "end_in_next_run": end_in, "end_out": end_out,
+                  "cash_wages": round(end_in - end_out, 2) if end_in else None, "in": tin, "out": tout, "diff": round(tin - tout, 2),
+                  "in_by_source": raw["in"], "out_by_source": raw["out"]}, rows, ordered=True)
 
 
 def advances(entries: list[dict], branch: str, start: date, end: date) -> dict:
@@ -306,6 +381,14 @@ def pea_invoice_paid(entry: dict) -> Optional[str]:
     return m.group(1) if m else None
 
 
+AI_BILL_REF = re.compile(r"อ้างอิง\s+((?:bill:[^\s,()·]+(?:,\s*)?)+)")
+
+
+def ai_bills_paid(entry: dict) -> list[str]:
+    """The AI-read bills ('bill:...' keys) a cheque says it pays ('... จ่ายบิล X (อ้างอิง bill:2026-10:แก่งคอย:ab12cd34:1)')."""
+    return [ref for grp in AI_BILL_REF.findall(str(entry.get("description") or "")) for ref in re.findall(r"bill:[^\s,()·]+", grp)]
+
+
 def sum_lines(entry: dict, account: str, side: str, branch: Optional[str] = None) -> float:
     return round(sum(money(ln.get(side)) for ln in entry.get("lines") or [] if ln.get("account") == account
                      and (branch is None or line_branch(ln, entry) == branch)), 2)
@@ -317,17 +400,22 @@ def bills_check(owed: list[dict], branch: str, start: date, end: date, *, elec_b
     clear an older bill), with its lines. elec_bills = the stored PEA bills of this month. later_run = a cheque run later than this
     month is already booked (so an unpaid PEA bill of this month should have been paid by now). shop_bills = #payables' view of the
     purchase / truck bills ({source: 'purchase'|'truck', id, amount, state: paid|now|due, changed, shop, branch}), None if unknown."""
-    rows, states, nums = [], [], {"pea_owed": 0.0, "pea_paid": 0.0, "pea_unpaid": 0.0, "shop_owed": 0.0, "shop_unpaid": 0.0,
-                                  "no_payer": {}, "unknown_payments": 0.0}
+    rows, states, nums = [], [], {"pea_owed": 0.0, "pea_paid": 0.0, "pea_unpaid": 0.0, "ai_owed": 0.0, "ai_unpaid": 0.0, "shop_owed": 0.0,
+                                  "shop_unpaid": 0.0, "elec_other": 0.0, "no_payer": {}, "unknown_payments": 0.0}
     bills = [e for e in owed if e.get("source") == "electricity" and str(e.get("source_id") or "").startswith("pea:")]
     payers: dict = {}
+    ai_payers: dict = {}
     for e in owed:
         dr = sum_lines(e, "2100", "debit")
         if not dr:
             continue
         inv = pea_invoice_paid(e)
+        refs = ai_bills_paid(e)
         if inv:
             payers.setdefault(inv, []).append((e, dr))
+        elif refs:                                     # a cheque that pays a bill read by AI (app/acc_cheques names it)
+            for ref in refs:
+                ai_payers.setdefault(ref, []).append((e, dr))
         elif in_bounds(e, start, end) and branch in entry_branches(e):
             nums["unknown_payments"] = round(nums["unknown_payments"] + dr, 2)
             states.append("warn")
@@ -399,9 +487,44 @@ def bills_check(owed: list[dict], branch: str, start: date, end: date, *, elec_b
             elif b.get("changed"):
                 states.append("warn")
                 rows.append(row_of(e, b["changed"], f"บิลแก้ยอดหลังจ่ายแล้ว ต่าง {b['changed']:+,.2f} · {b.get('shop') or ''}"))
+    # bills read by AI ('bill:' keys): paid by the cheque that names them
+    for e in owed:
+        sid = str(e.get("source_id") or "")
+        if not sid.startswith("bill:") or e.get("source") == "electricity" or not in_bounds(e, start, end):
+            continue
+        due = sum_lines(e, "2100", "credit", branch)
+        if not due:
+            continue
+        paid_list = ai_payers.get(sid, [])
+        paid = round(sum(a for _, a in paid_list), 2)
+        nums["ai_owed"] = round(nums["ai_owed"] + due, 2)
+        label = f"บิลอ่านด้วย AI · {e.get('party') or ''} · {short_desc(e.get('description'))}"
+        if len(paid_list) > 1:
+            states.append("bad")
+            rows.append(row_of(e, paid - due, f"{label}: จ่ายซ้ำ {len(paid_list)} ครั้ง รวม {baht(paid)} (บิล {baht(due)})"))
+        elif not paid:
+            nums["ai_unpaid"] = round(nums["ai_unpaid"] + due, 2)
+            states.append("warn" if later_run else "info")
+            rows.append(row_of(e, due, f"{label}: ยังไม่มีเช็คจ่าย" + (" (มีรอบเช็คเดือนถัดไปแล้ว — ตรวจว่าเช็คลงเป็นค่าใช้จ่ายซ้ำหรือไม่)"
+                                                                       if later_run else " (รอรอบเช็คเดือนหน้า)")))
+        elif paid < due - 1:
+            nums["ai_unpaid"] = round(nums["ai_unpaid"] + due - paid, 2)
+            states.append("warn")
+            rows.append(row_of(e, due - paid, f"{label}: จ่ายไม่ครบ ขาด {baht(due - paid)}"))
+    # electricity owed that did not come from a PEA bill (an AI read of a PEA bill, booked before 26 Nov 2026): nothing pays it, and
+    # the PEA bill of the same meter books the same cost again
+    for e in owed:
+        if e.get("source") != "electricity" or str(e.get("source_id") or "").startswith("pea:") or not in_bounds(e, start, end):
+            continue
+        cr = sum_lines(e, "2100", "credit", branch)
+        if cr:
+            nums["elec_other"] = round(nums["elec_other"] + cr, 2)
+            states.append("warn")
+            rows.append(row_of(e, cr, f"ค่าไฟที่ไม่ได้มาจากใบแจ้ง PEA (ไม่มีผู้จ่ายในแอป) — อาจนับซ้ำกับใบแจ้ง PEA · {e.get('party') or ''}"))
     # everything else owed this month has no payer in the app yet (card fuel: the stations' monthly bills)
     for e in owed:
-        if e.get("source") in ("electricity", "purchase", "truck_bill") or not in_bounds(e, start, end):
+        if (e.get("source") in ("electricity", "purchase", "truck_bill") or str(e.get("source_id") or "").startswith("bill:")
+                or not in_bounds(e, start, end)):
             continue
         cr = sum_lines(e, "2100", "credit", branch)
         if cr:
@@ -415,6 +538,10 @@ def bills_check(owed: list[dict], branch: str, start: date, end: date, *, elec_b
     parts = []
     if nums["pea_owed"]:
         parts.append(f"ค่าไฟ PEA {baht(nums['pea_owed'])} จ่ายแล้ว {baht(nums['pea_paid'])}")
+    if nums["ai_owed"]:
+        parts.append(f"บิลอ่านด้วย AI {baht(nums['ai_owed'])} ยังไม่จ่าย {baht(nums['ai_unpaid'])}")
+    if nums["elec_other"]:
+        parts.append(f"ค่าไฟไม่ได้มาจากใบแจ้ง PEA {baht(nums['elec_other'])}")
     if shop_bills is not None and nums["shop_owed"]:
         parts.append(f"บิลร้านค้า {baht(nums['shop_owed'])} ยังไม่จ่าย {baht(nums['shop_unpaid'])}")
     for src, amt in nums["no_payer"].items():
@@ -427,10 +554,14 @@ def bills_check(owed: list[dict], branch: str, start: date, end: date, *, elec_b
 
 
 # ------------------------------------------------------------------ 4: each file's own total (pure)
-def file_totals_check(files: list[dict], booked: dict, branch: str) -> dict:
+def file_totals_check(files: list[dict], booked: dict, branch: str, docs: Optional[dict] = None) -> dict:
     """files = booked inbox_files of the month ({id, file_name, preview, booked_at}); booked = {batch key: (entries now, total debit now)}.
-    For each batch of the branch: printed total vs its rows, and what the preview booked vs what is in the books now."""
-    rows, states, n_batches = [], [], 0
+    For each batch of the branch: printed total vs its rows, and what the preview booked vs what is in the books now.
+    docs = {acc_docs batch key: {"read_total", "pages", "edited"}} as acc_docs holds it NOW: for a batch of scanned papers (AI) the
+    owner fixes lines on the review screen, so the books are compared with the pages' totals after those fixes (not with the preview
+    at booking time -- every fix turned this red, review 26 Nov 2026) and the fixed pages are shown as info."""
+    docs = docs or {}
+    rows, states, n_batches, n_edited = [], [], 0, 0
     claimed: dict = {}
     for f in sorted(files, key=lambda f: str(f.get("booked_at") or "")):
         for b in (f.get("preview") or {}).get("batches") or []:
@@ -451,6 +582,13 @@ def file_totals_check(files: list[dict], booked: dict, branch: str) -> dict:
                 rows.append({"text": f"{name}: ถูกแทนด้วยไฟล์ที่ลงทีหลัง (ชุดเดียวกัน)", "amount": want, **base})
                 continue
             problems = []
+            d = docs.get(key)
+            if d is not None:                          # pages of a scanned half: the review screen may have fixed lines since
+                want = rt = money(d.get("read_total"))
+                if d.get("edited"):
+                    n_edited += 1
+                    rows.append({"text": f"{name}: แก้บนหน้าตรวจ {d['edited']} หน้า — เทียบกับยอดหลังแก้ {baht(want)}", "amount": want, **base,
+                                 "note": "edited"})
             if ft is not None and rt is not None and abs(money(ft) - money(rt)) > 1:
                 problems.append(f"ยอดในไฟล์ {baht(money(ft))} แต่แถวรวมได้ {baht(money(rt))}")
             if abs(now - want) > 1:
@@ -464,8 +602,12 @@ def file_totals_check(files: list[dict], booked: dict, branch: str) -> dict:
     if not n_batches:
         return check("file_totals", branch, "info", "ยังไม่มีไฟล์ที่ลงบัญชีจากกล่องรับไฟล์เดือนนี้", {"batches": 0, "bad": 0}, [])
     state = "bad" if nb else "ok"
-    summary = f"{n_batches} ชุดข้อมูล · " + (f"ไม่ตรง {nb} ชุด" if nb else "ตรงกันทุกชุด")
-    return check("file_totals", branch, state, summary, {"batches": n_batches, "bad": nb}, rows)
+    summary = (f"{n_batches} ชุดข้อมูล · " + (f"ไม่ตรง {nb} ชุด" if nb else "ตรงกันทุกชุด")
+               + (f" · แก้บนหน้าตรวจ {n_edited} ชุด (เทียบกับยอดหลังแก้)" if n_edited else ""))
+    data = {"batches": n_batches, "bad": nb}
+    if n_edited:
+        data["edited"] = n_edited
+    return check("file_totals", branch, state, summary, data, rows)
 
 
 # ------------------------------------------------------------------ 5: look-alikes across sources (pure)
@@ -567,6 +709,40 @@ def _vehicles(entry: dict) -> set:
     return {ln.get("vehicle_id") for ln in entry.get("lines") or [] if ln.get("vehicle_id")}
 
 
+def batch_of(entry: dict) -> str:
+    """The batch an entry was booked in, from its source_id: 'cheque-2026-07-สระบุรี:r17' -> 'cheque-2026-07-สระบุรี', acc_docs lines
+    '<batch>:p2:l1' -> '<batch>', card fuel 'fuel:pt:2026-10:<plate>' -> 'fuel:pt:2026-10', every PEA bill -> 'pea'. A source_id with
+    no ':' (a purchase / truck bill id) is its own source: one batch."""
+    sid, src = str(entry.get("source_id") or ""), entry.get("source") or ""
+    if ":" not in sid:
+        return src
+    m = re.match(r"^(.*?):p\d+:[lx]\w*$", sid)
+    if m:
+        return m.group(1)
+    if sid.startswith("pea:"):
+        return "pea"
+    if sid.startswith(("fuel:", "sales:")):
+        return ":".join(sid.split(":")[:3])
+    return sid.rsplit(":", 1)[0]
+
+
+def _cmonth(entry: dict) -> Optional[str]:
+    try:
+        return company_month(date.fromisoformat(str(entry.get("entry_date") or "")[:10]))
+    except ValueError:
+        return None
+
+
+def same_batch(a: dict, b: dict) -> bool:
+    """Two entries of the same source that are NOT a possible double: the same batch (one file's rows), or different company months /
+    branches (a payment repeated every month, or on both branches' sheets). Same source but another batch in the same month and
+    branch IS compared: an AI read of a PEA bill ('bill:...', source electricity) against the PEA bill itself, the script's papers
+    against the drop box's papers of the same half (review 26 Nov 2026)."""
+    if a.get("source") != b.get("source"):
+        return False
+    return batch_of(a) == batch_of(b) or _cmonth(a) != _cmonth(b) or a.get("branch") != b.get("branch")
+
+
 def could_be_same(a: dict, b: dict) -> bool:
     """Dates and trucks do not rule out that two entries are one piece of money."""
     va, vb = _vehicles(a), _vehicles(b)
@@ -598,7 +774,7 @@ def find_lookalikes(entries: list[dict], start: date, end: date, pnl: dict) -> l
 
     def consider(a: dict, b: dict, reason: str, why: str) -> None:
         key = tuple(sorted((a["id"], b["id"])))
-        if key in seen or a.get("source") == b.get("source") or not side[a["id"]] or side[a["id"]] != side[b["id"]]:
+        if key in seen or same_batch(a, b) or not side[a["id"]] or side[a["id"]] != side[b["id"]]:
             return                         # a double that matters books the P&L twice: both a cost, or both income
         if not (in_bounds(a, start, end) or in_bounds(b, start, end)):
             return
@@ -628,7 +804,7 @@ def find_lookalikes(entries: list[dict], start: date, end: date, pnl: dict) -> l
         for a in lst:
             for b in cands:
                 # the cheap tests first: a bucket of 4,000-baht cash-fuel lines has hundreds of entries
-                if (a["id"] == b["id"] or a.get("source") == b.get("source") or side[a["id"]] != side[b["id"]]
+                if (a["id"] == b["id"] or same_batch(a, b) or side[a["id"]] != side[b["id"]]
                         or abs(amt[a["id"]] - amt[b["id"]]) > 1 or not (in_bounds(a, start, end) or in_bounds(b, start, end))
                         or not could_be_same(a, b)):
                     continue
@@ -648,8 +824,8 @@ def lookalikes_check(pairs: list[dict], branch: str) -> dict:
     total = round(sum(p["amount"] for p in mine), 2)
     summary = (f"พบ {len(mine)} คู่ที่อาจนับซ้ำ รวม {baht(total)} — ดูว่าเป็นเงินก้อนเดียวกันหรือไม่" if mine
                else "ไม่พบรายการที่ซ้ำกันระหว่างแหล่งข้อมูล")
-    return {"key": "lookalikes", "branch": branch, "title": TITLES["lookalikes"], "state": "warn" if mine else "ok", "summary": summary,
-            "numbers": {"pairs": len(mine), "total": total, "by_document": sum(1 for p in mine if p["reason"] == "doc")}, "rows": rows}
+    return check("lookalikes", branch, "warn" if mine else "ok", summary,
+                 {"pairs": len(mine), "total": total, "by_document": sum(1 for p in mine if p["reason"] == "doc")}, rows, ordered=True)
 
 
 # ------------------------------------------------------------------ 6: this month vs the usual (pure)
@@ -702,8 +878,7 @@ def usual_check(month: str, by_month: dict, branch: str, names: dict) -> dict:
     summary = (f"เทียบค่าเฉลี่ย {len(have)} เดือนก่อน ({month_label(have[-1])} – {month_label(have[0])}) · "
                + (f"ต่างจากปกติมาก {nw} หมวด" if nw else "ไม่มีหมวดที่ต่างจากปกติมาก")
                + (f" · หมวดใหม่ {states.count('info')}" if "info" in states else ""))
-    return {"key": "vs_usual", "branch": branch, "title": TITLES["vs_usual"], "state": state, "summary": summary,
-            "numbers": {"months": have, "accounts": per, "warn": nw}, "rows": top_rows(rows)}
+    return check("vs_usual", branch, state, summary, {"months": have, "accounts": per, "warn": nw}, rows)
 
 
 # ------------------------------------------------------------------ all checks from loaded data (pure)
@@ -722,7 +897,7 @@ def evaluate(month: str, branches: list[str], data: dict) -> list[dict]:
         out["advances"].append(advances(month_entries, b, start, end))
         out["bills"].append(bills_check(data["owed"], b, start, end, elec_bills=data["elec_bills"], later_run=data["later_run"],
                                         shop_bills=data.get("shop_bills")))
-        out["file_totals"].append(file_totals_check(data["files"], data["booked"], b))
+        out["file_totals"].append(file_totals_check(data["files"], data["booked"], b, data.get("docs")))
         out["lookalikes"].append(lookalikes_check(pairs, b))
         out["vs_usual"].append(usual_check(month, pnl_amounts(data["history"], pnl, b), b, names))
     return [c for k in ORDER for c in out[k]]
@@ -778,6 +953,23 @@ def _booked_now(keys: list[str]) -> dict:
     return out
 
 
+MONEY_PAGES = ("expense", "fuel", "advance")              # acc_docs kinds whose lines are entries (covers / tables / memos are not)
+
+
+def _docs_now(keys: list[str]) -> dict:
+    """{acc_docs batch key: {"read_total", "pages", "edited"}} as acc_docs is NOW (the review screen updates read_total on a fix)."""
+    out = {}
+    for key in keys:
+        try:
+            rows = supabase.select_all("acc_docs", {"select": "page,kind,read_total,edited_at", "batch": f"eq.{key}", "order": "page.asc"})
+        except supabase.SupabaseError:
+            return {}
+        if rows:
+            out[key] = {"read_total": round(sum(money(r.get("read_total")) for r in rows if r.get("kind") in MONEY_PAGES), 2),
+                        "pages": len(rows), "edited": sum(1 for r in rows if r.get("edited_at"))}
+    return out
+
+
 def _files(month: str) -> list[dict]:
     try:
         return supabase.select_all("inbox_files", {"select": "id,file_name,status,month,preview,batches,booked_at", "month": f"eq.{month}",
@@ -811,10 +1003,12 @@ def _load(month: str) -> dict:
         files = f_files.result()
         keys = sorted({b["key"] for f in files for b in (f.get("preview") or {}).get("batches") or []})
         f_booked = ex.submit(_booked_now, keys)
+        f_docs = ex.submit(_docs_now, [k for k in keys if k.startswith("docs:")])
         history = [{"account": ln["account"], "debit": ln["debit"], "credit": ln["credit"], "branch": ln.get("branch") or ln["entry"].get("branch"),
                     "month": _company_month(ln["entry"]["entry_date"])} for ln in f_history.result()]
         return {"accounts": accounts, "window": f_window.result(), "history": history, "owed": f_owed.result(), "elec_bills": f_elec.result(),
-                "later_run": bool(f_later.result()), "shop_bills": f_shop.result(), "files": files, "booked": f_booked.result()}
+                "later_run": bool(f_later.result()), "shop_bills": f_shop.result(), "files": files, "booked": f_booked.result(),
+                "docs": f_docs.result()}
 
 
 def run(month: str, branch: str = "") -> dict:

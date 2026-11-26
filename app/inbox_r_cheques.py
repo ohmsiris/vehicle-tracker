@@ -250,6 +250,8 @@ def read(f: Dropped, refs: Optional[tuple] = None) -> dict:
     if fn:
         base.append({"what": "month", "source": "ชื่อไฟล์", "value": fn, "weight": W_FILE})
     provisional, _ = vote(base, "month")
+    if not provisional and f.choices.get("month"):            # nothing in the file says the month: the owner picked it
+        provisional = f.choices["month"]
     if not provisional:
         p.update(note="ไม่รู้เดือนของรอบเช็ค", signals=base,
                  conflicts=[{"key": "month", "message": "ไม่พบเดือนของรอบเช็คในไฟล์ — โปรดเลือก", "options": [], "default": None}])

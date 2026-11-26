@@ -137,6 +137,20 @@ def allowed(menus: list[str], path: str) -> bool:
     return any(path.startswith(p) for m in menus if m in MENUS for p in MENUS[m]["api"])
 
 
+# Per-person pay (a payroll sheet dropped in ลงข้อมูล: every name with its wage) is only for whoever may open the employees' pay.
+PAY_MENUS = ("employees", "payroll")
+
+
+def sees_pay(user: Optional[dict]) -> bool:
+    """May this signed-in person see per-person pay? An owner, or a person with one of PAY_MENUS. None (nobody) may not -- the owner's
+    access code is checked by the caller."""
+    if not user:
+        return False
+    if is_owner_user(user):
+        return True
+    return any(m in PAY_MENUS for m in (user.get("menus") or []))
+
+
 def menu_options() -> list[dict]:
     """Every menu, in the sidebar's order, with its section."""
     order = sorted(MENUS, key=lambda k: (GROUPS.index(MENUS[k]["group"]), MENUS[k]["pos"]))

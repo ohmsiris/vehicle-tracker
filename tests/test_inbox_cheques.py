@@ -284,3 +284,90 @@ def test_amr_report_is_read_and_saved_without_ledger_rows(monkeypatch):
 @pytest.mark.parametrize("mod", [rc, rp])
 def test_reader_module_shape(mod):
     assert mod.KIND and mod.LABEL and mod.FEEDS and callable(mod.sniff) and callable(mod.read) and callable(mod.book) and callable(mod.unbook)
+
+
+# ------------------------------------------------------------------ AI-read bills paid by the HQ cheque (review 26 Nov 2026)
+def _ai_bill(sid="bill:2026-10:แก่งคอย:ab12cd34:1", total=5320.5, party="โครงการชลประทานสระบุรี", doc_no="W-123", paid_by=None):
+    return {"ai_bill": True, "source_id": sid, "month": sid.split(":")[1], "branch": "แก่งคอย", "party": party, "what": "ค่าน้ำชลประทาน ต.ค. 69",
+            "doc_no": doc_no, "total": total, "paid_by": paid_by or []}
+
+
+def _with_ai(*bills):
+    return {**PURCHASES, **{ac.AI_KEY + b["source_id"]: b for b in bills}}
+
+
+def test_a_cheque_pays_an_ai_read_bill_by_amount_and_party():
+    b = _ai_bill()
+    out = ac.build([_row("ค่าน้ำชลประทาน 10/69", "โครงการส่งน้ำและบำรุงรักษา", 5320.5, no=7, cheque_date=date(2026, 11, 20)),
+                    _row("ค่าน้ำชลประทาน 10/69", "โครงการส่งน้ำและบำรุงรักษา", 5320.5, no=8)],
+                   branch="แก่งคอย", file_month=date(2026, 11, 1), batch="cheque-2026-11-แก่งคอย", purchases=_with_ai(b))
+    paid, second = out["entries"]
+    assert paid["kind"] == "pays_bill" and paid["entry_date"] == "2026-11-20"
+    assert {ln["account"]: ln["debit"] for ln in paid["lines"] if ln["debit"]} == {"2100": 5320.5}       # not 5200 a second time
+    assert f"อ้างอิง {b['source_id']}" in paid["description"]
+    assert out["matched"] == [{"row": "r7", "bill": b["source_id"], "period": "2026-10"}]
+    assert second["kind"] == "cost"                                                                      # one bill is paid once
+    from app import acc_checks
+    assert acc_checks.ai_bills_paid(paid) == [b["source_id"]]
+
+
+def test_an_ai_bill_is_not_paid_by_a_stranger_another_run_or_an_old_month():
+    b = _ai_bill()
+    run = dict(branch="แก่งคอย", file_month=date(2026, 11, 1), batch="cheque-2026-11-แก่งคอย")
+    stranger = ac.build([_row("ซ่อมปั๊มน้ำ", "ร้านช่างแดง", 5320.5)], purchases=_with_ai(b), **run)
+    assert stranger["entries"][0]["kind"] == "cost" and not stranger["matched"]                          # same amount, someone else
+    paid_elsewhere = _ai_bill(paid_by=["cheque-2026-10-แก่งคอย"])
+    row = _row("ค่าน้ำชลประทาน 10/69", "โครงการชลประทาน", 5320.5)
+    assert ac.build([row], purchases=_with_ai(paid_elsewhere), **run)["entries"][0]["kind"] == "cost"
+    paid_here = _ai_bill(paid_by=["cheque-2026-11-แก่งคอย"])                                            # this run, read again
+    assert ac.build([row], purchases=_with_ai(paid_here), **run)["entries"][0]["kind"] == "pays_bill"
+    old = _ai_bill(sid="bill:2026-06:แก่งคอย:ab12cd34:1")
+    assert ac.build([row], purchases=_with_ai(old), **run)["entries"][0]["kind"] == "cost"
+    other = dict(run, branch="สระบุรี", batch="cheque-2026-11-สระบุรี")                               # Kaeng Khoi's bill, Saraburi's sheet
+    assert ac.build([row], purchases=_with_ai(b), **other)["entries"][0]["kind"] == "cost"
+
+
+def test_the_bill_number_in_the_cheque_note_pays_an_ai_bill():
+    b = _ai_bill(doc_no="INV-77881", total=12000.0, party="หจก. ไทยเคมี")
+    out = ac.build([_row("สารกรอง", "บจ. อื่น", 10000.0, "#INV-77881")], branch="แก่งคอย", file_month=date(2026, 11, 1),
+                   batch="t", purchases=_with_ai(b))
+    e = out["entries"][0]
+    assert e["kind"] == "pays_bill" and {ln["account"]: ln["debit"] for ln in e["lines"] if ln["debit"]} == {"2100": 10000.0}
+    assert any("ยังค้าง 2,000.00" in f for f in out["flags"])
+    assert ac.purchase_refs(_row("x", note="#INV-77881"), _with_ai(b)) == []                         # an AI bill is never a purchase bill
+
+
+def test_load_refs_reads_open_ai_bills_and_who_pays_them(monkeypatch):
+    def fake(table, params, page=1000):
+        if table in ("elec_bills", "purchase_bills"):
+            return []
+        assert table == "acc_entries"
+        if params.get("source_id") == "like.bill:*":
+            return [{"id": "e1", "branch": "แก่งคอย", "source_id": "bill:2026-10:แก่งคอย:ab12cd34:1", "party": "ชลประทาน",
+                     "description": "ค่าน้ำ ต.ค.", "doc_no": "W-1", "lines": [{"account": "5200", "credit": 0}, {"account": "2100", "credit": 5320.5}]},
+                    {"id": "e2", "branch": "สระบุรี", "source_id": "bill:2026-10:สระบุรี:ffff0000:1", "party": "x", "description": "",
+                     "doc_no": None, "lines": [{"account": "5200", "credit": 0}]}]                     # owes nothing on 2100
+        assert params["source"] == "eq.hq_cheques" and params["description"].startswith("like.*อ้างอิง")
+        return [{"source_id": "cheque-2026-11-แก่งคอย:r7", "description": "ค่าน้ำ · จ่ายบิล W-1 (อ้างอิง bill:2026-10:แก่งคอย:ab12cd34:1) · เช็ค 1"}]
+    monkeypatch.setattr(supabase, "select_all", fake)
+    bills, purchases = ac.load_refs()
+    ai = ac.ai_bills_of(purchases)
+    assert len(ai) == 1 and ai[0]["total"] == 5320.5 and ai[0]["month"] == "2026-10"
+    assert ai[0]["paid_by"] == ["cheque-2026-11-แก่งคอย"]
+
+
+def test_the_drop_box_cheque_reader_turns_the_row_into_pays_bill():
+    b = _ai_bill(sid="bill:2026-10:สระบุรี:ab12cd34:1", total=22949.0, party="บจ. ปฏิทิน", doc_no="")
+    b["branch"] = "สระบุรี"
+    p = rc.read(ic.sniff_file(NAME, _workbook()), refs=(REFS[0], _with_ai(b)))
+    srb = p["batches"][0]
+    assert [r["role"] for r in srb["rows"]] == ["funding", "pays_bill", "cost", "pays_bill", "pays_bill"]
+    assert {"row": "r5", "bill": b["source_id"], "period": "2026-10"} in srb["matched"]
+
+
+def test_a_month_the_owner_picks_is_used_when_the_file_names_none():
+    """No title, no dates, no tags: the reader asks; once the owner picks a month it reads with that month (review, 26 Nov 2026)."""
+    from app import inbox_common as ic, inbox_r_cheques as rc
+    import inspect
+    src = inspect.getsource(rc.read)
+    assert 'f.choices.get("month")' in src

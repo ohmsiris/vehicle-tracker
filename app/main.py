@@ -1199,8 +1199,32 @@ def _inbox_call(fn, *args, **kwargs):
         return _acc_call(fn, *args, **kwargs)
     except inbox.NotFound as exc:
         raise HTTPException(404, str(exc))
+    except inbox.Busy as exc:                     # another action on the same file is running (a second click on ลงบัญชี ...)
+        raise HTTPException(409, str(exc))
+    except inbox.Forbidden as exc:
+        raise HTTPException(403, str(exc))
     except inbox.InboxError as exc:
         raise HTTPException(422, str(exc))
+
+
+def _sees_pay(supplied: str) -> bool:
+    """May this caller see per-person pay in a dropped payroll sheet? The owner, or a person with the employees (or payroll) menu."""
+    if _is_owner(supplied):
+        return True
+    return users.sees_pay(users.session_user(supplied) if (supplied or "").startswith("u_") else None)
+
+
+def _read_inbox_uploads(files: list[UploadFile]) -> list[tuple]:
+    """The drop box's own upload: up to inbox.MAX_FILE_BYTES (50 MB) a file. A file over it is NOT read (data None) and is refused on
+    its own by inbox.upload with a Thai message; the other files of the same upload go through."""
+    from app import inbox
+    if len(files) > inbox.MAX_FILES:
+        raise HTTPException(413, f"ส่งได้ครั้งละไม่เกิน {inbox.MAX_FILES} ไฟล์")
+    out: list = []
+    for f in files:
+        data = f.file.read(inbox.MAX_FILE_BYTES + 1)
+        out.append((f.filename or "upload", None if len(data) > inbox.MAX_FILE_BYTES else data))
+    return out
 
 
 @app.post("/api/accounts/inbox")
@@ -1208,7 +1232,7 @@ def api_inbox_upload(files: list[UploadFile] = File(...), x_app_token: str = Hea
     """Drop files: each is stored once (same file again -> the row it already has), identified from its content and read (not booked)."""
     from app import inbox
     _check_token(x_app_token, token)
-    raws = _read_uploads(files, inbox.MAX_FILES)
+    raws = _read_inbox_uploads(files)
     return {"files": _inbox_call(inbox.upload, raws, _who(x_app_token or token))}
 
 
@@ -1225,18 +1249,23 @@ def api_inbox_one(file_id: str, x_app_token: str = Header(default=""), token: st
     """One dropped file with its whole preview (the ดูก่อนลงบัญชี dialog)."""
     from app import inbox
     _check_token(x_app_token, token)
-    return _inbox_call(inbox.get, file_id)
+    return _inbox_call(inbox.get, file_id, _sees_pay(x_app_token or token))
 
 
 @app.get("/api/accounts/inbox/{file_id}/file")
 def api_inbox_file(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
-    """The dropped file itself (private bucket, served through the app)."""
+    """The dropped file itself (private bucket, served through the app). Only PDFs and pictures open in the browser; anything else
+    (an .html dropped in the box ...) is a download, sandboxed and never sniffed -- it must never run on the app's own address, where
+    the viewer's token is. PDFs get no CSP sandbox: Chrome's PDF viewer refuses to open inside one."""
     from urllib.parse import quote as _q
     from app import inbox
     _check_token(x_app_token, token)
-    data, mime, name = _inbox_call(inbox.download, file_id)
-    return Response(content=data, media_type=mime, headers={"Content-Disposition": f"inline; filename*=UTF-8''{_q(name)}",
-                                                            "Cache-Control": "private, max-age=3600"})
+    data, media, name, inline = _inbox_call(inbox.download, file_id, _sees_pay(x_app_token or token))
+    headers = {"Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{_q(name)}",
+               "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"}
+    if media != "application/pdf":
+        headers["Content-Security-Policy"] = "sandbox"
+    return Response(content=data, media_type=media, headers=headers)
 
 
 @app.post("/api/accounts/inbox/{file_id}/choose")
@@ -1274,8 +1303,8 @@ def api_inbox_delete(file_id: str, x_app_token: str = Header(default=""), token:
     """ลบ: what it booked is taken back, then the file and its row are deleted."""
     from app import inbox
     _check_token(x_app_token, token)
-    _inbox_call(inbox.remove, file_id)
-    return {"ok": True}
+    res = _inbox_call(inbox.remove, file_id) or {}
+    return {"ok": True, **res}
 
 
 @app.get("/api/accounts/checks")

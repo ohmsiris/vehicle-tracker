@@ -85,7 +85,7 @@ def test_pc6906_081_found_across_the_month_boundary():
         assert {pairs[0]["a"]["id"], pairs[0]["b"]["id"]} == {"chq", "pur"}
     s, e = period_bounds("2026-07")
     c = ac.lookalikes_check(ac.find_lookalikes([cheque, bill], s, e, PNL), SB)
-    assert c["state"] == "warn" and c["numbers"]["pairs"] == 1 and len(c["rows"]) == 2 and c["rows"][0]["pair"] == 1
+    assert c["state"] == "warn" and c["data"]["pairs"] == 1 and len(c["rows"]) == 2 and c["rows"][0]["pair"] == 1
     assert "45,582" in c["summary"] and "25/06/2026" in c["rows"][0]["text"]
     assert ac.lookalikes_check([], SB)["state"] == "ok"
     # out of the window entirely: nothing
@@ -148,8 +148,8 @@ def test_advances_net_out():
     pay = ent("p", "2026-10-25", "payroll", [ln("5400", 900000), ln("1500", credit=252000), ln("1100", credit=648000)])
     wo = ent("w", "2026-10-20", "adjustment", [ln("7920", 3000), ln("1500", credit=3000)])
     c = ac.advances([adv, pay, wo], SB, s, e)
-    assert c["state"] == "ok" and c["numbers"]["in"] == 255000 and c["numbers"]["out"] == 255000
-    assert c["numbers"]["out_by_source"] == {"payroll": 252000, "adjustment": 3000}
+    assert c["state"] == "ok" and c["data"]["in"] == 255000 and c["data"]["out"] == 255000
+    assert c["data"]["out_by_source"] == {"payroll": 252000, "adjustment": 3000}
     c = ac.advances([adv, pay], SB, s, e)
     assert c["state"] == "warn" and "ต่าง +3,000" in c["summary"]
     assert ac.advances([adv, pay], KK, s, e)["state"] == "info"
@@ -172,7 +172,7 @@ def _cash_month():
 
 def test_petty_cash_matches_each_top_up_with_what_it_pays_for():
     c = ac.petty_cash(_cash_month(), SB, "2026-10")
-    n = c["numbers"]
+    n = c["data"]
     assert n["in"] == 886912 and n["out"] == 981489                         # the plain month totals, shown
     assert n["mid_in"] == 321141 and n["mid_out"] == 322141                  # within 1,000: ok
     assert n["end_in_next_run"] == 600000 and n["end_out"] == 211690 and n["cash_wages"] == 388310
@@ -222,7 +222,7 @@ def test_bills_paid_unpaid_and_paid_twice():
     s, e = period_bounds("2026-09")
     owed = [_pea("111111", "2026-09-25", 800000), _pays("c1", "2026-10-20", "111111", 800000)]
     c = ac.bills_check(owed, SB, s, e, elec_bills=[{"invoice_no": "111111", "branch": SB, "total": 800000, "deposit_interest": 0}], later_run=True)
-    assert c["state"] == "ok" and c["numbers"]["pea_paid"] == 800000
+    assert c["state"] == "ok" and c["data"]["pea_paid"] == 800000
     unpaid = owed[:1]
     assert ac.bills_check(unpaid, SB, s, e, elec_bills=[], later_run=False)["state"] == "info"     # next month's run not in yet
     c = ac.bills_check(unpaid, SB, s, e, elec_bills=[], later_run=True)
@@ -254,8 +254,8 @@ def test_bills_card_fuel_is_info_and_shop_bills_from_payables():
     shop = [{"source": "purchase", "id": "pb1", "state": "due", "changed": 0.0, "shop": "วิศวภัณฑ์"},
             {"source": "truck", "id": "ev1", "state": "paid", "changed": 0.0, "shop": "อู่"}]
     c = ac.bills_check([fuel, pur, trk], SB, s, e, elec_bills=[], later_run=False, shop_bills=shop)
-    assert c["state"] == "info" and c["numbers"]["no_payer"] == {"card_fuel": 10000}
-    assert c["numbers"]["shop_owed"] == 8000 and c["numbers"]["shop_unpaid"] == 5000
+    assert c["state"] == "info" and c["data"]["no_payer"] == {"card_fuel": 10000}
+    assert c["data"]["shop_owed"] == 8000 and c["data"]["shop_unpaid"] == 5000
     assert "น้ำมันบัตร ค้าง 10,000" in c["summary"]
     shop[1]["changed"] = 250.0
     assert ac.bills_check([fuel, pur, trk], SB, s, e, elec_bills=[], later_run=False, shop_bills=shop)["state"] == "warn"
@@ -272,7 +272,7 @@ def _file(fid, key, file_total, rows_total, entries_total, booked_at="2026-11-01
 def test_file_totals():
     key = "cheque-2026-10-สระบุรี"
     c = ac.file_totals_check([_file("a", key, 845000, 845000, 845000)], {key: (20, 845000.4)}, SB)
-    assert c["state"] == "ok" and c["numbers"] == {"batches": 1, "bad": 0}
+    assert c["state"] == "ok" and c["data"] == {"batches": 1, "bad": 0}
     c = ac.file_totals_check([_file("a", key, 845000, 845000, 845000)], {key: (40, 1690000)}, SB)
     assert c["state"] == "bad" and "ตอนนี้ในบัญชีมี 1,690,000" in c["rows"][0]["text"]                # doubled after booking
     c = ac.file_totals_check([_file("a", key, 845000, 840000, 840000)], {key: (19, 840000)}, SB)
@@ -299,7 +299,7 @@ def test_usual_check():
               {"account": "6300", "debit": 30000, "credit": 0, "branch": SB, "month": "2026-10"}]       # new: info
     by = ac.pnl_amounts(lines, {"5100": "cogs", "5300": "cogs", "7100": "expense", "6300": "expense", "7900": "expense"}, SB)
     c = ac.usual_check("2026-10", by, SB, names)
-    assert c["state"] == "warn" and c["numbers"]["warn"] == 2 and len(c["numbers"]["months"]) == 6
+    assert c["state"] == "warn" and c["data"]["warn"] == 2 and len(c["data"]["months"]) == 6
     texts = [r["text"] for r in c["rows"]]
     assert any(t.startswith("5300 เกลือ: 90,000 ปกติ 40,000 (+125%)") for t in texts)
     assert any(t.startswith("7100") and "ยังไม่มีเดือนนี้" in t for t in texts)                          # 54,000 usual, 0 now
@@ -374,8 +374,8 @@ def test_run_end_to_end_on_a_fake_database(monkeypatch):
     by = {(c["key"], c["branch"]): c for c in out["checks"]}
     assert by[("lookalikes", SB)]["state"] == "warn" and "PC6906081" in by[("lookalikes", SB)]["rows"][0]["text"]
     assert by[("lookalikes", KK)]["state"] == "ok"
-    assert by[("bills", SB)]["numbers"]["pea_owed"] == 700000 and by[("bills", SB)]["numbers"]["shop_unpaid"] == 45582
-    assert by[("vs_usual", SB)]["numbers"]["months"] == ["2026-06", "2026-05"]      # the cheque (25 Jun) and the paper (10 May)
+    assert by[("bills", SB)]["data"]["pea_owed"] == 700000 and by[("bills", SB)]["data"]["shop_unpaid"] == 45582
+    assert by[("vs_usual", SB)]["data"]["months"] == ["2026-06", "2026-05"]      # the cheque (25 Jun) and the paper (10 May)
     for c in out["checks"]:
         assert c["state"] in ("ok", "warn", "bad", "info") and c["title"] and isinstance(c["summary"], str) and len(c["rows"]) <= 50
     one = ac.run("2026-07", KK)
@@ -396,3 +396,119 @@ def test_dmy_and_rows_are_capped():
     assert ac.dmy("2026-10-25") == "25/10/2026"
     rows = [{"amount": float(i)} for i in range(80)]
     assert len(ac.top_rows(rows)) == 50 and ac.top_rows(rows)[0]["amount"] == 79.0
+
+
+# ------------------------------------------------------------------ review fixes (26 Nov 2026)
+def _thai(s):
+    return any("฀" <= ch <= "๿" for ch in s)
+
+
+def test_numbers_are_a_flat_list_with_thai_labels_and_rows_have_the_page_shape():
+    c = ac.petty_cash(_cash_month(), SB, "2026-10")
+    assert isinstance(c["numbers"], list) and c["numbers"]
+    for n in c["numbers"]:
+        assert set(n) == {"label", "value", "kind"} and n["kind"] in ("money", "count", "pct")
+        assert isinstance(n["value"], (int, float)) and not isinstance(n["value"], bool)
+        assert _thai(n["label"])                                                       # Thai, never a key like mid_in
+    labels = {n["label"]: n for n in c["numbers"]}
+    assert labels["กลางเดือน: เช็คเติม"]["value"] == 321141 and labels["เงินเข้า: เช็ค HQ"]["kind"] == "money"
+    for r in c["rows"]:
+        assert {"date", "text", "amount", "source"} <= set(r)
+        assert r["date"] is None or len(r["date"]) == 10
+    assert {r["source"] for r in c["rows"]} >= {"เช็ค HQ", "เอกสารเบิกกลางเดือน"}
+    s, e = period_bounds("2026-10")
+    adv = ac.advances([ent("a", "2026-10-08", "midmonth", [ln("1500", 255000), ln("1100", credit=255000)])], SB, s, e)
+    assert {"label": "เบิกไป", "value": 255000, "kind": "money"} in adv["numbers"]
+    assert {"label": "ต่าง", "value": 100.0, "kind": "pct"} in adv["numbers"]
+    ft = ac.file_totals_check([_file("a", "k", 1, 1, 1)], {"k": (1, 1)}, SB)
+    assert ft["numbers"] == [{"label": "ชุดข้อมูล", "value": 1, "kind": "count"}, {"label": "ชุดที่ไม่ตรง", "value": 0, "kind": "count"}]
+    usual = ac.usual_check("2026-10", {"2026-09": {"5100": 5.0}, "2026-10": {"5100": 5.0}}, SB, {})
+    assert {"label": "เดือนที่ใช้เทียบ", "value": 1, "kind": "count"} in usual["numbers"]
+
+
+def test_petty_cash_counts_papers_by_their_batch_not_the_line_date():
+    # Saraburi 2026-07: the mid-month list of July holds receipts of 24-25 Jun (company month 2026-06 by date)
+    rows = [ent("f1", "2026-07-15", "hq_cheques", [ln("1100", 300000), ln("1120", credit=300000)], description="คชจ.+เบิกกลางเดือน 7/2569"),
+            ent("m1", "2026-06-24", "midmonth", [ln("6130", 120000), ln("1100", credit=120000)], source_id="2026-07-saraburi:p2:l1"),
+            ent("m2", "2026-07-03", "midmonth", [ln("5510", 180000), ln("1100", credit=180000)], source_id="2026-07-saraburi:p3:l1"),
+            ent("m3", "2026-06-25", "midmonth", [ln("5510", 50000), ln("1100", credit=50000)], source_id="docs:2026-06:สระบุรี:mid:p4:l1")]
+    c = ac.petty_cash(rows, SB, "2026-07")
+    assert c["data"]["mid_out"] == 300000 and c["data"]["mid_in"] == 300000 and c["state"] == "ok"
+    assert ac.petty_cash(rows, SB, "2026-06")["data"]["mid_out"] == 50000                # June's own batch, not July's early lines
+    assert ac.paper_month({"source_id": "docs:2026-07:สระบุรี:end:p1:l2"}) == "2026-07"
+    assert ac.paper_month({"source_id": "x", "entry_date": "2026-06-26"}) == "2026-07"   # no batch: the date's company month
+
+
+def test_file_totals_compare_scanned_papers_with_the_pages_after_review_fixes():
+    key = "docs:2026-11:สระบุรี:mid"
+    f = _file("ai", key, 4500, 4380, 4380)                     # the AI misread a line: 4,380 read against 4,500 written
+    fixed = {key: {"read_total": 4500, "pages": 4, "edited": 1}}  # the owner fixed it on the review screen
+    c = ac.file_totals_check([f], {key: (5, 4500)}, SB, fixed)
+    assert c["state"] == "ok" and c["data"]["edited"] == 1
+    assert any("แก้บนหน้าตรวจ 1 หน้า" in r["text"] for r in c["rows"]) and "เทียบกับยอดหลังแก้" in c["summary"]
+    assert ac.file_totals_check([f], {key: (5, 4500)}, SB)["state"] == "bad"            # without the pages' totals: the old false red
+    assert ac.file_totals_check([f], {key: (10, 9000)}, SB, fixed)["state"] == "bad"    # doubled after booking is still red
+    off = {key: {"read_total": 4620, "pages": 4, "edited": 1}}                          # fixed, but still not what the paper says
+    assert ac.file_totals_check([f], {key: (5, 4620)}, SB, off)["state"] == "bad"
+
+
+def test_an_ai_read_pea_bill_and_the_pea_bill_are_a_lookalike():
+    s, e = period_bounds("2026-10")
+    pea = ent("p", "2026-10-25", "electricity", [ln("5100", 780729.25), ln("1400", 54651.03), ln("2100", credit=835380.28)],
+              party="PEA มิเตอร์ 72", doc_no="318011438503", source_id="pea:318011438503")
+    ai = ent("a", "2026-10-25", "electricity", [ln("5100", 835380.28), ln("2100", credit=835380.28)], party="การไฟฟ้าส่วนภูมิภาค",
+             description="ค่าไฟฟ้า ต.ค. 69", doc_no="318011438503", source_id="bill:2026-10:สระบุรี:ab12cd34:1")
+    pairs = ac.find_lookalikes([pea, ai], s, e, PNL)
+    assert len(pairs) == 1 and pairs[0]["reason"] == "doc"
+    pea2 = dict(pea, id="p2", source_id="pea:318011438999", doc_no="318011438999")
+    assert ac.find_lookalikes([pea, pea2], s, e, PNL) == []                             # two PEA bills: one batch ('pea')
+    # the same cheque payment every month is not a double
+    pnl = {**PNL, "7200": "expense"}
+    gps9 = ent("g9", "2026-09-20", "hq_cheques", [ln("7200", 3422), ln("1130", credit=3422)], party="GPS ติดตามรถ",
+               source_id="cheque-2026-09-สระบุรี:r3")
+    gps10 = ent("g10", "2026-10-20", "hq_cheques", [ln("7200", 3422), ln("1130", credit=3422)], party="GPS ติดตามรถ",
+                source_id="cheque-2026-10-สระบุรี:r3")
+    assert ac.find_lookalikes([gps9, gps10], s, e, pnl) == []
+    assert ac.batch_of({"source_id": "2026-07-saraburi:p2:l1"}) == "2026-07-saraburi"
+    assert ac.batch_of({"source_id": "fuel:pt:2026-10:842919"}) == "fuel:pt:2026-10"
+    assert ac.batch_of({"source_id": "pb1", "source": "purchase"}) == "purchase"
+
+
+def test_the_drop_box_papers_against_the_script_papers_of_the_same_half():
+    s, e = period_bounds("2026-11")
+    script = ent("s", "2026-11-02", "midmonth", [ln("5510", 1500), ln("1100", credit=1500)], party="ของใช้โรงงาน", description="ถุงมือ",
+                 source_id="2026-11-saraburi:p2:l1")
+    box = ent("b", "2026-11-02", "midmonth", [ln("5510", 1500), ln("1100", credit=1500)], party="ของใช้โรงงาน", description="ถุงมือ",
+              source_id="docs:2026-11:สระบุรี:mid:p2:l1")
+    assert len(ac.find_lookalikes([script, box], s, e, PNL)) == 1
+    same = dict(box, id="b2", source_id="docs:2026-11:สระบุรี:mid:p3:l4")
+    assert ac.find_lookalikes([box, same], s, e, PNL) == []                             # one file's own lines
+
+
+def test_bills_ai_bills_paid_by_the_cheque_and_electricity_without_a_pea_bill():
+    s, e = period_bounds("2026-10")
+    sid = "bill:2026-10:สระบุรี:ab12cd34:1"
+    bill = ent("w", "2026-10-25", "water_irrigation", [ln("5200", 5320.5), ln("2100", credit=5320.5)], party="ชลประทาน", source_id=sid,
+               description="ค่าน้ำชลประทาน ต.ค. 69")
+    pays = ent("c", "2026-11-20", "hq_cheques", [ln("2100", 5320.5), ln("1130", credit=5320.5)],
+               description=f"ค่าน้ำชลประทาน 10/69 · จ่ายบิล W-1 (อ้างอิง {sid}) · เช็ค 1")
+    c = ac.bills_check([bill, pays], SB, s, e, elec_bills=[], later_run=True)
+    assert c["state"] == "ok" and c["data"]["ai_owed"] == 5320.5 and c["data"]["ai_unpaid"] == 0
+    assert c["data"]["no_payer"] == {}
+    c = ac.bills_check([bill], SB, s, e, elec_bills=[], later_run=True)
+    assert c["state"] == "warn" and "ยังไม่มีเช็คจ่าย" in c["rows"][0]["text"]
+    paid_now = dict(pays, entry_date="2026-10-20")                                      # a payment this month naming it: not "unknown"
+    assert ac.bills_check([bill, paid_now], SB, s, e, elec_bills=[], later_run=False)["data"]["unknown_payments"] == 0
+    ai_pea = ent("x", "2026-10-25", "electricity", [ln("5100", 9000), ln("2100", credit=9000)], party="การไฟฟ้า",
+                 source_id="bill:2026-10:สระบุรี:ffff0000:1")
+    c = ac.bills_check([ai_pea], SB, s, e, elec_bills=[], later_run=False)
+    assert c["state"] == "warn" and c["data"]["elec_other"] == 9000 and "ไม่ได้มาจากใบแจ้ง PEA" in c["rows"][0]["text"]
+
+
+def test_docs_now_sums_only_the_money_pages(monkeypatch):
+    rows = [{"page": 1, "kind": "cover", "read_total": 4500, "edited_at": None},
+            {"page": 2, "kind": "expense", "read_total": 1500, "edited_at": "2026-11-20"},
+            {"page": 3, "kind": "fuel", "read_total": 3000, "edited_at": None},
+            {"page": 4, "kind": "memo", "read_total": None, "edited_at": None}]
+    monkeypatch.setattr(supabase, "select_all", lambda table, params, page=1000: rows if params["batch"] == "eq.docs:k" else [])
+    assert ac._docs_now(["docs:k", "docs:none"]) == {"docs:k": {"read_total": 4500.0, "pages": 4, "edited": 1}}
