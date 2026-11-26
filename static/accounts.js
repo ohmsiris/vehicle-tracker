@@ -12,6 +12,13 @@
 const acx = { data: null, open: new Set() };
 const ACX_FROM = { program: "จากโปรแกรม", you: "จากคุณ", hq: "จาก HQ" };
 
+// the month to open on: the company month named after THIS calendar month -- from the 26th to the month's end the month just finished is
+// still being closed (summaries, papers), so it stays the default; the new one is one pick away (owner, 26 Nov 2026)
+function acxDefaultMonth() {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function acxMonths() {
   const out = [];
   const t = new Date();
@@ -44,12 +51,12 @@ async function openAccounts(mode = "out") {
   $("acxViews").hidden = mode !== "out";                     // the ต้นทุนต่อหน่วย tab belongs to the P&L, not to ลงข้อมูล
   if (mode !== "out") acx.view = "pnl";
   $("acxMonth").querySelector('option[value="year"]')?.toggleAttribute("hidden", mode === "in");
-  if (mode === "in" && $("acxMonth").value === "year") $("acxMonth").value = acxMonths()[0];
+  if (mode === "in" && $("acxMonth").value === "year") $("acxMonth").value = acxDefaultMonth();
   showErr("acxError", "");
   if (!acx.wired) {
     acx.wired = true;
     $("acxMonth").replaceChildren(el("option", { value: "year", text: "ทั้งปี · 12 เดือนล่าสุด (ภาพรวม)" }), ...acxMonths().map((k) => el("option", { value: k, text: acxMonthLabel(k) })));
-    $("acxMonth").value = acxMonths()[0];
+    $("acxMonth").value = acxDefaultMonth();
     for (const id of ["acxMonth", "acxHalf", "acxBranch"]) $(id).onchange = loadAccounts;
     $("acxAdd").onclick = () => acxAddDialog({});
     const view = (v) => { acx.view = v; $("acxViewPnl").classList.toggle("active", v === "pnl"); $("acxViewUnit").classList.toggle("active", v === "unit"); showErr("acxError", ""); loadAccounts(); };

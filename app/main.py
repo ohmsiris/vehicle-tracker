@@ -2400,7 +2400,7 @@ def api_cash_fuel(month: str = "", branch: str = "สระบุรี", x_app_
     from app import cash_fuel, route_sales
     _check_token(x_app_token, token)
     if not re.fullmatch(r"\d{4}-\d{2}", month or ""):
-        month = cash_fuel.month_of(route_sales.today())[0]
+        month = f"{route_sales.today():%Y-%m}"      # the month being closed stays on until the calendar month ends (owner, 26 Nov 2026)
     return _fuel_call(cash_fuel.month_view, branch, month)
 
 
@@ -2647,7 +2647,7 @@ def api_driver_days(month: str = Query(default=""), half: int = Query(default=0)
     from app import driver_days, mgr
     _check_token(x_app_token, token)
     if not month:                                     # this company month, whole (half = 0); an old page may still ask for a half
-        month = driver_days.period_of(mgr.today_th())[0]
+        month = f"{mgr.today_th():%Y-%m}"           # the month being closed stays on until the calendar month ends (owner, 26 Nov 2026)
     return _dd_call(driver_days.overview, month, half)
 
 
