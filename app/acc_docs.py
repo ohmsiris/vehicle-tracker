@@ -83,6 +83,8 @@ def build(batch: dict, vehicles: list[dict]) -> dict:
             if amount <= 0:
                 raise BadBatch(f"page {p['page']} line {i}: amount")
             total += amount
+            if opt.get("skip"):          # counted in the page total, not booked (e.g. fuel the bookkeeper already has on the cash-fuel page)
+                continue
             v = None
             if opt.get("v"):
                 v = by_plate.get(norm_plate(opt["v"])) or by_number.get(str(opt["v"]))

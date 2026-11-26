@@ -337,6 +337,54 @@ def _sync_program(lo: str, hi: str) -> int:
     entries += [x for x in (purchase_entry(b) for b in bills) if x]
     supabase.delete("acc_entries", {"source": f"in.({','.join(PROGRAM_SOURCES)})", "entry_date": f"gte.{lo}", "and": f"(entry_date.lte.{hi})"})
     _insert_entries(entries)
+    return len(entries) + _sync_cash_fuel(lo, hi, vehicles)
+
+
+# ---- น้ำมันเงินสด (owner, 26 Nov 2026: "cash fuel is already done by the bookkeeper"): the bookkeeper's checked lines on the cash-fuel
+# page ARE the cash fuel in the books -- one entry per fill, Dr 6130 (the truck) / Cr 1100, booked under the half's papers (midmonth /
+# endmonth) so the petty-cash check still sees them. Duplicates (dup_of) and lines not checked yet are left out. A dropped mid / end-of-month
+# paper does not book its fuel lines for a branch and half the bookkeeper has done (inbox_ai: "อยู่ในน้ำมันเงินสดแล้ว").
+CASH_FUEL_PREFIX = "cashfuel:"
+
+
+def cash_fuel_entry(ln: dict, vehicle: Optional[dict]) -> Optional[dict]:
+    amount = round(float(ln.get("amount") or 0), 2)
+    if amount <= 0 or not ln.get("day") or not ln.get("checked") or ln.get("dup_of"):
+        return None
+    truck = (f"#{vehicle['vehicle_number']} " if vehicle and vehicle.get("vehicle_number") else "") + ((vehicle or {}).get("plate_number") or ln.get("plate_read") or "")
+    branch = ln.get("branch") or (vehicle or {}).get("branch") or BRANCHES[0]
+    who = f" · {ln['driver_name']}" if ln.get("driver_name") else ""
+    return {"entry_date": str(ln["day"])[:10], "branch": branch, "source": "midmonth" if int(ln.get("batch") or 1) == 1 else "endmonth",
+            "source_id": f"{CASH_FUEL_PREFIX}{ln.get('month')}:{branch}:{ln['id']}", "party": "น้ำมันเงินสด",
+            "description": f"{truck.strip() or 'ไม่ระบุรถ'} · เติมน้ำมันเงินสด{who} (หน้าน้ำมันเงินสด)", "doc_type": "petty_cash", "doc_no": None,
+            "lines": [{"account": "6130", "debit": amount, "credit": 0.0, "branch": branch, "vehicle_id": ln.get("vehicle_id"), "machine_id": None, "memo": None},
+                      {"account": "1100", "debit": 0.0, "credit": amount, "branch": branch, "vehicle_id": None, "machine_id": None, "memo": None}]}
+
+
+def half_key(entry: dict) -> tuple:
+    p = period_of(date.fromisoformat(str(entry["entry_date"])[:10]))
+    return entry.get("branch"), p["month"], p["half"]
+
+
+def cash_fuel_covered_by_papers(entries: list[dict]) -> set:
+    """(branch, month, half) whose mid / end papers booked 6130 fuel themselves (not the cash-fuel page's own entries)."""
+    return {half_key(e) for e in entries if not str(e.get("source_id") or "").startswith(CASH_FUEL_PREFIX)}
+
+
+def _sync_cash_fuel(lo: str, hi: str, vehicles: dict) -> int:
+    try:
+        rows = supabase.select_all("cash_fuel_lines", {"select": "id,branch,month,batch,day,amount,vehicle_id,driver_name,plate_read,checked,dup_of",
+                                                       "day": f"gte.{lo}", "and": f"(day.lte.{hi})", "order": "id.asc"})
+    except supabase.SupabaseError:
+        return 0                                           # the cash-fuel tables are not there: nothing to book
+    # a branch and half whose PAPERS already booked their fuel (booked before the bookkeeper did that half) keeps the papers' fuel: never both
+    paper_fuel = supabase.select_all("acc_entries", {"select": "branch,entry_date,source_id,acc_lines!inner(account)", "acc_lines.account": "eq.6130",
+                                                     "source": "in.(midmonth,endmonth)", "entry_date": f"gte.{lo}", "and": f"(entry_date.lte.{hi})",
+                                                     "order": "id.asc"})
+    covered = cash_fuel_covered_by_papers(paper_fuel)
+    entries = [x for x in (cash_fuel_entry(r, vehicles.get(r.get("vehicle_id"))) for r in rows) if x and half_key(x) not in covered]
+    supabase.delete("acc_entries", {"source_id": f"like.{CASH_FUEL_PREFIX}*", "entry_date": f"gte.{lo}", "and": f"(entry_date.lte.{hi})"})
+    _insert_entries(entries)
     return len(entries)
 
 

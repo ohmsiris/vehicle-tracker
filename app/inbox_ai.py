@@ -567,6 +567,30 @@ def is_expense_document(reads: list[dict]) -> bool:
 
 
 # ------------------------------------------------------------------ the preview
+def _cash_fuel_done(month: str, branch: str, half: str) -> bool:
+    """Has the bookkeeper checked cash fuel for this branch and half on the cash-fuel page? Then that page is the cash fuel in the books."""
+    if not _db_ready():
+        return False
+    from app import supabase
+    try:
+        return bool(supabase.select("cash_fuel_lines", {"select": "id", "month": f"eq.{month}", "branch": f"eq.{branch}",
+                                                        "batch": f"eq.{1 if half == 'mid' else 2}", "checked": "eq.true", "limit": "1"}))
+    except Exception:                                  # noqa: BLE001 -- no answer: book the paper's fuel as before
+        return False
+
+
+def skip_cash_fuel(batch: dict, month: str, branch: str, half: str) -> list:
+    """Mark every fuel line (6130) of the batch as not booked (acc_docs counts it in the page total only). Returns the lines marked."""
+    out = []
+    for p in batch.get("pages") or []:
+        for ln in p.get("lines") or []:
+            if ln[3] == "6130":
+                ln[5]["skip"] = True
+                ln[5].setdefault("page", p.get("page"))
+                out.append(ln)
+    return out
+
+
 def from_pages(reads: list[dict], name: str, choices: dict, usage: Optional[dict] = None, images: Optional[dict] = None) -> dict:
     """The page reads -> the PREVIEW. Reads the database (vehicles, earlier documents, existing entries), never writes."""
     reads = sorted(reads, key=lambda r: r.get("n") or 0)
@@ -665,6 +689,9 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
 
     batch, flags = _batch(reads, name, key, month, branch, half, feed, vehicles)
     pv["flags"] += flags
+    skipped = skip_cash_fuel(batch, month, branch, half) if _cash_fuel_done(month, branch, half) else []
+    if skipped:
+        pv["flags"].append(f"น้ำมันเงินสด {len(skipped)} รายการ ({sum(x[2] for x in skipped):,.2f} บาท) อยู่ในหน้าน้ำมันเงินสดแล้ว (คนทำบัญชีตรวจแล้ว) — ไม่ลงซ้ำจากเอกสารนี้")
     try:
         out = acc_docs.build(batch, vehicles)
     except acc_docs.BadBatch as exc:
@@ -683,6 +710,9 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
         rows.append({"date": e["entry_date"], "text": e["description"], "party": e["party"], "amount": float(debit["debit"]),
                      "role": role_of(debit["account"], unsure), "account": debit["account"], "flag": "อ่านไม่ชัด" if unsure else None,
                      "page": e["doc_page"], "branch": e["branch"]})
+    for dm, text, amount, account, party, opt in skipped:
+        rows.append({"date": None, "text": f"{text} — อยู่ในน้ำมันเงินสดแล้ว ไม่ลงซ้ำ", "party": party, "amount": 0.0, "role": "info",
+                     "account": account, "flag": None, "page": opt.get("page")})
     for d in out["docs"]:
         if d["kind"] in ("memo", "other") or (d["kind"] == "cover" and d.get("read_total") is None):
             rows.append({"date": d.get("date_from"), "text": f"หน้า {d['page']}: {d.get('title') or ''}" + (f" — {d['summary']}" if d.get("summary") else ""),

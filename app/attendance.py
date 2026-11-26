@@ -380,7 +380,9 @@ def _load_month(month: str) -> dict:
 def default_month() -> str:
     latest = supabase.select("attendance_punches", {"select": "punched_at", "order": "punched_at.desc", "limit": "1"})
     if latest:
-        return pay_month_of(datetime.fromisoformat(str(latest[0]["punched_at"])[:19]).date())
+        # the latest punches' month -- but never past this calendar month: from the 26th to the month's end the month just finished is still
+        # being closed (owner, 26 Nov 2026), so it stays the default and the new one is one pick away
+        return min(pay_month_of(datetime.fromisoformat(str(latest[0]["punched_at"])[:19]).date()), f"{employees.today_th():%Y-%m}")
     current = pay_month_of(employees.today_th())                       # nothing uploaded yet: the pay month that has just ended
     y, m = int(current[:4]), int(current[5:7])
     return f"{y - (m == 1):04d}-{(m - 2) % 12 + 1:02d}"

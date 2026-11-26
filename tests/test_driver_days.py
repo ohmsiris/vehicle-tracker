@@ -177,3 +177,38 @@ def test_route_drivers_of_both_branches_with_their_own_trucks(monkeypatch):
     monkeypatch.setattr(dd.supabase, "select_all", lambda t, p: tables[t])
     got = dd.drivers()
     assert [(d["id"], d["truck"], d["branch"]) for d in got] == [("e1", "6", "สระบุรี"), ("e2", "6", "แก่งคอย")]     # Saraburi first
+
+
+def test_paper_fuel_is_not_booked_where_the_bookkeeper_has_cash_fuel():
+    """A fuel line on a dropped paper counts in the page total but is not booked when the cash-fuel page has that half (26 Nov 2026)."""
+    from app import acc_docs, inbox_ai
+    batch = {"batch": "docs:2026-11:สระบุรี:mid", "month": "2026-11", "branch": "สระบุรี", "covers": [], "files": {},
+             "pages": [{"page": 1, "file_page": 1, "feed": "midmonth", "kind": "expense", "title": "รายการเบิก", "written_total": 3000,
+                        "lines": [("27/10", "เติมน้ำมัน 86-0974", 2000.0, "6130", "น้ำมันเงินสด", {}),
+                                  ("27/10", "โอที", 1000.0, "5410", "ค่าแรง", {})]}]}
+    skipped = inbox_ai.skip_cash_fuel(batch, "2026-11", "สระบุรี", "mid")
+    assert [x[1] for x in skipped] == ["เติมน้ำมัน 86-0974"]
+    out = acc_docs.build(batch, [])
+    assert [e["lines"][0]["account"] for e in out["entries"]] == ["5410"]          # only the OT is booked
+    assert out["docs"][0]["status"] == "ok"                                          # the page total still includes the fuel
+
+
+def test_cash_fuel_lines_become_6130_entries_under_the_halfs_papers():
+    from app import accounting as acc
+    v = {"id": "v1", "vehicle_number": "19", "plate_number": "1ฒถ 2085", "branch": "สระบุรี"}
+    e = acc.cash_fuel_entry({"id": 7, "branch": "สระบุรี", "month": "2026-11", "batch": 2, "day": "2026-11-12", "amount": 1000,
+                             "vehicle_id": "v1", "driver_name": "สมชาย", "checked": True, "dup_of": None}, v)
+    assert e["source"] == "endmonth" and e["source_id"] == "cashfuel:2026-11:สระบุรี:7"
+    assert [(l["account"], l["debit"], l["credit"], l["vehicle_id"]) for l in e["lines"]] == [("6130", 1000.0, 0.0, "v1"), ("1100", 0.0, 1000.0, None)]
+    assert acc.cash_fuel_entry({"id": 8, "day": "2026-11-12", "amount": 500, "checked": False}, v) is None       # not checked yet
+    assert acc.cash_fuel_entry({"id": 9, "day": "2026-11-12", "amount": 500, "checked": True, "dup_of": 7}, v) is None   # a duplicate
+
+
+def test_papers_that_already_booked_fuel_keep_it_cash_fuel_is_not_added_twice():
+    from app import accounting as acc
+    covered = acc.cash_fuel_covered_by_papers([{"branch": "สระบุรี", "entry_date": "2026-11-15", "source_id": "docs:2026-11:สระบุรี:end:p1:l1"},
+                                               {"branch": "สระบุรี", "entry_date": "2026-10-28", "source_id": "cashfuel:2026-11:สระบุรี:7"}])
+    assert covered == {("สระบุรี", "2026-11", 2)}                     # the end-of-month papers' fuel; the cash-fuel page's own line is not "papers"
+    late = acc.cash_fuel_entry({"id": 9, "branch": "สระบุรี", "month": "2026-11", "batch": 2, "day": "2026-11-12", "amount": 800, "checked": True}, None)
+    early = acc.cash_fuel_entry({"id": 10, "branch": "สระบุรี", "month": "2026-11", "batch": 1, "day": "2026-10-28", "amount": 800, "checked": True}, None)
+    assert acc.half_key(late) in covered and acc.half_key(early) not in covered
