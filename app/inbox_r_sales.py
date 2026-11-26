@@ -230,7 +230,7 @@ def _file_bytes(file_id: str) -> bytes:
     row = supabase.select("inbox_files", {"select": "storage_path", "id": f"eq.{file_id}", "limit": "1"})
     if not row:
         raise ValueError("ไม่พบไฟล์ที่อัปโหลด")
-    return supabase.storage_download_private(row[0]["storage_path"])
+    return supabase.storage_download(row[0]["storage_path"], bucket=supabase.ACCOUNTING_BUCKET)
 
 
 def _delete_lines(preview: dict) -> None:

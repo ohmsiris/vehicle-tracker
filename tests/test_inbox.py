@@ -110,15 +110,15 @@ class FakeDB:
             del self.rows[k]
 
     def storage_upload(self, path, data, content_type, upsert=False, bucket=supabase.STORAGE_BUCKET):
-        assert bucket == supabase.PRIVATE_BUCKET and path.startswith("inbox/")
+        assert bucket == supabase.ACCOUNTING_BUCKET and path.startswith("inbox/")
         self.files[path] = data
 
     def storage_download(self, path, bucket=supabase.STORAGE_BUCKET):
-        assert bucket == supabase.PRIVATE_BUCKET
+        assert bucket == supabase.ACCOUNTING_BUCKET
         return self.files[path]
 
     def storage_delete(self, paths, bucket=supabase.STORAGE_BUCKET):
-        assert bucket == supabase.PRIVATE_BUCKET
+        assert bucket == supabase.ACCOUNTING_BUCKET
         for p in paths:
             self.files.pop(p, None)
 
@@ -181,7 +181,8 @@ def test_a_reader_that_crashes_marks_the_file_failed_with_a_thai_message():
 
 # ------------------------------------------------------------------ status, values
 @pytest.mark.parametrize("preview,status", [
-    ({"conflicts": [{"key": "month"}], "store_only": True}, "needs_choice"),     # a conflict wins over everything
+    ({"conflicts": [{"key": "month"}], "store_only": True}, "stored"),           # kept, never booked: no question to answer
+    ({"conflicts": [{"key": "month"}]}, "needs_choice"),
     ({"store_only": True}, "stored"),
     ({"needs_ai": True}, "needs_ai"),
     ({"batches": [batch("k")]}, "read"),
@@ -492,3 +493,15 @@ def test_every_accounts_path_the_pages_call_is_covered():
         calls |= set(re.findall(r"/api/accounts/[a-z-]+", (root / name).read_text(encoding="utf-8")))
     for p in calls - {"/api/accounts/inbox"}:
         assert users.allowed(["accounts"], p), p
+
+
+def test_a_stored_file_never_asks_and_files_under_its_default_month():
+    p = {"store_only": True, "conflicts": [{"key": "month", "default": "2026-10", "options": []}], "batches": [], "signals": []}
+    v = inbox.file_values("payroll", p, None)
+    assert v["status"] == "stored" and v["month"] == "2026-10"
+
+
+def test_thai_file_names_sent_in_the_windows_code_page_are_put_back():
+    garbled = "สรุปเงินเดือน.pdf".encode("cp874").decode("latin-1")
+    assert inbox.fix_name(garbled) == "สรุปเงินเดือน.pdf"
+    assert inbox.fix_name("สรุป.pdf") == "สรุป.pdf" and inbox.fix_name("Oct.pdf") == "Oct.pdf"

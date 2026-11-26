@@ -25,6 +25,7 @@ logger = logging.getLogger("vehicle_tracker.supabase")
 
 STORAGE_BUCKET = "event-files"
 PRIVATE_BUCKET = "customer-files"          # never public: ID cards (customer_photos)
+ACCOUNTING_BUCKET = "accounting-files"     # never public: the files dropped in บัญชี › ลงข้อมูล (Excel / PDF / scans up to 50 MB; 24 Nov 2026)
 
 _http: Optional[httpx.Client] = None
 

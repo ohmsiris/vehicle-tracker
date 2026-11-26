@@ -158,10 +158,10 @@ def _thai_error(head: str, exc: Exception) -> str:
 
 # ------------------------------------------------------------------ pure: status, the row's values, superseding, rebook
 def status_of(preview: dict) -> str:
+    if preview.get("store_only"):                  # kept, never booked: a month question would only be in the way (it files under its default)
+        return "stored"
     if preview.get("conflicts"):
         return "needs_choice"
-    if preview.get("store_only"):
-        return "stored"
     if preview.get("needs_ai"):
         return "needs_ai"
     return "read"
@@ -172,7 +172,10 @@ def file_values(kind: str, preview: dict, error: Optional[str]) -> dict:
     branches = sorted({b.get("branch") for b in preview.get("batches") or [] if b.get("branch")})
     if not branches:
         branches = sorted({s["value"] for s in preview.get("signals") or [] if s.get("what") == "branch" and s.get("value")})[:2]
-    return {"kind": kind, "status": "failed" if error else status_of(preview), "month": preview.get("month"), "branches": branches,
+    month = preview.get("month")
+    if not month and preview.get("store_only"):
+        month = next((c.get("default") for c in preview.get("conflicts") or [] if c.get("key") == "month"), None)
+    return {"kind": kind, "status": "failed" if error else status_of(preview), "month": month, "branches": branches,
             "preview": preview, "error": error, "ai_usage": preview.get("ai_usage")}
 
 
@@ -311,11 +314,29 @@ def _save(file_id: str, values: dict) -> dict:
 
 
 def _download(row: dict) -> bytes:
-    return supabase.storage_download(row["storage_path"], bucket=supabase.PRIVATE_BUCKET)
+    return supabase.storage_download(row["storage_path"], bucket=supabase.ACCOUNTING_BUCKET)
 
 
 def _ext(name: str) -> str:
     return ("." + name.rsplit(".", 1)[-1].lower()) if "." in name else ""
+
+
+def fix_name(name: str) -> str:
+    """A Thai file name some tools send in the Windows Thai code page arrives as Latin-1 garbage ("ãºÊÃØ»..."): put it back."""
+    if not name or any("฀" <= ch <= "๿" for ch in name) or not any(" " <= ch <= "ÿ" for ch in name):
+        return name
+    try:
+        raw = name.encode("latin-1")
+    except UnicodeEncodeError:
+        return name
+    for enc in ("utf-8", "cp874"):
+        try:
+            fixed = raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+        if any("฀" <= ch <= "๿" for ch in fixed):
+            return fixed
+    return name
 
 
 def upload(files: list[tuple[str, bytes]], who: str = "") -> list[dict]:
@@ -328,7 +349,7 @@ def upload(files: list[tuple[str, bytes]], who: str = "") -> list[dict]:
     readers = _readers()
     out, seen = [], {}
     for name, data in files:
-        name = (name or "file")[:200]
+        name = fix_name(name or "file")[:200]
         if not data:
             out.append({"id": None, "file_name": name, "status": "failed", "status_label": STATUS_LABEL["failed"], "message": f"{name}: ไฟล์ว่าง ไม่ได้เก็บ"})
             continue
@@ -354,13 +375,13 @@ def _store_new(name: str, data: bytes, sha: str, who: str, readers: list) -> dic
     ext = _ext(name) or (".pdf" if data[:5] == b"%PDF-" else "")
     path = f"inbox/{fid}{ext}"
     mime = TYPES.get(ext, "application/octet-stream")
-    supabase.storage_upload(path, data, mime, bucket=supabase.PRIVATE_BUCKET)
+    supabase.storage_upload(path, data, mime, bucket=supabase.ACCOUNTING_BUCKET)
     row = {"id": fid, "file_name": name, "storage_path": path, "mime_type": mime, "byte_size": len(data), "sha256": sha,
            "uploaded_by": (who or "")[:80] or None, "choices": {}, **file_values(kind, preview, error)}
     try:
         saved = supabase.insert(TABLE, [row])
     except supabase.SupabaseError:
-        supabase.storage_delete([path], bucket=supabase.PRIVATE_BUCKET)
+        supabase.storage_delete([path], bucket=supabase.ACCOUNTING_BUCKET)
         have = supabase.select(TABLE, {"select": "*", "sha256": f"eq.{sha}", "limit": "1"})
         if have:                                           # dropped twice at the same moment: the other one won
             return {**row_view(have[0], _running_ids()), "message": f"{name}: ไฟล์นี้อยู่ในกล่องแล้ว — ไม่เพิ่มซ้ำ"}
@@ -498,7 +519,7 @@ def remove(file_id: str) -> None:
         raise InboxError("AI กำลังอ่านไฟล์นี้อยู่ — รอให้เสร็จก่อนจึงลบได้")
     if row.get("status") == "booked":
         _unbook(row)
-    supabase.storage_delete([row["storage_path"]], bucket=supabase.PRIVATE_BUCKET)
+    supabase.storage_delete([row["storage_path"]], bucket=supabase.ACCOUNTING_BUCKET)
     supabase.delete(TABLE, {"id": f"eq.{file_id}"})
 
 
