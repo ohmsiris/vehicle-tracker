@@ -179,18 +179,22 @@ def test_route_drivers_of_both_branches_with_their_own_trucks(monkeypatch):
     assert [(d["id"], d["truck"], d["branch"]) for d in got] == [("e1", "6", "สระบุรี"), ("e2", "6", "แก่งคอย")]     # Saraburi first
 
 
-def test_paper_fuel_is_not_booked_where_the_bookkeeper_has_cash_fuel():
-    """A fuel line on a dropped paper counts in the page total but is not booked when the cash-fuel page has that half (26 Nov 2026)."""
+def test_paper_fuel_is_not_booked_where_the_bookkeeper_has_it_but_her_missing_lines_stay():
+    """Only the paper's fuel lines that ARE on the cash-fuel page are skipped (same day + amount, then amount for a misread date);
+    a fuel line she left out (no truck) stays booked from the paper. The page total still includes everything (26 Nov 2026)."""
     from app import acc_docs, inbox_ai
     batch = {"batch": "docs:2026-11:สระบุรี:mid", "month": "2026-11", "branch": "สระบุรี", "covers": [], "files": {},
-             "pages": [{"page": 1, "file_page": 1, "feed": "midmonth", "kind": "expense", "title": "รายการเบิก", "written_total": 3000,
+             "pages": [{"page": 1, "file_page": 1, "feed": "midmonth", "kind": "expense", "title": "รายการเบิก", "written_total": 4500,
                         "lines": [("27/10", "เติมน้ำมัน 86-0974", 2000.0, "6130", "น้ำมันเงินสด", {}),
+                                  ("3/10", "เติมน้ำมัน 84-7169 (อ่านไม่ชัด)", 1000.0, "6130", "น้ำมันเงินสด", {}),     # really 31/10
+                                  ("1/11", "เบิกค่าน้ำมันรถ", 500.0, "6130", "น้ำมันเงินสด", {}),                       # not on her page
                                   ("27/10", "โอที", 1000.0, "5410", "ค่าแรง", {})]}]}
-    skipped = inbox_ai.skip_cash_fuel(batch, "2026-11", "สระบุรี", "mid")
-    assert [x[1] for x in skipped] == ["เติมน้ำมัน 86-0974"]
+    done = [{"day": "2026-10-27", "amount": 2000}, {"day": "2026-10-31", "amount": 1000}]
+    skipped = inbox_ai.skip_cash_fuel(batch, done)
+    assert sorted(x[2] for x in skipped) == [1000.0, 2000.0]
     out = acc_docs.build(batch, [])
-    assert [e["lines"][0]["account"] for e in out["entries"]] == ["5410"]          # only the OT is booked
-    assert out["docs"][0]["status"] == "ok"                                          # the page total still includes the fuel
+    assert sorted((e["lines"][0]["account"], e["lines"][0]["debit"]) for e in out["entries"]) == [("5410", 1000.0), ("6130", 500.0)]
+    assert out["docs"][0]["status"] == "ok"                                          # the page total still includes the skipped fuel
 
 
 def test_cash_fuel_lines_become_6130_entries_under_the_halfs_papers():

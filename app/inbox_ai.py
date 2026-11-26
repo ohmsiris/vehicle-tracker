@@ -567,28 +567,60 @@ def is_expense_document(reads: list[dict]) -> bool:
 
 
 # ------------------------------------------------------------------ the preview
-def _cash_fuel_done(month: str, branch: str, half: str) -> bool:
-    """Has the bookkeeper checked cash fuel for this branch and half on the cash-fuel page? Then that page is the cash fuel in the books."""
+def _cash_fuel_lines(month: str, branch: str, half: str) -> list[dict]:
+    """The bookkeeper's checked, non-duplicate cash-fuel lines of this branch and half ([] = she has not done it: the paper books its fuel)."""
     if not _db_ready():
-        return False
+        return []
     from app import supabase
     try:
-        return bool(supabase.select("cash_fuel_lines", {"select": "id", "month": f"eq.{month}", "branch": f"eq.{branch}",
-                                                        "batch": f"eq.{1 if half == 'mid' else 2}", "checked": "eq.true", "limit": "1"}))
+        return supabase.select_all("cash_fuel_lines", {"select": "day,amount", "month": f"eq.{month}", "branch": f"eq.{branch}",
+                                                       "batch": f"eq.{1 if half == 'mid' else 2}", "checked": "eq.true", "dup_of": "is.null",
+                                                       "order": "id.asc"})
     except Exception:                                  # noqa: BLE001 -- no answer: book the paper's fuel as before
-        return False
+        return []
 
 
-def skip_cash_fuel(batch: dict, month: str, branch: str, half: str) -> list:
-    """Mark every fuel line (6130) of the batch as not booked (acc_docs counts it in the page total only). Returns the lines marked."""
-    out = []
-    for p in batch.get("pages") or []:
-        for ln in p.get("lines") or []:
-            if ln[3] == "6130":
-                ln[5]["skip"] = True
-                ln[5].setdefault("page", p.get("page"))
-                out.append(ln)
-    return out
+def skip_cash_fuel(batch: dict, done: list[dict]) -> list:
+    """Mark the paper's fuel lines (6130) that ARE on the cash-fuel page as not booked (acc_docs still counts them in the page total):
+    first the same day and amount, then the same amount on another day (a date misread: 31/10 read as 3/10). A fuel line she does not have
+    (no truck written, so she left it out) stays booked from the paper -- nothing is lost. Returns the lines marked."""
+    from collections import Counter
+    by_day = Counter((str(r["day"])[:10], round(float(r["amount"]), 2)) for r in done)
+    lines = [(p, ln) for p in batch.get("pages") or [] for ln in p.get("lines") or [] if ln[3] == "6130"]
+    month = batch.get("month") or ""
+    out, rest = [], []
+    for p, ln in lines:
+        d = _line_day(ln[0], month)
+        k = (d, round(float(ln[2]), 2))
+        if d and by_day[k] > 0:
+            by_day[k] -= 1
+            out.append((p, ln))
+        else:
+            rest.append((p, ln))
+    by_amount = Counter()
+    for (day, amt), n in by_day.items():
+        by_amount[amt] += n
+    for p, ln in rest:
+        amt = round(float(ln[2]), 2)
+        if by_amount[amt] > 0:
+            by_amount[amt] -= 1
+            out.append((p, ln))
+    for p, ln in out:
+        ln[5]["skip"] = True
+        ln[5].setdefault("page", p.get("page"))
+    return [ln for _, ln in out]
+
+
+def _line_day(dm: str, month: str) -> Optional[str]:
+    """'31/10' in company month '2026-11' -> '2026-10-31' (a day on or after the 26th is the month before)."""
+    try:
+        d, m = (int(x) for x in str(dm).split("/")[:2])
+        y = int(month[:4])
+        if month[5:7] == "01" and m == 12:
+            y -= 1
+        return date(y, m, d).isoformat()
+    except (ValueError, TypeError):
+        return None
 
 
 def from_pages(reads: list[dict], name: str, choices: dict, usage: Optional[dict] = None, images: Optional[dict] = None) -> dict:
@@ -689,9 +721,12 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
 
     batch, flags = _batch(reads, name, key, month, branch, half, feed, vehicles)
     pv["flags"] += flags
-    skipped = skip_cash_fuel(batch, month, branch, half) if _cash_fuel_done(month, branch, half) else []
+    done = _cash_fuel_lines(month, branch, half)
+    skipped = skip_cash_fuel(batch, done) if done else []
     if skipped:
-        pv["flags"].append(f"น้ำมันเงินสด {len(skipped)} รายการ ({sum(x[2] for x in skipped):,.2f} บาท) อยู่ในหน้าน้ำมันเงินสดแล้ว (คนทำบัญชีตรวจแล้ว) — ไม่ลงซ้ำจากเอกสารนี้")
+        kept = [ln for p_ in batch.get("pages") or [] for ln in p_.get("lines") or [] if ln[3] == "6130" and not ln[5].get("skip")]
+        pv["flags"].append(f"น้ำมันเงินสด {len(skipped)} รายการ ({sum(x[2] for x in skipped):,.2f} บาท) อยู่ในหน้าน้ำมันเงินสดแล้ว (คนทำบัญชีตรวจแล้ว) — ไม่ลงซ้ำจากเอกสารนี้"
+                           + (f" · อีก {len(kept)} รายการ ({sum(x[2] for x in kept):,.2f} บาท) ไม่มีในหน้าน้ำมันเงินสด — ลงจากเอกสารนี้" if kept else ""))
     try:
         out = acc_docs.build(batch, vehicles)
     except acc_docs.BadBatch as exc:
