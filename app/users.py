@@ -61,7 +61,9 @@ MENUS = {
                   "api": ["/api/employees", "/api/rates/", "/api/hr/"]},
     "loans": {"label": "เงินกู้", "group": "พนักงาน", "pos": 2, "nav": ["navLoans"], "hash": "#loans", "also": ["#loan="], "api": ["/api/loans", "/api/employees"]},
     "attendance": {"label": "เวลาทำงาน", "group": "พนักงาน", "pos": 3, "nav": ["navAttendance"], "hash": "#attendance", "api": ["/api/attendance"]},
-    "documents": {"label": "ใบเตือน / บันทึกข้อความ", "group": "พนักงาน", "pos": 4, "nav": ["navDocs"], "hash": "#documents", "also": ["#document="],
+    # pay rides on a menu and an API prefix of its own (26 Nov 2026): everything the page shows comes from /api/payroll
+    "payroll": {"label": "คำนวณเงินเดือน", "group": "พนักงาน", "pos": 4, "nav": ["navPayroll"], "hash": "#payroll", "api": ["/api/payroll"]},
+    "documents": {"label": "ใบเตือน / บันทึกข้อความ", "group": "พนักงาน", "pos": 5, "nav": ["navDocs"], "hash": "#documents", "also": ["#document="],
                   "api": ["/api/documents", "/api/employees"]},
     "dashboard": {"label": "ภาพรวม (รถ)", "group": "รถ", "pos": 1, "nav": ["navDash"], "hash": "#dash", "api": ["/api/dashboard"]},
     "repair_board": {"label": "สถานะงานซ่อม", "group": "รถ", "pos": 2, "nav": ["navBoard"], "hash": "#board", "also": ["#truck="],

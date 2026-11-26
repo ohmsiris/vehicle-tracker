@@ -117,6 +117,7 @@ TABLES: dict[str, str] = {
     "shop_payment_bills": "id.asc",
     "shop_pay_settings": "shop.asc",
     "employee_pay_months": "id.asc",
+    "employee_pay_rules": "employee_id.asc",
     "route_driver_days": "id.asc",
     "route_driver_settings": "employee_id.asc",
     "tax_invoice_customers": "code.asc",

@@ -89,6 +89,7 @@
       <button id="navEmployees" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg><span>รายชื่อพนักงาน</span></button>
       <button id="navLoans" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10.2c0-1 1.1-1.7 2.5-1.7s2.5.7 2.5 1.7-1.1 1.5-2.5 1.8-2.5.8-2.5 1.8 1.1 1.7 2.5 1.7 2.5-.7 2.5-1.7"/></svg><span>เงินกู้</span></button>
       <button id="navAttendance" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg><span>เวลาทำงาน</span></button>
+      <button id="navPayroll" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8.5 7.5h7M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 16h.01M12 16h.01M15.5 16h.01"/></svg><span>คำนวณเงินเดือน</span></button>
       <button id="navDocs" class="sideitem" type="button"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4M10 12h6M10 16h6"/></svg><span>ใบเตือน / บันทึกข้อความ</span></button>
       <button class="sideitem" type="button" disabled title="ยังไม่ได้สร้าง"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 9h8M8 13h5M9 17l2 2 4-4"/></svg><span>ตรวจสลิปเงินเดือน</span><i class="soon">เร็วๆ นี้</i></button>
     </nav>
@@ -1042,6 +1043,19 @@
     <div id="pyBody"></div>
   </section>
 
+  <!-- ============ คำนวณเงินเดือน: step one, the checklist of what the pay calculation needs (payroll.js) ============ -->
+  <section id="payrollView" hidden>
+    <div class="page-head pw-head">
+      <div>
+        <h2 class="page-title">คำนวณเงินเดือน</h2>
+        <p class="muted small">ขั้นแรก: ตรวจว่าข้อมูลครบหรือยัง — ยังไม่คำนวณเงิน</p>
+      </div>
+      <div class="pw-bar" id="pwBar"></div>
+    </div>
+    <p class="error" id="pwError" hidden></p>
+    <div id="pwBody"></div>
+  </section>
+
   <!-- ============ ใบอนุญาต · เอกสาร: licences, certificates, drivers' licences and their scans (licences.js) ============ -->
   <section id="licencesView" hidden>
     <div class="page-head">
@@ -1791,6 +1805,7 @@
 <script src="/static/taxinv.js"></script>
 <script src="/static/taxbill.js"></script>
 <script src="/static/emppay.js"></script>
+<script src="/static/payroll.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/buy.js"></script>
 <script src="/static/manual.js"></script>

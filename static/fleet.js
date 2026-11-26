@@ -11,7 +11,7 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["users", "customers", "iceOrders", "cashFuel", "licences", "payables", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "driverDays", "taxInvoices", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
+const FLEET_VIEWS = ["users", "customers", "iceOrders", "cashFuel", "licences", "payables", "employees", "employee", "loans", "loan", "attendance", "payroll", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "driverDays", "taxInvoices", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 
 // ------------------------------------------------------------------ routing
 function route() {
@@ -33,6 +33,7 @@ function route() {
   if (h === "employees") return openEmployees();
   if (h === "loans") return openLoans();
   if (h === "attendance") return openAttendance();
+  if (h === "payroll" || h.startsWith("payroll/")) return openPayroll(h.slice(8));
   if (h === "documents") return openDocuments();
   const dcx = /^document=(.+)$/.exec(h);
   if (dcx && UUID_RE.test(dcx[1])) return openDocument(dcx[1]);

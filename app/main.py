@@ -2675,6 +2675,33 @@ def api_driver_days_save(employee_id: str, body: dict = Body(...), x_app_token: 
     return _dd_call(driver_days.save, employee_id, body.get("month"), body.get("half"), body.get("rows") or [])
 
 
+# ---------------------------------------------------- คำนวณเงินเดือน: the checklist of inputs (26 Nov 2026) -- app/payroll.py
+# Pay data rides on its own menu ("payroll") and its own prefix: nothing here is reachable through /api/employees, /api/loans ...
+# The lock is the menu gate alone (owner's brief, 26 Nov 2026): this page does NOT ask for the old second lock of พนักงาน (HR_PIN /
+# X-HR-Pin, see _hr_call). If HR_PIN is ever set on the server again and pay should sit behind it, call employees.check_pin here.
+def _pw_call(fn, *args, **kwargs):
+    import httpx
+    from app import payroll
+    if not supabase.configured():
+        raise HTTPException(503, "ระบบยังไม่พร้อม")
+    try:
+        return fn(*args, **kwargs)
+    except payroll.PayrollError as exc:
+        raise HTTPException(400, str(exc))
+    except (supabase.SupabaseError, httpx.HTTPError):         # an error answer from the database, or none at all (timeout)
+        logger.exception("payroll")
+        raise HTTPException(502, "โหลดไม่สำเร็จ ลองใหม่อีกครั้ง")
+
+
+@app.get("/api/payroll/checklist")
+def api_payroll_checklist(month: str = Query(default=""), fresh: bool = Query(default=False), x_app_token: str = Header(default=""),
+                          token: str = Query(default="")) -> dict:
+    """What the pay calculation of a pay month (26th - 25th) needs and what is already in: by kind of input and per person. Reads only."""
+    from app import mgr, payroll
+    _check_token(x_app_token, token)
+    return _pw_call(payroll.load, month, mgr.today_th(), fresh=fresh)
+
+
 @app.get("/api/payables")
 def api_payables(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """Every shop: what it is owed, its bills (wherever they were recorded) and its payments."""

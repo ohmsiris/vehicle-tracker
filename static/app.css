@@ -2485,3 +2485,147 @@ main:has(#cashFuelView:not([hidden]) .cf-review) { max-width: 1840px; }
 .role-row { display: grid; grid-template-columns: 110px 1fr auto; gap: 4px 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); }
 .role-row:first-child { border-top: 0; }
 @media (max-width: 560px) { .role-row { grid-template-columns: 1fr auto; } .role-when { grid-column: 1 / -1; } }
+
+/* คำนวณเงินเดือน (#payroll), payroll.js (26 Nov 2026): step one, the checklist of what the pay calculation needs.
+   Marks are drawn (tick / dot / cross / dash), coloured only with the tokens; the per-person table scrolls inside its own box. */
+main:has(#payrollView:not([hidden])) { max-width: 1480px; }
+.pw-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; }
+.pw-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pw-bar select { width: auto; max-width: 100%; }
+.pw-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
+.pw-tiles .kpi { min-width: 0; }
+.pw-period { margin: -6px 0 16px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--text-2); line-height: 1.45; }
+.pw-card { min-width: 0; }
+.pw-h { margin: 0 0 8px; font-size: 16px; }
+.pw-h .muted { font-weight: 400; }
+.pw-list { list-style: none; margin: 0 -8px; padding: 0; }
+.pw-list > li + li { border-top: 1px solid var(--line); }
+.pw-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 9px 8px; }
+.pw-row-main { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
+.pw-sub { color: var(--text-2); white-space: pre-line; }
+.pw-link { color: var(--accent); font-size: 13px; white-space: nowrap; text-decoration: none; padding-top: 2px; border-radius: 6px; }
+.pw-link:hover { text-decoration: underline; }
+.pw-link:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-mark { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: none; vertical-align: -3px; color: var(--muted); }
+.pw-mark svg { display: block; }
+.pw-mark.ok { color: var(--ok); } .pw-mark.warn { color: var(--warn); } .pw-mark.bad { color: var(--bad); } .pw-mark.na { color: var(--muted); }
+.pw-mark.big { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); margin-top: 1px; }
+.pw-mark.big.ok { background: var(--ok-soft); } .pw-mark.big.warn { background: var(--warn-soft); } .pw-mark.big.bad { background: var(--bad-soft); }
+.pw-kind-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.pw-kind-head .pw-link { padding: 11px 8px 0 0; }
+.pw-kind-btn { display: grid; grid-template-columns: 22px minmax(0, 1fr) 14px; gap: 3px 10px; align-items: start; line-height: 1.45; width: 100%; padding: 9px 8px; border: 0; background: none; font: inherit; color: inherit; text-align: left; border-radius: 8px; }
+button.pw-kind-btn { cursor: pointer; }
+button.pw-kind-btn:hover { background: var(--surface-2); }
+button.pw-kind-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-kind-btn > .pw-mark { grid-column: 1; grid-row: 1; }
+.pw-kind-top, .pw-meter, .pw-src { grid-column: 2; min-width: 0; }
+.pw-kind-top { display: flex; flex-wrap: wrap; gap: 0 10px; align-items: baseline; }
+.pw-count { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pw-n { white-space: nowrap; }
+.pw-n.ok { color: var(--ok); } .pw-n.warn { color: var(--warn); } .pw-n.bad { color: var(--bad); font-weight: 650; }
+.pw-unknown { color: var(--warn); }
+.pw-meter { display: flex; gap: 2px; height: 6px; max-width: 420px; margin: 2px 0; }
+.pw-meter i { display: block; height: 100%; min-width: 3px; border-radius: 3px; }
+.pw-meter .ok { background: var(--ok); } .pw-meter .warn { background: var(--warn-line); } .pw-meter .bad { background: var(--bad); }
+.pw-src { overflow-wrap: anywhere; line-height: 1.45; }
+.pw-src > span { display: block; }
+/* "รอขั้นต่อไป": IceBox has nowhere to hold this yet, so nothing on this page turns the line green */
+.pw-later i { display: inline-block; font-style: normal; font-size: 11px; line-height: 1.5; padding: 0 7px; border: 1px solid var(--line-strong, var(--line)); border-radius: 999px; background: var(--surface-2); color: var(--text-2); white-space: nowrap; }
+.pw-later-say { margin: -2px 0 8px; line-height: 1.5; }
+.pw-inline { border: 0; padding: 0; background: none; font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline; border-radius: 4px; }
+.pw-inline:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-chev { grid-column: 3; grid-row: 1; color: var(--muted); font-size: 16px; line-height: 1.4; justify-self: center; transition: transform .15s; }
+.pw-kind.open .pw-chev { transform: rotate(90deg); color: var(--text); }
+.pw-kind-body { padding: 0 8px 10px 40px; }
+/* a wide card: every input on one line, the bars under each other so they read as one chart */
+.pw-kinds { container-type: inline-size; }
+@container (min-width: 900px) {
+  .pw-kind-head { grid-template-columns: minmax(0, 1fr) 124px; }
+  .pw-kind-head .pw-link { justify-self: end; }
+  .pw-kind-btn { grid-template-columns: 22px 170px 245px 120px minmax(0, 1fr) 14px; gap: 0 14px; align-items: center; }
+  .pw-kind-btn > .pw-mark { margin-top: 0; }
+  .pw-kind-top { display: contents; }
+  .pw-kind-top > strong { grid-column: 2; grid-row: 1; }
+  .pw-kind-top > .pw-count { grid-column: 3; grid-row: 1; }
+  .pw-meter { grid-column: 4; grid-row: 1; margin: 0; }
+  .pw-src { grid-column: 5; grid-row: 1; }
+  .pw-chev { grid-column: 6; }
+}
+.pw-who { list-style: none; margin: 0; padding: 0; font-size: 13.5px; max-height: 340px; overflow-y: auto; }
+.pw-who li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; padding: 4px 8px; border-radius: 6px; overflow-wrap: anywhere; line-height: 1.45; }
+.pw-who li:nth-child(odd) { background: var(--surface-2); }
+.pw-who .pw-mark { margin-top: 2px; }
+.pw-who b { font-weight: 600; }
+.pw-more { margin: 6px 0 0 8px; color: var(--text-2); }
+.pw-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 8px; }
+.pw-tools .seg { margin: 0; max-width: 100%; }
+.pw-tools .segbtn { padding: 6px 14px; font-size: 13.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pw-tools .segbtn:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-tools select { width: auto; max-width: 250px; padding: 7px 10px; font-size: 14px; }
+.pw-tools input[type=text] { flex: 1 1 180px; width: auto; max-width: 260px; padding: 7px 12px; font-size: 14px; }
+.pw-shown { margin-left: auto; white-space: nowrap; }
+.pw-legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin-bottom: 10px; }
+.pw-none { margin: 6px 0 0; }
+.pw-tablewrap { overflow: auto; max-height: calc(100vh - var(--topbar-h) - 56px); max-height: calc(100dvh - var(--topbar-h) - 56px); border: 1px solid var(--line); border-radius: 12px; background: var(--surface); container-type: inline-size; }
+.pw-tablewrap:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
+.pw-table th, .pw-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; background: var(--surface); }
+.pw-table thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); font-size: 12.5px; font-weight: 650; color: var(--text-2); }
+.pw-table thead abbr { text-decoration: none; cursor: help; }
+.pw-table .pw-c-code { position: sticky; left: 0; z-index: 1; width: 120px; min-width: 120px; max-width: 120px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pw-table .pw-c-name { position: sticky; left: 120px; z-index: 1; min-width: 150px; border-right: 1px solid var(--line); }
+.pw-table thead .pw-c-code, .pw-table thead .pw-c-name { z-index: 3; }
+.pw-c-sub { display: none; }
+.pw-person { cursor: pointer; }
+.pw-person.miss .pw-c-code { box-shadow: inset 3px 0 0 var(--bad); }
+.pw-person.carry .pw-c-code { box-shadow: inset 3px 0 0 var(--warn-line); }
+.pw-person.ok .pw-c-code { box-shadow: inset 3px 0 0 var(--ok); }
+.pw-person:hover td, .pw-person.open td { background: var(--accent-soft); }
+.pw-table .pw-c-pos { max-width: 110px; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.pw-st-d { font-size: 11.5px; line-height: 1.3; margin-top: 1px; white-space: normal; min-width: 96px; max-width: 132px; }
+.pw-table .pw-in { padding-left: 6px; padding-right: 6px; font-variant-numeric: tabular-nums; }
+.pw-v { margin-left: 4px; font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pw-in.miss .pw-v { color: var(--bad); }
+.pw-table .pw-c-caret { width: 30px; padding: 0 4px 0 0; text-align: center; }
+.pw-caret { border: 0; background: none; font: inherit; font-size: 16px; line-height: 1; color: var(--muted); cursor: pointer; padding: 3px 8px; border-radius: 6px; transition: transform .15s; }
+.pw-caret:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-person.open .pw-caret { transform: rotate(90deg); color: var(--text); }
+.pw-table .pw-group th { background: var(--surface-2); font-weight: 400; font-size: 13px; padding: 7px 0; }
+.pw-group-in { position: sticky; left: 0; display: inline-block; box-sizing: border-box; max-width: calc(100vw - 56px); max-width: calc(100cqw - 18px); padding: 0 10px; white-space: normal; }
+.pw-group-in b { font-weight: 650; }
+.pw-table .pw-detail td { padding: 0; white-space: normal; }
+.pw-panel { position: sticky; left: 0; box-sizing: border-box; max-width: calc(100vw - 56px); width: calc(100cqw - 18px); padding: 10px 14px 12px; border-left: 3px solid var(--accent); }
+.pw-panel-head { display: flex; flex-wrap: wrap; gap: 0 12px; align-items: baseline; margin-bottom: 6px; }
+.pw-notes { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 28px; }
+.pw-note { display: grid; grid-template-columns: minmax(120px, 36%) minmax(0, 1fr); gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px; line-height: 1.45; }
+.pw-note dt { font-weight: 600; }
+.pw-note dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.pw-note .pw-v { margin-left: 0; font-size: inherit; color: var(--text); }
+.pw-note.miss dd { color: var(--bad); }
+.pw-lack { margin: 0 0 6px; color: var(--bad); }
+.pw-off { margin: 8px 0 0; }
+.pw-empty-cols { margin: 8px 2px 0; }
+.pw-decisions { margin: 0; padding-left: 24px; display: grid; gap: 10px; line-height: 1.5; }
+.pw-decisions li::marker { color: var(--muted); font-weight: 600; }
+.pw-failed { margin: 4px 2px 0; }
+/* dark: the amber line token is too dim to carry a bar or a row's edge, the text amber is the bright one */
+[data-theme="dark"] .pw-meter .warn { background: var(--warn); }
+[data-theme="dark"] .pw-person.carry .pw-c-code { box-shadow: inset 3px 0 0 var(--warn); }
+@media (max-width: 1500px) { .pw-table .pw-c-pos { display: none; } }      /* the unfolded row says the position */
+@media (max-width: 760px) {
+  .pw-bar { width: 100%; }
+  .pw-bar select { flex: 1 1 0; min-width: 0; padding: 9px 8px; font-size: 13.5px; }
+  .pw-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .pw-card { padding: 14px 14px; }
+  .pw-kind-body { padding-left: 8px; }
+  .pw-tools .seg { display: flex; width: 100%; }
+  .pw-tools .segbtn { flex: 1 1 auto; padding: 6px 4px; font-size: 12.5px; }
+  .pw-tools select, .pw-tools input[type=text] { flex: 1 1 100%; width: 100%; max-width: none; }
+  .pw-shown { margin-left: 0; }
+  /* a phone: the name (and an unusual status) go under the code in the one column that stays put, so the ticks start right after it */
+  .pw-table .pw-c-name, .pw-table .pw-c-st { display: none; }
+  .pw-table .pw-c-code { width: 136px; min-width: 136px; max-width: 136px; padding-left: 7px; padding-right: 4px; border-right: 1px solid var(--line); }
+  .pw-c-sub { display: block; font-weight: 400; font-size: 12px; line-height: 1.35; color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
+  .pw-c-sub .lc-badge { margin-left: 4px; font-size: 10.5px; }
+  .pw-notes { grid-template-columns: minmax(0, 1fr); }
+}

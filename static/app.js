@@ -71,10 +71,10 @@ function initTheme() {
 
 let lastBillView = "capture";   // where "บันทึกบิล" in the menu returns to, so a half-reviewed bill isn't abandoned by a peek at the board
 
-const VIEW_NAMES = ["home", "users", "customers", "iceOrders", "cashFuel", "licences", "payables", "employees", "employee", "loans", "loan", "attendance", "documents", "document", "board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "driverDays", "taxInvoices", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
+const VIEW_NAMES = ["home", "users", "customers", "iceOrders", "cashFuel", "licences", "payables", "employees", "employee", "loans", "loan", "attendance", "payroll", "documents", "document", "board", "dash", "capture", "busy", "review", "done", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "driverDays", "taxInvoices", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 // which sidebar entry lights up for each view
 const NAV_OF = {
-  home: "navHome", users: "navUsers", customers: "navCustomers", iceOrders: "navIceOrders", cashFuel: "navCashFuel", licences: "navLicences", payables: "navPayables", employees: "navEmployees", employee: "navEmployees", loans: "navLoans", loan: "navLoans", attendance: "navAttendance", documents: "navDocs", document: "navDocs", board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
+  home: "navHome", users: "navUsers", customers: "navCustomers", iceOrders: "navIceOrders", cashFuel: "navCashFuel", licences: "navLicences", payables: "navPayables", employees: "navEmployees", employee: "navEmployees", loans: "navLoans", loan: "navLoans", attendance: "navAttendance", payroll: "navPayroll", documents: "navDocs", document: "navDocs", board: "navBoard", dash: "navDash", capture: "navBills", busy: "navBills", review: "navBills", done: "navBills",
   roster: "navRoster", truck: "navRoster", event: "navLog", log: "navLog", where: "navWhere", plan: "navPlan", tyreStock: "navTyreStock", odometers: "navOdometers", accounts: "navAccounts", electricity: "navElectricity", routes: "navRoutes", salesSheets: "navSalesSheets", driverDays: "navDriverDays", taxInvoices: "navTaxInvoices", mgr: "navMgr", mgrCal: "navMgrCal", mgrRecurring: "navMgrRecurring", mgrSettings: "navMgrSettings", settings: "navSettings", machinery: "navMachIndex", machine: "navMachIndex", machineParts: "navMachParts", machinePlan: "navMachPlan", machineLog: "navMachLog", purchases: "navPurchases", purchaseNew: "navPurchases", prices: "navPrices", priceItem: "navPrices", stock: "navStock", sheet: "navStock",
 };
 
@@ -903,6 +903,7 @@ async function init() {
   $("navEmployees").addEventListener("click", () => goHash("#employees"));
   $("navLoans").addEventListener("click", () => goHash("#loans"));
   $("navAttendance").addEventListener("click", () => goHash("#attendance"));
+  $("navPayroll").addEventListener("click", () => goHash("#payroll"));
   $("navDocs").addEventListener("click", () => goHash("#documents"));
   $("navMgrCal").addEventListener("click", () => goHash("#mgr-calendar"));
   $("navMgrRecurring").addEventListener("click", () => goHash("#mgr-recurring"));
