@@ -99,3 +99,13 @@ def test_ice_between_branches_cheque_only_settles():
     assert by[("สระบุรี", "1600")] == (344700.0, 0.0)
     assert not any(k[1] in ("5060", "4150") or k[0] == "แก่งคอย" for k in by)
     assert by[("สระบุรี", "5050")] == (98435.94, 0.0)            # bought from outside: an ordinary cost
+
+
+def test_owner_answers_26_nov_2026():
+    from app import acc_cheques as ac
+    # calendars for customers are marketing, not "other"
+    assert ac.classify({"what": "ปฏิทินแจกลูกค้า 1500ชุด", "payee": "บริษัท ทดสอบ จำกัด", "note": "", "amount": 44460.0})["account"] == "6500"
+    # ice naming the sheet's own branch is still ice between the branches (settled through 1600, not bought from outside)
+    assert ac.other_branch({"what": "ค่าน้ำแข็ง สระบุรี 9/2569"}, "สระบุรี") == "แก่งคอย"
+    assert ac.other_branch({"what": "ค่าน้ำแข็งแก่งคอย#07/69หน้าโรง=344700"}, "สระบุรี") == "แก่งคอย"
+    assert ac.other_branch({"what": "ค่าน้ำแข็งบางปะอิน06-2569"}, "แก่งคอย") is None

@@ -44,6 +44,7 @@ RULES = [  # (pattern on the lower-cased description, account) -- first match wi
     (r"ประกันสังคม", "7110"),
     (r"ต่างด้าว|พม่า|พาสปอร์ต", "7120"),
     (r"ต่อภาษี|พรบ|ลักษณะตัวรถ|ขนส่ง", "6300"),
+    (r"ปฏิทิน|ของแจกลูกค้า|ของขวัญลูกค้า|ของชำร่วย", "6500"),      # marketing / customer gifts (owner, 26 Nov 2026: the 1,500 calendars)
     (r"ค่าสอบบัญชี", "7600"),
     (r"gps", "7200"),
     (r"ซ้อมดับเพลิง|เปิดหน้าบัญชี", "7500"),
@@ -151,7 +152,11 @@ def other_branch(row: dict, branch: str) -> Optional[str]:
     date); the cheque only settles what the branch owes the other one (Dr 1600). Ice from บางปะอิน stays 5050, bought from outside."""
     names = {"สระบุรี": "แก่งคอย", "แก่งคอย": "สระบุรี"}
     other = names.get(branch)
-    return other if other and other in row["what"] else None
+    if not other:
+        return None
+    what = re.sub(r"\s+", "", row["what"])
+    # an ice row naming EITHER branch is ice between the branches: Saraburi's Nov 2026 sheet wrote "ค่าน้ำแข็ง สระบุรี 9/2569" (owner, 26 Nov 2026)
+    return other if other in what or ("ค่าน้ำแข็ง" in what and branch in what) else None
 
 
 def paid_from(row: dict) -> str:

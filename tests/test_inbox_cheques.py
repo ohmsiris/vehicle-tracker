@@ -140,7 +140,7 @@ def test_read_both_branches_roles_totals_and_month():
         {"หัวกระดาษ", "วันที่บนเช็ค", "เดือนในรายการ +1", "ท้ายชื่อชีท", "ชื่อไฟล์", "ใบแจ้ง PEA ที่จ่าย +1"}
     srb, kk = p["batches"]
     assert (srb["key"], kk["key"]) == ("cheque-2026-11-สระบุรี", "cheque-2026-11-แก่งคอย")    # the legacy importer's keys
-    assert [r["role"] for r in srb["rows"]] == ["funding", "pays_bill", "cost", "pays_bill", "unknown"]
+    assert [r["role"] for r in srb["rows"]] == ["funding", "pays_bill", "cost", "pays_bill", "cost"]          # the calendars: marketing 6500 since 26 Nov 2026
     assert [r["role"] for r in kk["rows"]] == ["wages", "pays_bill", "transfer"]
     assert srb["rows_total"] == srb["file_total"] == 1393980.25
     assert kk["rows_total"] == kk["file_total"] == 2481162.05
