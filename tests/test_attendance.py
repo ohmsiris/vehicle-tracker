@@ -420,12 +420,22 @@ def _crew_change(days_first=6, nights=5):
     return out
 
 
-def test_a_move_between_the_day_and_night_crews_reads_as_one_whichever_shift_is_stored():
-    punches = _crew_change()
-    for stored in (8 * 60, 20 * 60):                    # the roster's current shift or the month's majority: the same reading
-        s = at.pair_shifts(punches, 12 * 60, usual_start=stored)
-        assert all(x["out"] for x in s)
-        assert [x["in"].hour for x in s] == [8] * 6 + [20] * 5
+def test_a_move_onto_the_stored_crew_reads_as_one():
+    punches = _crew_change()                            # days, a day off, then nights: the roster (stored) says nights now
+    s = at.pair_shifts(punches, 12 * 60, usual_start=20 * 60)
+    assert all(x["out"] for x in s)
+    assert [x["in"].hour for x in s] == [8] * 6 + [20] * 5
+
+
+def test_a_week_away_from_the_stored_crew_is_two_missed_scans():
+    # โซอู, day roster, 8 - 16 Nov 2026: 19:59 only on the 9th, 07:5x / 20:xx on the 10th - 14th, 07:51 only on the 15th. The owner: day shift.
+    punches = day_punches(*[f"2026-11-0{i}" for i in range(1, 9)], start="07:50", end="20:11") + [dt("2026-11-09", "19:59")]
+    for d in ("2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13", "2026-11-14"):
+        punches += [dt(d, "07:51"), dt(d, "20:05")]
+    punches += [dt("2026-11-15", "07:51"), dt("2026-11-16", "07:58"), dt("2026-11-16", "20:08")]
+    s = at.pair_shifts(punches, 12 * 60, usual_start=8 * 60)
+    assert [x["in"].strftime("%d %H:%M") for x in s if not x["out"]] == ["09 19:59", "15 07:51"]
+    assert all(x["in"].hour == 7 for x in s if x["out"])
 
 
 def test_one_missed_scan_still_does_not_turn_a_12_hour_month_around():

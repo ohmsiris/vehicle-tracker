@@ -200,7 +200,10 @@ def _tod(dt: datetime) -> int:
     return dt.hour * 60 + dt.minute
 
 
-SWITCH_COST = 240           # a change between the usual start and the one 12 hours away (day <-> night crew): cheaper than one missed scan
+SWITCH_COST = 240           # a change ONTO the usual start from the one 12 hours away (day <-> night crew): cheaper than one missed scan
+SWITCH_AWAY = 1100          # a change OFF the usual start: dearer than two missed scans (each up to SINGLE_COST + 180). The usual start is the crew the worker is on now
+                            # (the roster); earlier in the month they may have been on the other one, but a week away and back is two missed
+                            # scans, not a night week (owner, 27 Nov 2026: โซอู is day shift -- 19:59 only on 9 Nov, 07:51 only on 15 Nov)
 
 
 EXTRA_COST = 200            # a scan in the middle of a shift (in 23:26, 09:05, out 12:13): cheaper than a crew change or a scan alone
@@ -249,11 +252,9 @@ def _pair_with_start(kept: list[datetime], target_minutes: int, usual: int) -> l
                         cost, take = c, span
             local.append((cost, take))
         for k in range(k_n):
-            pick = k
-            for k2 in range(k_n):
-                if k2 != k and local[k2][0] + SWITCH_COST < local[pick][0] + (SWITCH_COST if pick != k else 0):
-                    pick = k2
-            best[i][k] = local[pick][0] + (SWITCH_COST if pick != k else 0)
+            change = lambda k2: 0 if k2 == k else SWITCH_COST if k2 == 0 else SWITCH_AWAY      # noqa: E731   starts[0] is the usual one
+            pick = min(range(k_n), key=lambda k2: (local[k2][0] + change(k2), k2 != k))
+            best[i][k] = local[pick][0] + change(pick)
             step[i][k] = (pick, local[pick][1])
     out, i = [], 0
     k = min(range(k_n), key=lambda x: (best[0][x] if n else 0, x))
@@ -389,6 +390,8 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         month_punches = sorted(p for p in mine if p.date() >= start - timedelta(days=1))
         if morning is not None and custom is None:
             shifts = pair_shifts(month_punches, target, usual_start=morning)
+        elif custom is not None and target == 12 * 60:     # a 12-hour worker's crew is known (the roster): no plain reading overrules it
+            shifts = pair_shifts(month_punches, target, usual_start=usual)
         else:
             shifts = pair_month(month_punches, target, usual)
         for s in shifts:
