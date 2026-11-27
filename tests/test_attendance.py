@@ -509,3 +509,11 @@ def test_a_double_shift_is_marked():
     punches = [dt("2026-09-01", "22:54"), dt("2026-09-02", "14:50"), dt("2026-09-02", "22:58"), dt("2026-09-03", "08:01")]
     days = month({E1: punches}, emps={E1: own})["people"][0]
     assert [d["double"] for d in days["days"]] == [True, False] and days["counts"]["double"] == 1
+
+
+def test_saraburi_truck_helpers_start_in_the_early_morning():
+    # ชาย, 26 - 28 Oct 2026: 04:49 - 21:01 every day read as 21:01 -> 04:49 nights (7.5 h is nearer 9 h than 16 h)
+    assert at.role_start("สระบุรี", "เด็กรถ") == 5 * 60
+    punches = [dt("2026-09-01", "04:49"), dt("2026-09-01", "21:01"), dt("2026-09-02", "04:49"), dt("2026-09-02", "20:55"), dt("2026-09-03", "04:48"), dt("2026-09-03", "22:11")]
+    days = month({E1: punches}, emps={E1: emp(E1, "SB-FR055", position="เด็กรถ")})["people"][0]["days"]
+    assert [[(s["in"], s["out"]) for s in d["shifts"]] for d in days] == [[("04:49", "21:01")], [("04:49", "20:55")], [("04:48", "22:11")]]

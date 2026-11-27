@@ -173,7 +173,8 @@ USUAL_DAYS = 45              # how far back the usual start is learned
 # when there are no earlier weeks to learn from: the start the role is known to have (owner, 27 Nov 2026: Saraburi's หน้าโรง drivers start in the
 # early morning, about 04:00 - 05:30, and leave in the afternoon or evening)
 ROLE_START = {("สระบุรี", "พนักงานขับรถหน้าโรง"): 5 * 60,     # Kaeng Khoi's หน้าโรง hours are not known yet: they keep the old rule
-              ("สระบุรี", "พนักงานขับรถสาย"): 6 * 60}         # route drivers leave in the morning, back in the afternoon / evening (นาวิน, 27 Nov 2026)
+              ("สระบุรี", "พนักงานขับรถสาย"): 6 * 60,         # route drivers leave in the morning, back in the afternoon / evening (นาวิน, 27 Nov 2026)
+              ("สระบุรี", "เด็กรถ"): 5 * 60}                  # helpers ride the trucks out in the early morning (ชาย: 04:45 - 21:00, read as 21:00 -> 04:45)
 
 
 # roles that always come in in the morning and leave whenever the work is done: their scans are read that way even when it leaves a scan or two
