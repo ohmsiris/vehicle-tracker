@@ -7,7 +7,7 @@ Fill employee_pay_rules (schema_v93) from the workbook "แบบคำนวณ
 Only these columns are read: รหัส, กลุ่มคิดเงิน, % ค่าคอม, บาท/ซอง, OT บาท/ชม., OT ชม./วัน, ได้เบี้ยขยัน, หมายเหตุ. The daily rate stays in
 employee_rates. People the workbook does not list (new people, people who left after it was made) get the group their branch and
 position imply. On top come three things the owner told us on 26 Nov 2026: who rides with which route driver, the two people paid
-344 on a day spent only on a truck, and the route that ended on 17/11/2026.
+344 on a day spent only on a truck, and the route that ended on 17/11/2026. เบี้ยขยัน goes to drivers only (owner, 27 Nov 2026).
 """
 import sys
 from pathlib import Path
@@ -22,6 +22,8 @@ RIDES_WITH = {                                      # เด็กรถ -> the 
 }
 RATE2 = {"SB-FR034": 344, "SB-FR076": 344}          # a day spent only on a truck (the plant day is their normal rate, 390)
 ROUTE_UNTIL = {"SB-PD011": "2026-11-17"}            # truck 9's route ended; other work after that
+BONUS_GROUPS = ("DRV-A", "DRV-B", "DRV-C", "DRV-D", "DRV-E", "DRV-F", "KK-DRV")   # เบี้ยขยัน: drivers only (owner, 27 Nov 2026) -- the
+                                                    # workbook's "Y for everyone" was a placeholder; HQ never paid it to anyone else
 
 
 def group_for(branch: str, position: str) -> str:
@@ -84,6 +86,7 @@ def main() -> None:
                     "ot_auto_hours": None, "bonus": False, "note": "ไม่อยู่ในแบบคำนวณ (เสนอ): จัดกลุ่มตามตำแหน่ง"}
             derived.append(f"{p['code']} -> {rule['pay_group']}")
         mate = by_code.get(RIDES_WITH.get(p["code"], ""))
+        rule = {**rule, "bonus": rule["pay_group"] in BONUS_GROUPS}
         rows.append({"employee_id": p["id"], **rule, "rate2": RATE2.get(p["code"]), "rides_with": mate["id"] if mate else None,
                      "route_until": ROUTE_UNTIL.get(p["code"])})
     unknown = sorted(c for c in book if c not in by_code)

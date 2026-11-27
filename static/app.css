@@ -2564,6 +2564,7 @@ button.pw-kind-btn:focus-visible { outline: none; box-shadow: var(--ring); }
 .pw-tools select { width: auto; max-width: 250px; padding: 7px 10px; font-size: 14px; }
 .pw-tools input[type=text] { flex: 1 1 180px; width: auto; max-width: 260px; padding: 7px 12px; font-size: 14px; }
 .pw-shown { margin-left: auto; white-space: nowrap; }
+.pw-extra { margin: -2px 0 8px; line-height: 1.45; overflow-wrap: anywhere; }
 .pw-legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin-bottom: 10px; }
 .pw-none { margin: 6px 0 0; }
 .pw-tablewrap { overflow: auto; max-height: calc(100vh - var(--topbar-h) - 56px); max-height: calc(100dvh - var(--topbar-h) - 56px); border: 1px solid var(--line); border-radius: 12px; background: var(--surface); container-type: inline-size; }
@@ -2608,6 +2609,51 @@ button.pw-kind-btn:focus-visible { outline: none; box-shadow: var(--ring); }
 .pw-decisions { margin: 0; padding-left: 24px; display: grid; gap: 10px; line-height: 1.5; }
 .pw-decisions li::marker { color: var(--muted); font-weight: 600; }
 .pw-failed { margin: 4px 2px 0; }
+/* กติกาที่ใช้คิดเงิน (27 Nov 2026): the workbook's rules under the tiles, open. A table of the pay groups, one line each in a wide card,
+   and the general rules under it (two columns when there is room); a small chip marks what is set aside ("พักไว้ก่อน") or waits on the owner. */
+.pw-fold { display: inline-flex; align-items: baseline; gap: 8px; border: 0; padding: 0; margin: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: left; border-radius: 6px; }
+.pw-fold:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-fold-chev { display: inline-block; color: var(--muted); font-size: 16px; line-height: 1; font-weight: 400; transition: transform .15s; }
+.pw-rules-card.open .pw-fold-chev { transform: rotate(90deg); color: var(--text); }
+.pw-rules-card:not(.open) .pw-h { margin-bottom: 0; }
+.pw-rules { container-type: inline-size; }
+.pw-rules-in { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.pw-rtable { width: 100%; border-collapse: collapse; font-size: 13.5px; line-height: 1.45; }
+.pw-rtable th, .pw-rtable td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.pw-rtable thead th { background: var(--surface-2); font-size: 12.5px; font-weight: 650; color: var(--text-2); white-space: nowrap; }
+.pw-rtable tbody tr:last-child td { border-bottom: 0; }
+.pw-r-g b { font-weight: 650; white-space: nowrap; margin-right: 8px; }
+.pw-r-g > span { font-size: 12.5px; color: var(--text-2); }
+.pw-r-g .pw-chip { margin-left: 6px; }
+.pw-rtable .pw-r-n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pw-r-h { margin-left: 6px; font-size: 12px; color: var(--muted); }
+.pw-rtable .pw-r-b { text-align: center; white-space: nowrap; }
+.pw-r-bt { display: none; }
+.pw-rtable tr.hold td { color: var(--muted); }
+.pw-rtable tr.hold .pw-mark { opacity: .6; }
+.pw-rtable tr.hold .pw-r-g > span { color: var(--muted); }
+@container (min-width: 900px) {
+  .pw-rtable .pw-r-g { white-space: nowrap; padding-right: 18px; }
+  .pw-rules-gen ul { columns: 2; column-gap: 40px; }
+}
+.pw-f { white-space: nowrap; }
+.pw-f b { font-weight: 600; white-space: nowrap; }
+.pw-f-sep { color: var(--muted); }
+.pw-rules-gen h4 { margin: 0 0 6px; font-size: 12.5px; font-weight: 650; color: var(--text-2); }
+.pw-rules-gen ul { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.pw-rules-gen li { break-inside: avoid; margin-bottom: 4px; }
+.pw-rules-gen li::marker { color: var(--muted); }
+.pw-chip { display: inline-block; font-size: 11px; line-height: 1.5; font-weight: 400; padding: 0 7px; border: 1px solid var(--line-strong, var(--line)); border-radius: 999px; background: var(--surface-2); color: var(--text-2); white-space: nowrap; vertical-align: 1px; }
+.pw-chip.wait { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+/* one person's own rule, above his notes */
+.pw-formula { margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.pw-formula-k { display: inline-block; margin-right: 10px; font-size: 12px; color: var(--text-2); }
+/* a branch that is set aside: its blocks come last, muted, with no coloured edge (the marks stay readable) */
+.pw-table .pw-group.hold th { color: var(--muted); }
+.pw-person.hold td { color: var(--muted); background: var(--surface-2); }
+.pw-person.hold:hover td, .pw-person.hold.open td { background: var(--accent-soft); }
+.pw-person.hold .pw-c-code { box-shadow: inset 3px 0 0 var(--line-strong, var(--line)); }
+.pw-person.hold .pw-mark, .pw-person.hold .lc-badge, .pw-person.hold .pw-v { opacity: .55; }
 /* dark: the amber line token is too dim to carry a bar or a row's edge, the text amber is the bright one */
 [data-theme="dark"] .pw-meter .warn { background: var(--warn); }
 [data-theme="dark"] .pw-person.carry .pw-c-code { box-shadow: inset 3px 0 0 var(--warn); }
@@ -2628,4 +2674,20 @@ button.pw-kind-btn:focus-visible { outline: none; box-shadow: var(--ring); }
   .pw-c-sub { display: block; font-weight: 400; font-size: 12px; line-height: 1.35; color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
   .pw-c-sub .lc-badge { margin-left: 4px; font-size: 10.5px; }
   .pw-notes { grid-template-columns: minmax(0, 1fr); }
+  /* the rules table on a phone: each group is a small block -- its name, people and เบี้ยขยัน on one line, the rule under it */
+  .pw-rtable, .pw-rtable tbody { display: block; }
+  .pw-rtable thead { display: none; }
+  .pw-rtable tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .pw-rtable tbody tr:last-child { border-bottom: 0; }
+  .pw-rtable td { display: block; padding: 0; border: 0; }
+  .pw-r-g { grid-column: 1; grid-row: 1; }
+  .pw-rtable .pw-r-n { grid-column: 2; grid-row: 1; }
+  .pw-rtable .pw-r-f { grid-column: 1 / -1; grid-row: 2; color: var(--text); }
+  .pw-rtable .pw-r-b { grid-column: 1 / -1; grid-row: 3; text-align: left; font-size: 12.5px; color: var(--text-2); }
+  .pw-r-bt { display: inline; }
+  .pw-f { white-space: normal; }
+}
+/* the narrowest phones: the four filter buttons may take two lines instead of being cut at the pill's edge */
+@media (max-width: 380px) {
+  .pw-tools .seg { flex-wrap: wrap; border-radius: 16px; }
 }

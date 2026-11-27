@@ -62,6 +62,12 @@ def file(out, key):
     return next(f for f in out["files"] if f["key"] == key)
 
 
+@pytest.fixture
+def no_hold(monkeypatch):
+    """แก่งคอย counted like any branch -- what the page does again once the owner lifts the hold of 27 Nov 2026."""
+    monkeypatch.setattr(pw, "HOLD_BRANCHES", ())
+
+
 # --------------------------------------------------------------------------------------------- the pay month
 def test_the_month_to_open_on():
     assert pw.default_month(date(2026, 11, 26)) == "2026-11"            # the month that just closed: the one being paid
@@ -102,12 +108,14 @@ def test_a_person_is_written_code_then_name():
     assert pw.who({"code": "SB-PD004", "full_name": "มานัส ศรีวิลาส", "nickname": "มานัส"}) == "SB-PD004 มานัส ศรีวิลาส"       # the nickname says nothing more
     assert pw.who({"code": "SB-PD014", "full_name": "ศุภกร  มูลเซอร์", "nickname": "ไมค์"}) == "SB-PD014 ศุภกร มูลเซอร์ (ไมค์)"
     assert pw.truck_label({"vehicle_number": "27", "plate_number": "84-2682", "vehicle_class": "รถใหญ่", "branch": "สระบุรี"}) == "#27 84-2682 รถใหญ่ สระบุรี"
+    # a truck whose fleet number is its plate: the plate once
+    assert pw.truck_label({"vehicle_number": "83-2919", "plate_number": "83-2919", "vehicle_class": "รถใหญ่", "branch": "สระบุรี"}) == "83-2919 รถใหญ่ สระบุรี"
 
 
 # --------------------------------------------------------------------------------------------- route drivers
 def route_src(rows, **kw):
-    return src(**{"employees": [emp("D1", "มานัส ศรีวิลาส", position="พนักงานขับรถสาย")], "rules": [rule("D1", "DRV-A", commission_pct=5)],
-                  "rates": [rate("D1", 120)], "pay_prev": [prev("D1")], "route": rows, **kw})
+    return src(**{"employees": [emp("D1", "มานัส ศรีวิลาส", position="พนักงานขับรถสาย")], "rules": [rule("D1", "DRV-E", commission_pct=2, bonus=True)],
+                  "rates": [rate("D1", 350)], "pay_prev": [prev("D1")], "route": rows, **kw})
 
 
 def test_a_route_driver_with_every_day_typed():
@@ -115,8 +123,9 @@ def test_a_route_driver_with_every_day_typed():
     p = one(out, "D1")
     assert p["cells"]["days"] == {"state": "ok", "value": 31, "text": "31 วัน", "note": ""}
     assert p["cells"]["sales"]["state"] == "ok" and p["cells"]["sales"]["value"] == 31000 and p["cells"]["sales"]["text"] == "31,000"
-    assert p["cells"]["bags"]["state"] == "na" and p["cells"]["fuel"]["state"] == "na"        # no baht per ซอง, not DRV-D
-    assert p["state"] == "ok" and p["missing"] == [] and (p["group"], p["group_label"], p["rate"]) == ("DRV-A", "พขร. รถหลอดใหญ่ 120/วัน + 5%", 120)
+    assert p["cells"]["bags"]["state"] == "na" and p["cells"]["fuel"]["state"] == "na"        # no baht per ซอง; paid on sales as typed
+    assert p["state"] == "ok" and p["missing"] == [] and (p["group"], p["group_label"], p["rate"]) == ("DRV-E", "พขร. รถปลีก-เล็ก 350/วัน + 2%", 350)
+    assert p["formula"] == "ค่าแรง = วัน × 350 · ค่าคอม = ยอดขาย × 2% · เบี้ยขยัน 1,000 ถ้ามาครบ 31 วัน" and p["hold"] is False
     assert file(out, "route_sales")["state"] == "ok"
 
 
@@ -163,7 +172,7 @@ def test_a_route_that_ended_before_the_period():
     s["rules"][0].update(pay_group="DRV-E", route_until="2026-11-17", bag_rate=3)
     out = pw.build(s, "2026-12", date(2026, 12, 20))
     c = one(out, "D1")["cells"]
-    assert c["days"] == {"state": "miss", "value": None, "text": "", "note": "เลิกขับรถสายตั้งแต่ 17/11/2026 · ยังไม่มีสแกนนิ้ว / ใบสรุปวันหยุด"}
+    assert c["days"] == {"state": "miss", "value": None, "text": "", "note": "ขับรถสายถึง 17/11/2026 · ยังไม่มีสแกนนิ้ว / ใบสรุปวันหยุด"}
     assert c["sales"]["state"] == "na" and c["bags"]["state"] == "na" and c["fuel"]["state"] == "na"
     assert kind(out, "sales")["need"] == 0 and file(out, "route_sales")["summary"].startswith("ลงครบ 0 คน")
     titles = [d["title"] for d in out["decisions"]]
@@ -193,7 +202,7 @@ def test_a_driver_who_types_sacks_and_tubes_apart():
     s = route_src(rows, split=[{"employee_id": "D1", "money_split": True}])
     s["rules"][0].update(pay_group="DRV-C", bag_rate=3)
     p = one(pw.build(s, MONTH, TODAY), "D1")
-    assert p["cells"]["sales"]["value"] == 31 * 200 and "เฉพาะยอดหลอด" in p["cells"]["sales"]["note"]      # the หลอด part only
+    assert p["cells"]["sales"]["value"] == 31 * 200 and p["cells"]["sales"]["note"] == "เฉพาะยอดหลอด · ก่อนหักค่าน้ำมัน"      # the หลอด part only
     assert p["cells"]["bags"] == {"state": "ok", "value": 62, "text": "62 ซอง", "note": ""}
 
 
@@ -221,7 +230,7 @@ def test_a_helper_follows_his_driver():
     assert (c["state"], c["value"]) == ("miss", 0) and "คนขับยังไม่ได้ลง 26/10-25/11" in c["note"]
 
 
-def test_scans_are_a_stand_in_and_nothing_is_missing():
+def test_scans_are_a_stand_in_and_nothing_is_missing(no_hold):
     punches = [{"employee_id": "SB-KK012", "punched_at": "2026-11-01T07:58:00"}, {"employee_id": "SB-KK012", "punched_at": "2026-11-01T20:01:00"},
                {"employee_id": "SB-KK012", "punched_at": "2026-11-02T08:00:00"}, {"employee_id": "SB-KK012", "punched_at": "2026-10-25T08:00:00"}]      # the 25th: last month's
     s = src(employees=[emp("SB-KK012", branch="แก่งคอย"), emp("N1"), emp("T1"), emp("SB-KK013", branch="แก่งคอย")],
@@ -236,16 +245,18 @@ def test_scans_are_a_stand_in_and_nothing_is_missing():
     assert one(out, "SB-KK013")["cells"]["ot"] == {"state": "miss", "value": None, "text": "", "note": "ยังไม่มีชั่วโมง OT (ใบสรุปสิ้นเดือนแก่งคอย)"}
     two = one(out, "T1")
     assert two["cells"]["days"]["note"] == "ยังไม่มีสแกนนิ้ว / ใบสรุปวันหยุด · ต้องแยกวันออกรถ (344)"
-    assert two["cells"]["rate"] == {"state": "carry", "value": 390, "text": "390 / 344", "note": "2 อัตรา: วันออกรถอย่างเดียว 344"} and two["rate2"] == 344
+    # both rates are confirmed: the rate is ok, the gap (which days are which) sits on the days cell
+    assert two["cells"]["rate"] == {"state": "ok", "value": 390, "text": "390 / 344", "note": "2 อัตรา: วันออกรถอย่างเดียว 344"} and two["rate2"] == 344
     f = file(out, "scan_kk")
     assert f["state"] == "warn" and "01/11/2026" in f["summary"] and "02/11/2026" in f["summary"]          # two days of a 31-day period
     assert file(out, "scan_sb_fr")["summary"] == "ยังไม่ได้อัปโหลดงวดนี้" and file(out, "scan_sb_pd")["state"] == "bad"
 
 
 def test_a_full_scan_file_is_green():
-    punches = [{"employee_id": "SB-KK001", "punched_at": f"{(START + timedelta(days=i)).isoformat()}T08:00:00"} for i in range(31)]
-    out = pw.build(src(employees=[emp("SB-KK001", branch="แก่งคอย")], rules=[rule("SB-KK001")], punches=punches), MONTH, TODAY)
-    assert (file(out, "scan_kk")["state"], file(out, "scan_kk")["summary"]) == ("ok", "1 คน 31 สแกน (26/10 ถึง 25/11)")
+    punches = [{"employee_id": code, "punched_at": f"{(START + timedelta(days=i)).isoformat()}T08:00:00"} for i in range(31) for code in ("SB-KK001", "SB-FR001")]
+    out = pw.build(src(employees=[emp("SB-KK001", branch="แก่งคอย"), emp("SB-FR001")], rules=[rule("SB-KK001"), rule("SB-FR001")], punches=punches), MONTH, TODAY)
+    assert (file(out, "scan_sb_fr")["state"], file(out, "scan_sb_fr")["summary"]) == ("ok", "1 คน 31 สแกน (26/10 ถึง 25/11)")
+    assert (file(out, "scan_kk")["state"], file(out, "scan_kk")["summary"]) == ("info", "แก่งคอยพักไว้ก่อน · 1 คน 31 สแกน (26/10 ถึง 25/11)")      # set aside: never a to-do
 
 
 # --------------------------------------------------------------------------------------------- who is on the list
@@ -269,8 +280,10 @@ def test_who_is_on_the_list_and_their_status():
     out = pw.build(src(employees=people, rules=[rule(p["id"]) for p in people], rates=[rate(p["id"]) for p in people], pay_tail=tail), MONTH, TODAY)
     assert [p["code"] for p in out["people"]] == ["SB-FR001", "SB-FR061", "SB-FR200", "SB-KK073", "SB-FR095"]      # สระบุรี, แก่งคอย, then the refund-only rows
     # the headline counts the people being paid: the one who left earlier and only waits for savings is beside it, not in it
-    assert out["summary"] == {"people": 4, "ok": 0, "carry": 0, "miss": 4, "hq_paid": 1, "worked": 4, "left_before": 1}
-    assert file(out, "start_dates")["summary"].startswith("3 คนยังไม่มีวันเริ่มงาน") and file(out, "start_dates")["state"] == "info"
+    # ... and แก่งคอย is set aside (owner, 27 Nov 2026): SB-KK073 stays on the list, in no count
+    assert out["summary"] == {"people": 3, "ok": 0, "carry": 0, "miss": 3, "hq_paid": 1, "worked": 3, "left_before": 1, "hold": 1}
+    assert [p["code"] for p in out["people"] if p["hold"]] == ["SB-KK073"] and out["hold_branches"] == ["แก่งคอย"]
+    assert file(out, "start_dates")["summary"].startswith("2 คนยังไม่มีวันเริ่มงาน") and file(out, "start_dates")["state"] == "info"
     assert one(out, "SB-FR061")["status"] == {"key": "resigned", "label": "ลาออก", "detail": "วันสุดท้าย 25/11/2026"}
     assert one(out, "SB-FR061")["cells"]["refund"] == {"state": "miss", "value": 10000, "text": "10,000", "note": "สะสม 10,000 บาท ยังไม่ได้คืน"}
     assert one(out, "SB-FR200")["status"] == {"key": "new", "label": "พนักงานใหม่", "detail": "เริ่ม 10/11/2026"}
@@ -278,6 +291,7 @@ def test_who_is_on_the_list_and_their_status():
     assert one(out, "SB-FR001")["status"] == {"key": "working", "label": "ทำงาน", "detail": ""}
     gone = one(out, "SB-FR095")
     assert gone["status"]["key"] == "left_before" and gone["status"]["label"] == "ลาออกแล้ว" and gone["status"]["detail"].startswith("รอคืนเงินสะสม")
+    assert gone["formula"] == "" and gone["hold"] is False
     assert [k for k, c in gone["cells"].items() if c["state"] != "na"] == ["refund"] and gone["missing"] == ["คืนเงินสะสม"]
     assert gone["cells"]["refund"]["note"].startswith("สะสม 2,500 บาท ยังไม่ได้คืน")
     assert set(gone["cells"]) == set(pw.KEYS) == {c["key"] for c in out["columns"]}                                # every column key present
@@ -327,14 +341,19 @@ def test_the_rate_cell():
     assert one(out, "A")["cells"]["rate"] == {"state": "ok", "value": 390, "text": "390", "note": ""}
     assert one(out, "B")["cells"]["rate"]["state"] == "miss" and one(out, "B")["rate"] is None
     assert one(out, "C")["cells"]["rate"]["state"] == "carry" and "ให้ตรวจ" in one(out, "C")["cells"]["rate"]["note"]
-    d = one(out, "D")["cells"]["rate"]
-    assert d["state"] == "carry" and d["value"] == 400 and "10/11/2026" in d["note"] and "380" in d["note"]            # a raise inside the period
+    # a raise inside the period: both rates are known, each for its own dates -- ok, and the rule shows both (owner, 27 Nov 2026)
+    assert one(out, "D")["cells"]["rate"] == {"state": "ok", "value": 400, "text": "380 / 400", "note": "380 ถึง 09/11/2026 · 400 ตั้งแต่ 10/11/2026"}
+    assert one(out, "D")["formula"] == "ค่าแรง = วัน × 380 (ถึง 09/11/2026) + วัน × 400 (ตั้งแต่ 10/11/2026) · ไม่มีเบี้ยขยัน"
+    assert one(out, "A")["formula"] == "ค่าแรง = วัน × 390 · ไม่มีเบี้ยขยัน" and one(out, "B")["formula"] == "ค่าแรง = วัน × (ยังไม่มีอัตรา) · ไม่มีเบี้ยขยัน"
+    assert pw.rate_spans(rates[2:], START, END) == [(380, START, date(2026, 11, 9)), (400, date(2026, 11, 10), END)]
+    late = pw.rate_cell([rate("E", 400, since="2026-11-10")], START, END, None)[0]                                    # no rate at all before the 10th
+    assert (late["state"], late["text"], late["note"]) == ("carry", "– / 400", "ยังไม่มีอัตรา ถึง 09/11/2026 · 400 ตั้งแต่ 10/11/2026")
     assert any(x["title"].startswith("ยังไม่มีอัตราค่าแรง: B ") for x in out["decisions"])
 
 
 def test_a_person_without_a_group():
     out = pw.build(src(employees=[emp("A")], rates=[rate("A")]), MONTH, TODAY)
-    assert one(out, "A")["cells"]["group"]["state"] == "miss" and kind(out, "group")["state"] == "bad"
+    assert one(out, "A")["cells"]["group"]["state"] == "miss" and kind(out, "group")["state"] == "bad" and one(out, "A")["formula"] == ""
 
 
 # --------------------------------------------------------------------------------------------- deductions
@@ -343,26 +362,37 @@ def test_last_months_sheet_stands_in_for_the_deductions():
     prevs = [prev("A", {"advance": 3000, "savings": 500, "sso": 429, "common": 350, "card": 0}), prev("B", {"advance": 0, "savings": 0, "sso": 0, "common": 0})]
     out = pw.build(src(employees=people, rules=[rule(p["id"]) for p in people], rates=[rate(p["id"]) for p in people], pay_prev=prevs), MONTH, TODAY)
     a, b, c = (one(out, x)["cells"] for x in "ABC")
-    assert a["advance"] == {"state": "carry", "value": 3000, "text": "3,000", "note": "ตามใบ HQ 10/2026 · รอใบเบิกกลางเดือน"}
-    assert a["savings"] == {"state": "carry", "value": 500, "text": "500", "note": "ตามใบ HQ 10/2026"}
-    assert a["sso"] == {"state": "carry", "value": 429, "text": "429", "note": "ตามใบ HQ 10/2026"}
+    assert a["advance"] == {"state": "carry", "value": 3000, "text": "3,000", "note": "ตามใบ HQ 10/2026 · รอรายชื่อเบิกจากเจ้าของ"}
+    # สะสม follows HQ's latest sheet: confirmed by the owner (27 Nov 2026), no longer a stand-in. ปกส. and เบิก still wait for him.
+    assert a["savings"] == {"state": "ok", "value": 500, "text": "500", "note": "ตามใบ HQ 10/2026 (เจ้าของยืนยัน)"}
+    assert a["sso"] == {"state": "carry", "value": 429, "text": "429", "note": "ตามใบ HQ 10/2026 · รอเจ้าของตรวจ"}
     assert a["common"] == {"state": "miss", "value": None, "text": "", "note": "ใบ HQ 10/2026 หัก 350 บาท · เปลี่ยนทุกเดือน ต้องใส่ใหม่"}       # never carried
     assert all(b[k]["state"] == "na" for k in ("savings", "sso", "common"))                                           # a row with zeros: not needed
     # who draws an advance changes every month: "none last month" is not "none this month" while the list is not in
-    assert b["advance"] == {"state": "carry", "value": 0, "text": "0", "note": "ใบ HQ 10/2026 ไม่ได้เบิก · รอใบเบิกกลางเดือน"}
-    assert all(c[k] == {"state": "miss", "value": None, "text": "", "note": "ไม่มีชื่อในใบ HQ 10/2026 — ยังไม่รู้ว่าต้องหักหรือไม่"} for k in ("advance", "savings", "sso"))
+    assert b["advance"] == {"state": "carry", "value": 0, "text": "0", "note": "ใบ HQ 10/2026 ไม่ได้เบิก · รอรายชื่อเบิกจากเจ้าของ"}
+    assert all(c[k] == {"state": "miss", "value": None, "text": "", "note": "ไม่มีชื่อในใบ HQ 10/2026 — ยังไม่รู้ว่าต้องหักหรือไม่"} for k in ("advance", "sso"))
+    # สะสม follows the sheet: someone who is not on it (a new hire) has nothing taken -- said in amber, never a red gap
+    assert c["savings"] == {"state": "carry", "value": 0, "text": "0", "note": "ไม่มีชื่อในใบ HQ 10/2026: ไม่หักสะสม — ถ้าจะเริ่มหักต้องแจ้ง"}
     assert c["common"]["state"] == "na"
     k = kind(out, "advance")
     assert (k["need"], k["ok"], k["carry"], k["miss"], k["state"]) == (3, 0, 2, 1, "bad")
     assert [r["state"] for r in k["rows"]] == ["bad", "warn", "warn"] and k["rows"][0]["who"].startswith("C ")        # the worst first
-    assert k["rows"][1] == {"who": "A คน ทดสอบ", "detail": "3,000 · ตามใบ HQ 10/2026 · รอใบเบิกกลางเดือน", "state": "warn"}      # the amount being carried shows
-    assert (file(out, "prev_sheet")["state"], file(out, "prev_sheet")["summary"]) == ("ok", "ใช้ใบ 10/2026 (2 คน)")
+    assert k["rows"][1] == {"who": "A คน ทดสอบ", "detail": "3,000 · ตามใบ HQ 10/2026 · รอรายชื่อเบิกจากเจ้าของ", "state": "warn"}      # the amount being carried shows
+    assert (file(out, "prev_sheet")["state"], file(out, "prev_sheet")["summary"]) == ("ok", "ใช้ใบ 10/2026 (2 คน)") and "สะสมหักตามใบนี้" in file(out, "prev_sheet")["title"]
+    sv = kind(out, "savings")                                                                  # A has it from the sheet, C is on no sheet
+    assert (sv["need"], sv["ok"], sv["carry"], sv["miss"], sv["later"]) == (2, 1, 1, 0, "") and "เจ้าของยืนยัน 27/11/2026" in sv["source"]
+    assert (kind(out, "sso")["carry"], kind(out, "sso")["state"]) == (1, "bad") and kind(out, "sso")["later"]
+    # the two things the owner said he would bring are the last lines of the decisions, marked as waiting on him
+    waiting = [d for d in out["decisions"] if d["wait"]]
+    assert [d["title"] for d in waiting] == ["ปกส.: เจ้าของกำลังตรวจ", "เบิกล่วงหน้า: รอรายชื่อจากเจ้าของ"] and out["decisions"][-2:] == waiting
+    assert "แทน 1 คน" in waiting[0]["detail"] and "แทน 2 คน" in waiting[1]["detail"]
     # the branch's list is booked: an advance is still only last sheet's figure (IceBox cannot read the list per person yet)
     listed = pw.build(src(employees=people, rules=[rule(p["id"]) for p in people], rates=[rate(p["id"]) for p in people], pay_prev=prevs, docs=ADVANCE_IN), MONTH, TODAY)
-    assert one(listed, "A")["cells"]["advance"]["note"] == "ตามใบ HQ 10/2026 · มีใบเบิกแล้ว แต่ระบบยังอ่านรายคนไม่ได้" and one(listed, "B")["cells"]["advance"]["state"] == "na"
+    assert one(listed, "A")["cells"]["advance"]["note"] == "ตามใบ HQ 10/2026 · มีใบเบิกแล้ว แต่ระบบยังอ่านรายคนไม่ได้ · รอรายชื่อเบิกจากเจ้าของ"
+    assert one(listed, "B")["cells"]["advance"]["state"] == "na"
 
 
-def test_the_stand_in_is_each_persons_latest_sheet_not_only_last_months():
+def test_the_stand_in_is_each_persons_latest_sheet_not_only_last_months(no_hold):
     """2026-12 seen on 26/11/2026: HQ's sheets end at 2026-10 and a 2026-11 one may never come (IceBox is taking over). SB-KK061 is
     on the 09/2026 sheet only."""
     people = [emp("A"), emp("K61", branch="แก่งคอย"), emp("N")]
@@ -372,7 +402,8 @@ def test_the_stand_in_is_each_persons_latest_sheet_not_only_last_months():
               prev("A", {"advance": 9999}, month="2027-01")]                                                         # a later month than the one asked for: ignored
     out = pw.build(src(employees=people, rules=[rule(p["id"]) for p in people], rates=[rate(p["id"]) for p in people], pay_prev=sheets), "2026-12", date(2026, 12, 20))
     a, k, n = (one(out, x)["cells"] for x in ("A", "K61", "N"))
-    assert (a["advance"]["state"], a["advance"]["value"], a["savings"]["value"], a["sso"]["note"]) == ("carry", 3000, 500, "ตามใบ HQ 10/2026")
+    assert (a["advance"]["state"], a["advance"]["value"], a["savings"]["value"], a["sso"]["note"]) == ("carry", 3000, 500, "ตามใบ HQ 10/2026 · รอเจ้าของตรวจ")
+    assert a["savings"]["state"] == "ok"                                                      # from the latest sheet; K61's is an older one: still a stand-in
     assert a["common"]["state"] == "miss" and "ใบ HQ 10/2026 หัก 59 บาท" in a["common"]["note"]
     assert (k["savings"]["state"], k["savings"]["note"]) == ("carry", "ตามใบ HQ 09/2026 (ไม่มีชื่อในใบ 10/2026)")
     assert k["sso"]["state"] == "na" and k["ot"]["state"] == "miss"                           # her own row says: no ปกส., OT is paid
@@ -404,10 +435,10 @@ def test_last_months_row_is_found_by_code_when_it_has_no_person():
     row = {"month": "2026-10", "code": "sb-kk073", "employee_id": None, "parts": {"commission": 9000}, "deductions": {"advance": 3000}, "sales": None}
     e = {**emp("uuid-1", branch="แก่งคอย"), "code": "SB-KK073"}
     c = one(pw.build(src(employees=[e], rules=[rule("uuid-1", "DAY")], rates=[rate("uuid-1")], pay_prev=[row]), MONTH, TODAY), "SB-KK073")["cells"]
-    assert c["advance"]["state"] == "carry" and c["trip"]["state"] == "miss" and c["trip"]["note"] == "ยังไม่มีตารางเที่ยวงวดนี้"      # a truck helper paid by the trip
+    assert c["advance"]["state"] == "carry" and c["trip"]["state"] == "miss" and c["trip"]["note"] == "ยังไม่มีตารางเที่ยวงวดนี้"      # a truck helper paid by the trip (his cells are as they are, hold or not)
 
 
-def test_sales_trip_money_and_ot_follow_what_was_paid_last_month():
+def test_sales_trip_money_and_ot_follow_what_was_paid_last_month(no_hold):
     e = [emp("K4", branch="แก่งคอย"), emp("K5", branch="แก่งคอย"), emp("S9"), emp("K6", branch="แก่งคอย")]
     prevs = [prev("K4", parts={"commission": 3143}, sales=157130), prev("K5", parts={"ot": 480}), prev("S9", parts={"ot": 120, "commission": 50}),
              prev("K6", parts={"commission": 8000})]
@@ -515,22 +546,88 @@ def fuel_src(**kw):
     return s
 
 
-def test_fuel_is_asked_only_of_the_sack_driver():
+USED = "\nใช้คิดเงินของรถสาย 1 คัน (กลุ่ม A, B, C หักจากยอดขาย · ทวาย หักจากซอง)"
+
+
+def test_the_sack_drivers_fuel():
     line = {"id": 1, "batch": 1, "amount": 800, "counted": True, "dup_of": None, "vehicle_id": "V27", "page_id": 7, "page": {"confirmed": True}}
     out = pw.build(fuel_src(cash_fuel=[line]), MONTH, TODAY)
     c = one(out, "D1")["cells"]["fuel"]
-    assert c["state"] == "miss" and c["note"] == "ยังไม่มีใบแจ้งหนี้บัตรน้ำมันงวดนี้ (รถ #27 84-2682 รถใหญ่ สระบุรี) · น้ำมันเงินสด: 26/10-10/11 มีแล้ว · 11/11-25/11 ยังไม่มี"
-    assert file(out, "card_fuel")["state"] == "bad"
+    assert (c["state"], c["value"], c["text"]) == ("miss", None, "")                          # a part of the fuel is never the cell's figure: it is in the note
+    assert c["note"] == "รถ #27 84-2682 รถใหญ่ สระบุรี · ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน · น้ำมันเงินสด 11/11-25/11 ยังไม่ได้อัปโหลด · มีแล้ว: เงินสด 800"
+    assert (file(out, "card_fuel")["state"], file(out, "card_fuel")["summary"]) == ("bad", "ยังไม่มีใบแจ้งหนี้บัตรน้ำมันงวดนี้ (บางจาก / PT)" + USED)
     f = file(out, "cash_fuel")
-    assert (f["state"], f["summary"]) == ("warn", "26/10-10/11 ยืนยันแล้ว 800 บาท · 11/11-25/11 ยังไม่ได้อัปโหลด")        # a half by its dates, never "งวด 26-10"
+    assert (f["state"], f["summary"]) == ("warn", "26/10-10/11 ยืนยันแล้ว 800 บาท · 11/11-25/11 ยังไม่ได้อัปโหลด" + USED)        # a half by its dates, never "งวด 26-10"
     card = [{"id": "e1", "source_id": "fuel:bangchak:2026-11:842682", "lines": [{"vehicle_id": "V27", "credit": 0}, {"vehicle_id": "V27", "credit": 29740}]},
             {"id": "e2", "source_id": "fuel:pt:2026-11:xx", "lines": [{"vehicle_id": "V9", "credit": 1000}]}]
     out = pw.build(fuel_src(cash_fuel=[line, {**line, "id": 2, "batch": 2, "amount": 200}], card_fuel=card), MONTH, TODAY)
     c = one(out, "D1")["cells"]["fuel"]
-    assert (c["state"], c["value"], c["text"]) == ("ok", 30740, "30,740") and "บัตร 29,740 + เงินสด 1,000" in c["note"]
-    assert (file(out, "card_fuel")["state"], file(out, "card_fuel")["summary"]) == ("ok", "บางจาก 1 คัน 29,740 บาท · PT 1 คัน 1,000 บาท")
+    assert c == {"state": "ok", "value": 30740, "text": "30,740", "note": "รถ #27 84-2682 รถใหญ่ สระบุรี · บัตร 29,740 + เงินสด 1,000"}
+    assert (file(out, "card_fuel")["state"], file(out, "card_fuel")["summary"]) == ("ok", "บางจาก 1 คัน 29,740 บาท · PT 1 คัน 1,000 บาท" + USED)
     assert file(out, "cash_fuel")["state"] == "ok"
-    assert kind(out, "fuel")["need"] == 1
+    assert kind(out, "fuel")["need"] == 1 and kind(out, "fuel")["source"].endswith("กลุ่ม A, B, C และทวาย (1 คัน)")
+    assert one(out, "D1")["cells"]["sales"]["note"] == ""                                     # ทวาย's fuel comes off his ซอง, never off his sales
+    assert one(out, "D1")["formula"] == "ค่าแรง = วัน × 350 · ค่าคอม = ยอดขายหลอด × 2% · ค่าซอง = (จำนวนซอง − ค่าน้ำมัน ÷ 140) × 3 บาท · เบี้ยขยัน 1,000 ถ้ามาครบ 31 วัน"
+
+
+def test_groups_a_b_c_are_paid_on_sales_after_the_trucks_fuel():
+    """Owner, 27 Nov 2026: the workbook's rule stands -- commission on sales AFTER the truck's fuel. What is typed in ยอดขายรายวัน is
+    before fuel, so each of those trucks' fuel (card + cash) is an input, exactly like ทวาย's."""
+    line = {"id": 1, "batch": 1, "amount": 800, "counted": True, "dup_of": None, "vehicle_id": "V27", "page_id": 7, "page": {"confirmed": True}}
+    card = [{"id": "e1", "source_id": "fuel:bangchak:2026-11:842682", "lines": [{"vehicle_id": "V27", "credit": 29740}]},
+            {"id": "e2", "source_id": "fuel:pt:2026-11:xx", "lines": [{"vehicle_id": "V9", "credit": 1000}]}]
+
+    def a(**kw):
+        s = fuel_src(**kw)
+        s["rules"][0].update(pay_group="DRV-A", commission_pct=5, bag_rate=None)
+        s["rates"] = [rate("D1", 120)]
+        return s
+    # nothing in: missing, and the sales are named as the figure before fuel
+    out = pw.build(a(), MONTH, TODAY)
+    c = one(out, "D1")["cells"]
+    assert c["fuel"] == {"state": "miss", "value": None, "text": "", "note": "รถ #27 84-2682 รถใหญ่ สระบุรี · ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน · "
+                         "น้ำมันเงินสด 26/10-10/11 ยังไม่ได้อัปโหลด · น้ำมันเงินสด 11/11-25/11 ยังไม่ได้อัปโหลด"}
+    assert (c["sales"]["state"], c["sales"]["value"], c["sales"]["note"]) == ("ok", 31000, "ก่อนหักค่าน้ำมัน") and one(out, "D1")["missing"] == ["ค่าน้ำมัน"]
+    assert one(out, "D1")["formula"] == "ค่าแรง = วัน × 120 · ค่าคอม = (ยอดขาย − ค่าน้ำมันรถ) × 5% · เบี้ยขยัน 1,000 ถ้ามาครบ 31 วัน"
+    # the card statements are in, cash fuel is not: still missing -- the card part is what is known
+    c = one(pw.build(a(card_fuel=card), MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert (c["state"], c["value"], c["text"]) == ("miss", None, "") and c["note"].endswith("น้ำมันเงินสด 11/11-25/11 ยังไม่ได้อัปโหลด · มีแล้ว: บัตร 29,740")
+    assert "ใบแจ้งหนี้" not in c["note"]
+    # one card station only: a truck may fill at the other one
+    c = one(pw.build(a(card_fuel=card[1:], cash_fuel=[line, {**line, "id": 2, "batch": 2}]), MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert (c["state"], c["value"]) == ("miss", None) and "ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน บางจาก ·" in c["note"] and c["note"].endswith("มีแล้ว: เงินสด 1,600")
+    # a cash page still to check
+    wait = {**line, "id": 3, "batch": 2, "page": {"confirmed": False}}
+    c = one(pw.build(a(card_fuel=card, cash_fuel=[line, wait]), MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert c["state"] == "miss" and "น้ำมันเงินสด 11/11-25/11 อัปโหลดแล้ว รอตรวจ" in c["note"] and c["value"] is None and c["note"].endswith("มีแล้ว: บัตร 29,740 + เงินสด 800")
+    # all of it in: ok, and the sales say what is left after it
+    out = pw.build(a(card_fuel=card, cash_fuel=[line, {**line, "id": 2, "batch": 2, "amount": 200}]), MONTH, TODAY)
+    c = one(out, "D1")["cells"]
+    assert (c["fuel"]["state"], c["fuel"]["value"]) == ("ok", 30740) and c["sales"]["note"] == "ก่อนหักค่าน้ำมัน · หลังหัก 260" and c["sales"]["value"] == 31000
+    assert one(out, "D1")["missing"] == [] and kind(out, "fuel")["state"] == "ok"
+    # all of it in and nothing for this truck: 0 is a real answer
+    other = [{**e, "lines": [{"vehicle_id": "V9", "credit": 500}]} for e in card]
+    c = one(pw.build(a(card_fuel=other, cash_fuel=[{**line, "vehicle_id": "V9"}, {**line, "id": 2, "batch": 2, "vehicle_id": "V9"}]), MONTH, TODAY), "D1")["cells"]
+    assert (c["fuel"]["state"], c["fuel"]["value"], c["fuel"]["text"]) == ("ok", 0, "0") and c["sales"]["note"] == "ก่อนหักค่าน้ำมัน · หลังหัก 31,000"
+    # the truck is found by the driver's name within his own branch (both branches have a #6); no truck: missing, and said
+    s = a(card_fuel=card)
+    s["vehicles"][0]["branch"] = "แก่งคอย"
+    assert one(pw.build(s, MONTH, TODAY), "D1")["cells"]["fuel"]["note"].startswith("ไม่พบรถของคนขับ")
+    # a source that could not be read
+    c = one(pw.build(a(card_fuel=None, cash_fuel=None, failed=["บัตรน้ำมัน"]), MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert c["state"] == "miss" and "โหลดข้อมูลบัตรน้ำมันไม่สำเร็จ" in c["note"] and "โหลดน้ำมันเงินสดไม่สำเร็จ" in c["note"]
+    # B and C: the same, on the หลอด part for a driver who types ซอง and หลอด apart
+    s = a(card_fuel=card, cash_fuel=[line, {**line, "id": 2, "batch": 2, "amount": 200}], split=[{"employee_id": "D1", "money_split": True}])
+    s["route"] = drove("D1", START, END, money=1500, money_parts={"zong": 300, "lod": 1200})
+    s["rules"][0].update(pay_group="DRV-B", bag_rate=10)
+    p = one(pw.build(s, MONTH, TODAY), "D1")
+    assert p["cells"]["sales"]["note"] == "เฉพาะยอดหลอด · ก่อนหักค่าน้ำมัน · หลังหัก 6,460" and p["cells"]["fuel"]["state"] == "ok"
+    assert p["formula"] == "ค่าแรง = วัน × 120 · ค่าคอม = (ยอดขายหลอด − ค่าน้ำมันรถ) × 5% · ค่าซอง = จำนวนซอง × 10 บาท · เบี้ยขยัน 1,000 ถ้ามาครบ 31 วัน"
+    s["rules"][0].update(pay_group="DRV-C", commission_pct=3.5, bag_rate=3)
+    assert one(pw.build(s, MONTH, TODAY), "D1")["formula"].startswith("ค่าแรง = วัน × 120 · ค่าคอม = (ยอดขายหลอด − ค่าน้ำมันรถ) × 3.5% · ค่าซอง = จำนวนซอง × 3 บาท")
+    # days still untyped: the sales are short, so nothing is said about "after fuel" yet
+    s["route"] = s["route"][:-2]
+    assert one(pw.build(s, MONTH, TODAY), "D1")["cells"]["sales"]["note"] == "เฉพาะยอดหลอด · ก่อนหักค่าน้ำมัน · ยังขาด 2 วัน"
 
 
 def test_cash_fuel_counts_only_what_was_confirmed():
@@ -551,13 +648,16 @@ def test_the_branch_papers_and_the_order_of_the_files():
     out = pw.build(src(employees=[emp("A")], rules=[rule("A")], docs=docs, pay_tail=tail), MONTH, TODAY)
     assert [f["key"] for f in out["files"]] == ["route_sales", "scan_sb_pd", "scan_sb_fr", "scan_kk", "advance_list", "month_papers", "card_fuel", "cash_fuel",
                                                 "kk_trips", "loans_mark", "hq_sheet", "start_dates"]
-    assert (file(out, "advance_list")["state"], file(out, "advance_list")["summary"]) == ("warn", "สระบุรี 2 หน้า · ยังไม่มี: แก่งคอย")
+    # แก่งคอย is set aside: its papers are named when they are in, and their absence is no gap
+    assert (file(out, "advance_list")["state"], file(out, "advance_list")["summary"]) == ("ok", "สระบุรี 2 หน้า · แก่งคอยพักไว้ก่อน")
     assert (file(out, "month_papers")["state"], file(out, "month_papers")["summary"]) == ("warn", "แก่งคอย 1 หน้า · ยังไม่มี: สระบุรี")
     assert (file(out, "hq_sheet")["state"], file(out, "hq_sheet")["summary"]) == ("ok", "มีแล้ว 1 คน")
     empty = pw.build(src(employees=[emp("A")], rules=[rule("A")]), MONTH, TODAY)
     assert (file(empty, "month_papers")["state"], file(empty, "month_papers")["summary"]) == ("bad", "ยังไม่ได้อัปโหลด")
     assert (file(empty, "hq_sheet")["state"], file(empty, "hq_sheet")["summary"]) == ("info", "ยังไม่มี (ใช้เทียบผลเท่านั้น)")
-    assert file(empty, "kk_trips")["state"] == "bad" and file(empty, "kk_trips")["link"] is None and "ต้องแจ้งให้ลงให้" in file(empty, "kk_trips")["summary"]
+    assert file(empty, "kk_trips")["state"] == "info" and file(empty, "kk_trips")["link"] is None
+    assert file(empty, "kk_trips")["summary"] == "แก่งคอยพักไว้ก่อน · ยังไม่มีตารางเที่ยวงวดนี้ — ยังอัปโหลดเองไม่ได้ ต้องแจ้งให้ลงให้"
+    assert (file(empty, "scan_kk")["state"], file(empty, "scan_kk")["summary"]) == ("info", "แก่งคอยพักไว้ก่อน · ยังไม่ได้อัปโหลดงวดนี้")
     assert [f["key"] for f in empty["files"]][-3:] == ["prev_sheet", "hq_sheet", "start_dates"]
     # a file in the drop box counts as waiting only while nobody has finished it: one kept on purpose ("stored") is not
     box = [{"id": 1, "kind": "scan", "status": "stored", "month": MONTH, "branches": None}, {"id": 2, "kind": "scan", "status": "needs_choice", "month": MONTH, "branches": None},
@@ -571,17 +671,18 @@ def test_the_branch_papers_and_the_order_of_the_files():
 # --------------------------------------------------------------------------------------------- roll-ups, failures
 def test_states_roll_up_by_person_and_by_kind():
     people = [emp("A"), emp("B"), emp("C", position="พนักงานขับรถสาย")]
-    s = src(employees=people, rules=[rule("A"), rule("B"), rule("C", "DRV-A")], rates=[rate("A"), rate("B"), rate("C")],
+    s = src(employees=people, rules=[rule("A"), rule("B"), rule("C", "DRV-E")], rates=[rate("A"), rate("B"), rate("C")],
             pay_prev=[prev("A", {"advance": 3000}), prev("B"), prev("C")], route=drove("C", START, END), docs=ADVANCE_IN,
             punches=[{"employee_id": "A", "punched_at": "2026-11-01T08:00:00"}])
     out = pw.build(s, MONTH, TODAY)
     assert [one(out, x)["state"] for x in "ABC"] == ["carry", "miss", "ok"]                   # miss beats carry beats ok
-    assert out["summary"] == {"people": 3, "ok": 1, "carry": 1, "miss": 1, "hq_paid": 0, "worked": 3, "left_before": 0}
+    assert out["summary"] == {"people": 3, "ok": 1, "carry": 1, "miss": 1, "hq_paid": 0, "worked": 3, "left_before": 0, "hold": 0}
     states = {k["key"]: k["state"] for k in out["kinds"]}
     assert states["group"] == "ok" and states["days"] == "bad" and states["advance"] == "warn" and states["fuel"] == "na" and states["sales"] == "ok"
     assert [k["key"] for k in out["kinds"]] == pw.KEYS == [c["key"] for c in out["columns"]]
     assert all({"key", "title", "state", "need", "ok", "carry", "miss", "source", "rows", "more", "link", "link_label", "note", "later"} == set(k) for k in out["kinds"])
-    assert len(out["decisions"]) <= 10 and all(set(d) == {"title", "detail"} for d in out["decisions"])
+    assert len(out["decisions"]) <= 10 and all(set(d) == {"title", "detail", "wait"} for d in out["decisions"])
+    assert set(out) >= {"rules", "hold_branches", "summary", "files", "kinds", "columns", "people", "decisions", "failed"}
 
 
 def test_the_kinds_follow_the_workbooks_columns_and_never_read_as_an_all_clear():
@@ -591,11 +692,16 @@ def test_the_kinds_follow_the_workbooks_columns_and_never_read_as_an_all_clear()
     pen = kind(out, "penalty")                                                                # nobody has a letter, but the papers that would carry one are not in
     assert (pen["need"], pen["state"]) == (0, "warn") and "ยังไม่ได้อัปโหลดเอกสารสิ้นเดือน" in pen["note"] and "เงินขาดของคนขับ" in pen["later"]
     assert kind(out, "nobonus")["state"] == "warn" and kind(out, "other")["state"] == "warn" and kind(out, "common")["state"] == "warn"
-    assert kind(out, "fuel")["state"] == "na" and kind(out, "fuel")["note"] == ""              # truly nobody: only the sack driver's fuel is asked
-    assert kind(out, "savings")["later"] and kind(out, "advance")["later"] and not kind(out, "loan")["later"] and not kind(out, "sales")["later"]
+    assert kind(out, "fuel")["state"] == "na" and kind(out, "fuel")["note"] == ""              # truly nobody: fuel is asked of the A, B, C, D route drivers only
+    assert kind(out, "fuel")["source"] == "ใบแจ้งหนี้บัตรน้ำมัน + น้ำมันเงินสด ของรถสาย กลุ่ม A, B, C และทวาย"
+    assert kind(out, "sso")["later"] and kind(out, "advance")["later"] and not kind(out, "loan")["later"] and not kind(out, "sales")["later"]
+    assert not kind(out, "savings")["later"]                                                  # confirmed: it follows HQ's latest sheet
     papers = [{"batch": f"docs:2026-11:{b}:end", "feed": "endmonth", "branch": b, "kind": "expense", "page": 1} for b in pw.BRANCHES]
     full = pw.build(src(employees=[emp("A")], rules=[rule("A")], rates=[rate("A")], docs=papers + ADVANCE_IN), MONTH, TODAY)
     assert (kind(full, "penalty")["state"], kind(full, "penalty")["note"]) == ("na", "") and "ยังไม่มีที่ลง" in kind(full, "common")["note"]
+    # the papers of a branch that is set aside are not waited for
+    sb = pw.build(src(employees=[emp("A")], rules=[rule("A")], rates=[rate("A")], docs=[papers[0], ADVANCE_IN[0]]), MONTH, TODAY)
+    assert (kind(sb, "penalty")["state"], kind(sb, "penalty")["note"]) == ("na", "") and "ยังไม่มีที่ลง" in kind(sb, "common")["note"]
 
 
 def test_people_with_the_same_line_are_folded_and_a_long_list_is_cut_at_eighty():
@@ -612,7 +718,7 @@ def test_people_with_the_same_line_are_folded_and_a_long_list_is_cut_at_eighty()
 
 
 def test_a_source_that_failed_shows_as_missing_and_is_named():
-    s = route_src(None, failed=["ยอดขายรายวัน", "บัตรน้ำมัน"], card_fuel=None, punches=None, docs=None, loans=None, pay_prev=None, trips=None)
+    s = route_src(None, failed=["ยอดขายรายวัน", "บัตรน้ำมัน"], card_fuel=None, punches=None, docs=None, loans=None, pay_prev=None, trips=None, uploads=None)
     out = pw.build(s, MONTH, TODAY)
     c = one(out, "D1")["cells"]
     assert c["days"]["state"] == "miss" and c["days"]["note"] == "โหลดยอดขายรายวันไม่สำเร็จ" and c["advance"]["note"] == "โหลดใบสรุปเงินเดือน HQ ไม่สำเร็จ"
@@ -621,13 +727,291 @@ def test_a_source_that_failed_shows_as_missing_and_is_named():
 
 
 def test_the_decisions_come_from_the_data():
-    people = [emp("A"), emp("K", branch="แก่งคอย"), emp("D", position="พนักงานขับรถสาย"), emp("T")]
-    rules = [rule("A", bonus=True), rule("K", "KK-PROD", bonus=True, ot_auto_hours=3), rule("D", "DRV-A", bonus=True), rule("T", rate2=344)]
+    """Settled by the owner on 27 Nov 2026 and no longer asked: who gets เบี้ยขยัน, แก่งคอย's OT, sales before or after fuel. What is
+    still open stays, built from the data."""
+    people = [emp("A"), emp("K", branch="แก่งคอย"), emp("D", position="พนักงานขับรถสาย"), emp("T"), emp("K2", branch="แก่งคอย")]
+    rules = [rule("A"), rule("K", "KK-PROD", ot_auto_hours=3, ot_rate=40), rule("D", "DRV-A", bonus=True, commission_pct=5), rule("T", rate2=344),
+             rule("K2", rate2=344)]
     out = pw.build(src(employees=people, rules=rules, rates=[rate(p["id"]) for p in people], route=drove("D", START, END)), MONTH, TODAY)
     titles = [d["title"] for d in out["decisions"]]
-    assert titles[0] == "เบี้ยขยัน: ใครได้บ้าง" and "(3 คน)" in out["decisions"][0]["detail"] and "2 คน" in out["decisions"][0]["detail"]
-    assert titles[1] == "OT แก่งคอย: ใส่ชั่วโมงจริง หรือ 3 ชม. ทุกวัน"
-    assert "กลุ่ม A, B, C" in titles[2] and any("2 อัตรา" in t for t in titles) and "สแกนนิ้วครั้งเดียว" in titles[-1]
+    assert titles == ["พนักงานผลิตที่ออกรถด้วย: ต้องรู้จำนวนวันออกรถอย่างเดียว", "สแกนนิ้วครั้งเดียวในวัน: นับเป็น 1 วันเต็มหรือไม่"]
+    assert not any(w in " ".join(titles) for w in ("เบี้ยขยัน", "OT", "น้ำมัน")) and not any(d["wait"] for d in out["decisions"])
+    assert "T คน ทดสอบ (390 / 344)" in out["decisions"][0]["detail"] and "K2" not in out["decisions"][0]["detail"]      # nothing is asked about a branch set aside
+    # nobody without a rate: that line is gone; someone without one brings it back, first
+    s = src(employees=people + [emp("N")], rules=rules + [rule("N")], rates=[rate(p["id"]) for p in people])
+    assert [d["title"] for d in pw.build(s, MONTH, TODAY)["decisions"]][0] == "ยังไม่มีอัตราค่าแรง: N คน ทดสอบ"
+
+
+def test_a_route_that_ended_inside_the_period_with_a_rate_from_that_date():
+    """SB-PD011 (owner, 27 Nov 2026): 350 on his route to 17/11/2026, 400 at หน้าโรง from 18/11/2026. Two rates inside one period, and
+    his fingerprint scans stand in for the days after the route."""
+    s = route_src(drove("D1", START, date(2026, 11, 17)))
+    s["rules"][0].update(route_until="2026-11-17")
+    s["rates"] = [rate("D1", 400, since="2026-11-18"), rate("D1", 350)]
+    out = pw.build(s, MONTH, TODAY)
+    p = one(out, "D1")
+    assert p["cells"]["rate"] == {"state": "ok", "value": 400, "text": "350 / 400", "note": "350 ถึง 17/11/2026 · 400 ตั้งแต่ 18/11/2026"}
+    assert p["formula"] == "ค่าแรง = วัน × 350 (ถึง 17/11/2026) + วัน × 400 (ตั้งแต่ 18/11/2026) · ค่าคอม = ยอดขาย × 2% · เบี้ยขยัน 1,000 ถ้ามาครบ 31 วัน"
+    assert (p["cells"]["days"]["state"], p["cells"]["days"]["note"]) == ("miss", "18/11-25/11 ทำงานอื่น ยังไม่มีข้อมูลวันทำงาน")      # no scans: nothing to go on
+    assert not any("ระหว่างงวด" in d["title"] for d in out["decisions"])                      # the rate after the route is there: settled
+    assert next(g for g in out["rules"]["groups"] if g["group"] == "DRV-E")["formula"].startswith("ค่าแรง = วัน × 350 ·")      # the group's rule keeps the route's rate
+    # his scans after the route: a stand-in (amber), counted with the route days
+    s["punches"] = [{"employee_id": "D1", "punched_at": f"2026-11-{d}T07:00:00"} for d in (16, 17, 18, 19, 20, 22, 25)]
+    c = one(pw.build(s, MONTH, TODAY), "D1")["cells"]["days"]
+    assert c == {"state": "carry", "value": 28, "text": "28 วัน", "note": "ขับรถสาย 23 วัน · 18/11-25/11 ทำงานอื่น: มีสแกน 5 วัน ยังไม่ได้สรุป"}
+    # route days still untyped beat the stand-in
+    s["route"] = s["route"][:-2]
+    c = one(pw.build(s, MONTH, TODAY), "D1")["cells"]["days"]
+    assert c["state"] == "miss" and c["note"].startswith("ยังไม่ได้ลง 16/11, 17/11 · ขับรถสาย 21 วัน · 18/11-25/11 ทำงานอื่น: มีสแกน 5 วัน")
+    # the same route end with no rate starting after it: the question stays
+    s["rates"] = [rate("D1", 350)]
+    out = pw.build(s, MONTH, TODAY)
+    assert any(d["title"].startswith("รถสายที่หยุดวิ่งระหว่างงวด") and "17/11/2026" in d["detail"] for d in out["decisions"])
+    assert one(out, "D1")["cells"]["rate"]["text"] == "350"
+
+
+# --------------------------------------------------------------------------------------------- the rules card
+def test_the_rules_are_shown_as_the_workbook_writes_them():
+    """Owner, 27 Nov 2026: the workbook's written rules are the primary rules for now, and must be visible."""
+    people = [emp("A1", position="พนักงานขับรถสาย"), emp("A2", position="พนักงานขับรถสาย"), emp("B1", position="พนักงานขับรถสาย"),
+              emp("E1", position="พนักงานขับรถสาย"), emp("E2", position="พนักงานขับรถสาย"), emp("F1"), emp("F2"), emp("P1"), emp("W1"), emp("W2"),
+              emp("KD", branch="แก่งคอย"), emp("KP", branch="แก่งคอย"), emp("KW", branch="แก่งคอย"), emp("GONE", status="resigned", end_date="2026-09-30")]
+    rules = [rule("A1", "DRV-A", commission_pct=5, bonus=True), rule("A2", "DRV-A", commission_pct=5, bonus=True),
+             rule("B1", "DRV-B", commission_pct=5, bag_rate=10, bonus=True), rule("E1", "DRV-E", commission_pct=2, bonus=True),
+             rule("E2", "DRV-E", commission_pct=2.5, bonus=True), rule("F1", "DRV-F", bonus=True), rule("F2", "DRV-F", bonus=True), rule("P1", "FAC-COM", ot_rate=40),
+             rule("W1", ot_rate=40), rule("W2", rate2=344), rule("KD", "KK-DRV", bonus=True), rule("KP", "KK-PROD", ot_rate=40, ot_auto_hours=3), rule("KW"),
+             rule("GONE", "DRV-C", commission_pct=9, bag_rate=9, bonus=True)]
+    rates = [rate("A1", 120), rate("A2", 120), rate("B1", 120), rate("E1", 350), rate("E2", 350), rate("F1", 400), rate("F2", 430), rate("P1", 300), rate("W1"), rate("W2"),
+             rate("KD", 400), rate("KP", 325), rate("KW", 325)]
+    out = pw.build(src(employees=people, rules=rules, rates=rates), MONTH, TODAY)
+    r = out["rules"]
+    assert r["source"] == "แบบคำนวณเงินเดือน (เสนอ) · เจ้าของยืนยัน 27/11/2026" and set(r) == {"general", "groups", "source"}
+    g = r["general"]
+    assert len(g) == 10 and all(isinstance(x, str) and x for x in g)
+    assert g[0] == "งวดเงินเดือน: วันที่ 26 ของเดือนก่อน ถึง 25 ของเดือนนี้ (งวดนี้ 26/10/2026 ถึง 25/11/2026 · 31 วัน)"
+    assert g[1] == "รวมรับ = ค่าแรง + ค่าคอม + ค่าซอง + เบี้ยขยัน + OT"
+    assert g[2] == "เบี้ยขยัน 1,000 บาท: เฉพาะพนักงานขับรถ เมื่อมาทำงานครบ 31 วันของงวด และไม่ถูกงด"
+    assert "กลุ่ม A, B, C" in g[3] and "หักค่าน้ำมันรถออกจากยอดขายก่อนคิดค่าคอม" in g[3] and "จำนวนซอง − ค่าน้ำมัน ÷ 140" in g[3]
+    assert g[4].startswith("พนักงานผลิตที่ออกรถด้วย (2 อัตรา): ") and "วันออกรถอย่างเดียวจ่ายอัตราที่สอง" in g[4] and "OT สระบุรี" in g[5] and "ไม่รวมในเงินเดือน" in g[5]
+    assert g[6] == "วันที่มาสแกนแต่ไม่ได้ทำงาน ไม่จ่าย" and "สะสม หักตามใบสรุปเงินเดือน HQ ล่าสุด" == g[7] and "ไม่ใช่รายได้ของเดือน" in g[8]
+    assert g[9].startswith("แก่งคอยพักไว้ก่อน")
+    assert [x["group"] for x in r["groups"]] == ["DRV-A", "DRV-B", "DRV-C", "DRV-D", "DRV-E", "DRV-F", "FAC-COM", "DAY", "KK-DRV", "KK-PROD"]
+    by = {x["group"]: x for x in r["groups"]}
+    assert all(set(x) - {"hold"} == {"group", "label", "formula", "people", "bonus"} for x in r["groups"])
+    # the numbers of the people in the group, where they all have the same one
+    assert by["DRV-A"] == {"group": "DRV-A", "label": "พขร. รถหลอดใหญ่ 120/วัน + 5%", "people": 2, "bonus": True,
+                           "formula": "ค่าแรง = วัน × 120 · ค่าคอม = (ยอดขาย − ค่าน้ำมันรถ) × 5% · เบี้ยขยัน 1,000"}
+    assert by["DRV-B"]["formula"] == "ค่าแรง = วัน × 120 · ค่าคอม = (ยอดขายหลอด − ค่าน้ำมันรถ) × 5% · ค่าซอง = จำนวนซอง × 10 บาท · เบี้ยขยัน 1,000"
+    # nobody of this period is in C or D (the one who left earlier does not count): the workbook's own numbers
+    assert (by["DRV-C"]["people"], by["DRV-C"]["bonus"]) == (0, True)
+    assert by["DRV-C"]["formula"] == "ค่าแรง = วัน × 203 · ค่าคอม = (ยอดขายหลอด − ค่าน้ำมันรถ) × 3.5% · ค่าซอง = จำนวนซอง × 3 บาท · เบี้ยขยัน 1,000"
+    assert by["DRV-D"]["formula"] == "ค่าแรง = วัน × 368 · ค่าคอม = ยอดขายหลอด × 2% · ค่าซอง = (จำนวนซอง − ค่าน้ำมัน ÷ 140) × 3 บาท · เบี้ยขยัน 1,000"
+    assert by["DRV-E"]["formula"] == "ค่าแรง = วัน × 350 · ค่าคอม = ยอดขาย × % ของแต่ละคน · เบี้ยขยัน 1,000"                # two different %
+    assert by["DRV-F"]["formula"] == "ค่าแรง = วัน × อัตราของแต่ละคน · ไม่มีค่าคอม · เบี้ยขยัน 1,000"                          # 400 and 430
+    assert (by["FAC-COM"]["formula"], by["FAC-COM"]["bonus"]) == ("ค่าแรง = วัน × 300 · (+ % ของยอดขาย ถ้ามี)", False)
+    assert (by["DAY"]["formula"], by["DAY"]["bonus"], by["DAY"]["people"], by["DAY"]["hold"]) == ("ค่าแรง = วัน × อัตราของแต่ละคน", False, 3, 1)
+    assert by["KK-DRV"] == {"group": "KK-DRV", "label": "พขร. แก่งคอย (ค่าเที่ยว)", "people": 1, "bonus": True, "hold": 1,
+                            "formula": "ค่าแรง = วัน × 400 · ค่าเที่ยว = กรอกเอง · เบี้ยขยัน 1,000"}
+    assert (by["KK-PROD"]["formula"], by["KK-PROD"]["bonus"], by["KK-PROD"]["hold"]) == ("ค่าแรง = วัน × 325 · OT = ชม. OT × 40 บาท", False, 1)
+    assert "hold" not in by["DRV-A"] and "hold" not in by["FAC-COM"]
+    # เบี้ยขยัน: drivers only (DRV-A..F and KK-DRV)
+    assert {x["group"] for x in r["groups"] if x["bonus"]} == set(pw.DRIVER_GROUPS)
+    # each person: the same rule with his own numbers
+    f = {p["code"]: p["formula"] for p in out["people"]}
+    assert f["E2"] == "ค่าแรง = วัน × 350 · ค่าคอม = ยอดขาย × 2.5% · เบี้ยขยัน 1,000 ถ้ามาครบ 31 วัน"
+    assert f["F2"] == "ค่าแรง = วัน × 430 · ไม่มีค่าคอม · เบี้ยขยัน 1,000 ถ้ามาครบ 31 วัน"
+    assert f["P1"] == "ค่าแรง = วัน × 300 · ไม่มีเบี้ยขยัน"                                    # แพ็ค with no %: nothing is promised
+    assert f["W2"] == "ค่าแรง = วันทำงานในโรงงาน × 390 + วันออกรถอย่างเดียว × 344 · ไม่มีเบี้ยขยัน"
+    assert f["KP"] == "ค่าแรง = วัน × 325 · OT = ชม. OT × 40 บาท · ไม่มีเบี้ยขยัน" and f["KD"].endswith("ค่าเที่ยว = กรอกเอง · เบี้ยขยัน 1,000 ถ้ามาครบ 31 วัน")
+    assert pw.formula_words("FAC-COM", "วัน × 300", {"pct": 1.5}, "ไม่มีเบี้ยขยัน", person=True) == "ค่าแรง = วัน × 300 · ค่าคอม = ยอดขาย × 1.5% · ไม่มีเบี้ยขยัน"
+    assert pw.formula_words("DRV-A", "วัน × 120", {}, person=True) == "ค่าแรง = วัน × 120 · ค่าคอม = (ยอดขาย − ค่าน้ำมันรถ) × (ยังไม่มี %)"
+    assert (pw.num(5.0), pw.num(3.5), pw.num(1000), pw.num(2.25)) == ("5", "3.5", "1,000", "2.25")
+
+
+# --------------------------------------------------------------------------------------------- a branch that is set aside
+def kk_src():
+    people = [emp("S1"), emp("S2"), emp("K1", branch="แก่งคอย"), emp("K2", branch="แก่งคอย"), emp("K4", "หนึ่ง ทดสอบ", branch="แก่งคอย", position="พนักงานขับรถสาย"),
+              emp("K9", branch="แก่งคอย", status="resigned", end_date="2026-10-20")]
+    rules = [rule("S1"), rule("S2"), rule("K1", "KK-PROD", ot_rate=40, ot_auto_hours=3), rule("K2", "KK-DRV", bonus=True), rule("K4", "KK-DRV", bonus=True)]
+    tail = [{"month": "2026-10", "code": "K9", "employee_id": "K9", "refund": 0, "savings_balance": 1500}]
+    return src(employees=people, rules=rules, rates=[rate(p["id"]) for p in people], pay_tail=tail,
+               pay_prev=[prev("S1", {"savings": 500, "sso": 429}), prev("S2"), prev("K1", {"savings": 500}, parts={"ot": 900}), prev("K2", parts={"commission": 5000}),
+                         prev("K4", parts={"commission": 3143}, sales=157130)],
+               punches=[{"employee_id": "S1", "punched_at": f"{(START + timedelta(days=i)).isoformat()}T08:00:00"} for i in range(31)], docs=ADVANCE_IN[:1])
+
+
+def test_a_branch_on_hold_is_listed_but_counted_nowhere():
+    """Owner, 27 Nov 2026: แก่งคอย is on hold (he will fill its OT in himself later). It must not count as missing or drown สระบุรี."""
+    assert pw.HOLD_BRANCHES == ("แก่งคอย",)
+    out = pw.build(kk_src(), MONTH, TODAY)
+    # everyone is still listed, แก่งคอย's people with "hold" and their cells as they are; a leaver waiting for savings is not "on hold"
+    assert [(p["code"], p["hold"]) for p in out["people"]] == [("S1", False), ("S2", False), ("K1", True), ("K2", True), ("K4", True), ("K9", False)]
+    k1 = one(out, "K1")["cells"]
+    assert k1["ot"]["state"] == "miss" and k1["days"]["state"] == "miss" and k1["savings"]["state"] == "ok" and one(out, "K1")["state"] == "miss"
+    assert one(out, "K2")["cells"]["trip"]["state"] == "miss" and one(out, "K4")["cells"]["sales"]["state"] == "miss"
+    # the headline is about the others
+    assert out["summary"] == {"people": 2, "ok": 0, "carry": 1, "miss": 1, "hq_paid": 0, "worked": 2, "left_before": 1, "hold": 3}
+    assert out["hold_branches"] == ["แก่งคอย"]
+    # every kind counts only the others, and says how many are set aside
+    days, ot, trip, sales, refund = (kind(out, k) for k in ("days", "ot", "trip", "sales", "refund"))
+    assert (days["need"], days["ok"], days["carry"], days["miss"], days["hold"], len(days["rows"])) == (2, 0, 1, 1, 3, 2)
+    assert (ot["need"], ot["rows"], ot["state"], ot["hold"]) == (0, [], "na", 1) and (trip["need"], trip["state"], trip["hold"]) == (0, "na", 1)
+    assert (sales["need"], sales["hold"]) == (0, 1) and (refund["need"], refund["miss"]) == (1, 1) and "hold" not in refund
+    assert not any("K1" in r["who"] or "K2" in r["who"] for k in out["kinds"] for r in k["rows"])
+    assert all(set(k) - {"hold"} == {"key", "title", "state", "need", "ok", "carry", "miss", "source", "rows", "more", "link", "link_label", "note", "later"} for k in out["kinds"])
+    # the files that are only about that branch are information; a driver of that branch is not chased for his sales
+    assert (file(out, "scan_kk")["state"], file(out, "scan_kk")["summary"]) == ("info", "แก่งคอยพักไว้ก่อน · ยังไม่ได้อัปโหลดงวดนี้")
+    assert file(out, "kk_trips")["state"] == "info" and file(out, "kk_trips")["summary"].startswith("แก่งคอยพักไว้ก่อน · ยังไม่มีตารางเที่ยวงวดนี้")
+    assert (file(out, "route_sales")["state"], file(out, "route_sales")["summary"]) == ("ok", "ลงครบ 0 คน ถึง 25/11/2026")
+    assert (file(out, "advance_list")["state"], file(out, "advance_list")["summary"]) == ("ok", "สระบุรี 1 หน้า · แก่งคอยพักไว้ก่อน")
+    assert file(out, "scan_sb_fr")["state"] == "bad" and file(out, "start_dates")["summary"].startswith("2 คน")
+    # nothing is asked about its people (K4's % of sales, the automatic OT)
+    assert not any("K4" in d["title"] or "แก่งคอย" in d["title"] or "OT" in d["title"] for d in out["decisions"])
+    assert out["rules"]["general"][-1] == "แก่งคอยพักไว้ก่อน: เจ้าของจะใส่ OT เองภายหลัง ยังไม่นับในตัวเลขของหน้านี้ (คืนเงินสะสมของคนที่ลาออกยังนับตามปกติ)"
+    # the savings of its leaver are money to pay back: counted, and the line says whose are among them
+    assert refund["source"].endswith("· รวมคนที่ลาออกของแก่งคอย 1 คน (เงินที่ต้องคืน ไม่ได้พักไว้)") and "แก่งคอย" not in kind(out, "savings")["source"]
+
+
+def test_without_the_hold_the_branch_counts_again(no_hold):
+    out = pw.build(kk_src(), MONTH, TODAY)
+    assert out["summary"] == {"people": 5, "ok": 0, "carry": 1, "miss": 4, "hq_paid": 0, "worked": 5, "left_before": 1, "hold": 0}
+    assert out["hold_branches"] == [] and not any(p["hold"] for p in out["people"]) and not any("hold" in k for k in out["kinds"])
+    assert (file(out, "scan_kk")["state"], file(out, "scan_kk")["summary"]) == ("bad", "ยังไม่ได้อัปโหลดงวดนี้") and file(out, "kk_trips")["state"] == "bad"
+    assert (file(out, "advance_list")["state"], file(out, "advance_list")["summary"]) == ("warn", "สระบุรี 1 หน้า · ยังไม่มี: แก่งคอย")
+    assert file(out, "route_sales")["state"] == "bad" and "K4 หนึ่ง ทดสอบ" in file(out, "route_sales")["summary"]
+    assert any(d["title"].startswith("ค่าคอมจากยอดขาย: K4 ") for d in out["decisions"]) and (kind(out, "ot")["need"], kind(out, "trip")["need"]) == (1, 1)
+    assert len(out["rules"]["general"]) == 9 and "hold" not in next(g for g in out["rules"]["groups"] if g["group"] == "KK-DRV")
+
+
+# --------------------------------------------------------------------------------------------- codes the staff list does not have
+def test_a_scan_code_that_is_not_in_the_staff_list():
+    """27 Nov 2026: the สระบุรี factory file carries SB-FR112, who is not an employee -- his scans are counted for nobody."""
+    punches = [{"employee_id": code, "punched_at": f"{(START + timedelta(days=i)).isoformat()}T08:00:00"} for i in range(31) for code in ("SB-FR001", "SB-PD001")]
+    ups = [{"id": "u0", "filename": "1_report (9).xls", "period_start": "2026-09-26", "period_end": "2026-10-25", "unknown_codes": "SB-FR999", "created_at": "2026-10-27T03:47:45"},
+           {"id": "u1", "filename": "1_report (12).xls", "period_start": "2026-10-26", "period_end": "2026-11-25", "unknown_codes": None, "created_at": "2026-11-27T03:54:34"},
+           {"id": "u2", "filename": "1_report (11).xls", "period_start": "2026-10-26", "period_end": "2026-11-25", "unknown_codes": "SB-FR112, SB-FR001, sb-fr113  นาย ก",
+            "created_at": "2026-11-27T05:21:39"}]
+    s = src(employees=[emp("SB-FR001"), emp("SB-PD001")], rules=[rule("SB-FR001"), rule("SB-PD001")], punches=punches, uploads=ups)
+    out = pw.build(s, MONTH, TODAY)
+    f = file(out, "scan_sb_fr")
+    assert (f["state"], f["link"], f["link_label"]) == ("warn", "#employees", "รายชื่อพนักงาน")
+    assert f["summary"] == "1 คน 31 สแกน (26/10 ถึง 25/11)\nมีรหัสที่ไม่อยู่ในรายชื่อพนักงาน: SB-FR112, sb-fr113 นาย ก — เพิ่มพนักงานก่อน ไม่งั้นไม่ถูกนับ"
+    assert (file(out, "scan_sb_pd")["state"], file(out, "scan_sb_pd")["link"]) == ("ok", "#attendance")              # the other file is clean
+    # last month's upload is not this period's; a code that is an employee by now is no longer unknown; the same file read again replaces its line
+    assert pw.unknown_codes(ups, s["employees"], START, END) == ["SB-FR112", "sb-fr113 นาย ก"]
+    again = ups + [{**ups[2], "id": "u3", "unknown_codes": None, "created_at": "2026-11-27T06:00:00"}]
+    assert pw.unknown_codes(again, s["employees"], START, END) == [] and pw.unknown_codes(None, [], START, END) == []
+    s["uploads"] = again
+    assert file(pw.build(s, MONTH, TODAY), "scan_sb_fr")["state"] == "ok"
+    many = [{**ups[2], "unknown_codes": ", ".join(f"SB-FR2{i:02d}" for i in range(8))}]
+    assert "SB-FR205 และอีก 2 รหัส —" in file(pw.build({**s, "uploads": many}, MONTH, TODAY), "scan_sb_fr")["summary"]
+
+
+# --------------------------------------------------------------------------------------------- after the review of 27 Nov 2026
+CASH = [{"id": 1, "batch": 1, "amount": 800, "counted": True, "dup_of": None, "vehicle_id": "V27", "page_id": 7, "page": {"confirmed": True}},
+        {"id": 2, "batch": 2, "amount": 200, "counted": True, "dup_of": None, "vehicle_id": "V27", "page_id": 8, "page": {"confirmed": True}}]
+PT = {"id": "e2", "source_id": "fuel:pt:2026-11:xx", "lines": [{"vehicle_id": "V9", "credit": 1000}]}
+
+
+def test_bangchak_needs_both_of_its_station_files():
+    """The drop box books บางจาก one station file at a time (NM, ห้วยบง): with only one of them in, a truck that fills at the other
+    would read as a real 0 -- so fuel is not complete, and the absent station is named."""
+    from app import inbox_r_fuel
+    assert pw.BANGCHAK_STATIONS == inbox_r_fuel.BC_STATIONS
+    nm = {"id": "e1", "source_id": "fuel:bangchak:2026-11:NM:842682", "lines": [{"vehicle_id": "V27", "credit": 12000}]}
+    hb = {"id": "e3", "source_id": "fuel:bangchak:2026-11:ห้วยบง:842682", "lines": [{"vehicle_id": "V27", "credit": 5000}]}
+    out = pw.build(fuel_src(cash_fuel=CASH, card_fuel=[nm, PT]), MONTH, TODAY)
+    c = one(out, "D1")["cells"]["fuel"]
+    assert (c["state"], c["value"], c["text"]) == ("miss", None, "")
+    assert c["note"] == "รถ #27 84-2682 รถใหญ่ สระบุรี · ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน บางจาก ห้วยบง · มีแล้ว: บัตร 12,000 + เงินสด 1,000"
+    f = file(out, "card_fuel")
+    assert (f["state"], f["summary"]) == ("warn", "บางจาก 1 คัน 12,000 บาท · PT 1 คัน 1,000 บาท · ยังไม่มี: บางจาก ห้วยบง" + USED)
+    assert (kind(out, "fuel")["miss"], kind(out, "fuel")["ok"]) == (1, 0)
+    # both station files in: complete -- and a truck that fills at both is one truck
+    out = pw.build(fuel_src(cash_fuel=CASH, card_fuel=[nm, hb, PT]), MONTH, TODAY)
+    assert one(out, "D1")["cells"]["fuel"] == {"state": "ok", "value": 18000, "text": "18,000", "note": "รถ #27 84-2682 รถใหญ่ สระบุรี · บัตร 17,000 + เงินสด 1,000"}
+    assert (file(out, "card_fuel")["state"], file(out, "card_fuel")["summary"]) == ("ok", "บางจาก 1 คัน 17,000 บาท · PT 1 คัน 1,000 บาท" + USED)
+    assert pw.card_fuel_view([hb, PT])["lack"] == ["บางจาก NM"] and pw.card_fuel_view([nm, hb])["lack"] == ["PT"]
+    assert pw.card_fuel_view([])["lack"] == ["บางจาก", "PT"] and pw.card_fuel_view(None)["stations"] == {}
+    # one of the older entries (both stations in one, no station in its key) is complete by itself
+    old = pw.card_fuel_view([{"source_id": "fuel:bangchak:2026-10:842682", "lines": [{"vehicle_id": "V27", "credit": 29740}]}, PT])
+    assert (old["lack"], old["estimated"]) == ([], [])
+    # an estimate is a figure to go on, never a statement: a stand-in, and no "after fuel" is promised on it
+    est = [{"id": "e4", "source_id": "fuel:bangchak:2026-11:est-842682", "lines": [{"vehicle_id": "V27", "credit": 9000}]}, {**PT, "source_id": "fuel:pt:2026-11:est-xx"}]
+    s = fuel_src(cash_fuel=CASH, card_fuel=est)
+    s["rules"][0].update(pay_group="DRV-A", commission_pct=5, bag_rate=None)
+    out = pw.build(s, MONTH, TODAY)
+    c = one(out, "D1")["cells"]
+    assert (c["fuel"]["state"], c["fuel"]["value"]) == ("carry", 10000) and c["fuel"]["note"].endswith("· บัตร บางจาก, PT เป็นยอดประมาณ ยังไม่ใช่ใบแจ้งหนี้")
+    assert c["sales"]["note"] == "ก่อนหักค่าน้ำมัน" and file(out, "card_fuel")["state"] == "warn" and "· ยอดประมาณ: บางจาก, PT" in file(out, "card_fuel")["summary"]
+
+
+def test_the_loans_to_do_leaves_out_a_branch_on_hold():
+    """The to-do line counts the same people as the loan kind: แก่งคอย's loans are named beside it, never added to it."""
+    people = [emp("A"), emp("K", branch="แก่งคอย"), emp("K2", branch="แก่งคอย")]
+    loans = [loan("A"), loan("K", repay_amount=500), loan("K2", repay_mode="flexible", repay_amount=None, amount=5000)]
+    entries = [paid("A", "2026-10"), paid("K", "2026-10", 500), paid("K2", "2026-10", 2000)]
+    out = pw.build(src(employees=people, rules=[rule(p["id"]) for p in people], loans=loans, loan_entries=entries), MONTH, TODAY)
+    f, k = file(out, "loans_mark"), kind(out, "loan")
+    assert (f["state"], f["summary"]) == ("warn", "ยังไม่ได้กด 1 รายการ 1,500 บาท · แก่งคอยพักไว้ก่อน 2 รายการ 500 บาท")
+    assert (k["need"], k["carry"], k["miss"], k["hold"]) == (1, 1, 0, 2)
+
+
+def test_the_groups_rule_keeps_its_numbers_when_someone_is_left_in_it_after_his_route():
+    """SB-PD011 seen in 2026-12: still in DRV-E, at หน้าโรง on 400 since 18/11/2026. The rule of the 21 others must go on saying 350."""
+    s = route_src(drove("D2", date(2026, 11, 26), date(2026, 12, 19)))
+    s["rules"][0].update(route_until="2026-11-17", commission_pct=9)
+    s["rates"] = [rate("D1", 400, since="2026-11-18"), rate("D1", 350), rate("D2", 350)]
+    s["employees"].append(emp("D2", "วิชัย ทดสอบ", position="พนักงานขับรถสาย"))
+    s["rules"].append(rule("D2", "DRV-E", commission_pct=2, bonus=True))
+    out = pw.build(s, "2026-12", date(2026, 12, 20))
+    g = next(x for x in out["rules"]["groups"] if x["group"] == "DRV-E")
+    assert (g["people"], g["formula"]) == (2, "ค่าแรง = วัน × 350 · ค่าคอม = ยอดขาย × 2% · เบี้ยขยัน 1,000")
+    assert one(out, "D1")["cells"]["days"]["note"].startswith("ขับรถสายถึง 17/11/2026 · ")          # the last day he drove, as his rate note says
+    # alone in the group, the rule shows the workbook's own numbers
+    s["employees"], s["rules"] = s["employees"][:1], s["rules"][:1]
+    g = next(x for x in pw.build(s, "2026-12", date(2026, 12, 20))["rules"]["groups"] if x["group"] == "DRV-E")
+    assert (g["people"], g["formula"]) == (1, "ค่าแรง = วัน × 350 · ค่าคอม = ยอดขาย × 2% · เบี้ยขยัน 1,000")
+
+
+def test_spare_days_and_the_trucks_fuel_are_a_question_for_the_owner():
+    """The truck's fuel is of the whole period, the driver's sales of his own days only: whose fuel a สำรองขับ day is has not been settled."""
+    card = [{"id": "e1", "source_id": "fuel:bangchak:2026-11:842682", "lines": [{"vehicle_id": "V27", "credit": 2000}]}, PT]
+    s = fuel_src(cash_fuel=CASH, card_fuel=card)
+    s["rules"][0].update(pay_group="DRV-A", commission_pct=5, bag_rate=None)
+    assert not any(d["title"].startswith("วันสำรองขับ") for d in pw.build(s, MONTH, TODAY)["decisions"])            # nobody had a spare day: not asked
+    for r in s["route"][5:7]:
+        r.update(spare=True)
+    out = pw.build(s, MONTH, TODAY)
+    c = one(out, "D1")["cells"]
+    assert c["fuel"]["state"] == "ok" and c["fuel"]["note"].endswith("บัตร 2,000 + เงินสด 1,000 · รวมค่าน้ำมันของวันสำรองขับ 2 วัน")
+    assert c["sales"]["note"] == "ก่อนหักค่าน้ำมัน · หลังหัก 26,000 (รวมค่าน้ำมันของวันสำรองขับ 2 วัน)"
+    d = next(x for x in out["decisions"] if x["title"] == "วันสำรองขับ: ค่าน้ำมันรถของวันนั้นหักจากใคร")
+    assert d["detail"].startswith("D1 มานัส ศรีวิลาส 2 วัน — ") and d["wait"] is False
+
+
+def test_the_tube_and_sack_driver_on_3_5_percent_is_asked_about():
+    """The workbook writes "ยอดขาย × 3.5%" for DRV-C; the page works on the หลอด part (his ซอง are paid apart). Shown as it is used, and asked."""
+    rows = drove("D1", START, END, money=500, money_parts={"zong": 300, "lod": 200})
+    s = route_src(rows, split=[{"employee_id": "D1", "money_split": True}])
+    s["rules"][0].update(pay_group="DRV-C", commission_pct=3.5, bag_rate=3)
+    out = pw.build(s, MONTH, TODAY)
+    assert "ค่าคอม = (ยอดขายหลอด − ค่าน้ำมันรถ) × 3.5%" in one(out, "D1")["formula"] and "เฉพาะยอดหลอด" in one(out, "D1")["cells"]["sales"]["note"]
+    d = next(x for x in out["decisions"] if x["title"] == "D1 มานัส ศรีวิลาส: ค่าคอม 3.5% คิดจากยอดหลอดอย่างเดียว หรือรวมยอดซอง")
+    assert '"ยอดขาย × 3.5%"' in d["detail"] and "3 บาท/ซอง" in d["detail"]
+    s["rules"][0].update(pay_group="DRV-B", commission_pct=5, bag_rate=10)                     # B's rule is written on หลอด already: nothing to ask
+    assert not any("คิดจากยอดหลอดอย่างเดียว" in x["title"] for x in pw.build(s, MONTH, TODAY)["decisions"])
+
+
+def test_ot_that_is_asked_of_a_daily_paid_person_is_in_his_rule(no_hold):
+    """แก่งคอย's รายวัน people were paid OT on HQ's sheet: the hours are an input, so the rule names them (the workbook's "OT ถ้ามี")."""
+    people = [emp("K5", branch="แก่งคอย"), emp("K7", branch="แก่งคอย"), emp("S1")]
+    out = pw.build(src(employees=people, rules=[rule("K5", ot_rate=40), rule("K7"), rule("S1")], rates=[rate(p["id"]) for p in people],
+                       pay_prev=[prev("K5", parts={"ot": 480}), prev("K7", parts={"ot": 80}), prev("S1", parts={"ot": 120})]), MONTH, TODAY)
+    assert one(out, "K5")["formula"] == "ค่าแรง = วัน × 390 · OT = ชม. OT × 40 บาท · ไม่มีเบี้ยขยัน"
+    assert one(out, "K7")["formula"] == "ค่าแรง = วัน × 390 · OT = ชม. OT × (ยังไม่มีอัตรา OT) บาท · ไม่มีเบี้ยขยัน"
+    assert one(out, "S1")["formula"] == "ค่าแรง = วัน × 390 · ไม่มีเบี้ยขยัน"                  # สระบุรี: OT is cash, out of pay
+    assert next(g for g in out["rules"]["groups"] if g["group"] == "DAY")["formula"] == "ค่าแรง = วัน × 390 · (แก่งคอย: + OT ถ้ามี)"
 
 
 # --------------------------------------------------------------------------------------------- the loader, the menu, the gate
@@ -644,6 +1028,7 @@ def test_load_reads_once_a_minute_and_asks_for_the_schema(monkeypatch):
     monkeypatch.setattr(pw, "has_v93", lambda: False)
     out = pw.load("2026-11", TODAY)
     assert out["ready"] is False and out["need"] == "schema_v93.sql" and out["people"] == [] and out["months"][1] == "2026-11"
+    assert out["rules"] == {"general": [], "groups": [], "source": pw.RULES_SOURCE} and out["hold_branches"] == ["แก่งคอย"]
     pw.forget()
 
 
@@ -716,7 +1101,7 @@ def test_every_select_names_its_columns_and_nothing_private(monkeypatch):
     monkeypatch.setattr(supabase, "select_all", lambda table, params=None, page=1000: seen.append((table, params)) or [])
     pw._read(MONTH)
     assert {t for t, _ in seen} >= {"employees", "employee_pay_rules", "employee_rates", "employee_pay_months", "route_driver_days", "attendance_punches",
-                                    "employee_loans", "employee_loan_entries"}
+                                    "attendance_uploads", "employee_loans", "employee_loan_entries", "acc_entries", "cash_fuel_lines", "vehicles", "drivers"}
     private = re.compile(r"phone|bank|account_no|id_card|national|passport|password|pin\b|token|notes|end_reason|\*", re.I)
     for table, params in seen:
         assert params["select"] in pw.SELECTS.values() and "order" in params
