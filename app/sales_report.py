@@ -32,11 +32,30 @@ def _is_header(ln: str) -> bool:
     return ln in ("สินค้า / ลูกค้า", "ราคา/หน่วย", "ราคารวม", "จํานวน", "จำนวน", "หน่วย") or ln.startswith(("นํ", "น้ำหนัก")) and "Kg" in ln
 
 
+# The program's PDF font draws the raised / shifted tone marks with glyphs that come out of the text layer as Cyrillic letters (U+0477 -
+# U+047B) or as the Thai fonts' private-use forms, and สระอำ as nikhahit + สระอา. Owner, 28 Nov 2026: "ร้านเนืѸอ" on the sales list is ร้านเนื้อ.
+TONES = "่้๊๋์"                        # ่ ้ ๊ ๋ ์
+MARKS = {chr(0x0477 + i): m for i, m in enumerate(TONES)}
+for _i, _m in enumerate(TONES):
+    MARKS[chr(0xF705 + _i)] = MARKS[chr(0xF70A + _i)] = MARKS[chr(0xF713 + _i)] = _m
+MARKS.update({"": "ั", "": "ิ", "": "ี", "": "ึ", "": "ื", "": "ํ", "": "็"})
+NIKHAHIT_AA = re.compile("ํ([่-๋]?)า")
+
+
+def fix_thai(text: str) -> str:
+    """The Thai as it should read: tone marks back from the font's stand-ins, nikhahit + สระอา as สระอำ (นํѸา -> น้ำ, จํากัด -> จำกัด)."""
+    if not text:
+        return text
+    out = "".join(MARKS.get(ch, ch) for ch in text)
+    return NIKHAHIT_AA.sub(lambda m: m.group(1) + "ำ", out)
+
+
 def text_of(data: bytes) -> str:
-    """The PDF's text, page by page (raw pymupdf text: no Thai clean-up, the names must stay exactly as earlier imports stored them)."""
+    """The PDF's text, page by page, with the Thai put right (fix_thai). Names stored before 28 Nov 2026 were fixed the same way, so the
+    books' keys still match."""
     import pymupdf
     with pymupdf.open(stream=data, filetype="pdf") as doc:
-        return "\n=====PAGE\n".join(p.get_text() for p in doc)
+        return fix_thai("\n=====PAGE\n".join(p.get_text() for p in doc))
 
 
 FOOTER = re.compile(r"บริษัท\s*สระบุรีวารีเทพ\s*จ\S*กัด[ \t]*(?:\(\s*สาขา\s*([^)\n]+?)\s*\))?")

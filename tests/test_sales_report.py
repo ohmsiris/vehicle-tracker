@@ -53,3 +53,12 @@ def test_parse_rows_totals_and_glued_names():
 def test_a_misread_day_is_reported():
     r = parse(TEXT.replace(" 2,240.00\nผลรวม", " 2,300.00\nผลรวม", 1))
     assert any("vs total" in p for p in r["problems"])
+
+
+def test_the_fonts_stand_ins_are_put_back_as_thai():
+    # owner, 28 Nov 2026: "ร้านเนืѸอ" on the sales list
+    from app.sales_report import fix_thai
+    assert fix_thai("ร้านเนืѸอ") == "ร้านเนื้อ" and fix_thai("57.นํѸาตกเจ็ดคต") == "57.น้ำตกเจ็ดคต"
+    assert fix_thai("ร้านพีѷเจ็ง") == "ร้านพี่เจ็ง" and fix_thai("บิѹกซี") == "บิ๊กซี" and fix_thai("46.คชสิทธิѻ-หนองแค") == "46.คชสิทธิ์-หนองแค"
+    assert fix_thai("CP ศูนย์จําหน่าย") == "CP ศูนย์จำหน่าย" and fix_thai("ดํา") == "ดำ"
+    assert fix_thai("น้ำแข็ง ซอง 12.50") == "น้ำแข็ง ซอง 12.50" and fix_thai("") == "" and fix_thai(None) is None

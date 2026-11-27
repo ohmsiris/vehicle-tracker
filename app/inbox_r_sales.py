@@ -254,6 +254,10 @@ def book(preview: dict, file_id: str) -> dict:
     for m, b in want.items():
         if b.get("line_count") is not None and got[m] != b["line_count"]:
             raise InvalidEntry(f"ไฟล์ที่เก็บไว้อ่านได้ {got[m]} รายการใน {month_label(m)} แต่ตัวอย่างมี {b['line_count']} — อ่านไฟล์ใหม่ก่อนลงบัญชี")
+    for b in batches:                                    # a preview read before 28 Nov 2026 still has the font's stand-ins in its names
+        for e in b.get("entries") or []:
+            for k in ("party", "description", "source_id"):
+                e[k] = sales_report.fix_thai(e.get(k))
     out = book_batches(preview)
     _delete_lines(preview)
     for i in range(0, len(lines), 1000):
