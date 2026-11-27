@@ -389,7 +389,8 @@ def test_the_usual_start_is_used_only_when_it_leaves_no_more_scans_alone():
     for i in range(10):
         d = datetime(2026, 11, 1) + timedelta(days=i)
         extra += [d.replace(hour=4, minute=40), d.replace(hour=15)] + ([d.replace(hour=15, minute=40)] if i in (2, 6) else [])
-    assert at.pair_month(extra, 9 * 60, 6 * 60) == at.pair_shifts(extra, 9 * 60)                         # the plain reading is kept
+    s = at.pair_month(extra, 9 * 60, 6 * 60)                     # the extra scan is read inside the shift: nothing alone, nothing flipped
+    assert all(x["out"] and x["in"].hour == 4 for x in s) and sum(1 for x in s if x.get("extra")) == 2
 
 
 def test_office_clerks_of_both_branches_start_about_eight():
@@ -448,3 +449,20 @@ def test_saraburi_mechanics_come_in_in_the_morning_and_leave_whenever():
     days = month({E1: punches}, emps={E1: emp(E1, "SB-FR001", position="ช่าง")})["people"][0]["days"]
     assert [[(s["in"], s["out"]) for s in d["shifts"]] for d in days] == [[("06:19", "23:42")], [("09:36", "22:31")], [("10:21", "21:22")], [("10:54", None)]]
     assert at.MORNING_IN.get(("แก่งคอย", "ช่าง")) is None
+
+
+def test_an_extra_scan_inside_a_shift_does_not_turn_the_month_around():
+    # ทู, 4 - 8 Nov 2026: midnight to noon, scanned in about 23:30; an extra 09:05 scan on the 5th read the rest of the month as 12:00 -> 23:30
+    days = ["2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07"]
+    punches = [dt("2026-11-03", "23:26"), dt("2026-11-04", "09:05"), dt("2026-11-04", "12:13")]
+    for d in days:
+        punches += [dt(d, "23:32"), datetime.fromisoformat(f"{d}T12:00:00") + timedelta(days=1)]
+    s = at.pair_shifts(punches, 12 * 60, usual_start=at.near_start(punches, 0))
+    assert [(x["in"].strftime("%H:%M"), x["out"].strftime("%H:%M")) for x in s] == [("23:26", "12:13")] + [("23:32", "12:00")] * 4
+    assert s[0]["extra"] == dt("2026-11-04", "09:05")
+    assert at.near_start(punches, 0) == 23 * 60 + 32 and at.near_start(punches, 23 * 60 + 45) == 23 * 60 + 45     # a few minutes off: kept
+
+
+def test_the_timed_readings_last_scan_alone_is_not_held_against_it():
+    punches = [dt("2026-11-01", "23:30"), dt("2026-11-02", "12:00"), dt("2026-11-02", "23:30"), dt("2026-11-03", "12:00"), dt("2026-11-03", "23:30")]
+    assert at.pair_month(punches, 12 * 60, 23 * 60 + 30)[0]["in"].hour == 23            # the plain reading (12:00 -> 23:30) leaves none alone

@@ -201,28 +201,51 @@ def _tod(dt: datetime) -> int:
 SWITCH_COST = 240           # a change between the usual start and the one 12 hours away (day <-> night crew): cheaper than one missed scan
 
 
+EXTRA_COST = 200            # a scan in the middle of a shift (in 23:26, 09:05, out 12:13): cheaper than a crew change or a scan alone
+EXTRA_LONGER = 240          # ... for a shift at most this many minutes longer than usual (15:00 - 00:31, then 06:51 is a new day, not one shift)
+
+
+NEAR_OFF = 20
+
+
+def near_start(punches: list[datetime], start: int) -> int:
+    """The worker's real start near a stored one: the middle of their scans within USUAL_SPREAD of it (ทู's 00:00 - 12:00 is 23:30 - 12:00 on
+    the machine; half an hour off on every shift tipped the month to the 12:00 crew)."""
+    rel = sorted(((_tod(p) - start + 720) % 1440) - 720 for p in punches if _clock_gap(_tod(p), start) <= USUAL_SPREAD)
+    off = rel[len(rel) // 2] if len(rel) >= 3 else 0
+    return int((start + off) % 1440) if abs(off) >= NEAR_OFF else start      # a few minutes off is noise: the stored start stays
+
+
+
+
 def _pair_with_start(kept: list[datetime], target_minutes: int, usual: int) -> list[dict]:
     """Pair around the usual start. For 12-hour shifts the reading may also change over to the start 12 hours away and back (a worker moved
     between the day and night crews part way through the month -- owner's roster, 27 Nov 2026: ขาล 25 days then 5 nights, กุน 18 then 10).
     A change costs SWITCH_COST, less than a scan left alone, so a clean change-over reads as one, but a single missed scan never turns
-    the rest of the month around (that still leaves a scan alone AND pays for the change)."""
+    the rest of the month around (that still leaves a scan alone AND pays for the change).
+    A third scan inside one shift (in, extra, out, all within MAX_SHIFT) is read as part of that shift and shown as "extra": ทู, 5 Nov 2026,
+    scanned 09:05 between 23:26 and 12:13, and the rest of his month read backwards (in 12:00, out 23:30)."""
     n = len(kept)
     starts = [usual] + ([(usual + 720) % 1440] if target_minutes == 12 * 60 else [])
     k_n = len(starts)
-    best = [[0.0] * k_n for _ in range(n + 2)]
-    step: list[list[tuple]] = [[(k, False)] * k_n for k in range(n + 2)]      # step[i][k] = (start used from scan i on, pairs i with i+1)
+    best = [[0.0] * k_n for _ in range(n + 3)]
+    step: list[list[tuple]] = [[(k, 1)] * k_n for k in range(n + 3)]      # step[i][k] = (start used from scan i on, scans this shift takes)
     for i in range(n - 1, -1, -1):
         local = []
         for k, st in enumerate(starts):
             alone = SINGLE_COST // 4 if i == n - 1 else SINGLE_COST     # the last scan loaded: its OUT may simply not be in the file yet
-            cost = best[i + 1][k] + alone + _clock_gap(_tod(kept[i]), st) * 0.25     # a lone scan near the start is a missed OUT, cheaper
-            here = False
-            if i + 1 < n and kept[i + 1] - kept[i] <= MAX_SHIFT:
-                gap = (kept[i + 1] - kept[i]).total_seconds() / 60
-                paired = best[i + 2][k] + abs(gap - target_minutes) * 0.25 + _clock_gap(_tod(kept[i]), st)
-                if paired < cost:
-                    cost, here = paired, True
-            local.append((cost, here))
+            start_cost = _clock_gap(_tod(kept[i]), st)
+            cost, take = best[i + 1][k] + alone + start_cost * 0.25, 1     # a lone scan near the start is a missed OUT, cheaper
+            for span, extra in ((2, 0), (3, EXTRA_COST)):
+                j = i + span - 1
+                if j < n and kept[j] - kept[i] <= MAX_SHIFT:
+                    gap = (kept[j] - kept[i]).total_seconds() / 60
+                    if span == 3 and gap > target_minutes + EXTRA_LONGER:
+                        continue
+                    c = best[j + 1][k] + extra + abs(gap - target_minutes) * 0.25 + start_cost
+                    if c < cost:
+                        cost, take = c, span
+            local.append((cost, take))
         for k in range(k_n):
             pick = k
             for k2 in range(k_n):
@@ -233,13 +256,12 @@ def _pair_with_start(kept: list[datetime], target_minutes: int, usual: int) -> l
     out, i = [], 0
     k = min(range(k_n), key=lambda x: (best[0][x] if n else 0, x))
     while i < n:
-        k, here = step[i][k]
-        if here:
-            out.append({"in": kept[i], "out": kept[i + 1]})
-            i += 2
-        else:
+        k, take = step[i][k]
+        if take == 1:
             out.append({"in": kept[i], "out": None})
-            i += 1
+        else:
+            out.append({"in": kept[i], "out": kept[i + take - 1], **({"extra": kept[i + 1]} if take == 3 else {})})
+        i += take
     return out
 
 
@@ -270,7 +292,10 @@ def pair_month(punches: list[datetime], target_minutes: int, usual: Optional[int
         return plain
     timed = pair_shifts(punches, target_minutes, usual_start=usual)
     alone = lambda shifts: sum(1 for x in shifts if not x["out"])  # noqa: E731
-    return timed if alone(timed) <= alone(plain) else plain
+    # the timed reading's last scan alone is no question (its OUT is in the next file: ทู in at 23:35 on the 25th). The plain reading's is
+    # kept: a flip pushes the missed scan to the end of the month that way (บุญนำ: 20:06 alone on the 20th, then nights to the 25th)
+    timed_alone = alone(timed) - (1 if timed and not timed[-1]["out"] else 0)
+    return timed if timed_alone <= alone(plain) else plain
 
 
 def is_free_hours(position) -> bool:
@@ -322,7 +347,8 @@ def _hhmm(dt: datetime) -> str:
 
 
 def _shift_card(s: dict) -> dict:
-    return {"in": _hhmm(s["in"]), "out": _hhmm(s["out"]) if s["out"] else None, "next_day": bool(s["out"] and s["out"].date() != s["in"].date()), "minutes": minutes_of(s)}
+    return {"in": _hhmm(s["in"]), "out": _hhmm(s["out"]) if s["out"] else None, "next_day": bool(s["out"] and s["out"].date() != s["in"].date()), "minutes": minutes_of(s),
+            **({"extra": _hhmm(s["extra"])} if s.get("extra") else {})}
 
 
 def review_card(r: dict) -> dict:
@@ -353,7 +379,7 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         before = [p for p in mine if p.date() < start - timedelta(days=1)]
         morning = MORNING_IN.get((e.get("branch") or "", (e.get("position") or "").strip()))
         if custom is not None:      # the worker's own shift time says when they start: 07:50 / 20:05 every day is days, not nights (owner, 27 Nov 2026: ปิ๊ปาย)
-            usual = parse_clock(e.get("shift_start"))
+            usual = near_start([p for p in mine if start - timedelta(days=1) <= p.date() <= end], parse_clock(e.get("shift_start")))
         else:
             usual = usual_start_of(before, target) if before else None
         if usual is None:

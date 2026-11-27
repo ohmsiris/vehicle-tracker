@@ -143,7 +143,7 @@ function atBody(p) {
 function atDayRow(p, d) {
   const dt = new Date(`${d.date}T00:00:00`);
   const times = d.shifts.length
-    ? d.shifts.map((s) => (s.out ? `${s.in} → ${s.out}${s.next_day ? " (+1 วัน)" : ""}` : `${s.in} (สแกนขาเดียว)`)).join("  ·  ")
+    ? d.shifts.map((s) => (s.out ? `${s.in} → ${s.out}${s.next_day ? " (+1 วัน)" : ""}${s.extra ? ` (สแกนกลางกะ ${s.extra})` : ""}` : `${s.in} (สแกนขาเดียว)`)).join("  ·  ")
     : "ไม่มีสแกน (เพิ่มโดยเจ้าของ)";
   const status = d.flag === "single" ? el("span", { class: "badge warn", text: d.single_no ? `สแกนขาเดียว ครั้งที่ ${d.single_no}` : "สแกนขาเดียว" })
     : d.flag === "short" ? el("span", { class: "badge warn", text: `ขาด ${atHM(p.expected - d.minutes)} ชม.` })
