@@ -136,7 +136,7 @@ KINDS = [
     ("penalty", "เงินขาด / ความผิด", "ปรับ", "ใบเตือนที่มีค่าปรับ ลงวันที่ในงวด", "#documents", "ใบเตือน / บันทึกข้อความ",
      "เงินขาดของคนขับ: ยังไม่มีที่ลงในระบบ"),
     ("other", "อุปกรณ์ / อื่นๆ", "อื่นๆ", "เขียนมือในเอกสารสิ้นเดือน", None, None, "ยังไม่มีที่ลงในระบบ"),
-    ("sso", "ปกส.", "ปกส.", "ใบสรุปเงินเดือน HQ ล่าสุด (รอเจ้าของตรวจ)", None, None, "ยังไม่มีที่ยืนยันยอดรายคนในระบบ — ใช้ยอดจากใบ HQ ล่าสุดแทน"),
+    ("sso", "ปกส.", "ปกส.", "รายชื่อประกันสังคม (สปส.1-10)", None, None, "ตามรายชื่อ สปส.1-10 ที่เจ้าของส่งมา · คนที่ไม่มีในรายชื่อ ใช้ยอดจากใบ HQ ล่าสุดแทน (รอเจ้าของตรวจ)"),
     ("refund", "คืนเงินสะสม", "คืนสะสม", "ยอดสะสมยกไปในใบ HQ ล่าสุด ของคนที่ลาออก", None, None, ""),
 ]
 KEYS = [k[0] for k in KINDS]
@@ -157,7 +157,7 @@ NO_TABLE = ("PGRST205", "42P01", "HTTP 404")      # what PostgREST says when a t
 # every column this page reads, table by table (tests check: no "*", nothing private)
 SELECTS = {
     "employees": "id,code,full_name,nickname,branch,position,status,start_date,end_date,pay_group,probation_end",
-    "employee_pay_rules": "employee_id,pay_group,commission_pct,bag_rate,ot_rate,ot_auto_hours,bonus,rate2,rides_with,route_until",
+    "employee_pay_rules": "employee_id,pay_group,commission_pct,bag_rate,ot_rate,ot_auto_hours,bonus,rate2,rides_with,route_until,sso,sso_source",
     "employee_rates": "id,employee_id,daily_rate,effective_from,kind,review,review_note",
     "pay_prev": "month,code,employee_id,parts,deductions,refund,flags,sales:details->sales,savings_balance:details->savings_balance",
     "pay_old": "month,code,employee_id,refund,flags,savings_balance:details->savings_balance,bag:parts->bag,other:parts->other",
@@ -1249,6 +1249,12 @@ def build_person(p: dict, ctx: dict) -> dict:
             cells["sso"] = cell("carry", _f(deds["sso"]), money(deds["sso"]), f"{said} · {WAIT_SSO}")
         if _f(deds.get("common")) > 0:
             cells["common"] = cell("miss", note=f"ใบ HQ {my(prev['month'])} หัก {money(deds['common'])} บาท · เปลี่ยนทุกเดือน ต้องใส่ใหม่")
+    listed_sso = (rule or {}).get("sso")
+    if not own and listed_sso is not None:                   # owner, 27 Nov 2026: the สปส.1-10 list says each person's ปกส. -- it replaces the stand-in
+        v = _f(listed_sso)
+        cells["sso"] = cell("ok", v, money(v) if v else "0", f"ตาม {rule.get('sso_source') or 'รายชื่อประกันสังคม'}" + ("" if v else " · ไม่หัก"))
+    elif not own and ctx.get("sso_list") and cells["sso"]["state"] == "carry":
+        cells["sso"] = {**cells["sso"], "note": f"ไม่มีชื่อใน {ctx['sso_list']} · {cells['sso']['note']}"}
     if drawn:                                                # the month's own list says it: on it (the amount), or on none of a complete one (0)
         cells["advance"] = drawn
     elif doubt and not own and (ctx["prev_failed"] or prev is None):
@@ -1726,7 +1732,8 @@ def build(src: dict, month: str, today: date) -> dict:
     before = [str(r["month"]) for r in sheets or [] if r.get("month") and str(r["month"]) < month]
     sheet = max(before) if before else None
     rules = {r["employee_id"]: r for r in src.get("rules") or []}
-    ctx = {"month": month, "start": start, "end": end, "upto": upto, "rules": rules, "rates": rates, "route": route, "scans": scans, "scan_count": scan_count, "fines": fines, "owed": owed,
+    sso_list = next((r.get("sso_source") for r in (rules or {}).values() if r and r.get("sso_source")), None)      # the สปส.1-10 list in use
+    ctx = {"month": month, "start": start, "end": end, "upto": upto, "rules": rules, "sso_list": sso_list, "rates": rates, "route": route, "scans": scans, "scan_count": scan_count, "fines": fines, "owed": owed,
            # the mid-month advance lists read from the drop box: who drew what (None = that read failed; a caller that never asked has none)
            "advance": advance_view(src.get("advance_files", []), employees),
            "split": {r["employee_id"] for r in src.get("split") or [] if r.get("money_split")},

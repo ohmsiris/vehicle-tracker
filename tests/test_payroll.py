@@ -1527,3 +1527,15 @@ def test_the_endpoint_is_gated(monkeypatch):
     assert bad.status_code == 400 and "เดือนไม่ถูกต้อง" in bad.json()["detail"]
     for path in ("/api/employees", "/api/loans", "/api/attendance", "/api/driver-days"):                 # the pay menu opens nothing else
         assert c.get(path, headers={"X-App-Token": "u_pay"}).status_code == 403
+
+
+def test_the_sso_list_replaces_the_stand_in():
+    # owner, 27 Nov 2026: the สปส.1-10 list gives each person's ปกส.; people not on it keep last sheet's figure, said in amber
+    people = [emp("A"), emp("B"), emp("C")]
+    rules = [{**rule("A"), "sso": 875, "sso_source": "สปส.1-10 ก.ย. 2569"}, {**rule("B"), "sso": 0, "sso_source": "สปส.1-10 ก.ย. 2569"}, rule("C")]
+    prevs = [prev("A", {"sso": 750}), prev("B", {"sso": 429}), prev("C", {"sso": 625})]
+    out = pw.build(src(employees=people, rules=rules, rates=[rate(p["id"]) for p in people], pay_prev=prevs), MONTH, TODAY)
+    a, b, c = (one(out, x)["cells"]["sso"] for x in "ABC")
+    assert a == {"state": "ok", "value": 875, "text": "875", "note": "ตาม สปส.1-10 ก.ย. 2569"}
+    assert b == {"state": "ok", "value": 0, "text": "0", "note": "ตาม สปส.1-10 ก.ย. 2569 · ไม่หัก"}
+    assert c["state"] == "carry" and c["value"] == 625 and c["note"].startswith("ไม่มีชื่อใน สปส.1-10 ก.ย. 2569 · ตามใบ HQ")
