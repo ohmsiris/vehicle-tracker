@@ -13,8 +13,15 @@ as "people to pay" someone who left earlier and only waits for savings (summary.
 
 The owner's decisions of 27 Nov 2026 are built in: the workbook's written rules are "the primary rules for now" and are shown as they are
 (RULES_*, the answer's "rules" and each person's "formula"); เบี้ยขยัน goes to drivers only; groups A, B, C are paid on sales AFTER the truck's
-fuel, so their trucks' fuel is an input like ทวาย's; สะสม follows HQ's latest sheet (confirmed, no longer a stand-in) while ปกส. and เบิกล่วงหน้า
-wait for him; สระบุรี OT is cash and stays out of pay; and แก่งคอย is set aside (HOLD_BRANCHES): its people stay listed, but out of every count.
+fuel, so their trucks' fuel is an input like ทวาย's; สะสม follows HQ's latest sheet (confirmed, no longer a stand-in) while ปกส. waits for him;
+สระบุรี OT is cash and stays out of pay; and แก่งคอย is set aside (HOLD_BRANCHES): its people stay listed, but out of every count.
+
+เบิกล่วงหน้า (27 Nov 2026) is read per person from the month's ใบเบิกกลางเดือน in the accounting drop box (inbox_files: the pages the AI read
+as an advance list -- never its petty-cash, fuel or cover pages --, lines of account 1500 with the staff code in their text). A person on
+a list has the list's amount; a person on no list has 0 only when every list of his branch adds up to the total written on it, agrees
+with the cover page's advance total, and every line found its one person -- otherwise HQ's last sheet goes on standing in, and the note
+says why. A person with two lines, or whose code was only guessed, is a stand-in to check. Lines that find nobody on the pay list are
+returned as "advance_unmatched".
 
 Who is on the list: company-paid people (employees.pay_group <> 'hq') who worked any day of the period, plus people who left earlier
 and still have savings to get back. Rules per person: employee_pay_rules (schema_v93.sql); the daily rate: employee_rates (app/rates.py).
@@ -30,6 +37,7 @@ import re
 import threading
 import time
 from datetime import date, timedelta
+from difflib import SequenceMatcher
 from typing import Callable, Optional
 
 import httpx
@@ -122,8 +130,7 @@ KINDS = [
     ("trip", "ค่าเที่ยว", "เที่ยว", "ตารางเที่ยว แก่งคอย", None, None, "ยังไม่มีที่ยืนยันค่าเที่ยวรายคนในระบบ"),
     ("nobonus", "งดเบี้ยขยัน", "งดเบี้ย", "เจ้าของตัดสินรายคน", None, None, "ยังไม่มีที่ลงในระบบ"),
     ("savings", "สะสม", "สะสม", "ใบสรุปเงินเดือน HQ ล่าสุด (เจ้าของยืนยัน 27/11/2026: หักตามใบ HQ)", None, None, ""),
-    ("advance", "เบิกล่วงหน้า", "เบิก", "ใบเบิกกลางเดือน", "#accounts-in", "ลงข้อมูล / แนบไฟล์",
-     "ระบบยังอ่านใบเบิกเป็นรายคนไม่ได้ — ใช้ยอดจากใบ HQ ล่าสุดแทน"),
+    ("advance", "เบิกล่วงหน้า", "เบิก", "ใบเบิกกลางเดือนในกล่องรับไฟล์ (อ่านรายคน) · ถ้ายังไม่มี ใช้ยอดจากใบ HQ ล่าสุดแทน", "#accounts-in", "ลงข้อมูล / แนบไฟล์", ""),
     ("loan", "เงินกู้ / ทำบัตร", "กู้", "เงินกู้ในระบบ (ตารางผ่อนของเดือนนี้)", "#loans", "เงินกู้", ""),
     ("common", "ส่วนกลาง", "ส่วนกลาง", "เขียนมือในใบเบิกกลางเดือน", None, None, "ยังไม่มีที่ลงในระบบ"),
     ("penalty", "เงินขาด / ความผิด", "ปรับ", "ใบเตือนที่มีค่าปรับ ลงวันที่ในงวด", "#documents", "ใบเตือน / บันทึกข้อความ",
@@ -167,6 +174,8 @@ SELECTS = {
     "fin_trip_tables": "id,employee_code,written_total,computed_total",
     "acc_docs": "batch,feed,branch,kind,page",
     "inbox_files": "id,kind,status,month,branches",
+    # the scans that were read: their pages as the AI read them, for the mid-month advance lists (nothing else of the preview)
+    "advance_files": "id,file_name,kind,status,month,branches,uploaded_at,booked_at,half:preview->half,pages:preview->ai_pages",
     "employee_documents": "id,employee_id,doc_date,status,penalty:content->penalty_amount",
 }
 
@@ -190,6 +199,19 @@ def _f(v) -> float:
         return float(v or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _amount(v) -> Optional[float]:
+    """A baht figure as a paper's reader gives it: a number, or text with commas and spaces ("3,000", " 6 000 ") -- None when there is
+    none or it cannot be read as a number (never a silent 0)."""
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(re.sub(r"[,\s]", "", str(v)))
+    except ValueError:
+        return None
 
 
 def dmy(d: date) -> str:
@@ -530,6 +552,413 @@ def cash_fuel_words(view: dict, labels: dict[int, str]) -> str:
     return "น้ำมันเงินสด: " + " · ".join(said[view["halves"][h]["state"]].format(labels[h]) for h in HALVES)
 
 
+# --------------------------------------------------------------------------------------------- the mid-month advance lists (pure)
+ADVANCE_ACCOUNT = "1500"                          # เงินเบิกล่วงหน้าพนักงาน in the drop box's chart (app/inbox_ai.py): what an advance-list line carries
+ADVANCE_READ = ("read", "booked")                 # a drop-box file whose pages can be used: read, or read and booked
+ADVANCE_NAME = "เบิกกลางเดือน"                    # a list whose heading says nothing more
+CODE_BRANCH = {prefix[3:]: branch for _key, prefix, _title, branch in SCAN_GROUPS}       # {"PD": "สระบุรี", "FR": "สระบุรี", "KK": "แก่งคอย"}
+# "SB-PD001", "sb - kk 073S", "SB-PO022" (a code the reader got wrong): SB, two letters or digits, the number
+CODE_RE = re.compile(r"(?<![A-Za-z])SB\s*[-–—_]?\s*([A-Za-z0-9]{2})\s*[-–—_]?\s*(\d{1,4})(?!\d)", re.I)
+NAME_TITLE_RE = re.compile(r"^(?:นางสาว|น\.\s*ส\.|นาง|นาย)\s*")
+TOTAL_RE = re.compile(r"^\s*(?:ยอด)?รวม|^\s*total", re.I)
+_TH_MONTH = (r"(?:มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม"
+             r"|ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)")
+TITLE_MONTH_RE = re.compile(r"\s*(?:ประจำ)?เดือน\s*(?:\d{1,2}\s*)?" + _TH_MONTH + r"\s*(?:\d{2,4})?\s*$")
+
+
+def read_code(text) -> tuple[Optional[str], str, str]:
+    """(the staff code, the rest of the text -- the name --, the code as written when it is not a staff code).
+    "นายทวาย กำจันทร์ SB-PD001" -> ("SB-PD001", "นายทวาย กำจันทร์", ""); "sb - kk 073S ทศพร" -> ("SB-KK073", "ทศพร", "");
+    "นายประสงค์ หลักทรัพย์ SB-PO022" -> (None, "นายประสงค์ หลักทรัพย์", "SB-PO022"); no code at all -> (None, the text, "")."""
+    text = str(text or "")
+    hits = list(CODE_RE.finditer(text))
+    m = next((h for h in hits if h.group(1).upper() in CODE_BRANCH), hits[0] if hits else None)
+    if not m:
+        return None, _norm(text), ""
+    end = m.end()
+
+    def latin(i: int) -> bool:
+        return i < len(text) and text[i].isascii() and text[i].isalnum()
+    if latin(end) and not latin(end + 1):                    # "SB-KK073S": one stray letter after the number
+        end += 1
+    name = _norm(re.sub(r"\(\s*\)", " ", f"{text[:m.start()]} {text[end:]}")).strip(" -–—:,")
+    prefix = m.group(1).upper()
+    if prefix in CODE_BRANCH:
+        return f"SB-{prefix}{int(m.group(2)):03d}", name, ""
+    return None, name, f"SB-{prefix}{m.group(2)}"
+
+
+def name_key(name) -> str:
+    """A person's name as two papers can share it: no title, no bracket, single spaces ("นายประสงค์  หลักทรัพย์" -> "ประสงค์ หลักทรัพย์")."""
+    return NAME_TITLE_RE.sub("", _norm(re.sub(r"\(.*?\)|\(.*$", " ", str(name or "")))).strip().lower()
+
+
+def short_name(file_name) -> str:
+    """A file as a note names it: without its ending, cut when very long."""
+    stem = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", _norm(file_name))
+    return stem if len(stem) <= 48 else stem[:47] + "…"
+
+
+def list_name(title) -> str:
+    """The part of a page's heading that tells one list from another: "รายการเบิกกลางเดือน : พนักงานขับรถ เดือน ตุลาคม 2569" ->
+    "พนักงานขับรถ" (the month is dropped: HQ forgets to change it, and it must not split a list)."""
+    t = TITLE_MONTH_RE.sub("", _norm(title))
+    if ":" in t:
+        t = t.split(":", 1)[1]
+    return _norm(t)
+
+
+def _list_key(name: str) -> str:
+    return re.sub(r"[\s:/.,()+\-]", "", name).lower()
+
+
+def _same_list(a: str, b: str) -> bool:
+    """Two headings of one list: the same once spaces and marks are gone, or nearly (the reader spells a heading two ways)."""
+    return a == b or (bool(a) and bool(b) and SequenceMatcher(None, a, b).ratio() >= 0.8)
+
+
+def page_lines(page: dict) -> list[dict]:
+    """The advance lines of one read page: account 1500 with a positive amount -- {code, raw, name, amount, unsure, via}. The staff
+    code comes from the line's text; a line without one takes it from the page's own list of codes only when that list has exactly
+    one staff code per line, in order, and agrees with every line that does carry a code (via = "page": a guess by position, so
+    the person is to be checked and nobody of the branch is told "you drew nothing" -- advance_view). A typed total among the
+    lines ("รวม 111,000") is not a person. An amount that came as text ("3,000") is read as the number it is."""
+    rows = []
+    for ln in page.get("lines") or []:
+        if not isinstance(ln, dict) or str(ln.get("account") or "").strip() != ADVANCE_ACCOUNT or (_amount(ln.get("amount")) or 0) <= 0:
+            continue
+        code, name, raw = read_code(ln.get("text"))
+        rows.append({"code": code, "raw": raw, "name": name, "amount": round(_amount(ln["amount"]), 2), "unsure": bool(ln.get("unsure")), "via": "text" if code else ""})
+    written = _amount(page.get("written_total"))
+    for r in [r for r in rows if not r["code"] and not r["raw"] and TOTAL_RE.search(r["name"])]:
+        rest = sum(x["amount"] for x in rows if x is not r)
+        if abs(r["amount"] - rest) <= 1 or (written is not None and abs(r["amount"] - written) <= 1):
+            rows.remove(r)
+    listed = [read_code(c)[0] for c in page.get("employee_codes") or []]
+    if any(not r["code"] for r in rows) and len(listed) == len(rows) and all(listed) and all(not r["code"] or r["code"] == c for r, c in zip(rows, listed)):
+        for r, c in zip(rows, listed):
+            if not r["code"]:
+                r.update(code=c, raw="", via="page")
+    return rows
+
+
+def page_blanks(page: dict) -> int:
+    """How many advance lines of a page (account 1500) carry no amount that can be used: none, 0, or text that is no number."""
+    return sum(1 for ln in page.get("lines") or [] if isinstance(ln, dict) and str(ln.get("account") or "").strip() == ADVANCE_ACCOUNT
+               and (_amount(ln.get("amount")) or 0) <= 0)
+
+
+def list_check(pages: list[dict], sums: list[float]) -> tuple[bool, Optional[float], str]:
+    """Do the lines read from a list add up to the total written on it (within 1 baht)? (complete, that total, why not).
+    pages = the list's read pages in order, sums = what was read from each. HQ's lists write totals two ways, and both are taken:
+    a grand (running) total at the foot of the last page (drivers 11/2026: nothing on page 1, 111,000 on page 2), or a total per page
+    (factory 11/2026: 84,000 and 57,000 -- and then 144,000, the grand total, on the last). Only a total WRITTEN on the paper counts:
+    a figure in the reader's own summary of the page may be its sum of the lines it managed to read, which proves nothing. A list with
+    no written total cannot be confirmed. When it does not add up, lines whose amount could not be read are said as well."""
+    read = round(sum(sums), 2)
+    wrote = [_amount(p.get("written_total")) for p in pages]
+    last = wrote[-1] if wrote else None
+    if last is not None and abs(last - read) <= 1:
+        return True, last, ""
+    if wrote and all(w is not None and abs(w - s) <= 1 for w, s in zip(wrote, sums)):
+        return True, round(sum(w for w in wrote if w is not None), 2), ""
+    blanks = sum(page_blanks(p) for p in pages)
+    more = f" · มี {blanks} บรรทัดที่ไม่มียอดหรืออ่านยอดไม่ได้" if blanks else ""
+    if last is None:
+        return False, None, f"อ่านได้ {money(read)} แต่ไม่มียอดรวมเขียนไว้ให้เทียบ{more}"
+    return False, last, f"อ่านได้ {money(read)} เขียนไว้ {money(last)}{more}"
+
+
+def advance_lists(files: Optional[list[dict]]) -> list[dict]:
+    """The month's mid-month advance lists, from the drop box's rows of the month (inbox_files; the read pages under "pages", or as
+    the table has them under preview.ai_pages). Pure. One entry per list -- the pages of one file that share a heading (drivers /
+    factory ...): {file, short, file_id, order, status, branch, name, title, pages, lines, total, written, complete, why, named,
+    cover, cover_why}; each line {code, raw, name, amount, unsure, via, file, short, branch, page, title, list}. named = every staff
+    code the list's pages carry, with an amount or not (HQ prints everyone's name and leaves the amount empty for a person who
+    draws nothing). complete = the lines add up to the total written on the list (list_check) and no page of the file failed to read.
+    cover = the mid-month advance total on the file's cover page (cover_parts.advance; None without one); cover_why = what to say
+    when that is not what the file's lists add up to (a page of a list is missing from the scan, or was read as something else).
+    Only the pages that ARE an advance list count (page_kind "advance"): a line of account 1500 on a petty-cash, fuel or cover page
+    is not the mid-month list and is nobody's mid-month advance. Only files that were read count (read / booked), and never the
+    end-of-month file: it carries the SIGNED copies of the same lists (app/inbox_ai.py books them once, from the mid-month file).
+    The same list in two files (uploaded twice) is taken once, from the booked one, else the newest -- and is not complete when
+    the two do not say the same."""
+    ranked = sorted(files or [], key=lambda f: str(f.get("uploaded_at") or ""), reverse=True)
+    ranked.sort(key=lambda f: f.get("status") != "booked")           # stable: booked first, the newest first among equals
+    out: list = []
+    for order, f in enumerate(ranked):
+        preview = f.get("preview") if isinstance(f.get("preview"), dict) else {}
+        if f.get("status") not in ADVANCE_READ or (f.get("half") or preview.get("half")) == "end":
+            continue
+        pages = f.get("pages") if f.get("pages") is not None else preview.get("ai_pages")
+        pages = sorted((p for p in pages or [] if isinstance(p, dict)), key=lambda p: _f(p.get("n")))
+        groups: list = []                                             # {key, name, title, pages: [(page, its lines)]}
+        for p in pages:
+            if p.get("page_kind") != "advance":                       # petty cash, fuel, the cover: not the list, whatever account a line has
+                continue
+            name = list_name(p.get("title"))
+            key = _list_key(name)
+            g = next((g for g in groups if _same_list(g["key"], key)), None)
+            if g is None:
+                g = {"key": key, "name": name, "title": _norm(p.get("title")), "pages": []}
+                groups.append(g)
+            g["pages"].append((p, page_lines(p)))
+        failed = [p.get("n") for p in pages if p.get("page_kind") == "error"]
+        named = [b for b in f.get("branches") or [] if b in BRANCHES]
+        # the cover page's own figure for the advances: written apart from the lists, so it shows a list page that is not in the scan
+        covers = [a for p in pages if p.get("page_kind") == "cover" and isinstance(p.get("cover_parts"), dict)
+                  for a in [_amount(p["cover_parts"].get("advance"))] if a and a > 0]
+        read = round(sum(ln["amount"] for g in groups for _p, got in g["pages"] for ln in got), 2)
+        cover = next((a for a in covers if abs(a - read) <= 1), covers[0] if covers else None)
+        cover_why = f"ใบปกเขียนยอดเบิกกลางเดือน {money(cover)} แต่อ่านจากรายชื่อได้ {money(read)}" if cover is not None and abs(cover - read) > 1 else ""
+        for g in groups:
+            lines = [ln for _p, got in g["pages"] for ln in got]
+            votes = [CODE_BRANCH[ln["code"][3:5]] for ln in lines if ln["code"]]
+            branch = named[0] if len(named) == 1 else (max(sorted(set(votes)), key=votes.count) if votes else None)
+            name = g["name"] or ADVANCE_NAME
+            complete, written, why = list_check([p for p, _got in g["pages"]], [sum(ln["amount"] for ln in got) for _p, got in g["pages"]])
+            if failed:
+                complete, why = False, "อ่านไม่สำเร็จ หน้า " + ", ".join(str(n) for n in failed)
+            twin = next((x for x in out if x["order"] != order and x["branch"] == branch and _same_list(_list_key(x["name"]), _list_key(name))), None)
+            if twin:                                                  # the same list, uploaded twice: taken once
+                if sorted((ln["code"] or ln["name"], ln["amount"]) for ln in lines) != sorted((ln["code"] or ln["name"], ln["amount"]) for ln in twin["lines"]):
+                    twin.update(complete=False, why=f"มีใบเบิกชุดเดียวกัน 2 ไฟล์ที่รายชื่อไม่ตรงกัน ({short_name(f.get('file_name'))})")
+                continue
+            entry = {"file": _norm(f.get("file_name")), "short": short_name(f.get("file_name")), "file_id": f.get("id"), "order": order, "status": f.get("status"),
+                     "branch": branch, "name": name, "title": g["title"], "pages": [p.get("n") for p, _got in g["pages"]],
+                     "total": round(sum(ln["amount"] for ln in lines), 2), "written": written, "complete": complete, "why": why,
+                     "cover": cover, "cover_why": cover_why,
+                     "named": sorted({c for p, _got in g["pages"] for c in (read_code(x)[0] for x in p.get("employee_codes") or []) if c}
+                                     | {ln["code"] for ln in lines if ln["code"]})}
+            entry["lines"] = [{**ln, "file": entry["file"], "short": entry["short"], "branch": branch, "page": p.get("n"), "title": _norm(p.get("title")),
+                               "list": name} for p, got in g["pages"] for ln in got]
+            out.append(entry)
+    out.sort(key=lambda x: (BRANCHES.index(x["branch"]) if x["branch"] in BRANCHES else 9, x["file"], _f(x["pages"][0] if x["pages"] else 0)))
+    return out
+
+
+def no_advance(failed: bool = False) -> dict:
+    """What advance_view gives for a month with no list at all (failed = the drop box could not be read)."""
+    return {"lists": [], "by_person": {}, "branches": {}, "clashed": {}, "failed": failed}
+
+
+def advance_view(files: Optional[list[dict]], employees: list[dict]) -> dict:
+    """Who drew what: {lists (advance_lists, each line now with "employee" = an id or None, "how" and "clash"), by_person {employee
+    id: his lines}, branches {branch: {lists, people, total, booked, files, why, complete, named, kinds}}, failed}. files = None: the
+    drop box could not be read. named = the staff codes the branch's lists carry; kinds = the code prefixes among them ("PD", "FR"):
+    a list of the drivers says nothing about the factory's people.
+    A line finds its person by the staff code. A line whose code names nobody -- none, one that is no staff code ("SB-PO022"), one
+    the staff list does not have -- finds him by his full name instead (first name and surname, title dropped, the only employee of
+    that name): how = "name". A code that names one person beside the full name of another goes to the name, with "clash" = that
+    code: the two disagree, so it is to be checked -- and the code's own person (clashed {his id: the name on the line}) is not told
+    "you drew nothing" either.
+    A branch is complete -- so a person of it who is on no list drew nothing -- only when each of its lists is, every line of
+    its lists found an employee (a line that found nobody may be any of the people who seem to be on no list), nobody has two lines
+    (HQ's list has one line a person: a second one is far more likely another person's line with the code misread), no line got
+    its code by position from the page's code list, and the cover page's advance total -- when the file has one -- is what the
+    lists add up to. Each failing is a reason in the branch's `why`."""
+    if files is None:
+        return no_advance(failed=True)
+    lists = advance_lists(files)
+    by_code: dict = {}
+    names: dict = {}
+    for e in sorted(employees, key=lambda e: e.get("status") != "active"):       # a code used twice: the one still working
+        code = read_code(e.get("code"))[0] or (e.get("code") or "").upper()
+        if code:
+            by_code.setdefault(code, e)
+        key = name_key(e.get("full_name"))
+        if " " in key:                                               # a first name and a surname: a nickname alone proves nothing
+            names.setdefault(key, []).append(e)
+    by_person: dict = {}
+    clashed: dict = {}
+    for lst in lists:
+        lst["nobody"] = 0
+        for ln in lst["lines"]:
+            e = by_code.get(ln["code"]) if ln["code"] else None
+            same = names.get(name_key(ln["name"])) or []
+            named = same[0] if len(same) == 1 else None
+            if named is not None and (e is None or named["id"] != e["id"]):
+                ln.update(how="name", clash=(e.get("code") or "") if e else "")
+                if e:
+                    clashed[e["id"]] = ln["name"]
+                e = named
+            else:
+                ln.update(how="code" if e else "", clash="")
+            ln["employee"] = e["id"] if e else None
+            if e:
+                by_person.setdefault(e["id"], []).append(ln)
+            else:
+                lst["nobody"] += 1
+    branches: dict = {}
+    for lst in lists:
+        if not lst["branch"]:
+            continue
+        b = branches.setdefault(lst["branch"], {"lists": [], "people": 0, "total": 0.0, "booked": True, "files": [], "why": [], "named": set()})
+        b["named"].update(lst["named"])
+        b["people"] += len(lst["lines"])
+        b["total"] = round(b["total"] + lst["total"], 2)
+        b["booked"] = b["booked"] and lst["status"] == "booked"
+        if lst["short"] not in b["files"]:
+            b["files"].append(lst["short"])
+        b["lists"].append(lst)
+        if not lst["complete"]:
+            b["why"].append(f"{lst['name']}: {lst['why']}")
+        if lst["nobody"]:
+            b["why"].append(f"{lst['name']}: มี {lst['nobody']} บรรทัดที่จับคู่กับพนักงานไม่ได้")
+        guessed = sum(1 for ln in lst["lines"] if ln["via"] == "page")
+        if guessed:
+            b["why"].append(f"{lst['name']}: มี {guessed} บรรทัดที่ไม่มีรหัส ใช้รหัสตามลำดับในหน้า")
+        if lst["cover_why"] and lst["cover_why"] not in b["why"]:
+            b["why"].append(lst["cover_why"])
+    for b in branches.values():
+        seen: dict = {}                                               # a person (else a code that found nobody) -> his lines on the branch's lists
+        for lst in b["lists"]:
+            for ln in lst["lines"]:
+                key = ln["employee"] or ln["code"] or ln["raw"]
+                if key:
+                    seen.setdefault(key, []).append(ln)
+        for got in seen.values():
+            if len(got) > 1:
+                code = got[0]["code"] or got[0]["raw"]
+                b["why"].append((f"รหัส {code}" if code else got[0]["name"]) + f" มี {len(got)} บรรทัด อาจอ่านรหัสผิด")
+        b["complete"] = not b["why"]
+        b["kinds"] = {c[3:5] for c in b["named"]}
+    return {"lists": lists, "by_person": by_person, "branches": branches, "clashed": clashed, "failed": False}
+
+
+def before_words(prev: Optional[dict], month: str) -> tuple[Optional[float], str]:
+    """(the advance on the person's latest HQ sheet, how a note says it): (3000.0, "เดือนก่อน 3,000"), (0.0, "เดือนก่อนไม่ได้เบิก"),
+    "ใบ HQ 09/2026 3,000" for a sheet older than last month's; (None, "") for someone on no sheet."""
+    if not prev:
+        return None, ""
+    amount = round(_f((prev.get("deductions") or {}).get("advance")), 2)
+    if prev.get("month") == add_month(month, -1):
+        return amount, f"เดือนก่อน {money(amount)}" if amount > 0 else "เดือนก่อนไม่ได้เบิก"
+    return amount, f"ใบ HQ {my(prev['month'])} " + (money(amount) if amount > 0 else "ไม่ได้เบิก")
+
+
+def advance_cell(p: dict, ctx: dict, prev: Optional[dict]) -> tuple[Optional[dict], str]:
+    """(the เบิกล่วงหน้า cell the month's lists give this person, else None; what to say in place of "waiting for the list" when the
+    lists are there but cannot settle him).
+    On a list: its amount, ok; a stand-in while a line is marked unsure, his code and his name disagree, he has two lines (the sum
+    is shown: one of them is probably someone else's, the code misread) or his code was only guessed from the page's code list.
+    With no amount on any list while every list of his branch is complete: 0, ok -- the note says whether a list names him
+    without an amount or not at all. Not when no list of the branch is about his kind of staff (his code's prefix): a file with the
+    drivers' list alone says nothing about the factory. A branch with no list: (None, "") -- nothing changes."""
+    adv = ctx["advance"]
+    if adv["failed"]:
+        return None, "โหลดใบเบิกกลางเดือนไม่สำเร็จ"
+    lines = adv["by_person"].get(p["id"]) or []
+    was, said = before_words(prev, ctx["month"])
+    if lines:
+        total = round(sum(ln["amount"] for ln in lines), 2)
+        notes = ["ตามใบเบิกกลางเดือน " + ", ".join(dict.fromkeys(ln["short"] for ln in lines))]
+        state = "ok"
+        if len(lines) > 1:                                    # one line a person on HQ's list: a second is to be checked, never a green sum
+            state = "carry"
+            notes.append(f"มีชื่อ {len(lines)} บรรทัด ({' + '.join(money(ln['amount']) for ln in lines)}) อาจอ่านรหัสผิด ต้องตรวจกับใบเบิก")
+        if any(ln["unsure"] for ln in lines):
+            state = "carry"
+            notes.append("อ่านไม่ชัด ต้องตรวจกับใบเบิก")
+        for ln in lines:
+            if ln["clash"]:
+                state = "carry"
+                notes.append(f"รหัสในใบ ({ln['clash']}) เป็นของคนอื่น จับคู่จากชื่อ ต้องตรวจ")
+            elif ln["how"] == "name":
+                notes.append(f"จับคู่จากชื่อ (รหัสในใบอ่านเป็น {ln['raw'] or ln['code']})" if ln["raw"] or ln["code"] else "จับคู่จากชื่อ (ในใบไม่มีรหัส)")
+            elif ln["via"] == "page":
+                state = "carry"
+                notes.append("ในบรรทัดไม่มีรหัส ใช้รหัสตามลำดับในหน้า ต้องตรวจกับใบเบิก")
+        if was is not None and was != total:
+            notes.append(said)
+        return cell(state, total, money(total), " · ".join(notes)), ""
+    b = adv["branches"].get(p.get("branch"))
+    if not b:
+        return None, ""
+    code = read_code(p.get("code"))[0] or ""
+    if p["id"] in adv["clashed"]:
+        return None, f"ในใบเบิกกลางเดือนมีรหัส {code or 'ของคนนี้'} แต่ชื่อเป็น {adv['clashed'][p['id']]} — ต้องตรวจว่าใครเบิก"
+    if code[3:5] not in b["kinds"]:
+        return None, f"ใบเบิกกลางเดือนที่มีอยู่ไม่มีรายชื่อกลุ่มรหัส {code[:5] or 'ของคนนี้'} — ยังยืนยันไม่ได้ว่าไม่ได้เบิก"
+    if b["complete"]:
+        words = "มีชื่อในใบเบิกกลางเดือน แต่ไม่มียอดเบิก — ไม่ได้เบิก" if code in b["named"] else "ไม่มีชื่อในใบเบิกกลางเดือน — ไม่ได้เบิก"
+        return cell("ok", 0, "0", words + (f" · {said}" if was else "")), ""
+    more = f" และอีก {len(b['why']) - 1} เรื่อง" if len(b["why"]) > 1 else ""
+    return None, f"ไม่มียอดเบิกในใบเบิกกลางเดือน แต่ยังยืนยันไม่ได้ว่าใบเบิกครบ ({b['why'][0]}{more})"
+
+
+def advance_unmatched(adv: dict, rows: list[dict], employees: list[dict]) -> list[dict]:
+    """The lines of the lists that are nobody's on the pay list: [{who, amount, file, why}] -- no code, a code the staff list does not
+    have, someone who left, someone HQ pays. who = what the list itself writes, as "<code> <name>"."""
+    paid = {p["id"] for p in rows if p["status"]["key"] != "left_before"}
+    waits = {p["id"] for p in rows if p["status"]["key"] == "left_before"}
+    by_id = {e["id"]: e for e in employees}
+    out = []
+    for lst in adv["lists"]:
+        for ln in lst["lines"]:
+            if ln["employee"] in paid:
+                continue
+            e = by_id.get(ln["employee"])
+            ed = _d(e.get("end_date")) if e else None
+            if e is None:
+                why = f"รหัส {ln['raw']} ไม่ใช่รหัสพนักงาน" if ln["raw"] else "ไม่มีรหัสนี้ในรายชื่อพนักงาน" if ln["code"] else "ไม่มีรหัสพนักงานในบรรทัด"
+            elif e["id"] in waits:
+                why = "ลาออกแล้ว รอคืนเงินสะสม"
+            elif (e.get("pay_group") or "company") == "hq":
+                why = "HQ จ่ายเอง"
+            elif e.get("status") == "resigned":
+                why = "ลาออกแล้ว" + (f" (วันสุดท้าย {dmy(ed)})" if ed else "")
+            else:
+                why = "ไม่อยู่ในรายชื่อจ่ายเงินงวดนี้"
+            more = []
+            if e is not None and name_key(ln["name"]).split(" ")[0] != name_key(e.get("full_name")).split(" ")[0]:
+                more.append(f"ในระบบ {e.get('code') or ''} คือ {_norm(e.get('full_name'))}")       # the list and the staff list name two people
+            if ln["unsure"]:
+                more.append("อ่านไม่ชัด")
+            out.append({"who": f"{ln['code'] or ln['raw'] or ''} {ln['name']}".strip(), "amount": ln["amount"], "file": lst["file"], "why": " · ".join([why] + more)})
+    return out
+
+
+def advance_line(adv: dict, pages: Optional[dict]) -> tuple[str, str]:
+    """(state, words) of the "ใบเบิกกลางเดือน" line, branch by branch: booked in the drop box = ok; read but not booked = warn (it
+    says so); nothing = bad. A list that cannot be confirmed complete is a warn as well. pages = {branch: pages booked} of the older
+    way (the scripts' acc_docs), which still counts for a branch with no file in the drop box. A branch that is set aside is not
+    waited for: what it has is said after its "พักไว้ก่อน", and asks for nothing."""
+    have, lack, aside, tones = [], [], [], []
+    for b in BRANCHES:
+        got, n = adv["branches"].get(b), (pages or {}).get(b)
+        words, tone = "", "bad"
+        if got:
+            words = f"{'ลงบัญชีแล้ว' if got['booked'] else 'อ่านแล้ว'} {got['people']:,} คน {money(got['total'])} บาท"
+            tone = "ok" if got["booked"] and got["complete"] else "warn"
+            if not held(b):
+                words += ("" if got["booked"] else " · ยังไม่ได้กดลงบัญชีในกล่องรับไฟล์") + ("" if got["complete"] else f" · ยังยืนยันไม่ได้ว่าครบ ({got['why'][0]})")
+        elif n:
+            words, tone = f"{n} หน้า", "ok"
+        if held(b):
+            aside.append(f"{b}พักไว้ก่อน" + (f" {words}" if words else ""))
+        elif words:
+            have.append(f"{b} {words}")
+            tones.append(tone)
+        else:
+            lack.append(b)
+            tones.append("bad")
+    if not have and not any(" " in a for a in aside):
+        return "bad", "ยังไม่ได้อัปโหลด"
+    state = "bad" if tones and all(t == "bad" for t in tones) else "warn" if any(t != "ok" for t in tones) else "ok"
+    return state, " · ".join(have + (["ยังไม่มี: " + ", ".join(lack)] if lack else []) + aside)
+
+
+def advance_source(adv: dict) -> str:
+    """The เบิกล่วงหน้า kind's source line once lists are in: which lists were read, with how many people and how much on each."""
+    parts = []
+    for b in BRANCHES:
+        got = adv["branches"].get(b)
+        if got and not held(b) and got["lists"]:
+            parts.append(f"{b}: " + ", ".join(f"{x['name']} {len(x['lines']):,} คน {money(x['total'])}" + ("" if x["complete"] else " (ยังยืนยันยอดไม่ได้)") for x in got["lists"]))
+    return "ใบเบิกกลางเดือนที่อ่านจากกล่องรับไฟล์ — " + " · ".join(parts) if parts else ""
+
+
 # --------------------------------------------------------------------------------------------- the cells of one person (pure)
 def rate_spans(rates: list[dict], first: date, last: date) -> list[tuple]:
     """The daily rate across a person's days of the period, in order: [(baht or None, from, to)] -- one span, unless a rate starts
@@ -788,6 +1217,8 @@ def build_person(p: dict, ctx: dict) -> dict:
 
     # ---- deductions: HQ's own sheet of the month when there is one, else the latest sheet before it as the stand-in
     fines = ctx["fines"].get(p["id"], [])
+    # เบิกล่วงหน้า from the month's own lists (never for a month HQ already worked out): the cell, or why the lists cannot settle him
+    drawn, doubt = (None, "") if own else advance_cell(p, ctx, prev)
     if own:
         said = f"ตามใบ HQ {my(own['month'])} (HQ คิดงวดนี้แล้ว)"
         for key in ("savings", "advance", "common", "other", "sso"):
@@ -806,10 +1237,10 @@ def build_person(p: dict, ctx: dict) -> dict:
         latest = prev["month"] == ctx["sheet"]
         said = f"ตามใบ HQ {my(prev['month'])}" + ("" if latest else f" (ไม่มีชื่อในใบ {my(ctx['sheet'])})")
         listed = bool((ctx["advance_in"] or {}).get(p.get("branch")))                 # the branch's mid-month list is booked (as pages, not per person)
-        wait = ("มีใบเบิกแล้ว แต่ระบบยังอ่านรายคนไม่ได้ · " if listed else "") + WAIT_ADVANCE
+        wait = doubt or ("มีใบเบิกแล้ว แต่ระบบยังอ่านรายคนไม่ได้ · " if listed else "") + WAIT_ADVANCE
         if _f(deds.get("advance")) > 0:
             cells["advance"] = cell("carry", _f(deds["advance"]), money(deds["advance"]), f"{said} · {wait}")
-        elif not listed:                                     # who draws changes every month: "none last month" is not "none this month"
+        elif doubt or not listed:                            # who draws changes every month: "none last month" is not "none this month"
             cells["advance"] = cell("carry", 0, "0", f"ใบ HQ {my(prev['month'])} ไม่ได้เบิก · {wait}")
         if _f(deds.get("savings")) > 0:                      # owner, 27 Nov 2026: สะสม follows HQ's latest sheet -- confirmed, no stand-in
             cells["savings"] = (cell("ok", _f(deds["savings"]), money(deds["savings"]), f"{said} (เจ้าของยืนยัน)") if latest
@@ -818,6 +1249,10 @@ def build_person(p: dict, ctx: dict) -> dict:
             cells["sso"] = cell("carry", _f(deds["sso"]), money(deds["sso"]), f"{said} · {WAIT_SSO}")
         if _f(deds.get("common")) > 0:
             cells["common"] = cell("miss", note=f"ใบ HQ {my(prev['month'])} หัก {money(deds['common'])} บาท · เปลี่ยนทุกเดือน ต้องใส่ใหม่")
+    if drawn:                                                # the month's own list says it: on it (the amount), or on none of a complete one (0)
+        cells["advance"] = drawn
+    elif doubt and not own and (ctx["prev_failed"] or prev is None):
+        cells["advance"] = {**cells["advance"], "note": f"{cells['advance']['note']} · {doubt}"}
     card = _f(((prev or own or {}).get("deductions") or {}).get("card"))
     cells["loan"] = loan_cell(ctx["loans"].get(p["id"], []), card)                    # ทำบัตร of the last sheet IS this loan: never both
     if fines:
@@ -917,6 +1352,8 @@ def kind_notes(ctx: dict) -> dict[str, str]:
         return {}
     out = {"nobonus": "ยังไม่รู้ว่างดของใคร", "other": "ยังไม่รู้ว่ามีของใคร"}
     papers, advance = ctx["papers_in"], ctx["advance_in"]
+    if ctx["advance"]["branches"]:                           # a list read from the drop box is in, booked or not
+        advance = {b: (advance or {}).get(b) or (1 if b in ctx["advance"]["branches"] else 0) for b in BRANCHES}
     branches = [b for b in BRANCHES if not held(b)]          # a branch that is set aside is not waited for
     if papers is None or not all(papers.get(b) for b in branches):
         out["penalty"] = "ยังไม่ได้อัปโหลดเอกสารสิ้นเดือนครบ จึงยังไม่รู้ว่ามีใบเตือน / เงินขาดหรือไม่"
@@ -1055,12 +1492,19 @@ def build_files(people: list[dict], src: dict, ctx: dict, month: str) -> list[di
     waiting = sum(1 for f in inbox if f.get("kind") == "scan" and f.get("status") in WAITING)       # a file kept on purpose ("stored") is not waiting
     broken = sum(1 for f in inbox if f.get("kind") == "scan" and f.get("status") == "failed")
     wait_words = (f" · มี {waiting} ไฟล์สแกนในกล่องรับไฟล์ ยังไม่ได้ลง" if waiting else "") + (f" · อ่านไม่สำเร็จ {broken} ไฟล์" if broken else "")
-    if docs is None:
+    # the mid-month advance lists: read per person from the drop box (advance_line); the older way's booked pages still count
+    adv = ctx["advance"]
+    if adv["failed"] or (docs is None and not adv["branches"]):
         out.append(_file("advance_list", "ใบเบิกกลางเดือน", "bad", "โหลดไม่สำเร็จ", "#accounts-in", "ลงข้อมูล / แนบไฟล์"))
+    else:
+        state, words = advance_line(adv, doc_pages(docs, "advance"))
+        mine = {x["file_id"] for x in adv["lists"]}           # a list that was read is said by the line itself, not as "a file waiting"
+        others = sum(1 for f in inbox if f.get("kind") == "scan" and f.get("status") in WAITING and f.get("id") not in mine)
+        tail = (f" · มี {others} ไฟล์สแกนในกล่องรับไฟล์ ยังไม่ได้ลง" if others else "") + (f" · อ่านไม่สำเร็จ {broken} ไฟล์" if broken else "")
+        out.append(_file("advance_list", "ใบเบิกกลางเดือน", state, words + (tail if state != "ok" else ""), "#accounts-in", "ลงข้อมูล / แนบไฟล์"))
+    if docs is None:
         out.append(_file("month_papers", "เอกสารสิ้นเดือน (ใบสรุปสิ้นเดือน)", "bad", "โหลดไม่สำเร็จ", "#accounts-in", "ลงข้อมูล / แนบไฟล์"))
     else:
-        state, words = _by_branch(doc_pages(docs, "advance"), "หน้า")
-        out.append(_file("advance_list", "ใบเบิกกลางเดือน", state, words + (wait_words if state != "ok" else ""), "#accounts-in", "ลงข้อมูล / แนบไฟล์"))
         state, words = _by_branch(doc_pages(docs, "endmonth"), "หน้า")
         out.append(_file("month_papers", "เอกสารสิ้นเดือน (ใบสรุปสิ้นเดือน)", state, words + (wait_words if state != "ok" else ""), "#accounts-in", "ลงข้อมูล / แนบไฟล์"))
     # ---- fuel: both lines now carry the pay of every route driver paid after fuel (A, B, C) as well as ทวาย's ซอง
@@ -1202,11 +1646,23 @@ def build_decisions(people: list[dict], ctx: dict) -> list[dict]:
                 "detail": "HQ นับเป็น 1 วันเต็ม (ไม่เคยจ่ายครึ่งวัน) — ต้องตกลงก่อนใช้สแกนนิ้วสรุปเป็นวันทำงาน"})
     # what the owner said he would bring: shown while a stand-in is still in its place
     waiting = []
-    for key, title, what in (("sso", "ปกส.: เจ้าของกำลังตรวจ", "รอเจ้าของตรวจและแจ้งยอดของงวดนี้"),
-                             ("advance", "เบิกล่วงหน้า: รอรายชื่อจากเจ้าของ", "รอรายชื่อคนเบิกของงวดนี้จากเจ้าของ")):
-        standing = sum(1 for p in worked if p["cells"][key]["state"] == "carry")
-        if standing:
-            waiting.append({"title": title, "detail": f"ตอนนี้ใช้ยอดจากใบ HQ ล่าสุดแทน {standing:,} คน — {what}"})
+    standing = sum(1 for p in worked if p["cells"]["sso"]["state"] == "carry")
+    if standing:
+        waiting.append({"title": "ปกส.: เจ้าของกำลังตรวจ", "detail": f"ตอนนี้ใช้ยอดจากใบ HQ ล่าสุดแทน {standing:,} คน — รอเจ้าของตรวจและแจ้งยอดของงวดนี้"})
+    # เบิกล่วงหน้า: gone once every counted person's advance is this month's own. Until then: the branch's list is still to come, or it
+    # was read and some people cannot be settled from it (an unclear line, a total that does not add up, a list that is not all there)
+    adv = ctx["advance"]
+    carried = [p for p in worked if p["cells"]["advance"]["state"] == "carry"]
+    absent = [p for p in carried if p["branch"] not in adv["branches"] and p["id"] not in adv["by_person"]]
+    if carried and len(absent) == len(carried):
+        waiting.append({"title": "เบิกล่วงหน้า: รอรายชื่อจากเจ้าของ",
+                        "detail": f"ตอนนี้ใช้ยอดจากใบ HQ ล่าสุดแทน {len(carried):,} คน — รอรายชื่อคนเบิกของงวดนี้จากเจ้าของ"})
+    elif carried:
+        check = [p for p in carried if p not in absent]
+        names = ": " + ", ".join(_who(p) for p in check) if len(check) <= 4 else ""
+        waiting.append({"title": "เบิกล่วงหน้า: รอเจ้าของตรวจกับใบเบิก",
+                        "detail": f"อ่านใบเบิกกลางเดือนแล้ว แต่ยังยืนยันไม่ได้ {len(check):,} คน{names} (อ่านไม่ชัด ยอดรวมไม่ตรง หรือรายชื่อไม่ครบ) — ต้องตรวจกับใบจริง"
+                                  + (f" · อีก {len(absent):,} คนยังไม่มีใบเบิกของสาขา ใช้ยอดจากใบ HQ ล่าสุดแทน" if absent else "")})
     return [{**d, "wait": False} for d in out[:10 - len(waiting)]] + [{**d, "wait": True} for d in waiting]
 
 
@@ -1270,7 +1726,9 @@ def build(src: dict, month: str, today: date) -> dict:
     before = [str(r["month"]) for r in sheets or [] if r.get("month") and str(r["month"]) < month]
     sheet = max(before) if before else None
     rules = {r["employee_id"]: r for r in src.get("rules") or []}
-    ctx = {"start": start, "end": end, "upto": upto, "rules": rules, "rates": rates, "route": route, "scans": scans, "scan_count": scan_count, "fines": fines, "owed": owed,
+    ctx = {"month": month, "start": start, "end": end, "upto": upto, "rules": rules, "rates": rates, "route": route, "scans": scans, "scan_count": scan_count, "fines": fines, "owed": owed,
+           # the mid-month advance lists read from the drop box: who drew what (None = that read failed; a caller that never asked has none)
+           "advance": advance_view(src.get("advance_files", []), employees),
            "split": {r["employee_id"] for r in src.get("split") or [] if r.get("money_split")},
            "own": own, "own_code": own_code, "prev": prev, "prev_code": prev_code, "prev_failed": sheets is None,
            "sheet": sheet, "sheet_people": before.count(sheet) if sheet else 0,
@@ -1296,6 +1754,8 @@ def build(src: dict, month: str, today: date) -> dict:
     n = {s: sum(1 for p in worked if p["state"] == s) for s in ("ok", "carry", "miss")}
     trucks = fuel_trucks(rows)
     sources = {"fuel": f"{TITLES_SOURCE['fuel']} ({trucks} คัน)"} if trucks else {}
+    if advance_source(ctx["advance"]) and not ctx["hq_done"]:
+        sources["advance"] = advance_source(ctx["advance"])
     # savings owed to someone who left are money to pay back: counted whatever is set aside, and the line says whose are among them
     for b in HOLD_BRANCHES:
         gone = sum(1 for p in rows if p["branch"] == b and p["cells"]["refund"]["state"] != "na" and not p["hold"])
@@ -1306,6 +1766,7 @@ def build(src: dict, month: str, today: date) -> dict:
             "rules": build_rules(rows, ctx),
             "files": build_files(rows, src, ctx, month), "kinds": build_kinds(rows, kind_notes(ctx), sources),
             "columns": [{"key": k[0], "label": k[1], "short": k[2]} for k in KINDS], "people": rows,
+            "advance_unmatched": advance_unmatched(ctx["advance"], rows, employees) if not ctx["hq_done"] else [],
             "decisions": build_decisions(rows, ctx), "failed": list(src.get("failed") or [])}
 
 
@@ -1370,6 +1831,9 @@ def _read(month: str) -> dict:
         ("docs", "เอกสารเบิก", lambda: supabase.select_all("acc_docs", {"select": SELECTS["acc_docs"], "or": f'(batch.like."{month}-*",batch.like."docs:{month}:*")',
                                                                      "order": "batch.asc,page.asc"})),
         ("inbox", "กล่องรับไฟล์", lambda: supabase.select_all("inbox_files", {"select": SELECTS["inbox_files"], "month": f"eq.{month}", "order": "id.asc"})),
+        # the scans of the month that were read, with their pages: the mid-month advance lists are among them (advance_lists)
+        ("advance_files", "ใบเบิกกลางเดือน", lambda: supabase.select_all("inbox_files", {"select": SELECTS["advance_files"], "month": f"eq.{month}", "kind": "eq.scan",
+                                                                                     "status": f"in.({','.join(ADVANCE_READ)})", "order": "uploaded_at.desc,id.asc"})),
         ("penalties", "ใบเตือน", lambda: supabase.select_all("employee_documents", {"select": SELECTS["employee_documents"], "doc_type": "eq.warning", "doc_date": f"gte.{s}",
                                                                                    "and": f"(doc_date.lte.{e})", "order": "doc_date.asc,id.asc"})),
     ]
@@ -1423,7 +1887,7 @@ def load(month: str, today: date, fresh: bool = False) -> dict:
         raise PayrollError(f"ดูย้อนหลังได้ถึงงวด {my(offered[-1])}")
     if not has_v93():
         return {"ready": False, "need": NEEDS, **frame(month, today), "summary": {"people": 0, "ok": 0, "carry": 0, "miss": 0, "hq_paid": 0, "hold": 0},
-                "hold_branches": list(HOLD_BRANCHES), "rules": {"general": [], "groups": [], "source": RULES_SOURCE}, "files": [], "kinds": [], "columns": [{"key": k[0], "label": k[1], "short": k[2]} for k in KINDS], "people": [], "decisions": [], "failed": []}
+                "hold_branches": list(HOLD_BRANCHES), "rules": {"general": [], "groups": [], "source": RULES_SOURCE}, "files": [], "kinds": [], "columns": [{"key": k[0], "label": k[1], "short": k[2]} for k in KINDS], "people": [], "advance_unmatched": [], "decisions": [], "failed": []}
     key = (month, today.isoformat())
     seen = _answers.get(key)
     if not fresh and seen and time.time() < seen[0]:

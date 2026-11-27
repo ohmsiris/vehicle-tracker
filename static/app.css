@@ -2559,6 +2559,11 @@ button.pw-kind-btn:focus-visible { outline: none; box-shadow: var(--ring); }
 .pw-who .pw-mark { margin-top: 2px; }
 .pw-who b { font-weight: 600; }
 .pw-more { margin: 6px 0 0 8px; color: var(--text-2); }
+/* เบิกล่วงหน้า: the names on the mid-month lists that found nobody on the pay list, folded under the kind's line */
+.pw-unm { padding: 0 8px 10px 40px; color: var(--text-2); }
+.pw-unm .pw-fold { padding: 2px 0; }
+.pw-unm.open .pw-fold-chev { transform: rotate(90deg); color: var(--text); }
+.pw-unm .pw-who { margin-top: 6px; color: var(--text); }
 .pw-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 8px; }
 .pw-tools .seg { margin: 0; max-width: 100%; }
 .pw-tools .segbtn { padding: 6px 14px; font-size: 13.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -2665,7 +2670,7 @@ button.pw-kind-btn:focus-visible { outline: none; box-shadow: var(--ring); }
   .pw-bar select { flex: 1 1 0; min-width: 0; padding: 9px 8px; font-size: 13.5px; }
   .pw-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .pw-card { padding: 14px 14px; }
-  .pw-kind-body { padding-left: 8px; }
+  .pw-kind-body, .pw-unm { padding-left: 8px; }
   .pw-tools .seg { display: flex; width: 100%; }
   .pw-tools .segbtn { flex: 1 1 auto; padding: 6px 4px; font-size: 12.5px; }
   .pw-tools select, .pw-tools input[type=text] { flex: 1 1 100%; width: 100%; max-width: none; }

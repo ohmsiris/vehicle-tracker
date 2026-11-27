@@ -46,7 +46,7 @@ def drove(code, first, last, money=1000, **kw):
 
 def src(**kw):
     base = {"employees": [], "rules": [], "rates": [], "pay_prev": [], "pay_tail": [], "route": [], "split": [], "punches": [], "loans": [], "loan_entries": [],
-            "card_fuel": [], "cash_fuel": [], "vehicles": [], "drivers": [], "trips": [], "docs": [], "inbox": [], "penalties": [], "failed": []}
+            "card_fuel": [], "cash_fuel": [], "vehicles": [], "drivers": [], "trips": [], "docs": [], "inbox": [], "advance_files": [], "penalties": [], "failed": []}
     return {**base, **kw}
 
 
@@ -694,8 +694,10 @@ def test_the_kinds_follow_the_workbooks_columns_and_never_read_as_an_all_clear()
     assert kind(out, "nobonus")["state"] == "warn" and kind(out, "other")["state"] == "warn" and kind(out, "common")["state"] == "warn"
     assert kind(out, "fuel")["state"] == "na" and kind(out, "fuel")["note"] == ""              # truly nobody: fuel is asked of the A, B, C, D route drivers only
     assert kind(out, "fuel")["source"] == "ใบแจ้งหนี้บัตรน้ำมัน + น้ำมันเงินสด ของรถสาย กลุ่ม A, B, C และทวาย"
-    assert kind(out, "sso")["later"] and kind(out, "advance")["later"] and not kind(out, "loan")["later"] and not kind(out, "sales")["later"]
+    assert kind(out, "sso")["later"] and not kind(out, "loan")["later"] and not kind(out, "sales")["later"]
     assert not kind(out, "savings")["later"]                                                  # confirmed: it follows HQ's latest sheet
+    # เบิกล่วงหน้า is read per person from the mid-month list in the drop box: an upload can turn it green, so it is no "later" any more
+    assert not kind(out, "advance")["later"] and "กล่องรับไฟล์" in kind(out, "advance")["source"] and kind(out, "advance")["link"] == "#accounts-in"
     papers = [{"batch": f"docs:2026-11:{b}:end", "feed": "endmonth", "branch": b, "kind": "expense", "page": 1} for b in pw.BRANCHES]
     full = pw.build(src(employees=[emp("A")], rules=[rule("A")], rates=[rate("A")], docs=papers + ADVANCE_IN), MONTH, TODAY)
     assert (kind(full, "penalty")["state"], kind(full, "penalty")["note"]) == ("na", "") and "ยังไม่มีที่ลง" in kind(full, "common")["note"]
@@ -1012,6 +1014,382 @@ def test_ot_that_is_asked_of_a_daily_paid_person_is_in_his_rule(no_hold):
     assert one(out, "K7")["formula"] == "ค่าแรง = วัน × 390 · OT = ชม. OT × (ยังไม่มีอัตรา OT) บาท · ไม่มีเบี้ยขยัน"
     assert one(out, "S1")["formula"] == "ค่าแรง = วัน × 390 · ไม่มีเบี้ยขยัน"                  # สระบุรี: OT is cash, out of pay
     assert next(g for g in out["rules"]["groups"] if g["group"] == "DAY")["formula"] == "ค่าแรง = วัน × 390 · (แก่งคอย: + OT ถ้ามี)"
+
+
+# --------------------------------------------------------------------------------------------- เบิกล่วงหน้า from the mid-month lists in the drop box
+DRIVERS = "รายการเบิกกลางเดือน : พนักงานขับรถ เดือน ตุลาคม 2569"                     # HQ forgot to change the month: the real file of 11/2026 says ตุลาคม
+FACTORY = "รายการเบิกกลางเดือน : ช่าง / ออฟฟิศ / ฝ่ายผลิต เดือน พฤศจิกายน 2569"
+SRB = "[SRB] รายการเบิกกลางเดือน15 พฤศจิกายน69"                                     # the file as a note names it
+SAID = f"ตามใบเบิกกลางเดือน {SRB}"
+
+
+def drew(text, amount=3000, unsure=False, account="1500"):
+    """A line as the drop box's reader gives it."""
+    return {"date": None, "text": text, "plate": None, "amount": amount, "unsure": unsure, "account": account, "truck_number": None}
+
+
+def page(n, lines, title=FACTORY, total=None, kind_="advance", codes=(), summary=""):
+    return {"n": n, "page_kind": kind_, "title": title, "written_total": total, "summary": summary, "employee_codes": list(codes), "lines": lines,
+            "date_from": None, "date_to": None, "branch_hints": [], "person": ""}
+
+
+def box(pages, fid="f1", branch="สระบุรี", status="read", name=None, at="2026-11-26T08:30:21+00:00", **kw):
+    """A row of inbox_files as the page selects it (the read pages under "pages")."""
+    return {"id": fid, "file_name": name or (f"{SRB}.pdf" if branch == "สระบุรี" else "[KK] รายการเบิกกลางเดือน15 พฤศจิกายน69.pdf"), "kind": "scan", "status": status,
+            "month": MONTH, "branches": [branch], "uploaded_at": at, "booked_at": None, "half": "mid", "pages": pages, **kw}
+
+
+def test_the_staff_code_in_a_list_line():
+    assert pw.read_code("นายทวาย กำจันทร์ SB-PD001") == ("SB-PD001", "นายทวาย กำจันทร์", "")
+    assert pw.read_code("SB-KK001 นายสายัณต์ พวนกิ่ง") == ("SB-KK001", "นายสายัณต์ พวนกิ่ง", "")
+    assert pw.read_code("sb - kk 073S นาย ทศพร สุขประเสริฐ") == ("SB-KK073", "นาย ทศพร สุขประเสริฐ", "")          # spaces, lower case, a stray letter
+    assert pw.read_code("ส้ม (MR. WIN KO KO) SB FR103") == ("SB-FR103", "ส้ม (MR. WIN KO KO)", "")
+    assert pw.read_code("คืน ปกส ช่างอาต (SB-FR002) ตค.69") == ("SB-FR002", "คืน ปกส ช่างอาต ตค.69", "")
+    assert pw.read_code("นาย ก SB-FR7") == ("SB-FR007", "นาย ก", "")
+    assert pw.read_code("นายรวม ขอนบกกลาง") == (None, "นายรวม ขอนบกกลาง", "")                                   # no code
+    # a code the reader got wrong (the real 11/2026 file: SB-PO022 for SB-PD022): no staff code, and what was written is kept
+    assert pw.read_code("นายประสงค์ หลักทรัพย์ SB-PO022") == (None, "นายประสงค์ หลักทรัพย์", "SB-PO022")
+    assert pw.name_key("นายประสงค์  หลักทรัพย์") == pw.name_key("ประสงค์ หลักทรัพย์") == "ประสงค์ หลักทรัพย์"
+    assert pw.name_key("นางสาว เค้ก(MRS.KHIN KHIN AYE)") == "เค้ก" and pw.name_key("ตุ๊กตา ( Mrs. THU ZAR WIN )") == "ตุ๊กตา"
+    assert pw.list_name(DRIVERS) == "พนักงานขับรถ" and pw.list_name(FACTORY) == "ช่าง / ออฟฟิศ / ฝ่ายผลิต"
+    assert pw.list_name("บันทึกการทำงาน+เบิกกลางเดือน บจก.สระบุรีวารีเทพ (แก่งคอย) ประจำเดือน 15 พฤศจิกายน 2569") == "บันทึกการทำงาน+เบิกกลางเดือน บจก.สระบุรีวารีเทพ (แก่งคอย)"
+    assert pw.list_name("รายการเบิกกลางเดือน พนักงานขับรถ") == "รายการเบิกกลางเดือน พนักงานขับรถ" and pw.short_name(f"{SRB}.pdf") == SRB
+    # the page's own list of codes fills a line without one: only when it has one staff code per line, in order
+    lines = [drew("นาย ก SB-FR001"), drew("นาย ข"), drew("นาย ค SB-FR003")]
+    got = pw.page_lines(page(1, lines, codes=["SB-FR001", "SB-FR002", "SB-FR003"]))
+    assert [(r["code"], r["name"], r["via"]) for r in got] == [("SB-FR001", "นาย ก", "text"), ("SB-FR002", "นาย ข", "page"), ("SB-FR003", "นาย ค", "text")]
+    assert [r["code"] for r in pw.page_lines(page(1, lines, codes=["SB-FR001", "SB-FR002", "SB-FR003", "SB-FR004"]))] == ["SB-FR001", None, "SB-FR003"]    # more codes than lines
+    assert [r["code"] for r in pw.page_lines(page(1, lines, codes=["SB-FR001", "SB-FR002", "SB-FR009"]))] == ["SB-FR001", None, "SB-FR003"]                # the order does not agree
+    # only account 1500 with an amount; a typed total among the lines is not a person (a driver called รวม is)
+    mixed = [drew("นายรวม ขอนบกกลาง SB-PD018"), drew("ค่าโทรศัพท์", 1924, account="7200"), drew("นาย ง SB-PD019", None), drew("นาย จ SB-PD020", 0), drew("รวม", 3000)]
+    assert [(r["code"], r["amount"]) for r in pw.page_lines(page(1, mixed))] == [("SB-PD018", 3000)]
+
+
+def test_a_list_is_complete_by_a_running_total_or_by_page_totals():
+    a, b, c = drew("นาย ก SB-PD001"), drew("นาย ข SB-PD002"), drew("นาย ค SB-PD003")
+
+    def one_list(pages, **kw):
+        got = pw.advance_lists([box(pages, **kw)])
+        assert len(got) == 1
+        return got[0]
+    # a grand total at the foot of the last page, nothing on the first (the real drivers' list: None, then 111,000)
+    x = one_list([page(7, [a, b], DRIVERS), page(8, [c], DRIVERS, total=9000)])
+    assert (x["name"], x["pages"], len(x["lines"]), x["total"], x["written"], x["complete"], x["why"]) == ("พนักงานขับรถ", [7, 8], 3, 9000, 9000, True, "")
+    assert (x["branch"], x["file"], x["short"], x["status"], x["cover"], x["cover_why"]) == ("สระบุรี", f"{SRB}.pdf", SRB, "read", None, "")
+    assert x["lines"][2] == {"code": "SB-PD003", "raw": "", "name": "นาย ค", "amount": 3000, "unsure": False, "via": "text", "file": f"{SRB}.pdf", "short": SRB,
+                             "branch": "สระบุรี", "page": 8, "title": DRIVERS, "list": "พนักงานขับรถ"}
+    # a total per page
+    x = one_list([page(9, [a, b], total=6000), page(10, [c], total=3000)])
+    assert (x["total"], x["written"], x["complete"]) == (9000, 9000, True)
+    # both at once (the real factory list: 84,000 and 57,000 per page, then 144,000 -- the grand total -- on the last)
+    x = one_list([page(9, [a], total=3000), page(10, [b], total=3000), page(11, [c], total=9000, summary="หน้าสุดท้าย ยอดหน้า 3,000 รวมทั้งหมด 9,000")])
+    assert (x["total"], x["written"], x["complete"]) == (9000, 9000, True)
+    # a line the reader lost shows under either way of writing totals
+    x = one_list([page(7, [a], DRIVERS), page(8, [c], DRIVERS, total=9000)])
+    assert (x["total"], x["written"], x["complete"], x["why"]) == (6000, 9000, False, "อ่านได้ 6,000 เขียนไว้ 9,000")
+    x = one_list([page(9, [a], total=6000), page(10, [c], total=3000)])
+    assert (x["complete"], x["why"]) == (False, "อ่านได้ 6,000 เขียนไว้ 3,000")
+    # no total written on any page: it cannot be confirmed -- a total in the reader's own summary may be its sum of what it read
+    for said in ("รายการเบิกกลางเดือน (ลำดับ 33-37) รวม 9000", "3 คน คนละ 3000 รวม 9,000 บาท", "32 คน คนละ 3000 บาท"):
+        x = one_list([page(7, [a, b], DRIVERS), page(8, [c], DRIVERS, summary=said)])
+        assert (x["complete"], x["written"], x["why"]) == (False, None, "อ่านได้ 9,000 แต่ไม่มียอดรวมเขียนไว้ให้เทียบ")
+    # an amount or a total that came as text with a comma is the number it is
+    x = one_list([page(7, [drew("นาย ก SB-PD001", "3,000"), drew("นาย ข SB-PD002", " 3 000 ")], DRIVERS, total="6,000")])
+    assert (len(x["lines"]), x["total"], x["written"], x["complete"]) == (2, 6000, 6000, True)
+    # ... and a line whose amount cannot be read is said when the list does not add up (never when it does: the total proves the rest)
+    x = one_list([page(7, [a, drew("นาย ข SB-PD002", "3,OOO"), drew("นาย ค SB-PD003", None)], DRIVERS, total=9000)])
+    assert (x["total"], x["complete"], x["why"]) == (3000, False, "อ่านได้ 3,000 เขียนไว้ 9,000 · มี 2 บรรทัดที่ไม่มียอดหรืออ่านยอดไม่ได้")
+    x = one_list([page(7, [a, b, c, drew("นาย ง SB-PD004", None)], DRIVERS, total=9000)])
+    assert (x["complete"], x["why"]) == (True, "")
+    # a page of the file that failed to read may be a page of the list
+    x = one_list([page(7, [a, b], DRIVERS), page(8, [c], DRIVERS, total=9000), {"n": 9, "page_kind": "error", "error": "x", "lines": []}])
+    assert (x["complete"], x["why"]) == (False, "อ่านไม่สำเร็จ หน้า 9")
+    # the table's own shape (preview.ai_pages) reads the same
+    x = one_list(None, half=None, preview={"half": "mid", "ai_pages": [page(7, [a, b, c], DRIVERS, total=9000)]})
+    assert (x["total"], x["complete"]) == (9000, True)
+
+
+def test_the_lists_of_a_file_and_the_files_that_count():
+    a, b, c = drew("นาย ก SB-PD001"), drew("นาย ข SB-FR002"), drew("นาย ค SB-FR003", 2000)
+    cover = page(1, [], "รายการสรุปค่าใช้จ่าย สระบุรี", total=486647, kind_="cover")
+    petty = page(2, [drew("ค่าโทรศัพท์โรงงาน", 1924, account="7200"), drew("ปะยาง 1 วง", 400, account="6110")], "รายการเบิก สาขาสระบุรี", total=2324, kind_="expense")
+    fuel = page(5, [drew("84-4607", 1500, account="6130")], "รายการเบิก สาขาสระบุรี", total=1500, kind_="fuel")
+    pages = [cover, petty, fuel, page(7, [a], DRIVERS, total=3000), page(9, [b], FACTORY), page(10, [c], FACTORY.replace("ฝ่ายผลิต", "ฝ่าย ผลิต"), total=5000)]
+    got = pw.advance_lists([box(pages)])
+    # petty cash and fuel are other accounts: only the two lists, told apart by their heading (a heading spelt two ways is one list)
+    assert [(x["name"], x["pages"], x["total"], x["complete"]) for x in got] == [("พนักงานขับรถ", [7], 3000, True), ("ช่าง / ออฟฟิศ / ฝ่ายผลิต", [9, 10], 5000, True)]
+    assert got[0]["named"] == ["SB-PD001"] and got[1]["named"] == ["SB-FR002", "SB-FR003"]
+    # the end-of-month file carries the signed copies of the same lists; a file kept unread, failed or waiting for a choice has nothing to give
+    assert pw.advance_lists([box(pages, half="end")]) == [] and pw.advance_lists(None) == []
+    assert all(pw.advance_lists([box(pages, status=s)]) == [] for s in ("stored", "failed", "needs_ai", "ai_running", "needs_choice"))
+    # the same list uploaded twice is taken once: from the booked file, else the newest
+    twice = pw.advance_lists([box(pages, fid="old", at="2026-11-20T01:00:00+00:00"), box(pages, fid="new", at="2026-11-26T01:00:00+00:00")])
+    assert [(x["file_id"], x["name"]) for x in twice] == [("new", "พนักงานขับรถ"), ("new", "ช่าง / ออฟฟิศ / ฝ่ายผลิต")] and all(x["complete"] for x in twice)
+    twice = pw.advance_lists([box(pages, fid="old", status="booked", at="2026-11-20T01:00:00+00:00"), box(pages, fid="new", at="2026-11-26T01:00:00+00:00")])
+    assert {x["file_id"] for x in twice} == {"old"}
+    # ... and when the two do not say the same, the list cannot be confirmed
+    other = [page(7, [a, drew("นาย ง SB-PD004")], DRIVERS, total=6000)]
+    twice = pw.advance_lists([box(pages, fid="old", at="2026-11-20T01:00:00+00:00"), box(other, fid="new", at="2026-11-26T01:00:00+00:00")])
+    drivers = next(x for x in twice if x["name"] == "พนักงานขับรถ")
+    assert (drivers["file_id"], drivers["complete"]) == ("new", False) and "2 ไฟล์" in drivers["why"]
+    # an advance line (account 1500) on a petty-cash, fuel or cover page is not the mid-month list: nobody's cell, no list, no total
+    spent = page(2, [drew("เบิกล่วงหน้า นาย ข SB-FR002", 500), drew("ค่าน้ำ", 90, account="7200")], "รายการเบิก สาขาสระบุรี", total=590, kind_="expense")
+    cover = page(1, [drew("เบิกกลางเดือน", 6000)], "รายการสรุปค่าใช้จ่าย สระบุรี", total=6590, kind_="cover")
+    assert pw.advance_lists([box([cover, spent])]) == []
+    view = pw.advance_view([box([cover, spent])], [emp("SB-PD001"), emp("SB-FR002")])
+    assert view["branches"] == {} and view["by_person"] == {} and view["lists"] == []
+    view = pw.advance_view([box([cover, spent, page(7, [a], DRIVERS, total=3000)])], [emp("SB-PD001"), emp("SB-FR002")])
+    assert list(view["by_person"]) == ["SB-PD001"] and [(x["name"], x["total"]) for x in view["lists"]] == [("พนักงานขับรถ", 3000)]
+    got = view["branches"]["สระบุรี"]
+    assert (got["people"], got["total"], got["complete"], got["why"]) == (1, 3000, True, [])
+    # a file with no branch written on it: the codes say whose list it is
+    assert pw.advance_lists([{**box([page(6, [drew("SB-KK001 นาย ก")], total=3000)]), "branches": None}])[0]["branch"] == "แก่งคอย"
+
+
+def advance_src(pages, people=None, prevs=None, **kw):
+    people = people or [emp(f"SB-FR{i:03d}") for i in range(1, 10)]
+    prevs = prevs if prevs is not None else [prev("SB-FR001", {"advance": 3000}), prev("SB-FR002", {"advance": 3000}), prev("SB-FR003", {"advance": 3000}),
+                                             prev("SB-FR004", {"advance": 3000}), prev("SB-FR005", {"advance": 3000}), prev("SB-FR006"), prev("SB-FR007")]
+    return src(**{"employees": people, "rules": [rule(p["id"]) for p in people], "rates": [rate(p["id"]) for p in people], "pay_prev": prevs,
+                  "advance_files": [box(pages)] if pages is not None else [], **kw})
+
+
+def factory_pages(last_total=19000, unsure=True):
+    """One list on two pages: 001 and 006 at 3,000, 002 at 5,000, 004 on a line the reader was unsure of, 005 at 2,000, 008 (on no
+    HQ sheet) at 3,000; 007 is printed with no amount, 003 and 009 are not on it."""
+    return [page(9, [drew("นาย ก SB-FR001"), drew("นาย ข SB-FR002", 5000), drew("นาย ง SB-FR004", unsure=unsure), drew("นาย จ SB-FR005", 2000), drew("นาย ฉ SB-FR006")], total=16000,
+                 codes=["SB-FR001", "SB-FR002", "SB-FR004", "SB-FR005", "SB-FR006", "SB-FR007"]),
+            page(10, [drew("นาย ซ SB-FR008")], total=last_total, codes=["SB-FR008"])]
+
+
+def test_the_advance_comes_from_the_months_list():
+    out = pw.build(advance_src(factory_pages()), MONTH, TODAY)
+    c = {p["code"][-1]: p["cells"]["advance"] for p in out["people"]}
+    assert c["1"] == {"state": "ok", "value": 3000, "text": "3,000", "note": SAID}                                    # on the list, the same as last month
+    assert c["2"] == {"state": "ok", "value": 5000, "text": "5,000", "note": f"{SAID} · เดือนก่อน 3,000"}                               # another amount than last month
+    assert c["3"] == {"state": "ok", "value": 0, "text": "0", "note": "ไม่มีชื่อในใบเบิกกลางเดือน — ไม่ได้เบิก · เดือนก่อน 3,000"}         # not on a complete list
+    assert c["4"] == {"state": "carry", "value": 3000, "text": "3,000", "note": f"{SAID} · อ่านไม่ชัด ต้องตรวจกับใบเบิก"}                # a line marked unsure
+    assert c["5"] == {"state": "ok", "value": 2000, "text": "2,000", "note": f"{SAID} · เดือนก่อน 3,000"}
+    assert c["6"] == {"state": "ok", "value": 3000, "text": "3,000", "note": f"{SAID} · เดือนก่อนไม่ได้เบิก"}
+    assert c["7"] == {"state": "ok", "value": 0, "text": "0", "note": "มีชื่อในใบเบิกกลางเดือน แต่ไม่มียอดเบิก — ไม่ได้เบิก"}            # printed on the list, no amount
+    assert c["8"] == {"state": "ok", "value": 3000, "text": "3,000", "note": SAID}                                    # on no HQ sheet: the list is enough
+    assert c["9"] == {"state": "ok", "value": 0, "text": "0", "note": "ไม่มีชื่อในใบเบิกกลางเดือน — ไม่ได้เบิก"}
+    k = kind(out, "advance")
+    assert (k["need"], k["ok"], k["carry"], k["miss"], k["state"], k["later"]) == (9, 8, 1, 0, "warn", "")
+    assert k["rows"] == [{"who": "SB-FR004 คน ทดสอบ", "detail": f"3,000 · {SAID} · อ่านไม่ชัด ต้องตรวจกับใบเบิก", "state": "warn"}]
+    assert k["source"] == "ใบเบิกกลางเดือนที่อ่านจากกล่องรับไฟล์ — สระบุรี: ช่าง / ออฟฟิศ / ฝ่ายผลิต 6 คน 19,000"
+    assert out["advance_unmatched"] == [] and "มีใบเบิกแล้ว" in kind(out, "common")["note"]
+    # what is asked of the owner changes with it: no list to wait for, one unclear line to check against the paper
+    waiting = [d for d in out["decisions"] if d["wait"]]
+    assert [d["title"] for d in waiting] == ["เบิกล่วงหน้า: รอเจ้าของตรวจกับใบเบิก"] and "ยืนยันไม่ได้ 1 คน: SB-FR004 คน ทดสอบ" in waiting[0]["detail"]
+    # ... and nothing at all once every counted person's advance is the month's own
+    clear = pw.build(advance_src(factory_pages(unsure=False)), MONTH, TODAY)
+    assert (kind(clear, "advance")["ok"], kind(clear, "advance")["state"]) == (9, "ok") and not any("เบิกล่วงหน้า" in d["title"] for d in clear["decisions"])
+    # a month HQ already worked out keeps HQ's own figure
+    done = advance_src(factory_pages(), prevs=[prev("SB-FR003", {"advance": 1500}, month=MONTH)])
+    assert one(pw.build(done, MONTH, TODAY), "SB-FR003")["cells"]["advance"]["note"] == "ตามใบ HQ 11/2026 (HQ คิดงวดนี้แล้ว)"
+
+
+def test_a_list_that_cannot_be_confirmed_keeps_the_stand_in():
+    why = "(ช่าง / ออฟฟิศ / ฝ่ายผลิต: อ่านได้ 19,000 เขียนไว้ 22,000)"
+    doubt = f"ไม่มียอดเบิกในใบเบิกกลางเดือน แต่ยังยืนยันไม่ได้ว่าใบเบิกครบ {why}"
+    out = pw.build(advance_src(factory_pages(last_total=22000)), MONTH, TODAY)             # the list says 22,000, 19,000 was read: a line is missing
+    c = {p["code"][-1]: p["cells"]["advance"] for p in out["people"]}
+    assert c["1"] == {"state": "ok", "value": 3000, "text": "3,000", "note": SAID}                                    # his own line was read
+    assert c["3"] == {"state": "carry", "value": 3000, "text": "3,000", "note": f"ตามใบ HQ 10/2026 · {doubt}"}        # may be the missing line: last month's stands in
+    assert c["7"] == {"state": "carry", "value": 0, "text": "0", "note": f"ใบ HQ 10/2026 ไม่ได้เบิก · {doubt}"}
+    assert c["9"] == {"state": "miss", "value": None, "text": "", "note": f"ไม่มีชื่อในใบ HQ 10/2026 — ยังไม่รู้ว่าต้องหักหรือไม่ · {doubt}"}
+    f = file(out, "advance_list")
+    assert (f["state"], f["link"]) == ("warn", "#accounts-in")
+    assert f["summary"] == f"สระบุรี อ่านแล้ว 6 คน 19,000 บาท · ยังไม่ได้กดลงบัญชีในกล่องรับไฟล์ · ยังยืนยันไม่ได้ว่าครบ {why} · แก่งคอยพักไว้ก่อน"
+    assert kind(out, "advance")["source"].endswith("ช่าง / ออฟฟิศ / ฝ่ายผลิต 6 คน 19,000 (ยังยืนยันยอดไม่ได้)")
+    d = next(d for d in out["decisions"] if d["title"] == "เบิกล่วงหน้า: รอเจ้าของตรวจกับใบเบิก")
+    assert d["wait"] and "ยืนยันไม่ได้ 3 คน" in d["detail"]                                                           # 003, 004 (unsure), 007 -- 009 is a red gap, not a stand-in
+    # a page of the file that failed to read: the same
+    broken = pw.build(advance_src(factory_pages() + [{"n": 11, "page_kind": "error", "error": "x", "lines": []}]), MONTH, TODAY)
+    assert one(broken, "SB-FR003")["cells"]["advance"]["note"].endswith("(ช่าง / ออฟฟิศ / ฝ่ายผลิต: อ่านไม่สำเร็จ หน้า 11)")
+    # the drop box itself could not be read: the stand-in, and the reason
+    failed = pw.build(advance_src(None, advance_files=None, failed=["ใบเบิกกลางเดือน"]), MONTH, TODAY)
+    assert one(failed, "SB-FR003")["cells"]["advance"] == {"state": "carry", "value": 3000, "text": "3,000", "note": "ตามใบ HQ 10/2026 · โหลดใบเบิกกลางเดือนไม่สำเร็จ"}
+    assert (file(failed, "advance_list")["state"], file(failed, "advance_list")["summary"]) == ("bad", "โหลดไม่สำเร็จ")
+
+
+def test_a_code_on_two_lines_is_checked_not_summed_in_green():
+    # HQ's list has one line a person: the second SB-FR002 is far more likely แหยม (SB-FR003) with his code misread. The list's total
+    # still adds up, so only the repeat itself can say it: 002 is a stand-in, and 003 is not told "you drew nothing"
+    people = [emp("SB-FR001"), emp("SB-FR002", "สอาด เถื่อนผา"), emp("SB-FR003", "แหยม"), emp("SB-FR004")]
+    pages = [page(9, [drew("นาย ก SB-FR001"), drew("นายสอาด เถื่อนผา SB-FR002"), drew("นายแหยม SB-FR002")], total=9000)]
+    out = pw.build(advance_src(pages, people, [prev("SB-FR003", {"advance": 3000})]), MONTH, TODAY)
+    c = {p["code"][-1]: p["cells"]["advance"] for p in out["people"]}
+    why = "รหัส SB-FR002 มี 2 บรรทัด อาจอ่านรหัสผิด"
+    assert c["1"] == {"state": "ok", "value": 3000, "text": "3,000", "note": SAID}
+    assert c["2"] == {"state": "carry", "value": 6000, "text": "6,000", "note": f"{SAID} · มีชื่อ 2 บรรทัด (3,000 + 3,000) อาจอ่านรหัสผิด ต้องตรวจกับใบเบิก"}
+    assert c["3"] == {"state": "carry", "value": 3000, "text": "3,000", "note": f"ตามใบ HQ 10/2026 · ไม่มียอดเบิกในใบเบิกกลางเดือน แต่ยังยืนยันไม่ได้ว่าใบเบิกครบ ({why})"}
+    assert c["4"]["state"] == "miss" and c["4"]["note"].endswith(f"({why})")                                          # on no HQ sheet either: a red gap, never a green 0
+    assert not pw.advance_view([box(pages)], people)["branches"]["สระบุรี"]["complete"]
+    assert file(out, "advance_list")["summary"] == f"สระบุรี อ่านแล้ว 3 คน 9,000 บาท · ยังไม่ได้กดลงบัญชีในกล่องรับไฟล์ · ยังยืนยันไม่ได้ว่าครบ ({why}) · แก่งคอยพักไว้ก่อน"
+    # the same person found once by his code and once by his full name is a repeat as well
+    again = [page(9, [drew("นายสอาด เถื่อนผา SB-FR002"), drew("นายสอาด เถื่อนผา SB-FO002")], total=6000)]
+    view = pw.advance_view([box(again)], people)
+    assert len(view["by_person"]["SB-FR002"]) == 2 and view["branches"]["สระบุรี"]["why"] == [why]
+
+
+def test_a_code_taken_by_position_is_a_stand_in():
+    # no line carries a code and the page's code list happens to be as long as the lines: who drew is then only a guess by position
+    people = [emp("SB-FR001"), emp("SB-FR002"), emp("SB-FR003")]
+    pages = [page(9, [drew("ข"), drew("ค")], total=6000, codes=["SB-FR001", "SB-FR002"])]
+    out = pw.build(advance_src(pages, people, []), MONTH, TODAY)
+    c = {p["code"][-1]: p["cells"]["advance"] for p in out["people"]}
+    guess = {"state": "carry", "value": 3000, "text": "3,000", "note": f"{SAID} · ในบรรทัดไม่มีรหัส ใช้รหัสตามลำดับในหน้า ต้องตรวจกับใบเบิก"}
+    assert c["1"] == guess == c["2"]
+    assert c["3"]["state"] == "miss" and c["3"]["note"].endswith("(ช่าง / ออฟฟิศ / ฝ่ายผลิต: มี 2 บรรทัดที่ไม่มีรหัส ใช้รหัสตามลำดับในหน้า)")
+
+
+def test_the_cover_page_must_agree_with_the_lists():
+    # the cover writes the advances as one figure of its own: a list page that is not in the scan shows there, whatever the pages' totals say
+    def cover(advance):
+        return {**page(1, [], "รายการสรุปค่าใช้จ่าย สระบุรี", total=50000, kind_="cover"), "cover_parts": {"fuel": 20000, "advance": advance, "expense": 21000}}
+    people = [emp("SB-FR001"), emp("SB-FR002"), emp("SB-FR003")]
+    lists = [page(9, [drew("นาย ก SB-FR001")], total=3000), page(10, [drew("นาย ข SB-FR002")], total=3000)]      # a total per page: both add up
+    out = pw.build(advance_src([cover(6000)] + lists, people, []), MONTH, TODAY)
+    assert one(out, "SB-FR003")["cells"]["advance"] == {"state": "ok", "value": 0, "text": "0", "note": "ไม่มีชื่อในใบเบิกกลางเดือน — ไม่ได้เบิก"}
+    assert pw.advance_lists([box([cover(6000)] + lists)])[0]["cover"] == 6000
+    why = "ใบปกเขียนยอดเบิกกลางเดือน 9,000 แต่อ่านจากรายชื่อได้ 6,000"
+    out = pw.build(advance_src([cover(9000)] + lists, people, []), MONTH, TODAY)                                     # a third page was never scanned
+    assert one(out, "SB-FR001")["cells"]["advance"]["state"] == "ok"                                                 # his own line was read
+    assert one(out, "SB-FR003")["cells"]["advance"]["state"] == "miss" and one(out, "SB-FR003")["cells"]["advance"]["note"].endswith(f"({why})")
+    assert file(out, "advance_list")["summary"].endswith(f"ยังยืนยันไม่ได้ว่าครบ ({why}) · แก่งคอยพักไว้ก่อน")
+    # a cover with no advance part (0), or as text with a comma, and a file without a cover
+    assert pw.advance_view([box([cover(0)] + lists)], people)["branches"]["สระบุรี"]["complete"]
+    assert pw.advance_view([box([cover("6,000")] + lists)], people)["branches"]["สระบุรี"]["complete"]
+    assert pw.advance_view([box(lists)], people)["branches"]["สระบุรี"]["complete"]
+
+
+def test_without_a_list_for_the_branch_nothing_changes():
+    people = [emp("SB-FR001"), emp("SB-PD001", position="พนักงานขับรถ"), emp("SB-KK001", branch="แก่งคอย")]
+    prevs = [prev(p["id"], {"advance": 3000}) for p in people]
+    kk = box([page(6, [drew("SB-KK001 นายสายัณต์ พวนกิ่ง")], "บันทึกการทำงาน+เบิกกลางเดือน (แก่งคอย)", total=3000)], fid="k1", branch="แก่งคอย")
+    out = pw.build(advance_src(None, people, prevs, advance_files=[kk]), MONTH, TODAY)
+    stand_in = {"state": "carry", "value": 3000, "text": "3,000", "note": "ตามใบ HQ 10/2026 · รอรายชื่อเบิกจากเจ้าของ"}
+    assert one(out, "SB-FR001")["cells"]["advance"] == stand_in == one(out, "SB-PD001")["cells"]["advance"]          # สระบุรี has no list: as before
+    assert one(out, "SB-KK001")["cells"]["advance"]["state"] == "ok"
+    assert [d["title"] for d in out["decisions"] if d["wait"]] == ["เบิกล่วงหน้า: รอรายชื่อจากเจ้าของ"]
+    assert kind(out, "advance")["source"] == pw.TITLES_SOURCE["advance"]                                              # the list of a branch set aside is not the source
+    # a file with the drivers' list alone says nothing about the factory's people
+    only = box([page(7, [drew("นาย ก SB-PD001")], DRIVERS, total=3000)])
+    out = pw.build(advance_src(None, people, prevs, advance_files=[only]), MONTH, TODAY)
+    assert one(out, "SB-PD001")["cells"]["advance"]["state"] == "ok"
+    assert one(out, "SB-FR001")["cells"]["advance"] == {"state": "carry", "value": 3000, "text": "3,000",
+                                                        "note": "ตามใบ HQ 10/2026 · ใบเบิกกลางเดือนที่มีอยู่ไม่มีรายชื่อกลุ่มรหัส SB-FR — ยังยืนยันไม่ได้ว่าไม่ได้เบิก"}
+
+
+def test_lines_that_find_nobody_on_the_pay_list():
+    people = [emp("SB-PD001", "ทวาย กำจันทร์"), emp("SB-PD022", "ประสงค์ หลักทรัพย์"), emp("SB-PD030", "สำรวย อสุรินทร์"), emp("SB-PD031", "เอก ดีศรี"),
+              emp("SB-FR005", "อัฐพล เปรมชื่น", pay_group="hq"), emp("SB-PD040", "คนเก่า ลาออก", status="resigned", end_date="2026-09-30"),
+              emp("SB-PD041", "รอ เงินสะสม", status="resigned", end_date="2026-10-02"), emp("SB-PD050")]
+    tail = [{"month": "2026-10", "code": "SB-PD041", "employee_id": "SB-PD041", "refund": 0, "savings_balance": 1500}]
+    lines = [drew("นายทวาย กำจันทร์ SB-PD001"), drew("นายประสงค์ หลักทรัพย์ SB-PO022"), drew("นายสำรวย อสุรินทร์ SB-PD031"),
+             drew("สุกัญญา บริรักษ์กุล SB-FR005", unsure=True), drew("นายคนเก่า ลาออก SB-PD040", 1000), drew("นายรอ เงินสะสม SB-PD041", 500)]
+    file_name = f"{SRB}.pdf"
+    out = pw.build(advance_src([page(7, lines, DRIVERS, total=13500)], people, [], pay_tail=tail), MONTH, TODAY)
+    c = {p["code"]: p["cells"]["advance"] for p in out["people"]}
+    assert c["SB-PD001"]["note"] == SAID
+    # the reader got his code wrong: found by his full name, the only employee of that name
+    assert c["SB-PD022"] == {"state": "ok", "value": 3000, "text": "3,000", "note": f"{SAID} · จับคู่จากชื่อ (รหัสในใบอ่านเป็น SB-PO022)"}
+    # a code that is someone else's beside his full name: his by the name, to be checked -- and the code's own person is not told "nothing"
+    assert c["SB-PD030"] == {"state": "carry", "value": 3000, "text": "3,000", "note": f"{SAID} · รหัสในใบ (SB-PD031) เป็นของคนอื่น จับคู่จากชื่อ ต้องตรวจ"}
+    assert (c["SB-PD031"]["state"], c["SB-PD031"]["note"]) == ("miss", "ไม่มีใบ HQ ของ 5 เดือนล่าสุดให้ใช้เป็นค่าแทน · ในใบเบิกกลางเดือนมีรหัส SB-PD031 แต่ชื่อเป็น นายสำรวย อสุรินทร์ — ต้องตรวจว่าใครเบิก")
+    assert c["SB-PD050"] == {"state": "ok", "value": 0, "text": "0", "note": "ไม่มีชื่อในใบเบิกกลางเดือน — ไม่ได้เบิก"}            # every line found an employee
+    assert out["advance_unmatched"] == [
+        {"who": "SB-FR005 สุกัญญา บริรักษ์กุล", "amount": 3000, "file": file_name, "why": "HQ จ่ายเอง · ในระบบ SB-FR005 คือ อัฐพล เปรมชื่น · อ่านไม่ชัด"},
+        {"who": "SB-PD040 นายคนเก่า ลาออก", "amount": 1000, "file": file_name, "why": "ลาออกแล้ว (วันสุดท้าย 30/09/2026)"},
+        {"who": "SB-PD041 นายรอ เงินสะสม", "amount": 500, "file": file_name, "why": "ลาออกแล้ว รอคืนเงินสะสม"}]
+    # a line that finds no employee at all may be anyone who seems to be on no list: nobody is told "you drew nothing"
+    lines += [drew("นายใหม่ ยังไม่มีในระบบ SB-PD099"), drew("นายไม่มีรหัส"), drew("นายแปลก SB-XX007")]
+    out = pw.build(advance_src([page(7, lines, DRIVERS, total=22500)], people, [prev("SB-PD050")], pay_tail=tail), MONTH, TODAY)
+    assert [(u["who"], u["why"]) for u in out["advance_unmatched"][3:]] == [("SB-PD099 นายใหม่ ยังไม่มีในระบบ", "ไม่มีรหัสนี้ในรายชื่อพนักงาน"),
+                                                                           ("นายไม่มีรหัส", "ไม่มีรหัสพนักงานในบรรทัด"), ("SB-XX007 นายแปลก", "รหัส SB-XX007 ไม่ใช่รหัสพนักงาน")]
+    assert one(out, "SB-PD050")["cells"]["advance"] == {"state": "carry", "value": 0, "text": "0", "note": "ใบ HQ 10/2026 ไม่ได้เบิก · ไม่มียอดเบิกในใบเบิกกลางเดือน "
+                                                        "แต่ยังยืนยันไม่ได้ว่าใบเบิกครบ (พนักงานขับรถ: มี 3 บรรทัดที่จับคู่กับพนักงานไม่ได้)"}
+    assert one(out, "SB-PD001")["cells"]["advance"]["state"] == "ok" and "จับคู่กับพนักงานไม่ได้" in file(out, "advance_list")["summary"]
+    assert all(set(u) == {"who", "amount", "file", "why"} for u in out["advance_unmatched"])
+
+
+def test_the_advance_list_line_booked_read_or_missing():
+    pages = [page(9, [drew("นาย ก SB-FR001"), drew("นาย ข SB-FR002")], total=6000)]
+    people = [emp("SB-FR001"), emp("SB-FR002")]
+    waiting = [{"id": "f1", "kind": "scan", "status": "read", "month": MONTH, "branches": ["สระบุรี"]}]
+    read = pw.build(advance_src(pages, people, [], inbox=waiting), MONTH, TODAY)
+    f = file(read, "advance_list")
+    assert (f["state"], f["link"], f["link_label"]) == ("warn", "#accounts-in", "ลงข้อมูล / แนบไฟล์")
+    assert f["summary"] == "สระบุรี อ่านแล้ว 2 คน 6,000 บาท · ยังไม่ได้กดลงบัญชีในกล่องรับไฟล์ · แก่งคอยพักไว้ก่อน"      # the file itself is not "one more file waiting"
+    assert "มี 1 ไฟล์สแกนในกล่องรับไฟล์ ยังไม่ได้ลง" in file(read, "month_papers")["summary"]
+    assert all(p["cells"]["advance"]["state"] == "ok" for p in read["people"])                                       # read is enough for the cells
+    booked = pw.build(advance_src(None, people, [], advance_files=[box(pages, status="booked")]), MONTH, TODAY)
+    assert (file(booked, "advance_list")["state"], file(booked, "advance_list")["summary"]) == ("ok", "สระบุรี ลงบัญชีแล้ว 2 คน 6,000 บาท · แก่งคอยพักไว้ก่อน")
+    none = pw.build(advance_src(None, people, []), MONTH, TODAY)
+    assert (file(none, "advance_list")["state"], file(none, "advance_list")["summary"]) == ("bad", "ยังไม่ได้อัปโหลด")
+    # pages booked the older way (no file in the drop box) still count, as before
+    old = pw.build(advance_src(None, people, [], docs=ADVANCE_IN[:1]), MONTH, TODAY)
+    assert (file(old, "advance_list")["state"], file(old, "advance_list")["summary"]) == ("ok", "สระบุรี 1 หน้า · แก่งคอยพักไว้ก่อน")
+    assert pw.advance_line(pw.no_advance(), {"สระบุรี": 0, "แก่งคอย": 2}) == ("bad", "ยังไม่มี: สระบุรี · แก่งคอยพักไว้ก่อน 2 หน้า")
+
+
+def test_the_advance_of_a_branch_on_hold():
+    people = [emp("SB-FR001"), emp("SB-KK001", branch="แก่งคอย"), emp("SB-KK002", branch="แก่งคอย")]
+    files = [box([page(9, [drew("นาย ก SB-FR001")], total=3000)], status="booked"),
+             box([page(6, [drew("SB-KK001 นายสายัณต์ พวนกิ่ง"), drew("SB-KK099 นายใคร ไม่รู้")], "บันทึกการทำงาน+เบิกกลางเดือน (แก่งคอย)", total=6000)], fid="k1", branch="แก่งคอย")]
+    s = advance_src(None, people, [prev("SB-KK002", {"advance": 3000})], advance_files=files)
+    out = pw.build(s, MONTH, TODAY)
+    # its people get their cells from its own list, and are counted nowhere
+    k1, k2 = one(out, "SB-KK001"), one(out, "SB-KK002")
+    assert k1["hold"] and k1["cells"]["advance"] == {"state": "ok", "value": 3000, "text": "3,000", "note": "ตามใบเบิกกลางเดือน [KK] รายการเบิกกลางเดือน15 พฤศจิกายน69"}
+    assert k2["hold"] and k2["cells"]["advance"]["state"] == "carry" and "มี 1 บรรทัดที่จับคู่กับพนักงานไม่ได้" in k2["cells"]["advance"]["note"]
+    k = kind(out, "advance")
+    assert (k["need"], k["ok"], k["carry"], k["hold"], k["state"]) == (1, 1, 0, 2, "ok") and "แก่งคอย" not in k["source"]
+    assert not any("เบิกล่วงหน้า" in d["title"] for d in out["decisions"])                                              # nothing is asked about a branch set aside
+    f = file(out, "advance_list")                                                                                  # its part is said after "พักไว้ก่อน", and asks for nothing
+    assert (f["state"], f["summary"]) == ("ok", "สระบุรี ลงบัญชีแล้ว 1 คน 3,000 บาท · แก่งคอยพักไว้ก่อน อ่านแล้ว 2 คน 6,000 บาท")
+    assert [(u["who"], u["file"]) for u in out["advance_unmatched"]] == [("SB-KK099 นายใคร ไม่รู้", "[KK] รายการเบิกกลางเดือน15 พฤศจิกายน69.pdf")]
+
+
+def test_the_advance_of_that_branch_without_the_hold(no_hold):
+    people = [emp("SB-FR001"), emp("SB-KK001", branch="แก่งคอย"), emp("SB-KK002", branch="แก่งคอย")]
+    files = [box([page(9, [drew("นาย ก SB-FR001")], total=3000)], status="booked"),
+             box([page(6, [drew("SB-KK001 นายสายัณต์ พวนกิ่ง")], "บันทึกการทำงาน+เบิกกลางเดือน (แก่งคอย)", total=3000)], fid="k1", branch="แก่งคอย")]
+    out = pw.build(advance_src(None, people, [], advance_files=files), MONTH, TODAY)
+    k = kind(out, "advance")
+    assert (k["need"], k["ok"], k["state"]) == (3, 3, "ok") and "hold" not in k and "แก่งคอย: บันทึกการทำงาน+เบิกกลางเดือน (แก่งคอย) 1 คน 3,000" in k["source"]
+    f = file(out, "advance_list")
+    assert (f["state"], f["summary"]) == ("warn", "สระบุรี ลงบัญชีแล้ว 1 คน 3,000 บาท · แก่งคอย อ่านแล้ว 1 คน 3,000 บาท · ยังไม่ได้กดลงบัญชีในกล่องรับไฟล์")
+    only = pw.build(advance_src(None, people, [], advance_files=files[:1]), MONTH, TODAY)
+    assert (file(only, "advance_list")["state"], file(only, "advance_list")["summary"]) == ("warn", "สระบุรี ลงบัญชีแล้ว 1 คน 3,000 บาท · ยังไม่มี: แก่งคอย")
+
+
+def test_the_loader_reads_the_lists_from_the_drop_box(monkeypatch):
+    from app import supabase
+    seen = []
+    row = {**box([page(9, [drew("นาย ก SB-FR001")], total=3000)]), "pages": [page(9, [drew("นาย ก SB-FR001")], total=3000)]}
+
+    def fake(table, params=None, page=1000):
+        seen.append((table, params))
+        return [emp("SB-FR001")] if table == "employees" else [row] if params["select"] == pw.SELECTS["advance_files"] else []
+    monkeypatch.setattr(supabase, "select_all", fake)
+    s = pw._read(MONTH)
+    asked = [p for t, p in seen if t == "inbox_files" and p["select"] == pw.SELECTS["advance_files"]]
+    # only the scans of the month that were read, and of each only the named columns: the pages the AI read, nothing else of the preview
+    assert asked == [{"select": pw.SELECTS["advance_files"], "month": "eq.2026-11", "kind": "eq.scan", "status": "in.(read,booked)", "order": "uploaded_at.desc,id.asc"}]
+    cols = [c.split(":")[-1] for c in pw.SELECTS["advance_files"].split(",")]
+    assert cols == ["id", "file_name", "kind", "status", "month", "branches", "uploaded_at", "booked_at", "preview->half", "preview->ai_pages"]
+    assert s["failed"] == [] and one(pw.build(s, MONTH, TODAY), "SB-FR001")["cells"]["advance"]["state"] == "ok"
+
+    def down(table, params=None, page=1000):
+        if params["select"] == pw.SELECTS["advance_files"]:
+            raise supabase.SupabaseError("boom")
+        return [emp("SB-FR001")] if table == "employees" else []
+    monkeypatch.setattr(supabase, "select_all", down)
+    s = pw._read(MONTH)
+    assert s["failed"] == ["ใบเบิกกลางเดือน"] and s["advance_files"] is None and file(pw.build(s, MONTH, TODAY), "advance_list")["summary"] == "โหลดไม่สำเร็จ"
 
 
 # --------------------------------------------------------------------------------------------- the loader, the menu, the gate

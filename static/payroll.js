@@ -19,8 +19,8 @@ const PW_STATUSES = ["working", "new", "probation", "resigned", "left_before"];
 const PW_STATUS_SAY = { working: "ทำงาน", new: "พนักงานใหม่", probation: "ทดลองงาน", resigned: "ลาออกในงวดนี้", left_before: "ลาออกแล้ว รอคืนเงินสะสม" };
 // months = the last list the server gave; def = the month it picks when none is asked for; kinds / people = what is unfolded;
 // filter / branch / group / status / kind / q = the filters of the per-person table (kind = "people who are not ok for this input");
-// rules = the rules card is unfolded (it opens that way)
-const pw_ = { seq: 0, data: null, months: [], def: "", busy: false, filter: "all", branch: "", group: "", status: "", kind: "", q: "", kinds: new Set(), people: new Set(), rules: true };
+// rules = the rules card is unfolded (it opens that way); unmatched = the list under เบิกล่วงหน้า is unfolded
+const pw_ = { seq: 0, data: null, months: [], def: "", busy: false, filter: "all", branch: "", group: "", status: "", kind: "", q: "", kinds: new Set(), people: new Set(), rules: true, unmatched: false };
 
 const pwN = (v) => Number(v || 0).toLocaleString("en-US");
 const pwNorm = (s) => String(s || "").toLowerCase().replace(/[\s\-_.]/g, "");
@@ -249,9 +249,29 @@ function pwMeter(k) {
   return el("span", { class: "pw-meter", "aria-hidden": "true" }, part("ok", k.ok), part("warn", k.carry), part("bad", k.miss));
 }
 
+// เบิกล่วงหน้า only: the lines of the mid-month lists that are nobody's on the pay list (no staff code, someone who left, someone HQ
+// pays), folded under the kind's own line. All of it is the server's "advance_unmatched": who (as the list writes it), amount, file, why.
+function pwUnmatched(list) {
+  const rows = (list || []).filter(Boolean);
+  if (!rows.length) return null;
+  const body = el("ul", { class: "pw-who", id: "pwUnmatched", hidden: !pw_.unmatched },
+    ...rows.map((r) => el("li", {}, pwMark("info", "จับคู่กับพนักงานไม่ได้"),
+      el("span", {}, el("b", { text: r.who || "ไม่มีชื่อ" }), ` — ${pwN(r.amount)} บาท`, r.why ? ` · ${r.why}` : null,
+        r.file ? el("span", { class: "muted", text: ` · ${r.file}` }) : null))));
+  const btn = el("button", { class: "pw-fold", type: "button", "aria-expanded": String(pw_.unmatched), "aria-controls": "pwUnmatched" },
+    `ชื่อในใบเบิกที่จับคู่กับพนักงานไม่ได้ ${pwN(rows.length)} รายการ`, el("span", { class: "pw-fold-chev", "aria-hidden": "true", text: "›" }));
+  const box = el("div", { class: `pw-unm small${pw_.unmatched ? " open" : ""}` }, btn, body);
+  btn.addEventListener("click", () => {
+    pw_.unmatched = !pw_.unmatched;
+    body.hidden = !pw_.unmatched; box.classList.toggle("open", pw_.unmatched); btn.setAttribute("aria-expanded", String(pw_.unmatched));
+  });
+  return box;
+}
+
 // One input of the calculation. The row unfolds (a real button: Tab, Enter / Space) to list who is not ok: people with something
 // of their own to fix first, then one line for the many who share the same words ("107 คน"). The names are one press away, in the table.
-function pwKind(k, i) {
+// d = the whole answer: the เบิกล่วงหน้า line also carries the names of the lists that found nobody (pwUnmatched).
+function pwKind(k, i, d) {
   const rows = (k.rows || []).filter(Boolean), more = Number(k.more || 0);
   const can = rows.length > 0 || more > 0;
   const key = k.key || `kind${i}`;
@@ -284,6 +304,8 @@ function pwKind(k, i) {
   if (can && pw_.kinds.has(key)) draw();
   item.append(el("div", { class: "pw-kind-head" }, head, pwLink(k.link, k.link_label)));
   if (body) item.append(body);
+  const loose = key === "advance" ? pwUnmatched((d || {}).advance_unmatched) : null;
+  if (loose) item.append(loose);
   return item;
 }
 
@@ -297,7 +319,7 @@ function pwKindsCard(d) {
       ` ตัวเลขทุกบรรทัดไม่นับ${(d.hold_branches || []).filter(Boolean).join(", ")} ${pwN(hold)} คน`) : null,
     later ? el("p", { class: "muted small pw-later-say" }, el("span", { class: "pw-later" }, el("i", { text: "รอขั้นต่อไป" })),
       " = ยังไม่มีที่ลงหรือยืนยันในระบบ อัปโหลดหรือกดอะไรในหน้านี้ก็ยังไม่เป็นสีเขียว — จะทำได้ในขั้นต่อไปของงานนี้") : null,
-    kinds.length ? el("ul", { class: "pw-list pw-kinds" }, ...kinds.map(pwKind)) : el("p", { class: "muted small", text: "ยังไม่มีรายการข้อมูลของงวดนี้" }));
+    kinds.length ? el("ul", { class: "pw-list pw-kinds" }, ...kinds.map((k, i) => pwKind(k, i, d))) : el("p", { class: "muted small", text: "ยังไม่มีรายการข้อมูลของงวดนี้" }));
 }
 
 // ------------------------------------------------------------------ รายคน
