@@ -1,7 +1,7 @@
 import sys
 import types
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -406,3 +406,34 @@ def test_the_workers_own_shift_time_decides_days_or_nights():
     days = month({E1: punches}, emps={E1: own})["people"][0]["days"]
     assert [(d["date"][5:], d["flag"]) for d in days][:2] == [("08-26", "ok"), ("08-27", "single")]
     assert days[0]["shifts"] == [{"in": "07:42", "out": "20:37", "next_day": False, "minutes": 775}]
+
+
+def _crew_change(days_first=6, nights=5):
+    """08:00 - 20:00 for some days, a day off, then 20:00 - 08:00 nights (moved to the night crew part way through the month)."""
+    out, d = [], datetime(2026, 11, 1)
+    for i in range(days_first):
+        out += [d + timedelta(days=i, hours=8), d + timedelta(days=i, hours=20)]
+    first_night = d + timedelta(days=days_first + 1, hours=20)
+    for i in range(nights):
+        out += [first_night + timedelta(days=i), first_night + timedelta(days=i, hours=12)]
+    return out
+
+
+def test_a_move_between_the_day_and_night_crews_reads_as_one_whichever_shift_is_stored():
+    punches = _crew_change()
+    for stored in (8 * 60, 20 * 60):                    # the roster's current shift or the month's majority: the same reading
+        s = at.pair_shifts(punches, 12 * 60, usual_start=stored)
+        assert all(x["out"] for x in s)
+        assert [x["in"].hour for x in s] == [8] * 6 + [20] * 5
+
+
+def test_one_missed_scan_still_does_not_turn_a_12_hour_month_around():
+    punches = _crew_change(days_first=10, nights=0)
+    del punches[7]                                                         # the 4th: no OUT
+    s = at.pair_month(punches, 12 * 60, 8 * 60)
+    assert [x["in"].hour for x in s if x["out"]] == [8] * 9 and sum(1 for x in s if not x["out"]) == 1
+
+
+def test_a_shift_that_is_not_12_hours_never_changes_crew():
+    punches = _days_404_1720("2026-11-01", 10, skip_in={3})
+    assert all(s["in"].hour == 4 for s in at.pair_shifts(punches, 9 * 60, usual_start=4 * 60 + 40) if s["out"])

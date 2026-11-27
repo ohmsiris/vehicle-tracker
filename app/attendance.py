@@ -193,22 +193,43 @@ def _tod(dt: datetime) -> int:
     return dt.hour * 60 + dt.minute
 
 
+SWITCH_COST = 240           # a change between the usual start and the one 12 hours away (day <-> night crew): cheaper than one missed scan
+
+
 def _pair_with_start(kept: list[datetime], target_minutes: int, usual: int) -> list[dict]:
+    """Pair around the usual start. For 12-hour shifts the reading may also change over to the start 12 hours away and back (a worker moved
+    between the day and night crews part way through the month -- owner's roster, 27 Nov 2026: ขาล 25 days then 5 nights, กุน 18 then 10).
+    A change costs SWITCH_COST, less than a scan left alone, so a clean change-over reads as one, but a single missed scan never turns
+    the rest of the month around (that still leaves a scan alone AND pays for the change)."""
     n = len(kept)
-    best = [0.0] * (n + 2)
-    pair_here = [False] * (n + 2)
+    starts = [usual] + ([(usual + 720) % 1440] if target_minutes == 12 * 60 else [])
+    k_n = len(starts)
+    best = [[0.0] * k_n for _ in range(n + 2)]
+    step: list[list[tuple]] = [[(k, False)] * k_n for k in range(n + 2)]      # step[i][k] = (start used from scan i on, pairs i with i+1)
     for i in range(n - 1, -1, -1):
-        cost = best[i + 1] + SINGLE_COST + _clock_gap(_tod(kept[i]), usual) * 0.25     # a lone scan near the usual start is a missed OUT, cheaper
-        here = False
-        if i + 1 < n and kept[i + 1] - kept[i] <= MAX_SHIFT:
-            gap = (kept[i + 1] - kept[i]).total_seconds() / 60
-            paired = best[i + 2] + abs(gap - target_minutes) * 0.25 + _clock_gap(_tod(kept[i]), usual)
-            if paired < cost:
-                cost, here = paired, True
-        best[i], pair_here[i] = cost, here
+        local = []
+        for k, st in enumerate(starts):
+            alone = SINGLE_COST // 4 if i == n - 1 else SINGLE_COST     # the last scan loaded: its OUT may simply not be in the file yet
+            cost = best[i + 1][k] + alone + _clock_gap(_tod(kept[i]), st) * 0.25     # a lone scan near the start is a missed OUT, cheaper
+            here = False
+            if i + 1 < n and kept[i + 1] - kept[i] <= MAX_SHIFT:
+                gap = (kept[i + 1] - kept[i]).total_seconds() / 60
+                paired = best[i + 2][k] + abs(gap - target_minutes) * 0.25 + _clock_gap(_tod(kept[i]), st)
+                if paired < cost:
+                    cost, here = paired, True
+            local.append((cost, here))
+        for k in range(k_n):
+            pick = k
+            for k2 in range(k_n):
+                if k2 != k and local[k2][0] + SWITCH_COST < local[pick][0] + (SWITCH_COST if pick != k else 0):
+                    pick = k2
+            best[i][k] = local[pick][0] + (SWITCH_COST if pick != k else 0)
+            step[i][k] = (pick, local[pick][1])
     out, i = [], 0
+    k = min(range(k_n), key=lambda x: (best[0][x] if n else 0, x))
     while i < n:
-        if pair_here[i]:
+        k, here = step[i][k]
+        if here:
             out.append({"in": kept[i], "out": kept[i + 1]})
             i += 2
         else:
