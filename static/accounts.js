@@ -111,6 +111,7 @@ function renderAccounts() {
             : f.state === "done" ? `ลงบัญชีแล้ว${f.entries ? ` · ${f.entries} รายการ · ${baht(f.total)} ฿` : ""}${waiting ? ` · อีก ${waiting} ไฟล์ยังไม่ได้ลงบัญชี` : ""}`
             : f.state === "none" ? "ไม่มีในงวดนี้"
             : f.state === "received" ? (drops.length ? "ได้รับไฟล์แล้ว · ยังไม่ได้ลงบัญชี (กด ลงบัญชี ที่กล่องรับไฟล์ด้านบน)" : "ได้รับไฟล์แล้ว · ยังไม่ได้ลงตัวเลข") : "ยังไม่ได้ใส่ — โยนไฟล์ลงกล่องด้านบน" }),
+          f.cash_fuel ? el("div", { class: "small muted", text: `น้ำมันเงินสดที่พนักงานบัญชีติ๊กแล้ว ${f.cash_fuel.entries} รายการ · ${baht(f.cash_fuel.total)} ฿ — ลงให้อัตโนมัติ ไม่ใช่เอกสารเบิก` }) : null,
           drops.length ? el("div", { class: "acx-files" }, ...drops.map((x) => el("button", { class: `linkbtn small acx-src${x.booked ? "" : " waiting"}`, type: "button",
             title: x.booked ? "ลงบัญชีจากไฟล์นี้" : "ไฟล์นี้ยังไม่ได้ลงบัญชี", text: `${x.booked ? "จากไฟล์" : "รอลงบัญชี"}: ${x.file_name}`, onclick: () => ibxPreview(x.id) }))) : null,
           myFiles.length ? el("div", { class: "acx-files" }, ...myFiles.map(acxFileChip)) : null),

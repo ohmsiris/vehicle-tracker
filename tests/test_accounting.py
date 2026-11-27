@@ -73,3 +73,12 @@ def test_the_checklist_shows_what_is_missing_for_the_half():
     assert "electricity" not in first and first["midmonth"]["state"] == "done" and first["truck_bill"]["state"] == "auto"
     second = {f["key"]: f for f in ac.feed_status(2, {}, {"water_city": "none"})}
     assert second["electricity"]["state"] == "missing" and second["water_city"]["state"] == "none" and "midmonth" not in second
+
+
+def test_the_bookkeepers_cash_fuel_does_not_tick_the_papers_row():
+    # owner, 27 Nov 2026: "ลงบัญชีแล้ว · 51 รายการ · 49,127 ฿" on the mid-month row, when only her checked cash fuel was in the books
+    rows = {f["key"]: f for f in ac.feed_status(1, {ac.CASH_FUEL_PREFIX + "midmonth": (51, 49_127.0)}, {})}
+    assert rows["midmonth"]["state"] == "missing" and rows["midmonth"]["entries"] == 0
+    assert rows["midmonth"]["cash_fuel"] == {"entries": 51, "total": 49_127.0}
+    both = {f["key"]: f for f in ac.feed_status(1, {"midmonth": (3, 900.0), ac.CASH_FUEL_PREFIX + "midmonth": (51, 49_127.0)}, {})}
+    assert both["midmonth"]["state"] == "done" and both["midmonth"]["entries"] == 3

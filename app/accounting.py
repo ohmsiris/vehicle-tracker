@@ -271,7 +271,9 @@ def feed_status(half: Optional[int], counts: dict, marks: dict, missing_amount: 
         booked = [d for d in drops if d.get("booked")]
         state = ("auto" if f["from"] == "program" else "done" if n or booked or mark == "done" else "none" if mark == "none"
                  else "received" if files.get(f["key"]) or drops else "missing")
+        cf_n, cf_total = counts.get(CASH_FUEL_PREFIX + f["key"], (0, 0.0))     # owner, 27 Nov 2026: the row said booked when only her fuel was
         out.append({**f, "entries": n, "total": round(total, 2), "state": state, "mark": mark, "files": files.get(f["key"], 0), "dropped": drops,
+                    "cash_fuel": {"entries": cf_n, "total": round(cf_total, 2)} if cf_n else None,
                     "note": f"บิล {missing_amount} ใบไม่มียอดเงิน — ไม่ได้นับ" if f["key"] == "truck_bill" and missing_amount else None})
     return out
 
@@ -429,8 +431,11 @@ def report(month: str, half: Optional[int] = None, branch: str = "") -> dict:
             total += _money(r["credit"]) - _money(r["debit"])
         per_entry[e["id"]] = (e, total)
     for e, total in per_entry.values():
-        n, t = counts.get(e["source"], (0, 0.0))
-        counts[e["source"]] = (n + 1, t + total)
+        key = e["source"]
+        if str(e.get("source_id") or "").startswith(CASH_FUEL_PREFIX):
+            key = CASH_FUEL_PREFIX + key          # the bookkeeper's cash fuel, booked under the half's papers: not the papers themselves
+        n, t = counts.get(key, (0, 0.0))
+        counts[key] = (n + 1, t + total)
     period_key = f"{month}-{half or 0}"
     marks = {m["feed"]: m["status"] for m in supabase.select_all("acc_feed_marks", {"select": "feed,status", "period": f"eq.{period_key}", "branch": f"eq.{branch or 'all'}", "order": "feed.asc"})}
     docs, fuel, files, elec = [], None, [], []
