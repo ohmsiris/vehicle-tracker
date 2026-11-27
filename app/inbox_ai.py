@@ -133,6 +133,21 @@ _LINE = {
     },
     "required": ["date", "text", "amount", "plate", "truck_number", "account", "unsure"],
 }
+# a row of a branch's work record (บันทึกการทำงาน+เบิกกลางเดือน, แก่งคอย's end-of-month copy: owner, 28 Nov 2026 -- the source of
+# แก่งคอย's days, OT and ค่าเที่ยว on the pay page). Numbers come as written (text): a blank cell is "", never a guess.
+_WORK = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "code": {"type": "string", "description": "the staff code as printed, e.g. SB-KK001"},
+        "name": {"type": "string", "description": "the name as printed"},
+        "days": {"type": "string", "description": "วัน (days worked) as written, e.g. '31'; '' when blank"},
+        "ot": {"type": "string", "description": "OT hours as written when a number, e.g. '15'; '' when blank or a word"},
+        "trip": {"type": "string", "description": "ค่าเที่ยว (trip money, baht) as written, e.g. '10900'; '' when blank"},
+        "note": {"type": "string", "description": "any word written in these cells instead of a number, e.g. 'เบี้ยขยัน'; else ''"},
+        "unsure": {"type": "boolean", "description": "true if days, OT or ค่าเที่ยว could not be read with confidence"},
+    },
+    "required": ["code", "name", "days", "ot", "trip", "note", "unsure"],
+}
 PAGE_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "properties": {
@@ -154,11 +169,13 @@ PAGE_SCHEMA = {
                                 "period_month": {"type": "string"}, "total": _num, "what": {"type": "string"},
                                 "account": {"type": "string", "enum": ACCOUNTS}},
                  "required": ["party", "doc_no", "date", "period_month", "total", "what", "account"]},
+        "work_rows": {"type": "array", "items": _WORK,
+                      "description": "ONLY for a per-person work record table (บันทึกการทำงาน) with วันทำงาน / OT / ค่าเที่ยว columns; else []"},
         "summary": {"type": "string", "description": "one short Thai line: what this page is"},
         "person": {"type": "string", "description": "who a memo / payslip is about; empty if none"},
     },
     "required": ["page_kind", "title", "date_from", "date_to", "written_total", "cover_parts", "lines", "branch_hints",
-                 "employee_codes", "bill", "summary", "person"],
+                 "employee_codes", "bill", "work_rows", "summary", "person"],
 }
 
 PROMPT = """You read ONE scanned page of a Thai ice factory's papers (company สระบุรีวารีเทพ; two branches: สระบุรี, code SRB / SB, and
@@ -195,6 +212,10 @@ written_total: the total written on the page as written (often red ink at the bo
 branch_hints: copy exactly any text that names the BRANCH the paper belongs to ("สาขาเมืองสระบุรี", "[SRB]", "สาขาแก่งคอย", "KK").
   Not the company name สระบุรีวารีเทพ on its own, not a province in an address.
 employee_codes: every employee code on the page (SB-FR076, SB-PD042, SB-KK012 ...).
+work_rows: ONLY on a per-person table with a วันทำงาน column (days) and OT / ค่าเที่ยว columns -- "บันทึกการทำงาน" (often together with
+  เบิกกลางเดือน). One row per person, top to bottom: code, name, days, ot, trip as WRITTEN (handwritten digits; "" for a blank cell;
+  a word such as "เบี้ยขยัน" or "-" in a cell goes to note, not to the number). Such a page is still page_kind advance when it has the
+  advance column. Every other page: [].
 bill: filled ONLY for page_kind bill (on other pages: every text "", total null, account 7900): party = who issued it; doc_no;
   date (YYYY-MM-DD); period_month = YYYY-MM of the month the bill is FOR when stated (ประจำเดือน / รอบการใช้), else "";
   total = the amount to pay; what = what it is for, short Thai; account = best account.
@@ -791,6 +812,9 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
     if not pv["note"]:
         pv["note"] = (f"{len(reads)} หน้า: " + ", ".join(f"{KIND_TH.get(k, k)} {n}" for k, n in Counter(r.get('page_kind') for r in reads).most_common())
                       + " — ทุกหน้าที่มีเงินเทียบยอดที่เขียนไว้กับยอดที่อ่านได้")
+    worked = sum(len(r.get("work_rows") or []) for r in reads)
+    if worked:                                       # the work record's days / OT / ค่าเที่ยว: used by the pay page, not booked here
+        pv["note"] = (pv.get("note") or "") + f" · บันทึกการทำงาน {worked} คน (วัน / OT / ค่าเที่ยว) ใช้ในหน้าคำนวณเงินเดือน"
     return pv
 
 

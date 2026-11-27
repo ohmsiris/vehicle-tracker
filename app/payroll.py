@@ -121,13 +121,13 @@ GROUP_DEFAULTS = {"DRV-A": {"rate": 120, "pct": 5}, "DRV-B": {"rate": 120, "pct"
 KINDS = [
     ("group", "กลุ่มคิดเงิน", "กลุ่ม", "กติกาคิดเงินรายคน (จากแผ่น อัตรา ของแบบคำนวณ)", None, None, ""),
     ("rate", "อัตรา/วัน", "อัตรา", "ค่าแรงต่อวัน ในหน้า รายชื่อพนักงาน", "#employees", "รายชื่อพนักงาน", ""),
-    ("days", "วันทำงาน", "วัน", "รถสาย: ยอดขายรายวัน · คนอื่น: สแกนนิ้ว / ใบสรุปวันหยุด", "#attendance", "เวลาทำงาน",
+    ("days", "วันทำงาน", "วัน", "รถสาย: ยอดขายรายวัน · แก่งคอย: บันทึกการทำงาน (กล่องรับไฟล์) · คนอื่น: สแกนนิ้ว / ใบสรุปวันหยุด", "#attendance", "เวลาทำงาน",
      "คนที่ไม่ใช่รถสาย: ยังไม่มีที่สรุปวันทำงานในระบบ"),
     ("sales", "ยอดขาย", "ยอดขาย", "รถสาย: ยอดขายรายวัน (เงินที่ได้ของวันที่ขับเอง)", "#driver-days", "ยอดขายรายวัน", ""),
     ("bags", "จำนวนซอง", "ซอง", "รถสาย: ยอดขายรายวัน (จำนวนซองของวันที่ขับเอง)", "#driver-days", "ยอดขายรายวัน", ""),
     ("fuel", "ค่าน้ำมัน", "น้ำมัน", "ใบแจ้งหนี้บัตรน้ำมัน + น้ำมันเงินสด ของรถสาย กลุ่ม A, B, C และทวาย", "#accounts-in", "ลงข้อมูล / แนบไฟล์", ""),
-    ("ot", "ชม. OT", "OT", "ใบสรุปสิ้นเดือนแก่งคอย / สแกนนิ้ว", "#attendance", "เวลาทำงาน", "ยังไม่มีที่ลงชั่วโมง OT รายคนในระบบ"),
-    ("trip", "ค่าเที่ยว", "เที่ยว", "ตารางเที่ยว แก่งคอย", None, None, "ยังไม่มีที่ยืนยันค่าเที่ยวรายคนในระบบ"),
+    ("ot", "ชม. OT", "OT", "แก่งคอย: บันทึกการทำงาน ในเอกสารสิ้นเดือน (กล่องรับไฟล์)", "#accounts-in", "ลงข้อมูล / แนบไฟล์", ""),
+    ("trip", "ค่าเที่ยว", "เที่ยว", "แก่งคอย: บันทึกการทำงาน (เทียบกับตารางเที่ยว)", "#accounts-in", "ลงข้อมูล / แนบไฟล์", ""),
     ("nobonus", "งดเบี้ยขยัน", "งดเบี้ย", "เจ้าของตัดสินรายคน", None, None, "ยังไม่มีที่ลงในระบบ"),
     ("savings", "สะสม", "สะสม", "ใบสรุปเงินเดือน HQ ล่าสุด (เจ้าของยืนยัน 27/11/2026: หักตามใบ HQ)", None, None, ""),
     ("advance", "เบิกล่วงหน้า", "เบิก", "ใบเบิกกลางเดือนในกล่องรับไฟล์ (อ่านรายคน) · ถ้ายังไม่มี ใช้ยอดจากใบ HQ ล่าสุดแทน", "#accounts-in", "ลงข้อมูล / แนบไฟล์", ""),
@@ -737,6 +737,44 @@ def advance_lists(files: Optional[list[dict]]) -> list[dict]:
     return out
 
 
+def work_records(files: Optional[list[dict]]) -> dict[str, dict]:
+    """แก่งคอย's work record (บันทึกการทำงาน, the end-of-month copy of the mid-month list with วัน / OT / ค่าเที่ยว filled in): owner,
+    28 Nov 2026 -- the source of แก่งคอย's days, OT and ค่าเที่ยว. From the drop box's read pages (work_rows, app/inbox_ai.py), booked files
+    first, the newest first. -> {code: {days, ot, trip, note, unsure, file, short, page, clash}}; clash = another file of the month
+    says other numbers for the same person. A row without a staff code is not anyone's. Pure."""
+    ranked = sorted(files or [], key=lambda f: str(f.get("uploaded_at") or ""), reverse=True)
+    ranked.sort(key=lambda f: f.get("status") != "booked")
+    out: dict = {}
+    for f in ranked:
+        preview = f.get("preview") if isinstance(f.get("preview"), dict) else {}
+        if f.get("status") not in ADVANCE_READ or (f.get("half") or preview.get("half")) == "mid":
+            continue                                          # the mid-month copy has the same columns, still empty
+        pages = f.get("pages") if f.get("pages") is not None else preview.get("ai_pages")
+        mine: dict = {}                                       # this file's rows
+        for pg in sorted((x for x in pages or [] if isinstance(x, dict)), key=lambda x: _f(x.get("n"))):
+            for w in pg.get("work_rows") or []:
+                if not isinstance(w, dict):
+                    continue
+                code = read_code(w.get("code"))[0] or read_code(w.get("name"))[0]
+                row = {"code": code, "name": _norm(w.get("name")), "days": _amount(w.get("days")), "ot": _amount(w.get("ot")),
+                       "trip": _amount(w.get("trip")), "note": _norm(w.get("note")), "unsure": bool(w.get("unsure")),
+                       "file": _norm(f.get("file_name")), "short": short_name(f.get("file_name")), "page": pg.get("n"), "clash": ""}
+                if not code or (row["days"], row["ot"], row["trip"]) == (None, None, None):
+                    continue                                  # nobody's, or nothing written for him
+                if code in mine:                              # the same code twice in one file: a misread code -- not trusted
+                    mine[code]["clash"] = f"รหัสนี้มี 2 บรรทัดในไฟล์เดียวกัน (หน้า {mine[code]['page']} และ {row['page']}: {row['name']})"
+                    continue
+                mine[code] = row
+        for code, row in mine.items():
+            had = out.get(code)
+            if had is None:
+                out[code] = row
+            elif (had["days"], had["ot"], had["trip"]) != (row["days"], row["ot"], row["trip"]) and not had["clash"]:
+                wrote = f"{num(row['days'])} วัน" if row["days"] is not None else "ต่างกัน"
+                had["clash"] = f"{row['short']} หน้า {row['page']} เขียน {wrote}"
+    return out
+
+
 def no_advance(failed: bool = False) -> dict:
     """What advance_view gives for a month with no list at all (failed = the drop box could not be read)."""
     return {"lists": [], "by_person": {}, "branches": {}, "clashed": {}, "failed": failed}
@@ -1215,6 +1253,11 @@ def build_person(p: dict, ctx: dict) -> dict:
             cells["trip"] = (cell("carry", total, money(total), "ตามตารางเที่ยว (ยังไม่ยืนยัน)") if mine
                              else cell("carry", note="มีตารางเที่ยวงวดนี้ แต่ยังไม่มีของคนนี้"))
 
+    # ---- แก่งคอย: days, OT and ค่าเที่ยว from the branch's work record (owner, 28 Nov 2026)
+    work = ctx.get("work", {}).get((p.get("code") or "").upper()) if p.get("branch") == "แก่งคอย" else None
+    if work:
+        apply_work(cells, work, first, last, ctx, p)
+
     # ---- deductions: HQ's own sheet of the month when there is one, else the latest sheet before it as the stand-in
     fines = ctx["fines"].get(p["id"], [])
     # เบิกล่วงหน้า from the month's own lists (never for a month HQ already worked out): the cell, or why the lists cannot settle him
@@ -1269,6 +1312,70 @@ def build_person(p: dict, ctx: dict) -> dict:
         cells["refund"] = refund_cell(owed, short=True)
     return _finish({**base, "status": status, "rate": cells["rate"]["value"], "rate2": rate2,
                     "formula": person_formula(group, rule, spans, (end - start).days + 1, ot=cells["ot"]["state"] != "na")}, cells)
+
+
+LATIN_RE = re.compile(r"[A-Za-z]{3,}")
+NOT_NAMES = {"MR", "MRS", "MISS", "MS"}
+
+
+def _consonants(name) -> str:
+    """The Thai consonants of a name, the titles off (also written twice: "นายนายวิน") and what is in brackets kept apart."""
+    text = re.sub(r"\(.*?\)|\s", "", _norm(name))
+    while NAME_TITLE_RE.match(text):
+        text = NAME_TITLE_RE.sub("", text, count=1)
+    return "".join(ch for ch in text if "ก" <= ch <= "ฮ")
+
+
+def same_person(paper, full_name, nickname="") -> bool:
+    """Is the name on the paper this employee's? Loose on purpose -- clerks spell every name their own way (เตี้ยวิน / เตี้ย(วิน),
+    แทะมินจอ / แทะบินจอ): a shared English name (KYAW, MIN ...), or the same first consonant with most of the rest. It only has to catch
+    a misread staff code, i.e. somebody else entirely. A paper with no Thai and no English name says nothing."""
+    words = {w.upper() for w in LATIN_RE.findall(_norm(paper))} - NOT_NAMES
+    mine = {w.upper() for x in (full_name, nickname) for w in LATIN_RE.findall(_norm(x))} - NOT_NAMES
+    if words & mine:
+        return True
+    a = _consonants(paper)
+    if not a:
+        return not words or not mine
+    for b in (_consonants(full_name) + _consonants(re.sub(r"[()]", "", _norm(full_name))), _consonants(nickname)):
+        if b and a[0] == b[0] and (a[:2] in b or sum(min(a.count(c), b.count(c)) for c in set(a)) >= 0.6 * len(a)):
+            return True
+    return False
+
+
+def apply_work(cells: dict, w: dict, first: date, last: date, ctx: dict, p: Optional[dict] = None) -> None:
+    """The work record's days, OT and ค่าเที่ยว into a แก่งคอย person's cells. ok when read with confidence and it checks out; carry
+    (to be looked at) when the reader was unsure, two files or two rows disagree, the name on the paper is not his, or the trip table
+    could not be compared or says another amount; miss when the days are more than the days he could have worked."""
+    said = f"ตามบันทึกการทำงาน ({w['short']} หน้า {w['page']})"
+    other = bool(p and w.get("name") and not same_person(w["name"], p.get("full_name"), p.get("nickname")))
+    doubt = [x for x in ("อ่านไม่ชัด ดูกระดาษ" if w["unsure"] else "", f"ไม่ตรง: {w['clash']}" if w["clash"] else "",
+                         f"ชื่อในกระดาษ: {w.get('name')}" if other else "") if x]
+    state = "carry" if doubt else "ok"
+    can = (last - first).days + 1
+    if w["days"] is not None:
+        days = w["days"]
+        bad = days > can or days < 0
+        kept = [x for x in str(cells["days"].get("note") or "").split(" · ") if x.startswith("ต้องแยกวันออกรถ")]      # the rate2 reminder stays
+        note = " · ".join([said, *([f"เกิน {can} วันของงวด"] if bad else []), *([w["note"]] if w["note"] else []), *doubt, *kept])
+        cells["days"] = cell("miss" if bad else state, days, f"{num(days)} วัน", note)
+    if w["ot"] is not None and w["ot"] > 0:
+        cells["ot"] = cell(state, w["ot"], f"{num(w['ot'])} ชม.", " · ".join([said, *doubt]))
+    elif cells["ot"]["state"] != "na" and w["days"] is not None:      # an OT person with his days filled and the OT cell blank: none
+        cells["ot"] = cell(state, 0, "0 ชม.", " · ".join([said, "ช่อง OT ว่าง", *doubt]))
+    if w["trip"] is not None and w["trip"] > 0:
+        notes, st = [said, *doubt], state
+        trips = ctx.get("trips")
+        if trips is None:
+            st, notes = "carry", [*notes, "โหลดตารางเที่ยวไม่สำเร็จ ยังไม่ได้เทียบ"]
+        else:
+            mine = [t for t in trips if (t.get("employee_code") or "").upper() == w["code"]]
+            table = round(sum(_f(t.get("computed_total") if t.get("computed_total") is not None else t.get("written_total")) for t in mine), 2) if mine else None
+            if table is not None and abs(table - w["trip"]) > 1:
+                st, notes = "carry", [*notes, f"ตารางเที่ยว {money(table)}"]
+            elif table is None and trips:
+                notes.append("ไม่มีในตารางเที่ยว")
+        cells["trip"] = cell(st, w["trip"], money(w["trip"]), " · ".join(notes))
 
 
 EARLY = "งวดเพิ่งเริ่ม ยังไม่ถึงวันที่ต้องลง"
@@ -1736,6 +1843,7 @@ def build(src: dict, month: str, today: date) -> dict:
     ctx = {"month": month, "start": start, "end": end, "upto": upto, "rules": rules, "sso_list": sso_list, "rates": rates, "route": route, "scans": scans, "scan_count": scan_count, "fines": fines, "owed": owed,
            # the mid-month advance lists read from the drop box: who drew what (None = that read failed; a caller that never asked has none)
            "advance": advance_view(src.get("advance_files", []), employees),
+           "work": work_records(src.get("advance_files")),
            "split": {r["employee_id"] for r in src.get("split") or [] if r.get("money_split")},
            "own": own, "own_code": own_code, "prev": prev, "prev_code": prev_code, "prev_failed": sheets is None,
            "sheet": sheet, "sheet_people": before.count(sheet) if sheet else 0,

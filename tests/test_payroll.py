@@ -1539,3 +1539,61 @@ def test_the_sso_list_replaces_the_stand_in():
     assert a == {"state": "ok", "value": 875, "text": "875", "note": "ตาม สปส.1-10 ก.ย. 2569"}
     assert b == {"state": "ok", "value": 0, "text": "0", "note": "ตาม สปส.1-10 ก.ย. 2569 · ไม่หัก"}
     assert c["state"] == "carry" and c["value"] == 625 and c["note"].startswith("ไม่มีชื่อใน สปส.1-10 ก.ย. 2569 · ตามใบ HQ")
+
+
+# --------------------------------------------------------------------------------------------- แก่งคอย's work record (28 Nov 2026)
+def _work_file(rows, status="read", name="[KK] เอกสารสิ้นเดือน.pdf", uploaded="2026-11-28T10:00:00"):
+    page = {"n": 7, "page_kind": "advance", "title": "บันทึกการทำงาน+เบิกกลางเดือน (แก่งคอย)", "lines": [], "employee_codes": [],
+            "work_rows": [{"code": c, "name": "x", "days": d, "ot": o, "trip": t, "note": note, "unsure": u} for c, d, o, t, note, u in rows]}
+    return {"id": "f1", "file_name": name, "kind": "scan", "status": status, "month": MONTH, "branches": ["แก่งคอย"], "uploaded_at": uploaded,
+            "half": "end", "pages": [page]}
+
+
+def test_the_kk_work_record_gives_days_ot_and_trip_money():
+    people = [emp("SB-KK001", branch="แก่งคอย", position="พขร."), emp("SB-KK013", branch="แก่งคอย"), emp("SB-KK030", branch="แก่งคอย"),
+              emp("SB-KK022", branch="แก่งคอย", position="เด็กรถ")]
+    rules = [rule("SB-KK001", "KK-DRV", bonus=True), rule("SB-KK013", "KK-PROD"), rule("SB-KK030", "KK-PROD"), rule("SB-KK022", "KK-DRV")]
+    rows = [("SB-KK001", "31", "", "10,900", "เบี้ยขยัน", False), ("SB-KK013", "30", "48", "", "", False),
+            ("SB-KK030", "32", "84", "", "", True), ("sb-kk 022", "24", "", "9195", "", False), ("", "20", "", "", "", False)]
+    trips = [{"id": 1, "employee_code": "SB-KK022", "written_total": 9175, "computed_total": None}]
+    out = pw.build(src(employees=people, rules=rules, rates=[rate(p["id"]) for p in people], advance_files=[_work_file(rows)], trips=trips), MONTH, TODAY)
+    a, b, c, d = (one(out, x)["cells"] for x in ("SB-KK001", "SB-KK013", "SB-KK030", "SB-KK022"))
+    said = "ตามบันทึกการทำงาน"
+    assert (a["days"]["state"], a["days"]["value"]) == ("ok", 31) and said in a["days"]["note"] and "เบี้ยขยัน" in a["days"]["note"]
+    assert (a["trip"]["state"], a["trip"]["value"]) == ("ok", 10900)
+    assert (b["days"]["value"], b["ot"]["state"], b["ot"]["value"]) == (30, "ok", 48)
+    assert c["days"]["state"] == "miss" and "เกิน 31 วัน" in c["days"]["note"] and c["ot"]["state"] == "carry"       # unsure + impossible
+    assert d["trip"]["state"] == "carry" and "ตารางเที่ยว 9,175" in d["trip"]["note"]                               # the trip table disagrees
+    wr = pw.work_records([_work_file(rows)])
+    assert set(wr) == {"SB-KK001", "SB-KK013", "SB-KK030", "SB-KK022"}                                              # a row with no code is nobody's
+
+
+def test_two_files_that_disagree_are_said():
+    a = _work_file([("SB-KK001", "31", "", "10900", "", False)], status="booked", name="ก.pdf", uploaded="2026-11-27T10:00:00")
+    b = _work_file([("SB-KK001", "30", "", "10900", "", False)], name="ข.pdf")
+    wr = pw.work_records([b, a])
+    assert wr["SB-KK001"]["days"] == 31 and "30 วัน" in wr["SB-KK001"]["clash"]                                    # the booked file wins
+
+
+def test_the_mid_month_copy_and_blank_rows_say_nothing():
+    # the mid-month copy is the same form with วัน / OT / ค่าเที่ยว still empty: it neither wins nor clashes
+    mid = {**_work_file([("SB-KK013", "", "", "", "", False)], status="booked", name="[KK] กลางเดือน.pdf"), "half": "mid"}
+    blank = _work_file([("SB-KK013", "", "", "", "", False)], name="[KK] อื่น.pdf")
+    end = _work_file([("SB-KK013", "30", "48", "", "", False)], name="[KK] สิ้นเดือน.pdf", uploaded="2026-11-28T11:00:00")
+    assert pw.work_records([mid, blank]) == {}
+    wr = pw.work_records([mid, end, blank])
+    assert (wr["SB-KK013"]["days"], wr["SB-KK013"]["ot"], wr["SB-KK013"]["clash"]) == (30, 48, "")
+
+
+def test_a_code_read_twice_in_one_file_and_a_name_that_is_not_his():
+    twice = _work_file([("SB-KK013", "30", "48", "", "", False), ("SB-KK013", "12", "", "", "", False)])
+    assert "2 บรรทัด" in pw.work_records([twice])["SB-KK013"]["clash"]
+    people = [emp("SB-KK013", "อาซู(MR.SOE MYAT OO)", branch="แก่งคอย")]
+    f = _work_file([("SB-KK013", "30", "48", "", "", False)])
+    f["pages"][0]["work_rows"][0]["name"] = "นายตะวันชัย(MR.SAW)"
+    out = pw.build(src(employees=people, rules=[rule("SB-KK013", "KK-PROD")], rates=[rate("SB-KK013")], advance_files=[f]), MONTH, TODAY)
+    c = one(out, "SB-KK013")["cells"]
+    assert c["days"]["state"] == "carry" and "ชื่อในกระดาษ" in c["days"]["note"]
+    f["pages"][0]["work_rows"][0]["name"] = "นายอาซู(MR.SOE MYAT OO)"
+    ok = pw.build(src(employees=people, rules=[rule("SB-KK013", "KK-PROD")], rates=[rate("SB-KK013")], advance_files=[f]), MONTH, TODAY)
+    assert one(ok, "SB-KK013")["cells"]["days"]["state"] == "ok"
