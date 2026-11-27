@@ -379,3 +379,14 @@ def test_the_usual_start_is_learned_only_when_steady():
     mixed = _days_404_1720("2026-10-01", 6) + [p.replace(day=p.day + 10, hour=(p.hour + 9) % 24) for p in _days_404_1720("2026-10-01", 6)]
     assert at.usual_start_of(sorted(mixed), 9 * 60) is None                   # days and nights mixed: the old rule stays
     assert at.ROLE_START.get(("สระบุรี", "พนักงานขับรถหน้าโรง")) == 300 and ("แก่งคอย", "พนักงานขับรถหน้าโรง") not in at.ROLE_START
+
+
+def test_the_usual_start_is_used_only_when_it_leaves_no_more_scans_alone():
+    from datetime import datetime, timedelta
+    flip = _days_404_1720("2026-11-01", 10, skip_in={3})
+    assert all(s["in"].hour == 4 for s in at.pair_month(flip, 9 * 60, 4 * 60 + 40) if s["out"])          # the flip is fixed
+    extra = []                                                                                           # in 04:40, out 15:00, extra scan 15:40
+    for i in range(10):
+        d = datetime(2026, 11, 1) + timedelta(days=i)
+        extra += [d.replace(hour=4, minute=40), d.replace(hour=15)] + ([d.replace(hour=15, minute=40)] if i in (2, 6) else [])
+    assert at.pair_month(extra, 9 * 60, 6 * 60) == at.pair_shifts(extra, 9 * 60)                         # the plain reading is kept

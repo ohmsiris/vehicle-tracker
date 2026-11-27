@@ -170,7 +170,8 @@ USUAL_SPREAD = 90
 USUAL_DAYS = 45              # how far back the usual start is learned
 # when there are no earlier weeks to learn from: the start the role is known to have (owner, 27 Nov 2026: Saraburi's หน้าโรง drivers start in the
 # early morning, about 04:00 - 05:30, and leave in the afternoon or evening)
-ROLE_START = {("สระบุรี", "พนักงานขับรถหน้าโรง"): 5 * 60}     # Kaeng Khoi's หน้าโรง hours are not known yet: they keep the old rule
+ROLE_START = {("สระบุรี", "พนักงานขับรถหน้าโรง"): 5 * 60,     # Kaeng Khoi's หน้าโรง hours are not known yet: they keep the old rule
+              ("สระบุรี", "พนักงานขับรถสาย"): 6 * 60}         # route drivers leave in the morning, back in the afternoon / evening (นาวิน, 27 Nov 2026)
 
 
 def _clock_gap(a: int, b: int) -> int:
@@ -221,6 +222,19 @@ def usual_start_of(punches: list[datetime], target_minutes: int = DEFAULT_SHIFT)
         return None
     rel = sorted(((x - best_c + 720) % 1440) - 720 for x in near)            # unwrapped around the centre (a start at 23:50 and 00:10)
     return int((best_c + rel[len(rel) // 2]) % 1440)
+
+
+def pair_month(punches: list[datetime], target_minutes: int, usual: Optional[int]) -> list[dict]:
+    """The month's shifts: read around the usual start when there is one -- but only when that leaves no MORE scans alone than the plain
+    reading. A route driver's extra scan (out at 15:00, a second scan at 15:40) is absorbed by the plain reading; the usual start would leave it
+    alone and ask the owner about a day that was fine (27 Nov 2026: สำเริง, อภิเชษฐ์ ...). A one-missed-scan flip (นาวิน, ประดิษฐ์) leaves the
+    same number alone either way, so the usual start wins there."""
+    plain = pair_shifts(punches, target_minutes)
+    if usual is None:
+        return plain
+    timed = pair_shifts(punches, target_minutes, usual_start=usual)
+    alone = lambda shifts: sum(1 for x in shifts if not x["out"])  # noqa: E731
+    return timed if alone(timed) <= alone(plain) else plain
 
 
 def is_free_hours(position) -> bool:
@@ -304,7 +318,7 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         usual = usual_start_of(before, target) if before else None
         if usual is None:
             usual = ROLE_START.get((e.get("branch") or "", (e.get("position") or "").strip()))
-        for s in pair_shifts([p for p in mine if p.date() >= start - timedelta(days=1)], target_minutes=target, usual_start=usual):
+        for s in pair_month(sorted(p for p in mine if p.date() >= start - timedelta(days=1)), target, usual):
             if start <= s["in"].date() <= end:
                 by_day.setdefault(s["in"].date(), []).append(s)
         for key, r in by_key.items():
