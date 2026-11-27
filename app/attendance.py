@@ -325,7 +325,10 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         target = expected if fixed else 9 * 60
         mine = punches.get(eid, [])
         before = [p for p in mine if p.date() < start - timedelta(days=1)]
-        usual = usual_start_of(before, target) if before else None
+        if custom is not None:      # the worker's own shift time says when they start: 07:50 / 20:05 every day is days, not nights (owner, 27 Nov 2026: ปิ๊ปาย)
+            usual = parse_clock(e.get("shift_start"))
+        else:
+            usual = usual_start_of(before, target) if before else None
         if usual is None:
             usual = role_start(e.get("branch"), e.get("position"))
         for s in pair_month(sorted(p for p in mine if p.date() >= start - timedelta(days=1)), target, usual):

@@ -395,3 +395,14 @@ def test_the_usual_start_is_used_only_when_it_leaves_no_more_scans_alone():
 def test_office_clerks_of_both_branches_start_about_eight():
     assert at.role_start("สระบุรี", "เสมียนออฟฟิศ") == 8 * 60 and at.role_start("แก่งคอย", "เสมียน") == 8 * 60
     assert at.role_start("สระบุรี", "พนักงานขับรถหน้าโรง") == 5 * 60 and at.role_start("แก่งคอย", "ผลิต") is None
+
+
+def test_the_workers_own_shift_time_decides_days_or_nights():
+    # 07:50 / 20:05 every day; on the 27th only the morning scan (ปิ๊ปาย, 26 Oct 2026). With nothing earlier the first day reads as 20:05 -> 07:50.
+    punches = [dt("2026-08-26", "07:42"), dt("2026-08-26", "20:37"), dt("2026-08-27", "07:56")] + day_punches("2026-08-28", "2026-08-29", "2026-08-30", start="07:50", end="20:05")
+    plain = month({E1: punches})["people"][0]["days"]
+    assert plain[0]["shifts"][1] == {"in": "20:37", "out": "07:56", "next_day": True, "minutes": 679}
+    own = dict(emp(E1, "SB-FR025"), shift_start="08:00", shift_end="20:00")
+    days = month({E1: punches}, emps={E1: own})["people"][0]["days"]
+    assert [(d["date"][5:], d["flag"]) for d in days][:2] == [("08-26", "ok"), ("08-27", "single")]
+    assert days[0]["shifts"] == [{"in": "07:42", "out": "20:37", "next_day": False, "minutes": 775}]
