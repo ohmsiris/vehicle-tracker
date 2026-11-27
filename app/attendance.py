@@ -174,6 +174,16 @@ ROLE_START = {("สระบุรี", "พนักงานขับรถห
               ("สระบุรี", "พนักงานขับรถสาย"): 6 * 60}         # route drivers leave in the morning, back in the afternoon / evening (นาวิน, 27 Nov 2026)
 
 
+OFFICE_START = 8 * 60       # office clerks (เสมียน...) of both branches work days from about 08:00 (owner, 27 Nov 2026: ปิยวรรณ, 08:15 - 21:00)
+
+
+def role_start(branch, position) -> Optional[int]:
+    pos = (position or "").strip()
+    if pos.startswith("เสมียน"):
+        return OFFICE_START
+    return ROLE_START.get((branch or "", pos))
+
+
 def _clock_gap(a: int, b: int) -> int:
     d = abs(a - b) % 1440
     return min(d, 1440 - d)
@@ -317,7 +327,7 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         before = [p for p in mine if p.date() < start - timedelta(days=1)]
         usual = usual_start_of(before, target) if before else None
         if usual is None:
-            usual = ROLE_START.get((e.get("branch") or "", (e.get("position") or "").strip()))
+            usual = role_start(e.get("branch"), e.get("position"))
         for s in pair_month(sorted(p for p in mine if p.date() >= start - timedelta(days=1)), target, usual):
             if start <= s["in"].date() <= end:
                 by_day.setdefault(s["in"].date(), []).append(s)

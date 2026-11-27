@@ -390,3 +390,8 @@ def test_the_usual_start_is_used_only_when_it_leaves_no_more_scans_alone():
         d = datetime(2026, 11, 1) + timedelta(days=i)
         extra += [d.replace(hour=4, minute=40), d.replace(hour=15)] + ([d.replace(hour=15, minute=40)] if i in (2, 6) else [])
     assert at.pair_month(extra, 9 * 60, 6 * 60) == at.pair_shifts(extra, 9 * 60)                         # the plain reading is kept
+
+
+def test_office_clerks_of_both_branches_start_about_eight():
+    assert at.role_start("สระบุรี", "เสมียนออฟฟิศ") == 8 * 60 and at.role_start("แก่งคอย", "เสมียน") == 8 * 60
+    assert at.role_start("สระบุรี", "พนักงานขับรถหน้าโรง") == 5 * 60 and at.role_start("แก่งคอย", "ผลิต") is None
