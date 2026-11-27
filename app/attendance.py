@@ -174,6 +174,11 @@ ROLE_START = {("สระบุรี", "พนักงานขับรถห
               ("สระบุรี", "พนักงานขับรถสาย"): 6 * 60}         # route drivers leave in the morning, back in the afternoon / evening (นาวิน, 27 Nov 2026)
 
 
+# roles that always come in in the morning and leave whenever the work is done: their scans are read that way even when it leaves a scan or two
+# more alone (owner, 27 Nov 2026: Saraburi's ช่าง, "morning 08/09/10am in then whatever is out" -- จรูญ's 22:00 - 10:00 days were read as nights)
+MORNING_IN = {("สระบุรี", "ช่าง"): 9 * 60}
+
+
 OFFICE_START = 8 * 60       # office clerks (เสมียน...) of both branches work days from about 08:00 (owner, 27 Nov 2026: ปิยวรรณ, 08:15 - 21:00)
 
 
@@ -346,13 +351,19 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         target = expected if fixed else 9 * 60
         mine = punches.get(eid, [])
         before = [p for p in mine if p.date() < start - timedelta(days=1)]
+        morning = MORNING_IN.get((e.get("branch") or "", (e.get("position") or "").strip()))
         if custom is not None:      # the worker's own shift time says when they start: 07:50 / 20:05 every day is days, not nights (owner, 27 Nov 2026: ปิ๊ปาย)
             usual = parse_clock(e.get("shift_start"))
         else:
             usual = usual_start_of(before, target) if before else None
         if usual is None:
             usual = role_start(e.get("branch"), e.get("position"))
-        for s in pair_month(sorted(p for p in mine if p.date() >= start - timedelta(days=1)), target, usual):
+        month_punches = sorted(p for p in mine if p.date() >= start - timedelta(days=1))
+        if morning is not None and custom is None:
+            shifts = pair_shifts(month_punches, target, usual_start=morning)
+        else:
+            shifts = pair_month(month_punches, target, usual)
+        for s in shifts:
             if start <= s["in"].date() <= end:
                 by_day.setdefault(s["in"].date(), []).append(s)
         for key, r in by_key.items():

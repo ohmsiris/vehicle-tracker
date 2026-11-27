@@ -437,3 +437,14 @@ def test_one_missed_scan_still_does_not_turn_a_12_hour_month_around():
 def test_a_shift_that_is_not_12_hours_never_changes_crew():
     punches = _days_404_1720("2026-11-01", 10, skip_in={3})
     assert all(s["in"].hour == 4 for s in at.pair_shifts(punches, 9 * 60, usual_start=4 * 60 + 40) if s["out"])
+
+
+def test_saraburi_mechanics_come_in_in_the_morning_and_leave_whenever():
+    # จรูญ, 5 - 7 Nov 2026: plain pairing reads 23:42 -> 09:36 nights; the owner: ช่าง come in at 08 - 10 and leave whenever the work is done
+    punches = [dt("2026-09-05", "06:19"), dt("2026-09-05", "23:42"), dt("2026-09-06", "09:36"), dt("2026-09-06", "22:31"),
+               dt("2026-09-07", "10:21"), dt("2026-09-07", "21:22"), dt("2026-09-08", "10:54")]
+    plain = month({E1: punches})["people"][0]["days"]
+    assert plain[0]["shifts"][1]["in"] == "23:42"
+    days = month({E1: punches}, emps={E1: emp(E1, "SB-FR001", position="ช่าง")})["people"][0]["days"]
+    assert [[(s["in"], s["out"]) for s in d["shifts"]] for d in days] == [[("06:19", "23:42")], [("09:36", "22:31")], [("10:21", "21:22")], [("10:54", None)]]
+    assert at.MORNING_IN.get(("แก่งคอย", "ช่าง")) is None
