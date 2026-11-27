@@ -350,3 +350,32 @@ def test_เด็กรถ_and_drivers_have_free_hours_no_shift_time_no_ot(db, 
     assert at.list_schedules()["people"] == []                                                # not offered in the settings list
     with pytest.raises(at.InvalidAttendance, match="ตั้งเวลากะไม่ได้"):
         at.set_schedule({"employee_id": E1, "start": "08:00", "end": "17:00"})
+
+
+# ---- one missed scan must not flip a day worker into nights (owner, 27 Nov 2026: ประดิษฐ์ / สุทธิสาร, หน้าโรง drivers who start ~04:30)
+def _days_404_1720(first, n, skip_in=()):
+    from datetime import datetime, timedelta
+    out = []
+    for i in range(n):
+        d = datetime.fromisoformat(first) + timedelta(days=i)
+        if i not in skip_in:
+            out.append(d.replace(hour=4, minute=40))
+        out.append(d.replace(hour=17, minute=20))
+    return out
+
+
+def test_with_a_usual_start_a_missed_morning_scan_stays_a_missed_scan():
+    punches = _days_404_1720("2026-11-01", 10, skip_in={3})                 # 4 Nov: no morning scan
+    old = at.pair_shifts(punches, 9 * 60)
+    assert any(s["in"].hour == 17 and s["out"] for s in old)                  # without it the month flips to evening -> morning
+    new = at.pair_shifts(punches, 9 * 60, usual_start=4 * 60 + 40)
+    assert [s for s in new if not s["out"]] == [{"in": punches[6], "out": None}]          # only the 4th's 17:20 is alone
+    assert all(s["in"].hour == 4 for s in new if s["out"])                    # every other shift starts at 04:40
+
+
+def test_the_usual_start_is_learned_only_when_steady():
+    assert at.usual_start_of(_days_404_1720("2026-10-01", 12), 9 * 60) == 4 * 60 + 40
+    assert at.usual_start_of(_days_404_1720("2026-10-01", 5), 9 * 60) is None          # too few shifts to tell
+    mixed = _days_404_1720("2026-10-01", 6) + [p.replace(day=p.day + 10, hour=(p.hour + 9) % 24) for p in _days_404_1720("2026-10-01", 6)]
+    assert at.usual_start_of(sorted(mixed), 9 * 60) is None                   # days and nights mixed: the old rule stays
+    assert at.ROLE_START.get(("สระบุรี", "พนักงานขับรถหน้าโรง")) == 300 and ("แก่งคอย", "พนักงานขับรถหน้าโรง") not in at.ROLE_START

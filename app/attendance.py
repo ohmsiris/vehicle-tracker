@@ -122,17 +122,25 @@ def parse_report(data: bytes) -> dict:
 
 
 # ------------------------------------------------------------------ shifts
-def pair_shifts(punches: list[datetime], target_minutes: int = DEFAULT_SHIFT) -> list[dict]:
+def pair_shifts(punches: list[datetime], target_minutes: int = DEFAULT_SHIFT, usual_start: Optional[int] = None) -> list[dict]:
     """Lay a person's scans in a row and pair them into shifts: [{in, out}] with out None for a single scan.
 
     A second scan within DUP_GAP of the one before is the same scan twice and is dropped. Then the pairing leaves the FEWEST scans alone
     (two scans more than MAX_SHIFT apart are never a pair); among equal ones it prefers shifts closest to `target_minutes` -- so one stray scan
-    in the evening does not drag every shift after it out of step."""
+    in the evening does not drag every shift after it out of step.
+
+    usual_start (minute of the day the person usually starts, learned from earlier months by usual_start_of): scans alone cannot tell an IN
+    from an OUT -- 04:40 / 17:20 every day reads as days (04:40 -> 17:20) or as nights (17:20 -> 04:40 the next morning). One missed morning
+    scan used to flip the rest of the month to nights, because that left one scan fewer alone (owner, 27 Nov 2026: ประดิษฐ์ and สุทธิสาร,
+    หน้าโรง drivers who start at about 04:30 / 05:00). With a usual start, a shift is also charged for how far its start is from it, and a
+    scan left alone costs SINGLE_COST, so the shifts keep their real start and the missed scans are the ones left alone."""
     kept: list[datetime] = []
     for p in sorted(set(punches)):
         if not kept or p - kept[-1] >= DUP_GAP:
             kept.append(p)
     n = len(kept)
+    if usual_start is not None:
+        return _pair_with_start(kept, target_minutes, usual_start)
     best: list[Optional[tuple]] = [None] * (n + 2)        # best[i] = (singles, deviation, pairs_here) for the scans from i on
     best[n] = best[n + 1] = (0, 0, False)
     for i in range(n - 1, -1, -1):
@@ -153,6 +161,66 @@ def pair_shifts(punches: list[datetime], target_minutes: int = DEFAULT_SHIFT) ->
             out.append({"in": kept[i], "out": None})
             i += 1
     return out
+
+
+SINGLE_COST = 480            # minutes of "badness" a scan left alone costs when the usual start decides (see pair_shifts)
+USUAL_MIN_SHIFTS = 8         # a usual start needs at least this many shifts in the earlier weeks ...
+USUAL_SHARE = 0.75           # ... and this share of them starting within USUAL_SPREAD minutes of each other
+USUAL_SPREAD = 90
+USUAL_DAYS = 45              # how far back the usual start is learned
+# when there are no earlier weeks to learn from: the start the role is known to have (owner, 27 Nov 2026: Saraburi's หน้าโรง drivers start in the
+# early morning, about 04:00 - 05:30, and leave in the afternoon or evening)
+ROLE_START = {("สระบุรี", "พนักงานขับรถหน้าโรง"): 5 * 60}     # Kaeng Khoi's หน้าโรง hours are not known yet: they keep the old rule
+
+
+def _clock_gap(a: int, b: int) -> int:
+    d = abs(a - b) % 1440
+    return min(d, 1440 - d)
+
+
+def _tod(dt: datetime) -> int:
+    return dt.hour * 60 + dt.minute
+
+
+def _pair_with_start(kept: list[datetime], target_minutes: int, usual: int) -> list[dict]:
+    n = len(kept)
+    best = [0.0] * (n + 2)
+    pair_here = [False] * (n + 2)
+    for i in range(n - 1, -1, -1):
+        cost = best[i + 1] + SINGLE_COST + _clock_gap(_tod(kept[i]), usual) * 0.25     # a lone scan near the usual start is a missed OUT, cheaper
+        here = False
+        if i + 1 < n and kept[i + 1] - kept[i] <= MAX_SHIFT:
+            gap = (kept[i + 1] - kept[i]).total_seconds() / 60
+            paired = best[i + 2] + abs(gap - target_minutes) * 0.25 + _clock_gap(_tod(kept[i]), usual)
+            if paired < cost:
+                cost, here = paired, True
+        best[i], pair_here[i] = cost, here
+    out, i = [], 0
+    while i < n:
+        if pair_here[i]:
+            out.append({"in": kept[i], "out": kept[i + 1]})
+            i += 2
+        else:
+            out.append({"in": kept[i], "out": None})
+            i += 1
+    return out
+
+
+def usual_start_of(punches: list[datetime], target_minutes: int = DEFAULT_SHIFT) -> Optional[int]:
+    """The minute of the day this person usually starts, from earlier weeks' scans -- or None when there is no steady start (fewer than
+    USUAL_MIN_SHIFTS shifts, or under USUAL_SHARE of them within USUAL_SPREAD minutes of one another: mixed days and nights keep the old rule)."""
+    starts = [_tod(s["in"]) for s in pair_shifts(punches, target_minutes) if s["out"]]
+    if len(starts) < USUAL_MIN_SHIFTS:
+        return None
+    best_c, near = None, []
+    for c in starts:
+        close = [x for x in starts if _clock_gap(x, c) <= USUAL_SPREAD]
+        if len(close) > len(near):
+            best_c, near = c, close
+    if len(near) < USUAL_SHARE * len(starts):
+        return None
+    rel = sorted(((x - best_c + 720) % 1440) - 720 for x in near)            # unwrapped around the centre (a start at 23:50 and 00:10)
+    return int((best_c + rel[len(rel) // 2]) % 1440)
 
 
 def is_free_hours(position) -> bool:
@@ -230,7 +298,13 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         expected = custom or expected_minutes(e.get("branch"))
         ot_applies = e.get("branch") == OT_BRANCH and (e.get("position") or "") in FIXED_POSITIONS      # Kaeng Khoi ผลิต: what is worked past the shift is OT
         by_day: dict[date, list[dict]] = {}
-        for s in pair_shifts(punches.get(eid, []), target_minutes=expected if fixed else 9 * 60):
+        target = expected if fixed else 9 * 60
+        mine = punches.get(eid, [])
+        before = [p for p in mine if p.date() < start - timedelta(days=1)]
+        usual = usual_start_of(before, target) if before else None
+        if usual is None:
+            usual = ROLE_START.get((e.get("branch") or "", (e.get("position") or "").strip()))
+        for s in pair_shifts([p for p in mine if p.date() >= start - timedelta(days=1)], target_minutes=target, usual_start=usual):
             if start <= s["in"].date() <= end:
                 by_day.setdefault(s["in"].date(), []).append(s)
         for key, r in by_key.items():
@@ -364,7 +438,7 @@ def import_report(data: bytes, filename: str) -> dict:
 
 def _load_month(month: str) -> dict:
     start, end = month_range(month)
-    window = {"and": f"(punched_at.gte.{start - timedelta(days=1)}T00:00:00,punched_at.lt.{end + timedelta(days=3)}T00:00:00)"}
+    window = {"and": f"(punched_at.gte.{start - timedelta(days=USUAL_DAYS)}T00:00:00,punched_at.lt.{end + timedelta(days=3)}T00:00:00)"}   # earlier weeks: the usual start
     cols = _EMP_COLS + (",shift_start,shift_end" if has_v27() else "")
     rows, reviews, emp_rows = supabase.parallel(
         lambda: supabase.select_all_parallel("attendance_punches", {"select": "employee_id,punched_at", **window, "order": "employee_id.asc,punched_at.asc"}),
