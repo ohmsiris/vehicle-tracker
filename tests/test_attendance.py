@@ -466,3 +466,10 @@ def test_an_extra_scan_inside_a_shift_does_not_turn_the_month_around():
 def test_the_timed_readings_last_scan_alone_is_not_held_against_it():
     punches = [dt("2026-11-01", "23:30"), dt("2026-11-02", "12:00"), dt("2026-11-02", "23:30"), dt("2026-11-03", "12:00"), dt("2026-11-03", "23:30")]
     assert at.pair_month(punches, 12 * 60, 23 * 60 + 30)[0]["in"].hour == 23            # the plain reading (12:00 -> 23:30) leaves none alone
+
+
+def test_a_day_only_a_little_short_is_still_flagged_but_marked_minor():
+    punches = day_punches("2026-09-01", start="08:00", end="19:45") + day_punches("2026-09-02", start="08:00", end="19:30")
+    days = month({E1: punches})["people"][0]
+    assert [(d["flag"], d["minor"]) for d in days["days"]] == [("short", True), ("short", False)]        # 15 min short / 30 min short
+    assert days["counts"]["short"] == 2 and days["counts"]["minor"] == 1 and days["counts"]["open"] == 2

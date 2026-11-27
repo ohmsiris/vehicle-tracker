@@ -33,6 +33,8 @@ OT_BRANCH = "แก่งคอย"                                  # the branc
 SHIFT_MINUTES = {"สระบุรี": 12 * 60, "แก่งคอย": 9 * 60}   # a ผลิต shift by branch: Kaeng Khoi's 9 hours are followed by 3 hours of OT (paid apart), Saraburi works 12 with none
 DEFAULT_SHIFT = 12 * 60
 LATE_GRACE = 10                                    # minutes of the shift that may be missing before a day is "short"
+MINOR_SHORT = 20                                   # a short day missing at most this many minutes is still asked about, but shown quieter
+                                                   # (owner, 27 Nov 2026: people scanning out about 19:50 -- flag it, less strongly than a single scan)
 FREE_SINGLES = 3                                   # single scans a month that come with the "half a day" suggestion
 DUP_GAP = timedelta(minutes=30)                    # a second scan this soon after the first is the same scan pressed twice
 MAX_SHIFT = timedelta(hours=19)                    # two scans further apart than this are not one shift (a long day, e.g. 03:45 to 20:45, is possible)
@@ -403,7 +405,9 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
                 singles += 1
             r = by_key.get((eid, day.isoformat()))
             ot = sum(minutes_of(s) - expected for s in shifts if s["out"] and minutes_of(s) - expected > LATE_GRACE) if ot_applies else 0
-            days.append({"date": day.isoformat(), "shifts": [_shift_card(s) for s in shifts], "flag": flag, "minutes": sum(minutes_of(s) for s in shifts), "ot_minutes": ot,
+            worked = sum(minutes_of(s) for s in shifts)
+            days.append({"date": day.isoformat(), "shifts": [_shift_card(s) for s in shifts], "flag": flag, "minutes": worked, "ot_minutes": ot,
+                         "minor": flag == "short" and expected - worked <= MINOR_SHORT,
                          "single_no": singles if flag == "single" else None, "suggest": "half" if flag == "single" and singles <= FREE_SINGLES else None,
                          "review": review_card(r) if r else None})
         if not days:
@@ -413,6 +417,7 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
                        "branch": e.get("branch") or "", "status": e.get("status") or "active", "fixed": fixed, "free": free, "expected": expected, "ot_applies": ot_applies,
                        "schedule": {"start": clock_text(parse_clock(e.get("shift_start"))), "end": clock_text(parse_clock(e.get("shift_end")))} if custom is not None else None,
                        "counts": {"days": len(days), "single": sum(d["flag"] == "single" for d in days), "short": sum(d["flag"] == "short" for d in days),
+                                  "minor": sum(1 for d in days if d["minor"]),
                                   "open": sum(d["review"] is None for d in flagged), "decided": sum(d["review"] is not None for d in flagged),
                                   "minutes": sum(d["minutes"] for d in days), "ot_minutes": sum(d["ot_minutes"] for d in days)},
                        "deduct": round(sum(d["review"]["deduct_amount"] for d in days if d["review"]), 2), "days": days})

@@ -1253,6 +1253,8 @@ dialog.lndialog { max-width: 720px; width: calc(100vw - 32px); }
 .btn.suggested { border-style: dashed; border-color: var(--warn); }
 .attable td { vertical-align: middle; }
 .attable tr.atneed td { background: var(--warn-soft); }
+.attable tr.atminor td { background: transparent; }
+.attable tr.atminor td:first-child { box-shadow: inset 3px 0 0 var(--warn-line, var(--flag-line)); }
 .attable tr.atdone td { background: var(--ok-soft); }
 @media (max-width: 640px) {
   .athead { padding: 10px 12px; }
