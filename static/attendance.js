@@ -57,7 +57,7 @@ function atTally() {
   const t = { people: at.data.people.length, days: 0, single: 0, short: 0, open: 0, decided: 0, suggested: 0, ot_minutes: 0 };
   for (const p of at.data.people) {
     const flagged = p.days.filter(atIsFlag);
-    Object.assign(p.counts, { days: p.days.length, single: p.days.filter((d) => d.flag === "single").length, short: p.days.filter((d) => d.flag === "short").length, minor: p.days.filter((d) => d.minor).length,
+    Object.assign(p.counts, { days: p.days.length, single: p.days.filter((d) => d.flag === "single").length, short: p.days.filter((d) => d.flag === "short").length, minor: p.days.filter((d) => d.minor).length, double: p.days.filter((d) => d.double).length,
       open: flagged.filter((d) => !d.review).length, decided: flagged.filter((d) => d.review).length, minutes: p.days.reduce((s, d) => s + d.minutes, 0), ot_minutes: p.days.reduce((s, d) => s + d.ot_minutes, 0) });
     p.deduct = p.days.reduce((s, d) => s + (d.review ? d.review.deduct_amount : 0), 0);
     t.days += p.counts.days; t.single += p.counts.single; t.short += p.counts.short; t.open += p.counts.open; t.decided += p.counts.decided;
@@ -76,6 +76,7 @@ function atVisiblePeople() {
     .filter((p) => !position || p.position === position)
     .filter((p) => !tokens.length || tokens.every((t) => empNorm([p.name, p.code, p.position, p.branch].join("|")).includes(t)))
     .filter((p) => {
+      if (kind === "double") return p.days.some((d) => d.double) && (show !== "open" || p.days.some((d) => atIsFlag(d) && !d.review));
       const flagged = p.days.filter((d) => atIsFlag(d) && (!kind || d.flag === kind));
       if (show === "open") return flagged.some((d) => !d.review);
       if (show === "flagged") return flagged.length > 0 || p.days.some((d) => d.flag === "manual");
@@ -115,6 +116,7 @@ function atCard(p) {
       c.single ? el("span", { class: "badge warn", text: `สแกนขาเดียว ${c.single}` }) : null,
       c.short > (c.minor || 0) ? el("span", { class: "badge warn", text: `ไม่ครบเวลา ${c.short - (c.minor || 0)}` }) : null,
       c.minor ? el("span", { class: "badge", title: `ขาดไม่เกิน 20 นาที`, text: `ขาดนิดหน่อย ${c.minor}` }) : null,
+      c.double ? el("span", { class: "badge", title: "ทำ 2 กะในวันเดียว หรือกะเดียวยาวเกิน 1.5 เท่า", text: `ควบกะ ${c.double}` }) : null,
       c.open ? el("span", { class: "badge urgent", text: `ค้าง ${c.open}` }) : (c.decided ? el("span", { class: "badge ok", text: "ตัดสินครบ" }) : null),
       c.ot_minutes ? el("span", { class: "badge ok", text: `OT ${atHM(c.ot_minutes)} ชม.` }) : null,
       p.deduct ? el("span", { class: "badge", text: `หัก ${atMoney(p.deduct)} ฿` }) : null,
@@ -127,7 +129,8 @@ function atCard(p) {
 
 function atBody(p) {
   const kind = $("atKind").value, all = at.allDays.has(p.employee_id);
-  const days = p.days.filter((d) => all || atIsFlag(d) || d.flag === "manual").filter((d) => all || !kind || d.flag === kind || d.flag === "manual");
+  const days = p.days.filter((d) => all || atIsFlag(d) || d.double || d.flag === "manual")
+    .filter((d) => all || !kind || (kind === "double" ? d.double : d.flag === kind) || d.flag === "manual");     // ควบกะ days are shown, not asked
   const table = days.length
     ? el("div", { class: "tablewrap" }, el("table", { class: "emptable attable" },
         el("thead", {}, el("tr", {}, ...["วัน", "เวลาสแกน", "ชั่วโมง", "สถานะ", "ตัดสิน"].map((x) => el("th", { text: x })))),
@@ -153,7 +156,7 @@ function atDayRow(p, d) {
     el("td", { class: "nowrap", text: `${AT_DOW[dt.getDay()]} ${beDate(d.date).replace(/ \d{4}$/, "")}` }),
     el("td", { text: times }),
     el("td", { class: "r nowrap", text: d.shifts.some((s) => s.out) ? atHM(d.minutes) : "—" }),
-    el("td", {}, status, d.shifts.length > 1 ? el("span", { class: "badge", text: `${d.shifts.length} กะ` }) : null,
+    el("td", {}, status, d.double ? el("span", { class: "badge", text: "ควบกะ" }) : null,
       d.ot_minutes ? el("span", { class: "badge ok", text: `OT ${atHM(d.ot_minutes)}` }) : null),
     el("td", {}, d.flag === "ok" ? null : atControls(p, d)));
 }

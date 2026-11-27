@@ -213,6 +213,21 @@ EXTRA_LONGER = 240          # ... for a shift at most this many minutes longer t
 NEAR_OFF = 20
 
 
+def work_day(scan_in: datetime, usual: Optional[int]) -> date:
+    """The day a shift counts for: the day of the usual start it is nearest to. The midnight crew scanning in at 23:55 starts the NEXT
+    day's 00:00 shift (owner, 27 Nov 2026: it read as a second shift -- "2 กะ" -- on the day before)."""
+    if usual is None:
+        return scan_in.date()
+    rel = ((_tod(scan_in) - usual + 720) % 1440) - 720
+    return (scan_in - timedelta(minutes=rel)).date() if abs(rel) <= 180 else scan_in.date()      # only a start near the usual one moves
+
+
+def is_exit(scan: datetime, usual: int, target_minutes: int) -> bool:
+    """A lone scan nearer the end of the worker's shift than its start: an OUT (owner, 27 Nov 2026: สำเนา's 00:05 on 26 Oct is the
+    25 Oct shift's exit -- 15:00 - 00:00 -- not a day of its own)."""
+    return _clock_gap(_tod(scan), (usual + target_minutes) % 1440) < _clock_gap(_tod(scan), usual)
+
+
 def near_start(punches: list[datetime], start: int) -> int:
     """The worker's real start near a stored one: the middle of their scans within USUAL_SPREAD of it (ทู's 00:00 - 12:00 is 23:30 - 12:00 on
     the machine; half an hour off on every shift tipped the month to the 12:00 crew)."""
@@ -395,8 +410,11 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
         else:
             shifts = pair_month(month_punches, target, usual)
         for s in shifts:
-            if start <= s["in"].date() <= end:
-                by_day.setdefault(s["in"].date(), []).append(s)
+            if not s["out"] and usual is not None and s["in"].date() <= start and is_exit(s["in"], usual, target)                     and (s["in"] - timedelta(minutes=target)).date() < start:
+                continue        # the exit of the last shift before this pay month (its IN is in the earlier file): not a day of this month
+            day = work_day(s["in"], usual)
+            if start <= day <= end:
+                by_day.setdefault(day, []).append(s)
         for key, r in by_key.items():
             if key[0] == eid and r.get("manual") and start <= date.fromisoformat(key[1]) <= end:
                 by_day.setdefault(date.fromisoformat(key[1]), [])
@@ -411,6 +429,7 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
             worked = sum(minutes_of(s) for s in shifts)
             days.append({"date": day.isoformat(), "shifts": [_shift_card(s) for s in shifts], "flag": flag, "minutes": worked, "ot_minutes": ot,
                          "minor": flag == "short" and expected - worked <= MINOR_SHORT,
+                         "double": not free and (sum(1 for x in shifts if x["out"]) >= 2 or worked >= expected * 3 // 2),
                          "single_no": singles if flag == "single" else None, "suggest": "half" if flag == "single" and singles <= FREE_SINGLES else None,
                          "review": review_card(r) if r else None})
         if not days:
@@ -420,7 +439,7 @@ def build_month(month: str, emps: dict[str, dict], punches: dict[str, list[datet
                        "branch": e.get("branch") or "", "status": e.get("status") or "active", "fixed": fixed, "free": free, "expected": expected, "ot_applies": ot_applies,
                        "schedule": {"start": clock_text(parse_clock(e.get("shift_start"))), "end": clock_text(parse_clock(e.get("shift_end")))} if custom is not None else None,
                        "counts": {"days": len(days), "single": sum(d["flag"] == "single" for d in days), "short": sum(d["flag"] == "short" for d in days),
-                                  "minor": sum(1 for d in days if d["minor"]),
+                                  "minor": sum(1 for d in days if d["minor"]), "double": sum(1 for d in days if d["double"]),
                                   "open": sum(d["review"] is None for d in flagged), "decided": sum(d["review"] is not None for d in flagged),
                                   "minutes": sum(d["minutes"] for d in days), "ot_minutes": sum(d["ot_minutes"] for d in days)},
                        "deduct": round(sum(d["review"]["deduct_amount"] for d in days if d["review"]), 2), "days": days})

@@ -483,3 +483,29 @@ def test_a_day_only_a_little_short_is_still_flagged_but_marked_minor():
     days = month({E1: punches})["people"][0]
     assert [(d["flag"], d["minor"]) for d in days["days"]] == [("short", True), ("short", False)]        # 15 min short / 30 min short
     assert days["counts"]["short"] == 2 and days["counts"]["minor"] == 1 and days["counts"]["open"] == 2
+
+
+def test_the_midnight_crew_scanning_in_before_midnight_counts_for_the_next_day():
+    # owner, 27 Nov 2026: 00:00 - 12:00 crew, in at 23:55 -> it read as a second shift ("2 กะ") on the day before
+    assert at.work_day(dt("2026-11-03", "23:55"), 0) == date(2026, 11, 4)
+    assert at.work_day(dt("2026-11-03", "00:10"), 0) == date(2026, 11, 3)
+    assert at.work_day(dt("2026-11-03", "07:54"), 20 * 60) == date(2026, 11, 3)          # the other crew's start stays on its own date
+    own = dict(emp(E1, "SB-FR037"), shift_start="00:00", shift_end="12:00")
+    punches = [dt("2026-09-01", "00:00"), dt("2026-09-01", "12:01"), dt("2026-09-01", "23:55"), dt("2026-09-02", "12:09")]
+    days = month({E1: punches}, emps={E1: own})["people"][0]["days"]
+    assert [(d["date"], len(d["shifts"]), d["double"]) for d in days] == [("2026-09-01", 1, False), ("2026-09-02", 1, False)]
+
+
+def test_the_exit_of_the_shift_before_the_month_is_not_a_day_of_it():
+    # สำเนา, 15:00 - 00:00: 00:05 on 26 Oct is the 25 Oct shift's exit (its IN is in the earlier file)
+    own = dict(emp(E1, "SB-FR008", position="หัวหน้างาน"), shift_start="15:00", shift_end="00:00")
+    punches = [dt("2026-08-26", "00:05"), dt("2026-08-26", "14:43"), dt("2026-08-27", "00:33"), dt("2026-08-27", "14:47"), dt("2026-08-28", "00:12")]
+    days = month({E1: punches}, emps={E1: own})["people"][0]["days"]
+    assert [(d["date"], d["flag"]) for d in days] == [("2026-08-26", "ok"), ("2026-08-27", "ok")]
+
+
+def test_a_double_shift_is_marked():
+    own = dict(emp(E1, "SB-FR009", position="หัวหน้างาน"), shift_start="23:00", shift_end="08:00")
+    punches = [dt("2026-09-01", "22:54"), dt("2026-09-02", "14:50"), dt("2026-09-02", "22:58"), dt("2026-09-03", "08:01")]
+    days = month({E1: punches}, emps={E1: own})["people"][0]
+    assert [d["double"] for d in days["days"]] == [True, False] and days["counts"]["double"] == 1
