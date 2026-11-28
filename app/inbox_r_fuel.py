@@ -28,6 +28,9 @@ Three kinds of file land here:
      the title ("สาขา NM" / "(สาขาห้วยบง)") and the file name; the oldest files name no station, then the format decides (NM's file is
      typed from the printed bill "ใบวางบิล/ใบกำกับภาษี", ห้วยบง's from the notebook "สมุด"), and the preview says so.
      Keys: "fuel:bangchak:<month>:<station>" (entries "...:<station>:<plate>"), so the two stations replace independently.
+     A stand-in's fills (owner, 28 Nov 2026: someone drove the route in place of its own driver -- that day's fuel comes off nobody's
+     commission, but is still the route's for the accounts) are the same plate's own second entry, "...:<station>:<plate>:sub",
+     described คนขับแทน: per-truck, per-station and file totals are what they were. Which fills those are: _read_station.
      MIGRATION: the scripts (import_bangchak.py, import_card_fuel_sheet.py, fill_fuel_estimates.py) booked both stations as ONE entry per
      plate per month, "fuel:bangchak:<month>:<plate>" -- that cannot be split by station, so it cannot be reproduced. Booking a station's
      file therefore also deletes those old combined entries of that month (and says so in the preview first): the other station's fuel
@@ -77,6 +80,11 @@ BC_SHEET = "บันทึกเติมน้ำมัน"
 BC_CHECK = "ตรวจสอบยอดรวม"
 BC_ABOUT = "คำอธิบาย"
 PT_OK = ("สำเร็จ", "success", "successful", "approved", "")
+# a stand-in's fills (owner, 28 Nov 2026): someone drove the route in place of its own driver -- that day's fuel comes off nobody's
+# commission, but stays the route's for the accounts. Booked as the plate's own second entry, "...:<station>:<plate>:sub".
+STAND_IN = "sub"
+STAND_IN_NOTE = "คนขับแทน (ไม่หักค่าคอม)"
+STAND_IN_TAG = "ไม่หักค่าคอม (คนขับแทน)"
 TH_ABBR = {"มค": 1, "กพ": 2, "มีค": 3, "เมย": 4, "พค": 5, "มิย": 6, "กค": 7, "สค": 8, "กย": 9, "ตค": 10, "พย": 11, "ธค": 12}
 _ABBR = "|".join(sorted(TH_ABBR, key=len, reverse=True))
 NAME_RANGE = re.compile(rf"(\d{{1,2}})({_ABBR})-(\d{{1,2}})({_ABBR})(\d{{2}})")
@@ -207,20 +215,31 @@ def read(f: Dropped) -> dict:
 
 # ------------------------------------------------------------------ rows / batches from per-plate totals
 def _batch(key: str, station: str, month: str, by_plate: dict, counts: dict, vehicles: list[dict], title: str, note: str,
-           file_total: Optional[float], sub: str = "", payer: str = PAYER, prefer: Optional[str] = None) -> tuple[dict, list[str]]:
+           file_total: Optional[float], sub: str = "", payer: str = PAYER, prefer: Optional[str] = None,
+           by_plate_sub: Optional[dict] = None, counts_sub: Optional[dict] = None) -> tuple[dict, list[str]]:
+    """by_plate_sub: a stand-in's fills by plate (owner, 28 Nov 2026), booked as their own entry of the same plate
+    ("...:<plate>:sub", the description says คนขับแทน): the truck's, the station's and the file's totals are the same as without them."""
     out = acc_cardfuel.build(month, station, by_plate, vehicles, note, payer=payer, sub=sub, prefer=prefer)
+    entries, flags = list(out["entries"]), list(out["flags"])
+    if by_plate_sub:
+        more = acc_cardfuel.build(month, station, by_plate_sub, vehicles, f"{note} · {STAND_IN_NOTE}", payer=payer, sub=sub, prefer=prefer,
+                                  tail=STAND_IN)
+        entries += more["entries"]
+        flags += [x for x in more["flags"] if x not in flags]
+        entries.sort(key=lambda e: e["source_id"])                   # a truck's stand-in entry right after its own
     rows = []
-    for e in out["entries"]:
-        plate_key = e["source_id"].rsplit(":", 1)[-1]
+    for e in entries:
+        stand_in = e["source_id"].endswith(":" + STAND_IN)
+        plate_key = e["source_id"].split(":")[-2 if stand_in else -1]
         gross = round(sum(ln["credit"] for ln in e["lines"]), 2)
         no_truck = all(ln.get("vehicle_id") is None for ln in e["lines"])
-        n = counts.get(plate_key, 0)
+        n = (counts_sub or {}).get(plate_key, 0) if stand_in else counts.get(plate_key, 0)
         rows.append({"date": e["entry_date"], "text": e["description"] + (f" · {n} ครั้ง" if n else ""), "party": e["party"],
                      "amount": gross, "role": "cost", "account": "6120",
                      "flag": "ไม่พบรถทะเบียนนี้ในระบบ — ลงไว้ไม่ผูกกับรถ" if no_truck else None})
     rows_total = round(sum(r["amount"] for r in rows), 2)
     return ({"key": key, "feed": "fuel_card", "source": "card_fuel", "branch": payer, "month": month, "title": title, "rows": rows,
-             "file_total": file_total, "rows_total": rows_total, "entries": out["entries"]}, out["flags"])
+             "file_total": file_total, "rows_total": rows_total, "entries": entries}, flags)
 
 
 # ------------------------------------------------------------------ 1. PT export
@@ -450,7 +469,8 @@ def _legacy_bangchak(month: str) -> list[dict]:
     from app import supabase
     rows = supabase.select_all("acc_entries", {"select": "*", "source_id": f"like.fuel:bangchak:{month}:*", "order": "id.asc"})
     pre = f"fuel:bangchak:{month}:"
-    # the drop box's own keys have one more segment ("<station>:<plate>"); a plate never holds a ":"
+    # the drop box's own keys have one more segment ("<station>:<plate>", a stand-in's "<station>:<plate>:sub" two); a plate never
+    # holds a ":"
     return [r for r in rows if (r.get("source_id") or "").startswith(pre) and ":" not in r["source_id"][len(pre):]]
 
 
@@ -461,8 +481,9 @@ def read_bangchak(f: Dropped) -> dict:
     groups = _bc_groups(book)
     multi = len(groups) > 1
     done: list[dict] = []
+    look = _Lookup()
     for log_name, prefix in groups:
-        got = _read_station(f, book, log_name, prefix, multi)
+        got = _read_station(f, book, log_name, prefix, multi, look)
         if got is None:
             continue
         if any(d["station"] == got["station"] for d in done):
@@ -472,7 +493,7 @@ def read_bangchak(f: Dropped) -> dict:
     if not done:
         p.update(store_only=True, note="ไฟล์บางจากนี้ไม่มีรายการเติมน้ำมัน")
         return p
-    vehicles = _vehicles()
+    vehicles = look.vehicles()
     for d in done:
         tag = f"{d['station']}: " if multi else ""
         p["conflicts"] += d["conflicts"]
@@ -482,7 +503,8 @@ def read_bangchak(f: Dropped) -> dict:
         batch, flags = _batch(d["key"], "bangchak", d["month"], d["per"], d["counts"], vehicles,
                               f"น้ำมันบางจาก {d['station']} {month_label(d['month'])} · {d['n']} บิล ({dmy(d['lo'])}–{dmy(d['hi'])})",
                               f"จากไฟล์บางจาก {d['station']}", d["file_total"], sub=d["station"],
-                              payer=BC_PAYER.get(d["station"], PAYER), prefer=BC_TRUCKS.get(d["station"]))
+                              payer=BC_PAYER.get(d["station"], PAYER), prefer=BC_TRUCKS.get(d["station"]),
+                              by_plate_sub=d["per_sub"], counts_sub=d["counts_sub"])
         p["batches"].append(batch)
         p["flags"] += flags
     for payer in dict.fromkeys(BC_PAYER.get(d["station"], PAYER) for d in done):
@@ -520,18 +542,106 @@ def read_bangchak(f: Dropped) -> dict:
     return p
 
 
-def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: bool) -> Optional[dict]:
+def _swap_kind(status: str, own, filled) -> str:
+    """What the Reader's สถานะ says about a fill (owner, 28 Nov 2026): "driver" = สลับคนขับ (รถเดิม), another driver in the route's
+    own truck; "both" = สลับทั้งคนขับและรถ, another driver in another truck; "truck" = สลับรถ (คนขับเดิม), the route's driver in
+    another truck (also a row that says ปกติ but names two different plates, as the older files do); "" = the route's driver in the
+    route's truck."""
+    s = re.sub(r"\s+", "", status or "")
+    if "ทั้งคนขับและรถ" in s:
+        return "both"
+    if s.startswith("สลับคนขับ"):
+        return "driver"
+    if s.startswith("สลับรถ") or (own and filled and norm_plate(str(own)) != norm_plate(str(filled))):
+        return "truck"
+    return ""
+
+
+def _route_label(number: str, own: str) -> str:
+    """'9' -> '#9'; a route the notebook names by its plate ('83-2919') as it is."""
+    return f"#{number}" if re.fullmatch(r"\d{1,3}", number or "") else (number or own or "?")
+
+
+class _Lookup:
+    """What a Bangchak read needs from the database, each read once and only when needed: the trucks, and which route drivers have a
+    ยอดขายรายวัน row on which days (for a fill marked สลับทั้งคนขับและรถ, owner 28 Nov 2026)."""
+
+    def __init__(self):
+        self._vehicles: Optional[list[dict]] = None
+        self._days: dict = {}
+
+    def vehicles(self) -> list[dict]:
+        if self._vehicles is None:
+            self._vehicles = _vehicles()
+        return self._vehicles
+
+    def route_days(self, lo: date, hi: date) -> Optional[dict]:
+        """(branch, truck number) -> {"driver": full name, "days": {iso day with a row}} per route driver; None = could not be read."""
+        if (lo, hi) not in self._days:
+            try:
+                self._days[(lo, hi)] = _route_days(lo, hi)
+            except Exception:                         # a preview never fails on this: the fill stays on the route, flagged
+                self._days[(lo, hi)] = None
+        return self._days[(lo, hi)]
+
+
+def _route_days(lo: date, hi: date) -> dict:
+    """The route drivers (driver_days.drivers: truck number + branch, both branches) and the days of [lo, hi] each has a ยอดขายรายวัน
+    row (any figure, or ticked สำรองขับ -- a day left empty has no row)."""
+    from app import driver_days, supabase
+    rows = supabase.select_all("route_driver_days", {"select": "employee_id,day,qty,money,spare", "day": f"gte.{lo.isoformat()}",
+                                                     "and": f"(day.lte.{hi.isoformat()})", "order": "day.asc"})
+    days: dict = defaultdict(set)
+    for r in rows:
+        if r.get("spare") or r.get("qty") or r.get("money") is not None:
+            days[r.get("employee_id")].add(str(r.get("day"))[:10])
+    out: dict = {}
+    for d in driver_days.drivers():
+        if d.get("truck") not in (None, ""):
+            out[(d.get("branch") or "สระบุรี", str(d["truck"]))] = {"driver": d.get("name") or "", "days": days.get(d["id"], set())}
+    return out
+
+
+def _route_key(number: str, own: str, station: str, look: "_Lookup") -> Optional[tuple[str, str]]:
+    """The route a fill is written under, as (branch, truck number): the truck of its own plate when the fleet has it (its number and
+    branch), else its number at the branch whose trucks use the station (truck numbers repeat between the plants)."""
+    prefer = BC_TRUCKS.get(station)
+    if own:
+        vehicles = look.vehicles()
+        by: dict = {}
+        for v in vehicles:
+            if v.get("plate_number") and (norm_plate(v["plate_number"]) not in by or (prefer and v.get("branch") == prefer)):
+                by[norm_plate(v["plate_number"])] = v
+        v = acc_cardfuel.find_vehicle(own, by, vehicles, prefer)
+        if v and v.get("vehicle_number") not in (None, ""):
+            return (v.get("branch") or "สระบุรี", str(v["vehicle_number"]))
+    if re.fullmatch(r"\d{1,3}", number or ""):
+        return (prefer or "สระบุรี", number)
+    return None
+
+
+def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: bool, look: Optional[_Lookup] = None) -> Optional[dict]:
     """One station's sheets of a Reader workbook: its fills by plate, station, month, file total and what to tell the owner -- or None
     when its log has no fill. multi: the workbook holds several stations, so the sheet prefix decides the station (the title only
-    cross-checks it) and a month question is asked per station ("month:<station>")."""
+    cross-checks it) and a month question is asked per station ("month:<station>").
+
+    Whose fuel a fill is (owner, 28 Nov 2026), by the Reader's สถานะ (_swap_kind):
+      * ปกติ / สลับรถ (คนขับเดิม): the route's own driver -- the route's fuel (its own plate), off his commission as before.
+      * สลับคนขับ (รถเดิม): someone drove the route in its own truck in place of its driver -- the route's plate, as a stand-in's fill:
+        its own entry "...:<plate>:sub", which comes off nobody's commission (payroll leaves it out) but is the route's for the accounts.
+      * สลับทั้งคนขับและรถ: another driver in another truck -- the fuel follows the day's SALES. When the route's own driver has a
+        ยอดขายรายวัน row that day (figures, or ticked สำรองขับ), the route sold that day: the route's plate, as a stand-in's fill. With no
+        row, the truck actually filled has it (an ordinary fill, not the route's) and a flag asks the owner to check -- a re-read (free)
+        after ยอดขายรายวัน is typed decides again. When the drivers or their days cannot be read, or the route has no driver in the
+        fleet list, it stays on the route as a stand-in's fill (nobody is charged for it), flagged.
+    Every fill by another driver or in another truck is listed in "swaps": where it went, and whether it is a stand-in's."""
+    look = look or _Lookup()
     log = book[log_name]
     col = _bc_head(log)
     title = str(((_sheet(book, prefix, BC_ABOUT) or [[None]])[0] or [None])[0] or "")
     flags, conflicts = [], []
-    fills = []
-    no_plate: dict = {}                               # fill index -> "#<truck number>" for a row with no plate
-    swapped: list = []                               # fills done in another truck than the route's own (shown, owner 28 Nov 2026)
     cell = lambda r, name: r[col[name]] if name in col and col[name] < len(r) else None
+    raw = []
     for r in log:
         if not r or not isinstance(r[0], (int, float)) or isinstance(r[0], bool):
             continue                                  # header, the "รวมทั้งหมด" line (no row number) and notes
@@ -540,21 +650,12 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
         if amount is None or d is None:
             flags.append(f"แถวลำดับ {r[0]:g}: ไม่มีวันที่หรือยอดเงิน — ไม่นับ")
             continue
-        # the fill belongs to the ROUTE (its truck number's own plate), not to the truck that happened to be filled: a driver in a
-        # borrowed truck is still doing his route, and his commission is net of his route's fuel (owner, 28 Nov 2026: route #20's
-        # driver filled 1ฒฬ 4861 twelve times in November). The plate filled decides only when the row has no route plate.
-        own = r[col["ทะเบียนรถประจำเบอร์นี้"]] if "ทะเบียนรถประจำเบอร์นี้" in col and col["ทะเบียนรถประจำเบอร์นี้"] < len(r) else None
-        filled = r[col["ทะเบียนรถที่เติมจริง"]]
-        plate = own or filled
-        if own and filled and norm_plate(str(own)) != norm_plate(str(filled)):
-            swapped.append({"date": d.isoformat(), "route": str(cell(r, "รถเบอร์") or "").strip(), "route_plate": str(own).strip(),
-                            "filled_plate": str(filled).strip(), "driver": str(cell(r, "คนขับจริงที่เติมวันนี้") or cell(r, "ชื่อที่บันทึกในต้นฉบับ") or "").strip(),
-                            "status": str(cell(r, "สถานะ") or "").strip(), "amount": amount})
-        number = str(r[col["รถเบอร์"]] or "").strip() if "รถเบอร์" in col and col["รถเบอร์"] < len(r) else ""
-        if not str(plate or "").strip() and re.fullmatch(r"\d{1,3}", number):
-            no_plate[len(fills)] = f"#{number}"       # no plate at all: the truck number -- used only where one plant fills (below)
-        fills.append((d, str(plate or "ไม่ระบุทะเบียน").strip(), amount))
-    if not fills:
+        own, filled = (str(v).strip() if v not in (None, "") else "" for v in (cell(r, "ทะเบียนรถประจำเบอร์นี้"), cell(r, "ทะเบียนรถที่เติมจริง")))
+        status = str(cell(r, "สถานะ") or "").strip()
+        raw.append({"day": d, "amount": amount, "own": own, "filled": filled, "status": status, "kind": _swap_kind(status, own, filled),
+                    "number": str(cell(r, "รถเบอร์") or "").strip(),
+                    "driver": str(cell(r, "คนขับจริงที่เติมวันนี้") or cell(r, "ชื่อที่บันทึกในต้นฉบับ") or "").strip()})
+    if not raw:
         return None
 
     # station: the sheet prefix ("NM บันทึกเติมน้ำมัน"), the title, the file name; the oldest files name none (then the format)
@@ -581,14 +682,59 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
         elif any(x["source"].startswith("รูปแบบไฟล์") for x in sig) and not picked:
             flags.append(f"ไฟล์ไม่ได้เขียนชื่อสถานี — ถือเป็น {station} จากรูปแบบไฟล์")
 
+    # whose fuel each fill is (see the docstring). The fill belongs to the ROUTE (its truck number's own plate), not to the truck that
+    # happened to be filled: a driver in a borrowed truck is still doing his route, and his commission is net of his route's fuel
+    # (owner, 28 Nov 2026: route #20's driver filled 1ฒฬ 4861 twelve times in November). The plate filled decides only when the row has
+    # no route plate -- or for another driver in another truck on a day the route sold nothing.
+    both = [i for i, x in enumerate(raw) if x["kind"] == "both" and x["own"] and x["filled"] and norm_plate(x["own"]) != norm_plate(x["filled"])]
+    days = look.route_days(min(raw[i]["day"] for i in both), max(raw[i]["day"] for i in both)) if both else {}
+    fills = []                                        # (day, plate, baht, a stand-in's fill)
+    no_plate: dict = {}                               # fill index -> "#<truck number>" for a row with no plate
+    swapped: list = []                                # fills by another driver or in another truck (shown, owner 28 Nov 2026)
+    moved, unsure = [], []
+    for i, x in enumerate(raw):
+        own, filled, kind = x["own"], x["filled"], x["kind"]
+        plate, stand_in = own or filled, kind in ("driver", "both")
+        label = _route_label(x["number"], own)
+        where = f"ลงที่สาย {label}"
+        if i in both:
+            route = _route_key(x["number"], own, station, look) if days is not None else None
+            info = (days or {}).get(route) if route else None
+            if info is None:
+                unsure.append(x)
+                where += " (ยังตรวจยอดขายรายวันไม่ได้)"
+            elif x["day"].isoformat() not in info["days"]:
+                plate, stand_in = filled, False       # the route sold nothing that day: the truck actually filled had the fuel
+                where = f"ลงที่รถที่เติม {filled} — ไม่มียอดขายสาย {label} วันนี้"
+                moved.append(x)
+        if kind:
+            swapped.append({"date": x["day"].isoformat(), "route": x["number"], "route_plate": own, "filled_plate": filled or own,
+                            "driver": x["driver"], "status": x["status"], "amount": x["amount"], "booked_plate": plate, "where": where,
+                            "stand_in": stand_in, "check": i in both and (x in moved or x in unsure)})
+        if not str(plate or "").strip() and re.fullmatch(r"\d{1,3}", x["number"]):
+            no_plate[len(fills)] = f"#{x['number']}"  # no plate at all: the truck number -- used only where one plant fills (below)
+        fills.append((x["day"], str(plate or "ไม่ระบุทะเบียน").strip(), x["amount"], stand_in))
+    if moved:
+        flags.append(f"สลับทั้งคนขับและรถ {len(moved)} ครั้ง ({sum(x['amount'] for x in moved):,.2f} บาท) ไม่มียอดขายของสายในวันนั้น — "
+                     "ลงที่รถที่เติมจริง ไม่ใช่ของสาย: "
+                     + ", ".join(f"{dmy(x['day'])} สาย {_route_label(x['number'], x['own'])} → {x['filled']} {x['amount']:,.2f}" for x in moved[:6])
+                     + (f" และอีก {len(moved) - 6} ครั้ง" if len(moved) > 6 else "")
+                     + " · ตรวจดู: ถ้ายังไม่ได้ลงยอดขายรายวันของวันนั้น ลงแล้วกดอ่านใหม่ (อ่านใหม่ไม่เสียเงิน) ระบบจะตัดสินใหม่")
+    if unsure:
+        flags.append(f"สลับทั้งคนขับและรถ {len(unsure)} ครั้ง ({sum(x['amount'] for x in unsure):,.2f} บาท) ตรวจยอดขายรายวันไม่ได้ "
+                     "(อ่านข้อมูลไม่ได้ หรือไม่พบคนขับประจำสายในระบบ) — ลงที่สายไว้ก่อนแบบคนขับแทน ไม่หักค่าคอมใคร: "
+                     + ", ".join(f"{dmy(x['day'])} สาย {_route_label(x['number'], x['own'])} {x['amount']:,.2f}" for x in unsure[:6])
+                     + (f" และอีก {len(unsure) - 6} ครั้ง" if len(unsure) > 6 else "")
+                     + " · กดอ่านใหม่ภายหลังได้ (ไม่เสียเงิน)")
+
     # a row with no plate goes by its truck number only at a station one plant's trucks use (BC_TRUCKS: แก่งคอย); at NM / ห้วยบง both
     # plants fill and truck numbers repeat, so it stays "ไม่ระบุทะเบียน" (flagged, not tied to a truck) as before
     if BC_TRUCKS.get(station):
-        fills = [(d, no_plate.get(i, plate), a) for i, (d, plate, a) in enumerate(fills)]
+        fills = [(d, no_plate.get(i, plate), a, si) for i, (d, plate, a, si) in enumerate(fills)]
 
     # month: the company month most of the baht falls in, the period in the title, the period in the file name
     by_month: dict = defaultdict(float)
-    for d, _, a in fills:
+    for d, _, a, _si in fills:
         by_month[company_month(d)] += a
     rows_month = max(by_month.items(), key=lambda kv: kv[1])[0]
     sig_m = [{"what": "month", "source": "วันที่ในแถว", "value": rows_month, "weight": 2}]
@@ -625,10 +771,13 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
 
     per: dict = defaultdict(float)
     counts: dict = defaultdict(int)
-    for _, plate, amount in fills:
-        per[plate] += amount
-        counts[norm_plate(plate)] += 1
+    per_sub: dict = defaultdict(float)                # a stand-in's fills: the same plate, their own entry (owner, 28 Nov 2026)
+    counts_sub: dict = defaultdict(int)
+    for _, plate, amount, stand_in in fills:
+        (per_sub if stand_in else per)[plate] += amount
+        (counts_sub if stand_in else counts)[norm_plate(plate)] += 1
     return {"station": station, "month": month, "key": f"fuel:bangchak:{month}:{station}", "per": dict(per), "counts": dict(counts),
+            "per_sub": dict(per_sub), "counts_sub": dict(counts_sub),
             "n": len(fills), "lo": lo, "hi": hi, "file_total": file_total, "flags": flags, "conflicts": conflicts, "signals": sig + sig_m,
             "swaps": swapped}
 

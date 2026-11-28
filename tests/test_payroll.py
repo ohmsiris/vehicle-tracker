@@ -979,20 +979,63 @@ def test_the_groups_rule_keeps_its_numbers_when_someone_is_left_in_it_after_his_
     assert (g["people"], g["formula"]) == (1, "ค่าแรง = วัน × 350 · ค่าคอม = ยอดขาย × 2% · เบี้ยขยัน 1,000")
 
 
-def test_spare_days_and_the_trucks_fuel_are_a_question_for_the_owner():
-    """The truck's fuel is of the whole period, the driver's sales of his own days only: whose fuel a สำรองขับ day is has not been settled."""
-    card = [{"id": "e1", "source_id": "fuel:bangchak:2026-11:842682", "lines": [{"vehicle_id": "V27", "credit": 2000}]}, PT]
-    s = fuel_src(cash_fuel=CASH, card_fuel=card)
+def test_a_stand_ins_fuel_comes_off_nobodys_commission():
+    """Owner, 28 Nov 2026: when someone drives a route in place of its own driver, that day's fuel is free -- never off anyone's
+    commission -- while his sales of that day are already left out by the สำรองขับ tick. Card: บางจาก's stand-in entries (":sub").
+    Cash: a line taken by someone else (another full name) or on a สำรองขับ day. A cash line with no name stays his (nobody can tell)."""
+    nm = {"id": "e1", "source_id": "fuel:bangchak:2026-11:NM:842682", "lines": [{"vehicle_id": "V27", "credit": 2000}]}
+    sub = {"id": "e5", "source_id": "fuel:bangchak:2026-11:NM:842682:sub", "lines": [{"vehicle_id": "V27", "credit": 3000}]}
+    hb = {"id": "e3", "source_id": "fuel:bangchak:2026-11:ห้วยบง:842682", "lines": [{"vehicle_id": "V27", "credit": 1000}]}
+    line = {"batch": 1, "counted": True, "dup_of": None, "vehicle_id": "V27", "page_id": 7, "page": {"confirmed": True}}
+    cash = [{**line, "id": 1, "day": "2026-10-28", "amount": 800, "driver_name": "มานัส  ศรีวิลาส"},          # his own (spacing aside)
+            {**line, "id": 2, "batch": 2, "day": "2026-11-12", "amount": 300, "driver_name": "แจ็ค ทดสอบ"},   # someone else took it
+            {**line, "id": 3, "batch": 2, "day": "2026-11-13", "amount": 200, "driver_name": None},          # no name: stays his
+            {**line, "id": 4, "day": "2026-11-01", "amount": 150, "driver_name": "มานัส ศรีวิลาส"}]          # a สำรองขับ day
+    s = fuel_src(cash_fuel=cash, card_fuel=[nm, sub, hb, PT])
     s["rules"][0].update(pay_group="DRV-A", commission_pct=5, bag_rate=None)
-    assert not any(d["title"].startswith("วันสำรองขับ") for d in pw.build(s, MONTH, TODAY)["decisions"])            # nobody had a spare day: not asked
-    for r in s["route"][5:7]:
+    for r in s["route"][5:7]:                                                    # 31/10 and 01/11: the spare drove
         r.update(spare=True)
     out = pw.build(s, MONTH, TODAY)
     c = one(out, "D1")["cells"]
-    assert c["fuel"]["state"] == "ok" and c["fuel"]["note"].endswith("บัตร 2,000 + เงินสด 1,000 · รวมค่าน้ำมันของวันสำรองขับ 2 วัน")
-    assert c["sales"]["note"] == "ก่อนหักค่าน้ำมัน · หลังหัก 26,000 (รวมค่าน้ำมันของวันสำรองขับ 2 วัน)"
-    d = next(x for x in out["decisions"] if x["title"] == "วันสำรองขับ: ค่าน้ำมันรถของวันนั้นหักจากใคร")
-    assert d["detail"].startswith("D1 มานัส ศรีวิลาส 2 วัน — ") and d["wait"] is False
+    assert (c["fuel"]["state"], c["fuel"]["value"]) == ("ok", 4000)              # card 2,000 + 1,000, cash 800 + 200
+    assert c["fuel"]["note"] == ("รถ #27 84-2682 รถใหญ่ สระบุรี · บัตร 3,000 + เงินสด 1,000 · "
+                                 "ไม่หัก: คนขับแทน 3,450 บาท (บัตรบางจาก 3,000 + เงินสดที่คนอื่นเบิก 300 + เงินสดวันสำรองขับ 150)")
+    assert c["sales"]["note"] == "ก่อนหักค่าน้ำมัน · หลังหัก 25,000"            # 29 own days x 1,000 - 4,000: nothing about spare days
+    assert not any(d["title"].startswith("วันสำรองขับ") for d in out["decisions"])  # settled: no longer asked
+    # the statements keep every baht (the accounts' and the file summary's figure); only the commission leaves them out
+    v = pw.card_fuel_view([nm, sub, hb, PT])
+    assert v["by_vehicle"] == {"V27": 3000, "V9": 1000} and v["stand_in"] == {"V27": 3000} and v["stations"]["bangchak"] == {"trucks": 1, "total": 6000}
+    assert v["lack"] == ["บางจาก แก่งคอย"]                                         # NM / ห้วยบง seen through the :sub key too
+    assert "บางจาก 1 คัน 6,000 บาท" in file(out, "card_fuel")["summary"]
+    # still missing a part: the note says what is known and what is left out
+    c = one(pw.build(fuel_src(cash_fuel=cash, card_fuel=[nm, sub]), MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert c["state"] == "miss" and c["note"].endswith("มีแล้ว: บัตร 2,000 + เงินสด 1,150 · ไม่หัก: คนขับแทน 3,300 บาท "
+                                                       "(บัตรบางจาก 3,000 + เงินสดที่คนอื่นเบิก 300)")
+
+
+def test_pt_card_fuel_cannot_tell_a_stand_in():
+    """PT's file names no driver: his truck's PT fill on a สำรองขับ day stays in, and the note says so (known gap, 28 Nov 2026)."""
+    nm = {"id": "e1", "source_id": "fuel:bangchak:2026-11:NM:842682", "lines": [{"vehicle_id": "V27", "credit": 2000}]}
+    hb = {"id": "e3", "source_id": "fuel:bangchak:2026-11:ห้วยบง:842682", "lines": [{"vehicle_id": "V27", "credit": 1000}]}
+    pt = {"id": "e2", "source_id": "fuel:pt:2026-11:842682", "lines": [{"vehicle_id": "V27", "credit": 500}]}
+    s = fuel_src(cash_fuel=CASH, card_fuel=[nm, hb, pt])
+    c = one(pw.build(s, MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert c["note"] == "รถ #27 84-2682 รถใหญ่ สระบุรี · บัตร 3,500 + เงินสด 1,000"          # no spare day: nothing to say
+    s["route"][5].update(spare=True)
+    c = one(pw.build(s, MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert c["value"] == 4500 and c["note"].endswith("· บัตร PT ของวันสำรองขับยังหักอยู่ (ไฟล์ PT ไม่มีชื่อคนขับ แยกไม่ได้)")
+    # an estimate keyed with a stand-in tail is still an estimate, and a truck is counted once
+    v = pw.card_fuel_view([{"source_id": "fuel:bangchak:2026-11:NM:est-842682:sub", "lines": [{"vehicle_id": "V27", "credit": 1}]}, nm])
+    assert v["estimated"] == ["บางจาก"] and v["stations"]["bangchak"]["trucks"] == 1 and v["by_vehicle"] == {"V27": 2000}
+
+
+def test_cash_fuel_keeps_who_took_it_and_when():
+    v = pw.cash_fuel_view([{"batch": 1, "day": "2026-11-02", "amount": 500, "counted": True, "dup_of": None, "vehicle_id": "V", "driver_name": "ก",
+                            "page_id": None, "page": None},
+                           {"batch": 1, "day": "2026-11-03", "amount": 100, "counted": False, "dup_of": None, "vehicle_id": "V", "driver_name": "ข",
+                            "page_id": None, "page": None}])
+    assert v["lines"] == {"V": [{"day": "2026-11-02", "amount": 500, "driver_name": "ก"}]} and v["by_vehicle"] == {"V": 500}
+    assert "day" in pw.SELECTS["cash_fuel_lines"].split(",") and "driver_name" in pw.SELECTS["cash_fuel_lines"].split(",")
 
 
 def test_the_tube_and_sack_driver_on_3_5_percent_is_asked_about():

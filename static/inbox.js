@@ -478,15 +478,21 @@ async function ibxPreview(id) {
     if (ran && ok) { await ibxPreview(f.id); loadAccounts(); }
   } }) : null;
   const flags = (p.flags || []).length ? el("ul", { class: "ibx-flags small" }, ...p.flags.map((x) => el("li", { text: x }))) : null;
-  // บางจาก: fills done in another truck than the route's own -- not a mistake, booked to the route's truck; each one listed (28 Nov 2026)
+  // บางจาก: fills by another driver or in another truck -- not a mistake; each one listed with where it was booked and whether it is a
+  // stand-in's fill (คนขับแทน: off nobody's commission, still the route's for the accounts -- owner, 28 Nov 2026)
   const sw = p.swaps || [];
-  const swaps = sw.length ? el("details", { class: "ibx-swaps small" },
-    el("summary", { text: `สลับรถ ${sw.length} ครั้ง — ไม่ใช่ข้อผิดพลาด ลงที่รถประจำเบอร์ของสาย (ค่าน้ำมันตามสาย) · กดดูว่าเป็นครั้งไหน` }),
+  const subs = sw.filter((x) => x.stand_in).length;
+  const checks = sw.filter((x) => x.check).length;
+  const swaps = sw.length ? el("details", { class: "ibx-swaps small", open: checks > 0 },
+    el("summary", { text: `สลับรถ / คนขับแทน ${sw.length} ครั้ง — ไม่ใช่ข้อผิดพลาด`
+      + (subs ? ` · คนขับแทน ${subs} ครั้ง ไม่หักค่าคอม` : "") + (checks ? ` · ต้องตรวจ ${checks} ครั้ง` : "") + " · กดดูว่าเป็นครั้งไหน" }),
     el("div", { class: "ibx-swaps-t" },
-      el("div", { class: "ibx-sw head" }, ...["วันที่", "สถานี", "สาย (รถประจำเบอร์)", "เติมในรถ", "คนขับ", "บาท"].map((t) => el("span", { text: t }))),
-      ...sw.map((x) => el("div", { class: "ibx-sw" }, el("span", { text: beDate(x.date) }), el("span", { text: x.station || "" }),
-        el("span", { text: `#${x.route} ${x.route_plate}` }), el("strong", { text: x.filled_plate }),
-        el("span", { text: x.driver + (x.status ? ` · ${x.status}` : "") }), el("span", { class: "num", text: fmtMoney(x.amount) }))))) : null;
+      el("div", { class: "ibx-sw head" }, ...["วันที่", "สถานี", "สาย (รถประจำเบอร์)", "เติมในรถ", "คนขับ", "ลงที่", "บาท"].map((t) => el("span", { text: t }))),
+      ...sw.map((x) => el("div", { class: "ibx-sw" + (x.check ? " check" : "") }, el("span", { text: beDate(x.date) }), el("span", { text: x.station || "" }),
+        el("span", { text: `${/^\d{1,3}$/.test(x.route || "") ? "#" : ""}${x.route || ""} ${x.route_plate || ""}`.trim() }), el("strong", { text: x.filled_plate }),
+        el("span", { text: x.driver + (x.status ? ` · ${x.status}` : "") }),
+        el("span", {}, el("span", { text: x.where || "ลงที่สาย" }), x.stand_in ? el("span", { class: "ibx-sw-tag", text: "ไม่หักค่าคอม (คนขับแทน)" }) : null),
+        el("span", { class: "num", text: fmtMoney(x.amount) }))))) : null;
   const usage = p.ai_usage || f.ai_usage;
   const ai = usage ? el("p", { class: "muted small", text: `อ่านด้วย AI${usage.model ? ` (${usage.model})` : ""} · ${ibxInt(usage.calls || 0)} ครั้ง · token เข้า ${ibxInt(usage.input_tokens || 0)} · ออก ${ibxInt(usage.output_tokens || 0)}` }) : null;
   const sup = ibxSuperseded(f);

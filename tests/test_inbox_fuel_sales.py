@@ -556,3 +556,125 @@ def test_sales_branch_conflict_and_saraburi_footer(report, db):
     assert p["conflicts"] == [] and p["batches"][0]["key"] == "sales:สระบุรี:2026-10"
     roles = {r["text"]: r["role"] for r in p["batches"][0]["rows"]}
     assert roles["CPF ซิลเลอร์"] == "revenue" and roles["สระบุรี"] == "revenue"               # Saraburi: only "...แก่งคอย" is internal
+
+
+# ------------------------------------------------------------------ 28 Nov 2026: a stand-in's fills (another driver on the route)
+SWAP_VEHICLES = VEHICLES + [{"id": 51, "plate_number": "85-9999", "vehicle_number": 25, "branch": "แก่งคอย"}]     # KK has a #25 too
+SWAP_DRIVERS = [{"id": "D25", "name": "ก ทดสอบ", "branch": "สระบุรี", "truck": 25}, {"id": "D12", "name": "ข ทดสอบ", "branch": "สระบุรี", "truck": 12},
+                {"id": "K25", "name": "ค ทดสอบ", "branch": "แก่งคอย", "truck": 25}]
+
+
+def _swap_book():
+    """NM, November: route #25 (84-2051) -- its own driver, a stand-in in its truck, its driver in 1ฒถ 2090, and three fills by another
+    driver in another truck (4, 5, 6 Nov)."""
+    def row(n, d, own, filled, status, amt):
+        return [n, d, "งวดที่ 1", "25", own, filled, "x", "แจ็ค ทดสอบ" if "คนขับ" in status else "ก ทดสอบ", "x", status, None, 10, 40, amt, None]
+    rows = [row(1, datetime(2026, 11, 1), "84-2051", "84-2051", "ปกติ", 1000),
+            row(2, datetime(2026, 11, 2), "84-2051", "84-2051", "สลับคนขับ (รถเดิม)", 500),
+            row(3, datetime(2026, 11, 3), "84-2051", "1ฒถ 2090", "สลับรถ (คนขับเดิม)", 400),
+            row(4, datetime(2026, 11, 4), "84-2051", "1ฒถ 2090", "สลับทั้งคนขับและรถ", 300),
+            row(5, datetime(2026, 11, 5), "84-2051", "1ฒถ 2090", "สลับทั้งคนขับและรถ", 200),
+            row(6, datetime(2026, 11, 6), "84-2051", "1ฒถ 2090", "สลับทั้งคนขับและรถ", 100)]
+    sheets = _nov_sheets("NM", NM_TITLE, [], 2500, bills=6)
+    sheets["NM บันทึกเติมน้ำมัน"] = [NOV_HEAD] + rows + [[None] * 10 + ["รวมทั้งหมด"] + [None] * 4]
+    return sniff_file("เติมน้ำมัน_NM_26ตค-25พย69.xlsx", _xlsx(sheets))
+
+
+@pytest.fixture
+def swap_db(db, monkeypatch):
+    from app import driver_days
+    db.tables["vehicles"] = SWAP_VEHICLES
+    db.tables["route_driver_days"] = [
+        {"employee_id": "D25", "day": "2026-11-04", "qty": {"lod": 10}, "money": 1000, "spare": False},     # route #25 sold on the 4th
+        {"employee_id": "D25", "day": "2026-11-06", "qty": {}, "money": None, "spare": True},              # ... and was ticked สำรองขับ on the 6th
+        {"employee_id": "D12", "day": "2026-11-05", "qty": {"lod": 1}, "money": 50, "spare": False},        # another route's day
+        {"employee_id": "K25", "day": "2026-11-05", "qty": {"lod": 1}, "money": 50, "spare": False}]        # KK's #25: not this route
+    monkeypatch.setattr(driver_days, "drivers", lambda: SWAP_DRIVERS)
+    return db
+
+
+def test_stand_in_fills_by_status(swap_db):
+    p = fuel.read(_swap_book())
+    (b,) = p["batches"]
+    by = {e["source_id"]: round(sum(ln["credit"] for ln in e["lines"]), 2) for e in b["entries"]}
+    assert by == {"fuel:bangchak:2026-11:NM:842051": 1400,          # ปกติ + สลับรถ (คนขับเดิม): the route's own driver, as before
+                  "fuel:bangchak:2026-11:NM:842051:sub": 900,       # สลับคนขับ + both-swapped on a day the route has a row (sold / สำรองขับ)
+                  "fuel:bangchak:2026-11:NM:1ฒถ2090": 200}          # both-swapped, no row for route #25 that day: the truck filled
+    # the totals are what they were: per file, per station, and route #25's plate keeps its whole route fuel
+    assert b["rows_total"] == b["file_total"] == 2500 and p["flags"] == [x for x in p["flags"] if "ยอดรวม" not in x]
+    sub = next(e for e in b["entries"] if e["source_id"].endswith(":sub"))
+    assert "คนขับแทน" in sub["description"] and sub["lines"][0]["vehicle_id"] == 2 and sub["branch"] == "สระบุรี"
+    assert next(r for r in b["rows"] if "คนขับแทน" in r["text"])["text"].endswith("· 3 ครั้ง")
+    # every fill by another driver or in another truck is listed, with where it went and whether it is a stand-in's
+    got = [(x["date"][8:], x["status"], x["booked_plate"], x["where"], x["stand_in"], x["check"]) for x in p["swaps"]]
+    assert got == [("02", "สลับคนขับ (รถเดิม)", "84-2051", "ลงที่สาย #25", True, False),
+                   ("03", "สลับรถ (คนขับเดิม)", "84-2051", "ลงที่สาย #25", False, False),
+                   ("04", "สลับทั้งคนขับและรถ", "84-2051", "ลงที่สาย #25", True, False),
+                   ("05", "สลับทั้งคนขับและรถ", "1ฒถ 2090", "ลงที่รถที่เติม 1ฒถ 2090 — ไม่มียอดขายสาย #25 วันนี้", False, True),
+                   ("06", "สลับทั้งคนขับและรถ", "84-2051", "ลงที่สาย #25", True, False)]
+    assert all(x["station"] == "NM" for x in p["swaps"]) and p["swaps"][0]["filled_plate"] == "84-2051"     # same truck: listed too
+    flag = next(x for x in p["flags"] if "ไม่มียอดขายของสายในวันนั้น" in x)
+    assert "05/11/2026 สาย #25 → 1ฒถ 2090 200.00" in flag and "อ่านใหม่" in flag
+    # ยอดขายรายวัน of the 5th typed afterwards: a re-read decides again -- the route's, a stand-in's
+    swap_db.tables["route_driver_days"].append({"employee_id": "D25", "day": "2026-11-05", "qty": {"lod": 2}, "money": 100, "spare": False})
+    p = fuel.read(_swap_book())
+    by = {e["source_id"]: round(sum(ln["credit"] for ln in e["lines"]), 2) for e in p["batches"][0]["entries"]}
+    assert by == {"fuel:bangchak:2026-11:NM:842051": 1400, "fuel:bangchak:2026-11:NM:842051:sub": 1100}
+    assert not any(x["check"] for x in p["swaps"]) and not any("ไม่มียอดขาย" in x for x in p["flags"])
+
+
+def test_stand_in_fills_when_the_sales_days_cannot_be_read(swap_db, monkeypatch):
+    from app import driver_days
+
+    def broken():
+        raise supabase.SupabaseError("down")
+    monkeypatch.setattr(driver_days, "drivers", broken)
+    p = fuel.read(_swap_book())
+    by = {e["source_id"]: round(sum(ln["credit"] for ln in e["lines"]), 2) for e in p["batches"][0]["entries"]}
+    assert by == {"fuel:bangchak:2026-11:NM:842051": 1400, "fuel:bangchak:2026-11:NM:842051:sub": 1100}     # on the route, charged to nobody
+    assert [x["check"] for x in p["swaps"]] == [False, False, True, True, True]
+    assert any("ตรวจยอดขายรายวันไม่ได้" in x and "ไม่หักค่าคอมใคร" in x for x in p["flags"])
+
+
+def test_sales_days_are_read_only_for_a_both_swapped_fill(db, monkeypatch):
+    from app import driver_days
+    monkeypatch.setattr(driver_days, "drivers", lambda: pytest.fail("no both-swapped fill: nothing to look up"))
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_ห้วยบง_26ตค-25พย69.xlsx", _two_stations()))
+    assert all(not e["source_id"].endswith(":sub") for b in p["batches"] for e in b["entries"]) and p.get("swaps", []) == []
+
+
+def test_stand_in_entries_are_never_legacy_and_book_with_their_station(swap_db):
+    swap_db.tables["acc_entries"] = [{"id": "a1", "source_id": "fuel:bangchak:2026-11:842051"},                # the scripts' combined entry
+                                     {"id": "a2", "source_id": "fuel:bangchak:2026-11:ห้วยบง:842051:sub"},     # a stand-in entry of the other station
+                                     {"id": "a3", "source_id": "fuel:bangchak:2026-11:ห้วยบง:842051"}]
+    assert [r["source_id"] for r in fuel._legacy_bangchak("2026-11")] == ["fuel:bangchak:2026-11:842051"]
+    assert fuel._station_entries("2026-11")
+    swap_db.tables["acc_entries"] = swap_db.tables["acc_entries"][1:2]
+    assert fuel._legacy_bangchak("2026-11") == [] and fuel._station_entries("2026-11")     # a stand-in entry alone still counts as the station's
+    p = fuel.read(_swap_book())
+    assert p["legacy"] == []
+    out = fuel.book(p, "file-swap")
+    assert out["batches"] == ["fuel:bangchak:2026-11:NM"] and out["booked"] == 2500 and out["legacy_removed"] == 0
+    assert ("acc_entries", {"source_id": "like.fuel:bangchak:2026-11:NM:*"}) in swap_db.deleted       # the :sub entry goes with its station
+    assert sorted(e["source_id"] for e in swap_db.entries) == ["fuel:bangchak:2026-11:NM:1ฒถ2090", "fuel:bangchak:2026-11:NM:842051",
+                                                               "fuel:bangchak:2026-11:NM:842051:sub"]
+    from app import acc_checks
+    assert {acc_checks.batch_of(e) for e in swap_db.entries} == {"fuel:bangchak:2026-11"}
+
+
+def test_payroll_reads_the_drop_boxs_stand_in_entries(swap_db):
+    from app import payroll
+    p = fuel.read(_swap_book())
+    entries = [{"source_id": e["source_id"], "lines": [{"vehicle_id": ln["vehicle_id"], "credit": ln["credit"]} for ln in e["lines"]]}
+               for e in p["batches"][0]["entries"]]
+    v = payroll.card_fuel_view(entries)
+    assert v["by_vehicle"] == {2: 1400, 1: 200} and v["stand_in"] == {2: 900}
+    assert v["stations"]["bangchak"] == {"trucks": 2, "total": 2500}            # the statement keeps every baht; #25 is one truck
+
+
+def test_cardfuel_tail_key():
+    e = acc_cardfuel.build("2026-11", "bangchak", {"84-2051": 107.0}, VEHICLES, "x", sub="NM", tail="sub")["entries"][0]
+    assert e["source_id"] == "fuel:bangchak:2026-11:NM:842051:sub"
+    assert fuel._swap_kind("สลับรถ (คนขับเดิม)", "a", "b") == "truck" and fuel._swap_kind("สลับคนขับ (รถเดิม)", "a", "a") == "driver"
+    assert fuel._swap_kind("สลับทั้งคนขับและรถ", "a", "b") == "both" and fuel._swap_kind("ปกติ", "84-2051", "84-2051") == ""
+    assert fuel._swap_kind("ปกติ", "84-2051", "1ฒถ 2090") == "truck"            # the older files: ปกติ, two plates

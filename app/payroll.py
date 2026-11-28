@@ -157,6 +157,10 @@ BANGCHAK_LEGACY = ("NM", "ห้วยบง")                # what one of the 
 BANGCHAK_BRANCH = {"แก่งคอย": "แก่งคอย"}
 BANGCHAK_FROM = {"แก่งคอย": "2026-11"}            # the first month a station has a statement (Kaeng Khoi's trucks moved to บางจาก then)
 ESTIMATE = "est-"
+# a stand-in's fills (owner, 28 Nov 2026): when someone drives a route in place of its own driver, that day's fuel is free -- it never
+# comes off anyone's commission -- but it is still the route's (accounting, กำไรต่อคัน). The drop box books บางจาก's as the plate's own
+# second entry "...:<station>:<plate>:sub" (app/inbox_r_fuel.STAND_IN); cash fuel by who took the money and the สำรองขับ days.
+STAND_IN = "sub"
 HALVES = (1, 2)                                   # cash fuel comes in two halves of the pay month: 26th - 10th, 11th - 25th
 WAITING = ("read", "needs_choice", "needs_ai", "ai_running")          # a drop-box file nobody has finished yet (schema_v92.sql)
 NO_TABLE = ("PGRST205", "42P01", "HTTP 404")      # what PostgREST says when a table is not there
@@ -175,7 +179,7 @@ SELECTS = {
     "employee_loans": "id,employee_id,kind,amount,loan_date,reason,repay_mode,repay_amount,repay_months,repay_percent,schedule,first_month,status",
     "employee_loan_entries": "id,loan_id,entry_date,kind,amount,pay_month,created_at",
     "acc_entries": "id,source_id,lines:acc_lines(vehicle_id,credit)",
-    "cash_fuel_lines": "id,batch,amount,counted,dup_of,vehicle_id,page_id,page:cash_fuel_pages(confirmed)",
+    "cash_fuel_lines": "id,batch,day,amount,counted,dup_of,vehicle_id,driver_name,page_id,page:cash_fuel_pages(confirmed)",
     "vehicles": "id,vehicle_number,plate_number,vehicle_class,branch,usage,main_driver_id,active",
     "drivers": "id,name",
     "fin_trip_tables": "id,employee_code,written_total,computed_total",
@@ -493,8 +497,13 @@ def card_fuel_view(entries: Optional[list[dict]]) -> dict:
     combined entries ("fuel:bangchak:<month>:<plate>") covers NM and ห้วยบง. แก่งคอย is waited for from BANGCHAK_FROM on.
     lack_by_branch = lack as one branch's trucks see it: "บางจาก แก่งคอย" is waited for by Kaeng Khoi's trucks only (BANGCHAK_BRANCH);
     everything else (NM, ห้วยบง, "บางจาก", "PT") by every truck, whichever plant it belongs to. estimated = stations with an estimate among their entries: a figure to go on, not a statement.
-    trucks = different trucks, however many entries each has."""
+    trucks = different trucks, however many entries each has.
+    A stand-in's fills (owner, 28 Nov 2026; "...:<plate>:sub") are NOT in by_vehicle -- the driver's commission is never net of them --
+    but in stand_in {vehicle id: baht}, for the fuel cell to say so; the stations' totals (the statements) still hold them.
+    pt_vehicles = the trucks with PT card fuel: PT's file names no driver, so a stand-in's PT fill cannot be told apart (known gap)."""
     by_vehicle: dict = {}
+    stand_in: dict = {}
+    pt_vehicles: set = set()
     stations: dict = {}
     seen: dict = {}                                           # station -> the trucks (vehicle id, else the plate in the key) with an entry
     subs: set = set()                                         # บางจาก's station files that are in
@@ -508,11 +517,13 @@ def card_fuel_view(entries: Optional[list[dict]]) -> dict:
             months.add(parts[2])                              # the month of บางจาก's entries: which of its stations to wait for
         amount = round(sum(_f(x.get("credit")) for x in e.get("lines") or []), 2)
         vid = next((x.get("vehicle_id") for x in e.get("lines") or [] if x.get("vehicle_id")), None)
+        sub = len(parts) > 1 and parts[-1] == STAND_IN
+        plate = parts[-2] if sub else parts[-1]
         s = stations.setdefault(station, {"trucks": 0, "total": 0.0})
-        seen.setdefault(station, set()).add(vid or parts[-1])
+        seen.setdefault(station, set()).add(vid or plate)
         s["trucks"] = len(seen[station])
         s["total"] = round(s["total"] + amount, 2)
-        if parts[-1].startswith(ESTIMATE):
+        if plate.startswith(ESTIMATE):
             if station not in estimated:
                 estimated.append(station)
         elif station == "bangchak":
@@ -520,8 +531,12 @@ def card_fuel_view(entries: Optional[list[dict]]) -> dict:
                 subs.add(parts[3])
             else:
                 whole = True
-        if vid:
+        if vid and sub:
+            stand_in[vid] = round(stand_in.get(vid, 0.0) + amount, 2)
+        elif vid:
             by_vehicle[vid] = round(by_vehicle.get(vid, 0.0) + amount, 2)
+            if station == "pt" and amount > 0:
+                pt_vehicles.add(vid)
     month = max(months) if months else ""
     lack: list = []                                           # (name, the branch that waits for it; None = everyone)
     for key, name in STATIONS.items():
@@ -530,16 +545,19 @@ def card_fuel_view(entries: Optional[list[dict]]) -> dict:
         elif key == "bangchak" and (whole or subs):          # only estimates: nothing to name, the cell says "ประมาณ"
             lack += [(f"{name} {st}", BANGCHAK_BRANCH.get(st)) for st in BANGCHAK_STATIONS
                      if st not in subs and not (whole and st in BANGCHAK_LEGACY) and month >= BANGCHAK_FROM.get(st, "")]
-    return {"by_vehicle": by_vehicle, "stations": stations, "lack": [n for n, _b in lack],
+    return {"by_vehicle": by_vehicle, "stand_in": stand_in, "pt_vehicles": pt_vehicles, "stations": stations, "lack": [n for n, _b in lack],
             "lack_by_branch": {b: [n for n, w in lack if w in (None, b)] for b in BRANCHES},
             "estimated": [STATIONS.get(k, k) for k in estimated]}
 
 
 def cash_fuel_view(lines: Optional[list[dict]]) -> dict:
-    """Cash fuel of a month by half: {halves: {1: {state ok|pending|none, total}, 2: ...}, by_vehicle}. Only what someone has
-    confirmed against the photo counts (a confirmed page, or a line typed in); a page still to check makes its half "pending"."""
+    """Cash fuel of a month by half: {halves: {1: {state ok|pending|none, total}, 2: ...}, by_vehicle, lines}. Only what someone has
+    confirmed against the photo counts (a confirmed page, or a line typed in); a page still to check makes its half "pending".
+    lines = {vehicle id: [{day, amount, driver_name}]} of what is counted: who took the money and when, so a driver's commission
+    can leave out a stand-in's fills (owner, 28 Nov 2026; fuel_cell)."""
     halves = {h: {"state": "none", "total": 0.0, "pending": 0} for h in HALVES}
     by_vehicle: dict = {}
+    lines_by: dict = {}
     for ln in lines or []:
         h = halves.get(ln.get("batch"))
         if h is None:
@@ -553,10 +571,45 @@ def cash_fuel_view(lines: Optional[list[dict]]) -> dict:
             h["total"] = round(h["total"] + _f(ln.get("amount")), 2)
             if ln.get("vehicle_id"):
                 by_vehicle[ln["vehicle_id"]] = round(by_vehicle.get(ln["vehicle_id"], 0.0) + _f(ln.get("amount")), 2)
+                lines_by.setdefault(ln["vehicle_id"], []).append({"day": str(ln.get("day") or "")[:10], "amount": _f(ln.get("amount")),
+                                                                  "driver_name": ln.get("driver_name")})
     for h in halves.values():
         if h["pending"]:
             h["state"] = "pending"
-    return {"halves": halves, "by_vehicle": by_vehicle}
+    return {"halves": halves, "by_vehicle": by_vehicle, "lines": lines_by}
+
+
+def stand_in_fuel(p: dict, truck: dict, ctx: dict) -> dict:
+    """What of a route driver's truck fuel is a stand-in's and comes off nobody's commission (owner, 28 Nov 2026: when someone drives a
+    route in place of its own driver, that day's fuel is free; the route still has it for the accounts):
+      card  = บางจาก's stand-in fills (the Reader's สลับคนขับ / สลับทั้งคนขับและรถ, booked "...:<plate>:sub");
+      other = cash fuel of his truck taken by someone else (a different full name; a line with no name stays his -- like PT, nobody
+              can tell);
+      spare = cash fuel of his truck on a day he is ticked สำรองขับ (someone else drove).
+    {card, other, spare, total} in baht; pt = his truck has PT card fuel (PT's file names no driver: a stand-in's PT fill stays in)."""
+    tid, card, cash = truck["id"], ctx.get("card"), ctx.get("cash")
+    rc = ctx["route_own"].get(p["id"]) or {}
+    spare_days = {d.isoformat() for d in rc.get("spare") or []}
+    me = _norm(p.get("full_name"))
+    out = {"card": round(_f(((card or {}).get("stand_in") or {}).get(tid)), 2), "other": 0.0, "spare": 0.0,
+           "pt": tid in ((card or {}).get("pt_vehicles") or ())}
+    for ln in ((cash or {}).get("lines") or {}).get(tid) or []:
+        if ln.get("day") in spare_days:
+            out["spare"] = round(out["spare"] + _f(ln.get("amount")), 2)
+        elif _norm(ln.get("driver_name")) and _norm(ln.get("driver_name")) != me:
+            out["other"] = round(out["other"] + _f(ln.get("amount")), 2)
+    out["total"] = round(out["card"] + out["other"] + out["spare"], 2)
+    return out
+
+
+def stand_in_words(free: dict, spare_days: int = 0) -> str:
+    """The fuel cell's words for stand_in_fuel: "ไม่หัก: คนขับแทน 3,500 บาท (บัตรบางจาก 3,000 + เงินสดที่คนอื่นเบิก 500)", and the PT gap."""
+    parts = [f"{label} {money(free[k])}" for k, label in (("card", "บัตรบางจาก"), ("other", "เงินสดที่คนอื่นเบิก"), ("spare", "เงินสดวันสำรองขับ"))
+             if free[k] > 0]
+    words = [f"ไม่หัก: คนขับแทน {money(free['total'])} บาท ({' + '.join(parts)})"] if parts else []
+    if spare_days and free["pt"]:
+        words.append("บัตร PT ของวันสำรองขับยังหักอยู่ (ไฟล์ PT ไม่มีชื่อคนขับ แยกไม่ได้)")
+    return " · ".join(words)
 
 
 def half_labels(start: date, end: date) -> dict[int, str]:
@@ -1221,13 +1274,10 @@ def build_person(p: dict, ctx: dict) -> dict:
         gap = f"ยังขาด {len(rc['missing'])} วัน" if rc["missing"] else ""
         split = p["id"] in ctx["split"]
         sold = rc["lod"] if split else rc["money"]
-        # the truck's fuel is of the whole period, his sales and ซอง of his own days only: whose fuel a สำรองขับ day is has not been
-        # settled (build_decisions asks), so the figure after fuel and the fuel itself say that those days are in it
-        spare = f"รวมค่าน้ำมันของวันสำรองขับ {len(rc['spare'])} วัน" if rc["spare"] else ""
-        if spare and cells["fuel"]["state"] != "na" and truck_of(p, ctx):
-            cells["fuel"] = {**cells["fuel"], "note": f"{cells['fuel']['note']} · {spare}"}
+        # his sales and ซอง are of his own days only; the fuel of a day someone else drove is free (owner, 28 Nov 2026): fuel_cell
+        # leaves a stand-in's fuel out and says how much
         fuel = cells["fuel"]
-        after = f" · หลังหัก {money(sold - fuel['value'])}" + (f" ({spare})" if spare else "") if fuel["state"] == "ok" and not rc["missing"] else ""
+        after = f" · หลังหัก {money(sold - fuel['value'])}" if fuel["state"] == "ok" and not rc["missing"] else ""
         before = "ก่อนหักค่าน้ำมัน" + after if net else ""
         cells["sales"] = cell("miss" if rc["missing"] else "ok", sold, money(sold), " · ".join(x for x in ("เฉพาะยอดหลอด" if split else "", before, gap) if x))
         if bags:
@@ -1428,11 +1478,14 @@ def fuel_cell(p: dict, ctx: dict) -> dict:
     """The fuel of a route driver's truck over the pay month: the card statements + cash fuel. ok only when all of it is in -- every
     card station's statement booked (บางจาก: both of its station files) and both cash halves confirmed -- and then 0 baht is a real
     answer. A card figure that is an estimate makes it a stand-in. Otherwise missing: the note names what is absent and what is
-    already known; the cell itself carries no figure, so a part of the fuel never reads as the truck's fuel."""
+    already known; the cell itself carries no figure, so a part of the fuel never reads as the truck's fuel.
+    A stand-in's fuel (stand_in_fuel, owner 28 Nov 2026) is never in the figure: the note says how much was left out and why."""
     truck = truck_of(p, ctx)
     if not truck:
         return cell("miss", note="ไม่พบรถของคนขับ (ทะเบียนรถไม่มีชื่อคนนี้เป็นคนขับหลัก)")
     card, cash, labels = ctx["card"], ctx["cash"], half_labels(ctx["start"], ctx["end"])
+    free = stand_in_fuel(p, truck, ctx)
+    free_words = stand_in_words(free, len((ctx["route_own"].get(p["id"]) or {}).get("spare") or []))
     lack, have = [], []                                      # what is absent; what is already known of this truck (shown only when it is money)
     on_card = in_cash = 0.0
     if card is None:
@@ -1452,15 +1505,17 @@ def fuel_cell(p: dict, ctx: dict) -> dict:
     else:
         states = {h: cash["halves"][h]["state"] for h in HALVES}
         lack += [f"น้ำมันเงินสด {labels[h]} " + ("ยังไม่ได้อัปโหลด" if states[h] == "none" else "อัปโหลดแล้ว รอตรวจ") for h in HALVES if states[h] != "ok"]
-        in_cash = cash["by_vehicle"].get(truck["id"], 0.0)
+        in_cash = round(cash["by_vehicle"].get(truck["id"], 0.0) - free["other"] - free["spare"], 2)
         if in_cash > 0:
             have.append(f"เงินสด {money(in_cash)}")
     if not lack:
         total = round(on_card + in_cash, 2)
         rough = (card or {}).get("estimated") or []
         return cell("carry" if rough else "ok", total, money(total), f"รถ {truck_label(truck)} · บัตร {money(on_card)} + เงินสด {money(in_cash)}"
+                    + (f" · {free_words}" if free_words else "")
                     + (f" · บัตร {', '.join(rough)} เป็นยอดประมาณ ยังไม่ใช่ใบแจ้งหนี้" if rough else ""))
-    return cell("miss", note=" · ".join([f"รถ {truck_label(truck)}"] + lack + (["มีแล้ว: " + " + ".join(have)] if have else [])))
+    return cell("miss", note=" · ".join([f"รถ {truck_label(truck)}"] + lack + (["มีแล้ว: " + " + ".join(have)] if have else [])
+                                        + ([free_words] if free_words else [])))
 
 
 def _finish(person: dict, cells: dict) -> dict:
@@ -1732,7 +1787,8 @@ def fuel_trucks(people: list[dict]) -> int:
 def build_decisions(people: list[dict], ctx: dict) -> list[dict]:
     """What still stands between the data and numbers that can be trusted (at most 10), built from the data: the rules the owner has
     yet to settle, then what he said he would send ("wait": true). Settled on 27 Nov 2026 and no longer asked: who gets เบี้ยขยัน
-    (drivers only), แก่งคอย's OT (the branch is set aside: nothing about its people is asked), sales before or after fuel (after)."""
+    (drivers only), แก่งคอย's OT (the branch is set aside: nothing about its people is asked), sales before or after fuel (after).
+    Settled on 28 Nov 2026: a สำรองขับ day's fuel is free (comes off nobody's commission -- stand_in_fuel)."""
     out = []
     worked = [p for p in people if p["status"]["key"] != "left_before" and not p["hold"]]
     rules, rates = ctx["rules"], ctx["rates"] or {}
@@ -1767,13 +1823,6 @@ def build_decisions(people: list[dict], ctx: dict) -> list[dict]:
         out.append({"title": f"{', '.join(_who(p) for p in tubes[:3])}: ค่าคอม {pct}% คิดจากยอดหลอดอย่างเดียว หรือรวมยอดซอง",
                     "detail": f"แบบคำนวณเขียนว่า \"ยอดขาย × {pct}%\" แต่ค่าซองจ่ายแยกแล้ว {bag} บาท/ซอง — หน้านี้ใช้ยอดหลอดอย่างเดียว (ตามที่ HQ คิด) "
                               "ถ้าต้องรวมยอดซองด้วยต้องแจ้ง"})
-    # the truck's fuel is of the whole period; a day the spare drove is not the driver's own day
-    spare = [(p, len(ctx["route_own"][p["id"]]["spare"])) for p in worked
-             if p["group"] in FUEL_GROUPS and p["cells"]["fuel"]["state"] != "na" and (ctx["route_own"].get(p["id"]) or {}).get("spare")]
-    if spare:
-        out.append({"title": "วันสำรองขับ: ค่าน้ำมันรถของวันนั้นหักจากใคร",
-                    "detail": ", ".join(f"{_who(p)} {n} วัน" for p, n in spare[:6]) + (f" และอีก {len(spare) - 6} คน" if len(spare) > 6 else "")
-                              + " — ยอดขายนับเฉพาะวันที่ขับเอง แต่ค่าน้ำมันรถเป็นของทั้งงวด ตอนนี้ค่าน้ำมันของวันสำรองขับยังรวมอยู่ในของคนขับประจำ"})
     two = [p for p in worked if p["rate2"]]
     if two:
         out.append({"title": "พนักงานผลิตที่ออกรถด้วย: ต้องรู้จำนวนวันออกรถอย่างเดียว",
