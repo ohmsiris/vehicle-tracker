@@ -1055,17 +1055,15 @@ def test_cash_fuel_keeps_who_took_it_and_when():
     assert "day" in pw.SELECTS["cash_fuel_lines"].split(",") and "driver_name" in pw.SELECTS["cash_fuel_lines"].split(",")
 
 
-def test_the_tube_and_sack_driver_on_3_5_percent_is_asked_about():
-    """The workbook writes "ยอดขาย × 3.5%" for DRV-C; the page works on the หลอด part (his ซอง are paid apart). Shown as it is used, and asked."""
+def test_the_tube_and_sack_driver_on_3_5_percent_follows_hq():
+    """The workbook writes "ยอดขาย × 3.5%" for DRV-C; the page works on the หลอด part (his ซอง are paid apart) -- the owner, 29 Nov 2026:
+    "follow HQ", so it is no longer asked."""
     rows = drove("D1", START, END, money=500, money_parts={"zong": 300, "lod": 200})
     s = route_src(rows, split=[{"employee_id": "D1", "money_split": True}])
     s["rules"][0].update(pay_group="DRV-C", commission_pct=3.5, bag_rate=3)
     out = pw.build(s, MONTH, TODAY)
     assert "ค่าคอม = (ยอดขายหลอด − ค่าน้ำมันรถ) × 3.5%" in one(out, "D1")["formula"] and "เฉพาะยอดหลอด" in one(out, "D1")["cells"]["sales"]["note"]
-    d = next(x for x in out["decisions"] if x["title"] == "D1 มานัส ศรีวิลาส: ค่าคอม 3.5% คิดจากยอดหลอดอย่างเดียว หรือรวมยอดซอง")
-    assert '"ยอดขาย × 3.5%"' in d["detail"] and "3 บาท/ซอง" in d["detail"]
-    s["rules"][0].update(pay_group="DRV-B", commission_pct=5, bag_rate=10)                     # B's rule is written on หลอด already: nothing to ask
-    assert not any("คิดจากยอดหลอดอย่างเดียว" in x["title"] for x in pw.build(s, MONTH, TODAY)["decisions"])
+    assert not any("คิดจากยอดหลอดอย่างเดียว" in x["title"] for x in out["decisions"])
 
 
 def test_ot_that_is_asked_of_a_daily_paid_person_is_in_his_rule(no_hold):

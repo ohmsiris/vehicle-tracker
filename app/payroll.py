@@ -2366,14 +2366,8 @@ def build_decisions(people: list[dict], ctx: dict) -> list[dict]:
             out.append({"title": f"ค่าคอมจากยอดขาย: {_who(p)} ยังไม่มี % ในกติกา",
                         "detail": f"ใบ HQ {my(ref['month'])} จ่ายค่าคอม {money(paid)} จากยอดขาย {money(sold)}{pct} ไม่ใช่ค่าเที่ยว — "
                                   "กติกาของคนนี้ยังไม่มี % และยังไม่มีที่ลงยอดขายของคนนี้ในระบบ"})
-    # the workbook writes "ยอดขาย × 3.5%" for C, the page works on the หลอด part (his ซอง are paid apart, and typed apart): to confirm
-    tubes = [p for p in worked if p["group"] == "DRV-C" and p["id"] in ctx["split"] and p["cells"]["sales"]["state"] != "na"]
-    if tubes:
-        r = rules.get(tubes[0]["id"]) or {}
-        pct, bag = (num(r[k]) if r.get(k) not in (None, "") else "" for k in ("commission_pct", "bag_rate"))
-        out.append({"title": f"{', '.join(_who(p) for p in tubes[:3])}: ค่าคอม {pct}% คิดจากยอดหลอดอย่างเดียว หรือรวมยอดซอง",
-                    "detail": f"แบบคำนวณเขียนว่า \"ยอดขาย × {pct}%\" แต่ค่าซองจ่ายแยกแล้ว {bag} บาท/ซอง — หน้านี้ใช้ยอดหลอดอย่างเดียว (ตามที่ HQ คิด) "
-                              "ถ้าต้องรวมยอดซองด้วยต้องแจ้ง"})
+    # the workbook writes "ยอดขาย × 3.5%" for C; the page works on the หลอด part (his ซอง are paid apart) -- settled by the owner,
+    # 29 Nov 2026: "follow HQ" (HQ's commission is on the หลอด sales only)
     # two rates: settled for whoever rides with one driver (his days split by the driver's own days, attendance_cell); still open for
     # the others (the spare / event riders go out on any truck)
     two = [p for p in worked if p["rate2"] and "split" not in p["cells"]["days"]]
