@@ -529,6 +529,7 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
     flags, conflicts = [], []
     fills = []
     no_plate: dict = {}                               # fill index -> "#<truck number>" for a row with no plate
+    swapped = 0
     for r in log:
         if not r or not isinstance(r[0], (int, float)) or isinstance(r[0], bool):
             continue                                  # header, the "รวมทั้งหมด" line (no row number) and notes
@@ -537,13 +538,22 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
         if amount is None or d is None:
             flags.append(f"แถวลำดับ {r[0]:g}: ไม่มีวันที่หรือยอดเงิน — ไม่นับ")
             continue
-        plate = r[col["ทะเบียนรถที่เติมจริง"]] or (r[col["ทะเบียนรถประจำเบอร์นี้"]] if "ทะเบียนรถประจำเบอร์นี้" in col else None)
+        # the fill belongs to the ROUTE (its truck number's own plate), not to the truck that happened to be filled: a driver in a
+        # borrowed truck is still doing his route, and his commission is net of his route's fuel (owner, 28 Nov 2026: route #20's
+        # driver filled 1ฒฬ 4861 twelve times in November). The plate filled decides only when the row has no route plate.
+        own = r[col["ทะเบียนรถประจำเบอร์นี้"]] if "ทะเบียนรถประจำเบอร์นี้" in col and col["ทะเบียนรถประจำเบอร์นี้"] < len(r) else None
+        filled = r[col["ทะเบียนรถที่เติมจริง"]]
+        plate = own or filled
+        if own and filled and norm_plate(str(own)) != norm_plate(str(filled)):
+            swapped += 1
         number = str(r[col["รถเบอร์"]] or "").strip() if "รถเบอร์" in col and col["รถเบอร์"] < len(r) else ""
         if not str(plate or "").strip() and re.fullmatch(r"\d{1,3}", number):
             no_plate[len(fills)] = f"#{number}"       # no plate at all: the truck number -- used only where one plant fills (below)
         fills.append((d, str(plate or "ไม่ระบุทะเบียน").strip(), amount))
     if not fills:
         return None
+    if swapped:
+        flags.append(f"{swapped} ครั้งเติมในรถคันอื่น (สลับรถ) — ลงที่รถประจำเบอร์ของสายนั้น (ค่าน้ำมันตามสาย)")
 
     # station: the sheet prefix ("NM บันทึกเติมน้ำมัน"), the title, the file name; the oldest files name none (then the format)
     tab = _station_of(prefix)
