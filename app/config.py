@@ -41,6 +41,12 @@ class Settings:
     # บัญชี › กล่องรับไฟล์ › อ่านด้วย AI (owner, 24 Nov 2026): the drop box reads handwritten scans and unknown files with Claude, only
     # when the owner clicks. On by default; INBOX_AI_ENABLED=0 switches the button off (app/inbox_ai.py then refuses with a Thai note).
     inbox_ai_enabled: bool = True
+    # Cartrack GPS (owner, 29 Nov 2026): the Fleetweb user name + the API key made at Fleetweb > Settings > API Settings. They live
+    # only in the server's environment. The owner's user is an HQ one that sees every branch's vehicles: app/cartrack.py keeps only
+    # the vehicles whose plate is a truck here.
+    cartrack_user: str = ""
+    cartrack_api_key: str = ""
+    cartrack_base: str = "https://fleetapi-th.cartrack.com/rest"
 
 
 def load_settings() -> Settings:
@@ -54,6 +60,9 @@ def load_settings() -> Settings:
         max_file_bytes=int(_env("MAX_FILE_BYTES", str(20 * 1024 * 1024))),
         hr_pin=_env("HR_PIN"),
         inbox_ai_enabled=_env("INBOX_AI_ENABLED", "1").lower() not in ("0", "false", "off", "no"),
+        cartrack_user=_env("CARTRACK_USER"),
+        cartrack_api_key=_env("CARTRACK_API_KEY"),
+        cartrack_base=_env("CARTRACK_BASE", "https://fleetapi-th.cartrack.com/rest").rstrip("/"),
     )
 
 

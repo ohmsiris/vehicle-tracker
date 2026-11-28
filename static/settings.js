@@ -30,6 +30,35 @@ function renderAppSettings() {
   const kind = (s) => s.kind || "repair";
   fill($("stShops"), shopTester(), ...st.data.shops.filter((s) => kind(s) === "repair").map(shopCard), newShopCard("repair"));
   fill($("stSuppliers"), ...st.data.shops.filter((s) => kind(s) === "supplier").map(shopCard), newShopCard("supplier"));
+  if (!$("stGps").firstChild) fill($("stGps"), gpsCard());
+}
+
+// GPS รถ (Cartrack), step one: is the key in the server's settings working, and which of Cartrack's vehicles are trucks here?
+// The key itself is never typed or shown here: it lives in the server's settings (CARTRACK_USER, CARTRACK_API_KEY). The owner's
+// Cartrack user sees every branch of HQ, so the other vehicles are only counted. /api/cartrack/check (app/cartrack.py), owner only.
+function gpsCard() {
+  const out = el("div", { class: "small stgps-out" });
+  const btn = el("button", { class: "btn small primary", type: "button", text: "ตรวจการเชื่อมต่อ" });
+  const plates = (list) => list.map((x) => (x.truck ? `#${x.truck} ` : "") + (x.plate || "-")).join(", ");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    fill(out, el("span", { class: "muted", text: "กำลังถาม Cartrack…" }));
+    try {
+      const r = await api("/api/cartrack/check");
+      const by = Object.entries(r.matched_by_branch || {}).map(([b, n]) => `${b} ${n} คัน`).join(" · ");
+      fill(out,
+        el("div", {}, el("strong", { text: "เชื่อมต่อได้" }), ` — Cartrack มีรถ ${r.vehicles} คัน ตรงกับรถในระบบ ${r.matched} คัน`, by ? ` (${by})` : ""),
+        r.not_here_count ? el("div", { class: "muted", text: `รถของสาขาอื่น / ไม่อยู่ในระบบ ${r.not_here_count} คัน — ไม่นำมาใช้` }) : null,
+        r.no_gps_count ? el("div", {}, `รถในระบบที่ยังไม่เจอใน Cartrack ${r.no_gps_count} คัน: `, el("span", { class: "muted", text: plates(r.no_gps) })) : null,
+        el("details", {}, el("summary", { text: "ข้อมูลที่ Cartrack ส่งมา (สำหรับตั้งค่าขั้นต่อไป)" }),
+          el("div", { class: "muted", text: (r.fields || []).join(", ") || "-" }),
+          el("pre", { class: "stgps-pre", text: JSON.stringify(r.sample || {}, null, 1) })));
+    } catch (err) { fill(out, el("span", { class: "error", text: err.message })); }
+    btn.disabled = false;
+  });
+  return el("section", { class: "card stshop" },
+    el("div", { class: "muted small", text: "ชื่อผู้ใช้และ API key ของ Cartrack ใส่ไว้ในการตั้งค่าของเซิร์ฟเวอร์เท่านั้น (CARTRACK_USER, CARTRACK_API_KEY) ไม่ต้องพิมพ์ที่นี่ — ปุ่มนี้ถามครั้งเดียว ไม่บันทึกอะไร" }),
+    el("div", { class: "pl-set-actions" }, btn), out);
 }
 
 // "ลองพิมพ์ชื่อในบิล": which shop a vendor text becomes, and by which word -- to check a word before trusting it

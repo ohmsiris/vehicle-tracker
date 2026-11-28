@@ -2037,6 +2037,20 @@ def api_home(fresh: bool = False, x_app_token: str = Header(default=""), token: 
     return home.load(fresh=fresh)
 
 
+@app.get("/api/cartrack/check")
+def api_cartrack_check(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """Cartrack GPS, step one (owner, 29 Nov 2026): does the key in the server's settings work, how many of Cartrack's vehicles are
+    trucks here, and which fields each carries. One read from Cartrack, nothing stored, the key never returned. The owner's alone."""
+    _check_owner(x_app_token, token)
+    if not supabase.configured():
+        raise HTTPException(503, "Supabase is not configured on the server")
+    from app import cartrack
+    try:
+        return cartrack.check()
+    except cartrack.CartrackError as exc:
+        raise HTTPException(422, str(exc))
+
+
 @app.get("/api/home/trends")
 def api_home_trends(fresh: bool = False, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """The home page's two charts (daily route sales, monthly profit by branch), asked for after the first paint. The owner's alone,
