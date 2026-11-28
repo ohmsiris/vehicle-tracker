@@ -739,7 +739,8 @@ def test_the_decisions_come_from_the_data():
              rule("K2", rate2=344)]
     out = pw.build(src(employees=people, rules=rules, rates=[rate(p["id"]) for p in people], route=drove("D", START, END)), MONTH, TODAY)
     titles = [d["title"] for d in out["decisions"]]
-    assert titles == ["พนักงานผลิตที่ออกรถด้วย: ต้องรู้จำนวนวันออกรถอย่างเดียว", "สแกนนิ้วครั้งเดียวในวัน: นับเป็น 1 วันเต็มหรือไม่"]
+    # a single scan is no longer asked (owner, 28 Nov 2026: each flagged day is decided on the attendance page)
+    assert titles == ["พนักงานผลิตที่ออกรถด้วย: ต้องรู้จำนวนวันออกรถอย่างเดียว"]
     assert not any(w in " ".join(titles) for w in ("เบี้ยขยัน", "OT", "น้ำมัน")) and not any(d["wait"] for d in out["decisions"])
     assert "T คน ทดสอบ (390 / 344)" in out["decisions"][0]["detail"] and "K2" not in out["decisions"][0]["detail"]      # nothing is asked about a branch set aside
     # nobody without a rate: that line is gone; someone without one brings it back, first
@@ -792,14 +793,15 @@ def test_the_rules_are_shown_as_the_workbook_writes_them():
     r = out["rules"]
     assert r["source"] == "แบบคำนวณเงินเดือน (เสนอ) · เจ้าของยืนยัน 27/11/2026" and set(r) == {"general", "groups", "source"}
     g = r["general"]
-    assert len(g) == 10 and all(isinstance(x, str) and x for x in g)
+    assert len(g) == 11 and all(isinstance(x, str) and x for x in g)
     assert g[0] == "งวดเงินเดือน: วันที่ 26 ของเดือนก่อน ถึง 25 ของเดือนนี้ (งวดนี้ 26/10/2026 ถึง 25/11/2026 · 31 วัน)"
     assert g[1] == "รวมรับ = ค่าแรง + ค่าคอม + ค่าซอง + เบี้ยขยัน + OT"
     assert g[2] == "เบี้ยขยัน 1,000 บาท: เฉพาะพนักงานขับรถ เมื่อมาทำงานครบ 31 วันของงวด และไม่ถูกงด"
     assert "กลุ่ม A, B, C" in g[3] and "หักค่าน้ำมันรถออกจากยอดขายก่อนคิดค่าคอม" in g[3] and "จำนวนซอง − ค่าน้ำมัน ÷ 140" in g[3]
     assert g[4].startswith("พนักงานผลิตที่ออกรถด้วย (2 อัตรา): ") and "วันออกรถอย่างเดียวจ่ายอัตราที่สอง" in g[4] and "OT สระบุรี" in g[5] and "ไม่รวมในเงินเดือน" in g[5]
     assert g[6] == "วันที่มาสแกนแต่ไม่ได้ทำงาน ไม่จ่าย" and "สะสม หักตามใบสรุปเงินเดือน HQ ล่าสุด" == g[7] and "ไม่ใช่รายได้ของเดือน" in g[8]
-    assert g[9].startswith("แก่งคอยพักไว้ก่อน")
+    assert g[9].startswith("วันทำงาน สระบุรี (ไม่ใช่รถสาย) ตามหน้า เวลาทำงาน: ") and "ควบกะ = 2 วัน" in g[9] and "ครึ่งวัน = 0.5" in g[9]
+    assert g[10].startswith("แก่งคอยพักไว้ก่อน")
     assert [x["group"] for x in r["groups"]] == ["DRV-A", "DRV-B", "DRV-C", "DRV-D", "DRV-E", "DRV-F", "FAC-COM", "DAY", "KK-DRV", "KK-PROD"]
     by = {x["group"]: x for x in r["groups"]}
     assert all(set(x) - {"hold"} == {"group", "label", "formula", "people", "bonus"} for x in r["groups"])
@@ -885,7 +887,7 @@ def test_without_the_hold_the_branch_counts_again(no_hold):
     assert (file(out, "advance_list")["state"], file(out, "advance_list")["summary"]) == ("warn", "สระบุรี 1 หน้า · ยังไม่มี: แก่งคอย")
     assert file(out, "route_sales")["state"] == "bad" and "K4 หนึ่ง ทดสอบ" in file(out, "route_sales")["summary"]
     assert any(d["title"].startswith("ค่าคอมจากยอดขาย: K4 ") for d in out["decisions"]) and (kind(out, "ot")["need"], kind(out, "trip")["need"]) == (1, 1)
-    assert len(out["rules"]["general"]) == 9 and "hold" not in next(g for g in out["rules"]["groups"] if g["group"] == "KK-DRV")
+    assert len(out["rules"]["general"]) == 10 and "hold" not in next(g for g in out["rules"]["groups"] if g["group"] == "KK-DRV")
 
 
 # --------------------------------------------------------------------------------------------- codes the staff list does not have
@@ -1545,7 +1547,7 @@ def test_every_select_names_its_columns_and_nothing_private(monkeypatch):
     for table, params in seen:
         assert params["select"] in pw.SELECTS.values() and "order" in params
         assert not private.search(params["select"]), (table, params["select"])
-    assert pw.SELECTS["employees"] == "id,code,full_name,nickname,branch,position,status,start_date,end_date,pay_group,probation_end"
+    assert pw.SELECTS["employees"] == "id,code,full_name,nickname,branch,position,status,start_date,end_date,pay_group,probation_end,shift_start,shift_end"
 
 
 def test_the_module_only_reads():
@@ -1731,3 +1733,166 @@ def test_the_loans_month_closes_by_itself_on_the_26th():
     assert loans.month_to_close(date(2026, 11, 26)) == "2026-11" and loans.month_to_close(date(2026, 11, 28)) == "2026-11"
     assert loans.month_to_close(date(2026, 12, 3)) == "2026-11" and loans.month_to_close(date(2026, 11, 25)) == "2026-10"
     assert loans.month_to_close(date(2027, 1, 10)) == "2026-12"
+
+
+# --------------------------------------------------------------------------------------------- สระบุรี's days from เวลาทำงาน (owner, 28 Nov 2026)
+def scans_of(code, special=None, regular=("07:00", "19:00")):
+    """A month of scans: `regular` every day of the period, except the days in `special` -- None = off, (in,) = a single scan,
+    (in, out) = one shift (out before in: the next morning)."""
+    rows = []
+    for i in range((END - START).days + 1):
+        day = START + timedelta(days=i)
+        sp = (special or {}).get(day, regular)
+        if not sp:
+            continue
+        rows.append({"employee_id": code, "punched_at": f"{day.isoformat()}T{sp[0]}:00"})
+        if len(sp) > 1:
+            out = day + timedelta(days=1) if sp[1] < sp[0] else day
+            rows.append({"employee_id": code, "punched_at": f"{out.isoformat()}T{sp[1]}:00"})
+    return rows
+
+
+def decided(code, day, decision, amount=0, manual=False):
+    return {"employee_id": code, "work_date": day.isoformat(), "decision": decision, "deduct_amount": amount, "note": None, "manual": manual}
+
+
+N = lambda m, x: date(2026, m, x)  # noqa: E731
+# 8 days off around four single scans (a lone scan next to a full day would pair with it), a short day and a ควบกะ (06:00 - 00:30)
+F1_DAYS = {N(10, 27): None, N(10, 28): ("12:00",), N(10, 29): None, N(10, 30): None, N(10, 31): ("12:00",), N(11, 1): None, N(11, 2): None,
+           N(11, 3): ("12:00",), N(11, 4): None, N(11, 5): None, N(11, 6): ("12:00",), N(11, 7): None, N(11, 10): ("07:00", "15:00"),
+           N(11, 14): ("06:00", "00:30")}
+
+
+def f1_src(reviews, **kw):
+    return src(employees=[emp("F1")], rules=[rule("F1")], rates=[rate("F1")], pay_prev=[prev("F1")], punches=scans_of("F1", F1_DAYS),
+               attendance_reviews=reviews, **kw)
+
+
+def test_saraburi_days_follow_the_owners_decisions():
+    """A complete shift 1, อนุมัติ 1, ครึ่งวัน 0.5, ไม่จ่าย 0, ค่าแรงเต็ม + หักเงิน 1 (its amount a fine), ควบกะ 2 -- the attendance page's
+    own shifts and flags, worked out from the same scans."""
+    reviews = [decided("F1", N(10, 28), "approve"), decided("F1", N(10, 31), "half"), decided("F1", N(11, 3), "unpaid"),
+               decided("F1", N(11, 6), "full_penalty", 200)]
+    out = pw.build(f1_src(reviews), MONTH, TODAY)
+    p = one(out, "F1")
+    c = p["cells"]["days"]
+    # 17 complete days + the ควบกะ (2) + อนุมัติ (1) + ครึ่งวัน (0.5) + ไม่จ่าย (0) + ค่าแรงเต็ม (1) = 21.5; the short day of 10/11 waits
+    assert c == {"state": "carry", "value": 21.5, "text": "21.5 วัน",
+                 "note": "ตามเวลาทำงาน: ครบกะ 18 · อนุมัติ 1 · ค่าแรงเต็ม + หักเงิน 1 · ครึ่งวัน 1 (นับ 0.5) · ไม่จ่าย 1 (นับ 0) · ควบกะ 1 วัน (นับวันละ 2)"
+                         " · เวลาทำงาน: รอตัดสิน 1 วัน (10/11) ยังไม่นับ"}
+    assert p["cells"]["penalty"] == {"state": "ok", "value": 200, "text": "200", "note": "เวลาทำงาน (ค่าแรงเต็ม + หักเงิน) 06/11/2026 200"}
+    f = file(out, "attendance_review")
+    assert (f["state"], f["link"]) == ("bad", "#attendance") and f["summary"] == "รอตัดสิน 1 วัน ของ 1 คน (ยังไม่นับเป็นวันทำงาน)\nF1 คน ทดสอบ: 10/11"
+    assert kind(out, "days")["later"] == "" and "เวลาทำงาน" in kind(out, "days")["source"]
+    # the short day decided, a day added by hand, and a complete day the owner did not pay ("came, scanned, did not work")
+    reviews += [decided("F1", N(11, 10), "approve"), decided("F1", N(11, 7), "approve", manual=True), decided("F1", N(11, 20), "unpaid")]
+    out = pw.build(f1_src(reviews), MONTH, TODAY)
+    c = one(out, "F1")["cells"]["days"]
+    assert (c["state"], c["value"], c["text"]) == ("ok", 22.5, "22.5 วัน")
+    assert c["note"] == "ตามเวลาทำงาน: ครบกะ 17 · อนุมัติ 2 · เพิ่มเอง 1 · ค่าแรงเต็ม + หักเงิน 1 · ครึ่งวัน 1 (นับ 0.5) · ไม่จ่าย 2 (นับ 0) · ควบกะ 1 วัน (นับวันละ 2)"
+    f = file(out, "attendance_review")
+    assert (f["state"], f["summary"]) == ("ok", "ตัดสินครบแล้ว · วันทำงานของ 1 คน มาจากหน้า เวลาทำงาน")
+    assert not any("สแกนนิ้วครั้งเดียว" in d["title"] for d in out["decisions"])          # settled: the owner decides each day
+
+
+def test_days_after_the_scan_file_are_not_known_yet():
+    """The fingerprint file of สระบุรี reaches 20/11 only: everything is decided, but the days after it are not in -- amber, said."""
+    s = src(employees=[emp("F2")], rules=[rule("F2")], rates=[rate("F2")], punches=[r for r in scans_of("F2") if r["punched_at"] < "2026-11-21"],
+            attendance_reviews=[])
+    c = one(pw.build(s, MONTH, TODAY), "F2")["cells"]["days"]
+    assert (c["state"], c["value"], c["note"]) == ("carry", 26, "ตามเวลาทำงาน: ครบกะ 26 · ไฟล์สแกนนิ้วมีถึง 20/11/2026 เท่านั้น")
+
+
+def test_a_double_shift_day_counts_two_and_half_of_it_one():
+    """count_attendance on its own: a ควบกะ day is worth 2, so a ครึ่งวัน decision on one is worth 1; days outside his own dates of the
+    period are not his."""
+    person = {"expected": 720, "days": [
+        {"date": "2026-11-01", "flag": "ok", "minutes": 1300, "double": True, "review": None},
+        {"date": "2026-11-02", "flag": "single", "minutes": 0, "double": True, "review": {"decision": "half", "deduct_amount": 0, "manual": False}},
+        {"date": "2026-11-03", "flag": "short", "minutes": 400, "double": False, "review": None},
+        {"date": "2026-10-20", "flag": "ok", "minutes": 720, "double": False, "review": None}]}
+    a = pw.count_attendance(person, START, END)
+    assert (a["total"], a["double"], a["open"], a["fines"]) == (3.0, 2, [N(11, 3)], [])
+    assert pw.count_attendance(person, N(11, 4), END) is None                    # nothing of his inside his dates: not from here
+
+
+def test_a_fine_on_a_warning_letter_of_the_same_day_is_counted_once():
+    reviews = [decided("F1", d, "approve") for d in (N(10, 28), N(10, 31), N(11, 3), N(11, 10))] + [decided("F1", N(11, 6), "full_penalty", 200)]
+    letters = [{"id": 1, "employee_id": "F1", "doc_date": "2026-11-06", "status": "signed", "penalty": 200}]
+    c = one(pw.build(f1_src(reviews, penalties=letters), MONTH, TODAY), "F1")["cells"]["penalty"]
+    assert (c["value"], c["note"]) == (200, "ใบเตือน 06/11/2026 200")
+    letters[0]["penalty"] = 300                                                  # another amount: another fine
+    c = one(pw.build(f1_src(reviews, penalties=letters), MONTH, TODAY), "F1")["cells"]["penalty"]
+    assert (c["value"], c["note"]) == (500, "ใบเตือน 06/11/2026 300 · เวลาทำงาน (ค่าแรงเต็ม + หักเงิน) 06/11/2026 200")
+
+
+def test_without_the_decisions_the_scans_stay_a_stand_in():
+    out = pw.build(f1_src(None, failed=["เวลาทำงาน (การตัดสินรายวัน)"]), MONTH, TODAY)
+    assert one(out, "F1")["cells"]["days"] == {"state": "carry", "value": 23, "text": "23 วัน",
+                                               "note": "มีสแกน 23 วัน ยังไม่ได้สรุปเป็นวันทำงาน · โหลดเวลาทำงานไม่สำเร็จ"}
+    assert (file(out, "attendance_review")["state"], file(out, "attendance_review")["summary"]) == ("bad", "โหลดไม่สำเร็จ")
+    # แก่งคอย keeps its own source (the work record): its scans are not read as working days here
+    s = src(employees=[emp("K1", branch="แก่งคอย")], rules=[rule("K1")], rates=[rate("K1")], punches=scans_of("K1"), attendance_reviews=[])
+    assert one(pw.build(s, MONTH, TODAY), "K1")["cells"]["days"]["note"] == "มีสแกน 31 วัน ยังไม่ได้สรุปเป็นวันทำงาน"
+
+
+def helper_src(reviews, helper_rule=None, **kw):
+    s = route_src(drove("D1", START, END), punches=scans_of("H1", {N(11, 1): None, N(11, 2): ("12:00",), N(11, 3): None}, ("05:00", "17:00")),
+                  attendance_reviews=reviews, **kw)
+    s["employees"].append(emp("H1", "เย ทดสอบ", position="เด็กรถ"))
+    s["rules"].append(helper_rule or rule("H1", rides_with="D1"))
+    s["rates"].append(rate("H1"))
+    return s
+
+
+def test_a_helper_keeps_his_drivers_days_until_his_own_are_decided():
+    c = one(pw.build(helper_src([]), MONTH, TODAY), "H1")["cells"]["days"]
+    assert (c["state"], c["value"]) == ("carry", 31)
+    assert c["note"] == "ตามคนขับ D1 มานัส ศรีวิลาส: 31 วัน (ยังไม่ยืนยัน) · เวลาทำงาน: รอตัดสิน 1 วัน (02/11) (ยังใช้วันของคนขับ)"
+    out = pw.build(helper_src([decided("H1", N(11, 2), "approve")]), MONTH, TODAY)
+    c = one(out, "H1")["cells"]["days"]
+    assert c == {"state": "ok", "value": 29, "text": "29 วัน", "note": "ตามเวลาทำงาน: ครบกะ 28 · อนุมัติ 1 · คนขับ D1 มานัส ศรีวิลาส ขับเอง 31 วัน"}
+    assert "split" not in c                                                      # one rate: nothing to split
+
+
+def test_two_rates_split_by_the_days_his_driver_drove():
+    """Owner, 26 Nov 2026: a day on the truck only (out and back, under 12 hours) pays 344; a plant day -- also one where he went out
+    and came back to keep working -- pays 390. With rides_with set, the truck days are his short days on which his driver drove."""
+    rows = drove("D1", START, END)
+    rows[next(i for i, r in enumerate(rows) if r["day"] == "2026-11-20")].update(spare=True, money=None, qty=None)      # the spare drove that day
+    s = route_src(rows, punches=scans_of("W1", {N(11, 2): ("06:00", "14:00"), N(11, 3): ("06:00", "14:00"), N(11, 4): ("06:00", "14:00"),
+                                                N(11, 20): ("06:00", "14:00")}), attendance_reviews=[decided("W1", d, "approve") for d in (N(11, 2), N(11, 3), N(11, 4), N(11, 20))])
+    s["employees"].append(emp("W1", "เชน ทดสอบ"))
+    s["rules"].append(rule("W1", rate2=344, rides_with="D1"))
+    s["rates"].append(rate("W1"))
+    out = pw.build(s, MONTH, TODAY)
+    p = one(out, "W1")
+    c = p["cells"]["days"]
+    assert (c["state"], c["value"], c["split"]) == ("ok", 31, {"plant": 28, "truck": 3})
+    assert c["note"] == "โรงงาน 28 วัน · ออกรถ 3 วัน (344) · ตามเวลาทำงาน: ครบกะ 27 · อนุมัติ 4 · คนขับ D1 มานัส ศรีวิลาส ขับเอง 30 วัน"
+    assert p["formula"].startswith("ค่าแรง = วันทำงานในโรงงาน × 390 + วันออกรถอย่างเดียว × 344")
+    assert not any(d["title"].startswith("พนักงานผลิตที่ออกรถด้วย") for d in out["decisions"])      # settled for him
+    # the driver's days not all typed: the truck days may be short
+    s["route"] = [r for r in rows if r["day"] != "2026-11-25"]
+    c = one(pw.build(s, MONTH, TODAY), "W1")["cells"]["days"]
+    assert c["state"] == "carry" and c["note"].endswith("คนขับยังไม่ได้ลง 25/11 (วันออกรถอาจยังไม่ครบ)")
+    # no driver to ride with (the spare / event riders): the reminder stays, and so does the question
+    s["route"] = rows
+    s["rules"][-1]["rides_with"] = None
+    out = pw.build(s, MONTH, TODAY)
+    c = one(out, "W1")["cells"]["days"]
+    assert (c["state"], c["value"]) == ("carry", 31) and "split" not in c and c["note"].endswith("ต้องแยกวันออกรถ (344)")
+    assert any(d["title"].startswith("พนักงานผลิตที่ออกรถด้วย") and "W1 เชน ทดสอบ (390 / 344)" in d["detail"] for d in out["decisions"])
+
+
+def test_the_loader_reads_the_decisions_and_the_attendance_window(monkeypatch):
+    from app import supabase
+    seen = []
+    monkeypatch.setattr(supabase, "select_all", lambda table, params=None, page=1000: seen.append((table, params)) or [])
+    s = pw._read(MONTH)
+    asked = [p for t, p in seen if t == "attendance_reviews"]
+    assert asked == [{"select": pw.SELECTS["attendance_reviews"], "work_date": "gte.2026-10-26", "and": "(work_date.lte.2026-11-25)",
+                      "order": "employee_id.asc,work_date.asc"}] and s["attendance_reviews"] == []
+    slices = [p for t, p in seen if t == "attendance_punches"]
+    # the attendance page's own window: 45 days before the period (the usual start), to the 27th (a night shift of the 25th ends on the 26th)
+    assert min(p["punched_at"] for p in slices) == "gte.2026-09-11T00:00:00" and max(p["and"] for p in slices) == "(punched_at.lt.2026-11-28T00:00:00)"

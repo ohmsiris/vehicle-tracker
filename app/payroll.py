@@ -23,6 +23,11 @@ with the cover page's advance total, and every line found its one person -- othe
 says why. A person with two lines, or whose code was only guessed, is a stand-in to check. Lines that find nobody on the pay list are
 returned as "advance_unmatched".
 
+วันทำงาน (28 Nov 2026): สระบุรี's staff who are not route drivers take their days from the attendance page (app/attendance.py build_month over
+the same scans, with the owner's decision on every flagged day -- count_attendance has the owner's rule); a เด็กรถ keeps his driver's days
+until his own flagged days are decided; someone with a second rate who rides with one driver gets his days split into plant and truck days
+(truck_days). Route drivers take theirs from ยอดขายรายวัน, แก่งคอย from its work record.
+
 Who is on the list: company-paid people (employees.pay_group <> 'hq') who worked any day of the period, plus people who left earlier
 and still have savings to get back. Rules per person: employee_pay_rules (schema_v93.sql); the daily rate: employee_rates (app/rates.py).
 
@@ -36,12 +41,13 @@ import logging
 import re
 import threading
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Callable, Optional
 
 import httpx
 
+from app import attendance as att_rules
 from app import loans as loan_rules
 from app.accounting import period_bounds, period_of
 from app.rates import rate_on
@@ -83,11 +89,15 @@ RULES_GENERAL = [
     "รวมรับ = ค่าแรง + ค่าคอม + ค่าซอง + เบี้ยขยัน + OT",
     "เบี้ยขยัน {bonus} บาท: เฉพาะพนักงานขับรถ เมื่อมาทำงานครบ {days} วันของงวด และไม่ถูกงด",
     "พขร. กลุ่ม A, B, C: หักค่าน้ำมันรถออกจากยอดขายก่อนคิดค่าคอม · ทวาย: ค่าซองคิดจาก จำนวนซอง − ค่าน้ำมัน ÷ {bag_price}",
-    "พนักงานผลิตที่ออกรถด้วย (2 อัตรา): วันออกรถอย่างเดียวจ่ายอัตราที่สอง วันทำงานในโรงงานจ่ายอัตราปกติ",
+    "พนักงานผลิตที่ออกรถด้วย (2 อัตรา): วันออกรถอย่างเดียวจ่ายอัตราที่สอง วันทำงานในโรงงานจ่ายอัตราปกติ"
+    " · วันออกรถอย่างเดียว = วันที่คนขับที่เขาออกรถด้วยขับรถสายเอง และเขาทำงานไม่ครบกะ (ออกรถแล้วกลับมาทำงานต่อจนครบกะ = วันทำงานในโรงงาน)",
     "OT สระบุรี จ่ายเป็นเงินสดทุกวันจากเงินสดย่อย ไม่รวมในเงินเดือน",
     "วันที่มาสแกนแต่ไม่ได้ทำงาน ไม่จ่าย",
     "สะสม หักตามใบสรุปเงินเดือน HQ ล่าสุด",
     "คืนเงินสะสม / จ่ายค้าง ไม่ใช่รายได้ของเดือน: ไม่นับในรวมรับ แต่รวมในจ่ายจริง",
+    # owner, 28 Nov 2026 (count_attendance)
+    "วันทำงาน สระบุรี (ไม่ใช่รถสาย) ตามหน้า เวลาทำงาน: ครบกะ / อนุมัติ / เพิ่มเอง = 1 วัน · ครึ่งวัน = 0.5 · ไม่จ่าย = 0 · ค่าแรงเต็ม + หักเงิน = 1 วัน"
+    " (เงินที่หักลงช่อง เงินขาด / ความผิด) · ควบกะ = 2 วัน · วันที่ยังไม่ได้ตัดสิน ยังไม่นับ",
 ]
 # one more line while a branch is set aside. Savings owed to someone of that branch who left are money to pay back, not part of what
 # is set aside: they stay counted, and the line says so.
@@ -121,8 +131,8 @@ GROUP_DEFAULTS = {"DRV-A": {"rate": 120, "pct": 5}, "DRV-B": {"rate": 120, "pct"
 KINDS = [
     ("group", "กลุ่มคิดเงิน", "กลุ่ม", "กติกาคิดเงินรายคน (จากแผ่น อัตรา ของแบบคำนวณ)", None, None, ""),
     ("rate", "อัตรา/วัน", "อัตรา", "ค่าแรงต่อวัน ในหน้า รายชื่อพนักงาน", "#employees", "รายชื่อพนักงาน", ""),
-    ("days", "วันทำงาน", "วัน", "รถสาย: ยอดขายรายวัน · แก่งคอย: บันทึกการทำงาน (กล่องรับไฟล์) · คนอื่น: สแกนนิ้ว / ใบสรุปวันหยุด", "#attendance", "เวลาทำงาน",
-     "คนที่ไม่ใช่รถสาย: ยังไม่มีที่สรุปวันทำงานในระบบ"),
+    ("days", "วันทำงาน", "วัน", "รถสาย: ยอดขายรายวัน · สระบุรี คนอื่น: เวลาทำงาน (สแกนนิ้ว + การตัดสินของเจ้าของ) · เด็กรถ: ตามคนขับจนกว่าวันของตัวเองจะตัดสินครบ"
+     " · แก่งคอย: บันทึกการทำงาน (กล่องรับไฟล์)", "#attendance", "เวลาทำงาน", ""),
     ("sales", "ยอดขาย", "ยอดขาย", "รถสาย: ยอดขายรายวัน (เงินที่ได้ของวันที่ขับเอง)", "#driver-days", "ยอดขายรายวัน", ""),
     ("bags", "จำนวนซอง", "ซอง", "รถสาย: ยอดขายรายวัน (จำนวนซองของวันที่ขับเอง)", "#driver-days", "ยอดขายรายวัน", ""),
     ("fuel", "ค่าน้ำมัน", "น้ำมัน", "ใบแจ้งหนี้บัตรน้ำมัน + น้ำมันเงินสด ของรถสาย กลุ่ม A, B, C และทวาย", "#accounts-in", "ลงข้อมูล / แนบไฟล์", ""),
@@ -167,7 +177,8 @@ NO_TABLE = ("PGRST205", "42P01", "HTTP 404")      # what PostgREST says when a t
 
 # every column this page reads, table by table (tests check: no "*", nothing private)
 SELECTS = {
-    "employees": "id,code,full_name,nickname,branch,position,status,start_date,end_date,pay_group,probation_end",
+    # shift_start / shift_end: a worker's own shift time, which the attendance page pairs his scans around (app/attendance.py build_month)
+    "employees": "id,code,full_name,nickname,branch,position,status,start_date,end_date,pay_group,probation_end,shift_start,shift_end",
     "employee_pay_rules": "employee_id,pay_group,commission_pct,bag_rate,ot_rate,ot_auto_hours,bonus,rate2,rides_with,route_until,sso,sso_source",
     "employee_rates": "id,employee_id,daily_rate,effective_from,kind,review,review_note",
     "pay_prev": "month,code,employee_id,parts,deductions,refund,flags,sales:details->sales,savings_balance:details->savings_balance",
@@ -175,6 +186,7 @@ SELECTS = {
     "route_driver_days": "employee_id,day,qty,money,spare,money_parts",
     "route_driver_settings": "employee_id,money_split",
     "attendance_punches": "employee_id,punched_at",
+    "attendance_reviews": "employee_id,work_date,decision,deduct_amount,note,manual",
     "attendance_uploads": "id,filename,period_start,period_end,unknown_codes,created_at",
     "employee_loans": "id,employee_id,kind,amount,loan_date,reason,repay_mode,repay_amount,repay_months,repay_percent,schedule,first_month,status",
     "employee_loan_entries": "id,loan_id,entry_date,kind,amount,pay_month,created_at",
@@ -1223,6 +1235,119 @@ def build_rules(rows: list[dict], ctx: dict) -> dict:
     return {"general": general, "groups": groups, "source": RULES_SOURCE}
 
 
+# --------------------------------------------------------------------------------------------- working days from เวลาทำงาน (pure)
+# Owner, 28 Nov 2026: the working days of สระบุรี's staff who are not route drivers come from the attendance page -- a day counts 1 when
+# its shift is complete or the owner approved it (or added it by hand); ค่าแรงครึ่งวัน 0.5; ไม่จ่าย 0; ค่าแรงเต็ม + หักเงิน 1, its amount a
+# fine; a ควบกะ day (two shifts) counts 2 at สระบุรี. A flagged day with no decision yet is not counted, and the cell waits for it.
+ATT_BRANCH = "สระบุรี"
+ATT_KINDS = [("ok", "ครบกะ"), ("approve", "อนุมัติ"), ("manual", "เพิ่มเอง"), ("full_penalty", "ค่าแรงเต็ม + หักเงิน"), ("half", "ครึ่งวัน"),
+             ("unpaid", "ไม่จ่าย")]
+ATT_SOURCE = "ตามเวลาทำงาน"
+
+
+def attendance_month(month: str, employees: list[dict], punches: list[dict], reviews: list[dict]) -> Optional[dict]:
+    """{employee id: his month on the attendance page} -- app/attendance.py's own build_month over the same scans and decisions, so
+    the shifts, flags and ควบกะ are exactly the ones the owner decided on (owner, 28 Nov 2026). None when it cannot be worked out."""
+    stamps: dict = {}
+    for r in punches:
+        try:
+            stamps.setdefault(r["employee_id"], []).append(datetime.fromisoformat(str(r["punched_at"])[:19]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    try:
+        out = att_rules.build_month(month, {e["id"]: e for e in employees}, stamps, reviews)
+    except Exception:                                        # a day the attendance rules cannot read must not blank the pay page
+        logger.exception("payroll checklist: attendance month")
+        return None
+    return {x["employee_id"]: x for x in out["people"]}
+
+
+def count_attendance(person: dict, first: date, last: date) -> Optional[dict]:
+    """One person's working days from his attendance month, his own days of the period only (first..last); None when he has none
+    there. {total, counts {kind: days}, double (ควบกะ days counted), open [flagged dates not decided], fines [{day, amount}],
+    days [{day, worth, double, minutes}] (the days that count), expected (his shift in minutes)}. Owner, 28 Nov 2026: the decision wins,
+    on a complete day too (a day "came, scanned, did not work" is ไม่จ่าย)."""
+    total, counts, double, open_days, fines, counted, seen = 0.0, {k: 0 for k, _ in ATT_KINDS}, 0, [], [], [], False
+    for d in person.get("days") or []:
+        day = _d(d.get("date"))
+        if not day or not first <= day <= last:
+            continue
+        seen = True
+        r = d.get("review") or {}
+        decision = r.get("decision")
+        if decision in att_rules.FRACTION:
+            kind = "manual" if d.get("flag") == "manual" and decision == "approve" else decision
+            worth = att_rules.FRACTION[decision]
+            if decision == "full_penalty" and _f(r.get("deduct_amount")) > 0:
+                fines.append({"day": day, "amount": round(_f(r["deduct_amount"]), 2)})
+        elif d.get("flag") == "ok":
+            kind, worth = "ok", 1.0
+        else:                                                # a single scan or a short shift nobody has decided yet
+            open_days.append(day)
+            continue
+        counts[kind] += 1
+        if d.get("double"):                                  # ควบกะ: two days' wage at สระบุรี (owner, 27 Nov 2026)
+            worth *= 2
+            double += 1 if worth else 0
+        total += worth
+        counted.append({"day": day, "worth": worth, "double": bool(d.get("double")), "minutes": int(d.get("minutes") or 0)})
+    if not seen:
+        return None
+    return {"total": round(total, 2), "counts": counts, "double": double, "open": open_days, "fines": fines, "days": counted,
+            "expected": int(person.get("expected") or att_rules.DEFAULT_SHIFT)}
+
+
+def attendance_days(p: dict, ctx: dict) -> Optional[dict]:
+    person = (ctx.get("attendance") or {}).get(p["id"])
+    return count_attendance(person, p["first"], p["last"]) if person else None
+
+
+def open_words(days: list[date]) -> str:
+    return f"เวลาทำงาน: รอตัดสิน {len(days)} วัน ({runs(days)})" if len(days) <= 6 else f"เวลาทำงาน: รอตัดสิน {len(days)} วัน"
+
+
+def attendance_words(att: dict) -> str:
+    """'ตามเวลาทำงาน: ครบกะ 24 · อนุมัติ 2 · ครึ่งวัน 2 (นับ 1) · ไม่จ่าย 1 (นับ 0) · ควบกะ 1 วัน (นับวันละ 2)'."""
+    n = att["counts"]
+    parts = [f"{label} {n[k]}" + (f" (นับ {num(n[k] * 0.5)})" if k == "half" else " (นับ 0)" if k == "unpaid" else "") for k, label in ATT_KINDS if n[k]]
+    if att["double"]:
+        parts.append(f"ควบกะ {att['double']} วัน (นับวันละ 2)")
+    return f"{ATT_SOURCE}: " + (" · ".join(parts) if parts else "ไม่มีวันที่นับ")
+
+
+def truck_days(att: dict, driver: dict, first: date, last: date) -> float:
+    """The days a production worker with two rates rode the truck only (owner, 26 Nov 2026: out and back, under 12 hours, 344): his
+    working days on which the driver he rides with drove his route himself, that are not a full plant shift of his (worked less than
+    his shift less the grace -- attendance's own "short" measure) and not ควบกะ. The rest of his days are plant days (390), the day he
+    went out on the truck and came back to keep working among them."""
+    drove = {d for d in driver["own"] if first <= d <= last}
+    full = att["expected"] - att_rules.LATE_GRACE
+    return round(sum(x["worth"] for x in att["days"] if x["worth"] > 0 and x["day"] in drove and not x["double"] and x["minutes"] < full), 2)
+
+
+def attendance_cell(att: dict, driver: Optional[dict], first: date, last: date, rate2: Optional[float]) -> dict:
+    """The days cell from his attendance month (owner, 28 Nov 2026): ok when every flagged day is decided, carry while some wait (those
+    are not counted). A เด็กรถ's line names his driver's own days beside it, as a check. Someone with a second rate who rides with a
+    driver gets both numbers: value = all his days, split = {plant, truck} -- ค่าแรง = plant x the rate + truck x rate2."""
+    notes = [attendance_words(att)]
+    if att["open"]:
+        notes.append(open_words(att["open"]) + " ยังไม่นับ")
+    state = "carry" if att["open"] else "ok"
+    extra: dict = {}
+    if driver and not driver["early"]:
+        mine = sum(1 for d in driver["own"] if first <= d <= last)
+        notes.append(f"คนขับ {driver['who']} ขับเอง {mine} วัน")
+        if rate2:
+            truck = truck_days(att, driver, first, last)
+            extra = {"split": {"plant": round(att["total"] - truck, 2), "truck": truck}}
+            notes.insert(0, f"โรงงาน {num(extra['split']['plant'])} วัน · ออกรถ {num(truck)} วัน ({money(rate2)})")
+            gaps = [d for d in driver["missing"] if first <= d <= last]
+            if gaps:                                         # the truck days may not all be known yet
+                state = "carry"
+                notes.append(f"คนขับยังไม่ได้ลง {runs(gaps)} (วันออกรถอาจยังไม่ครบ)")
+    return {**cell(state, att["total"], f"{num(att['total'])} วัน", " · ".join(notes)), **extra}
+
+
 def build_person(p: dict, ctx: dict) -> dict:
     """One row of the per-person table: every column decided. ctx = what build() prepared (the period, the sources by person)."""
     start, end = ctx["start"], ctx["end"]
@@ -1237,6 +1362,7 @@ def build_person(p: dict, ctx: dict) -> dict:
         cells["refund"] = refund_cell(owed)
         return _finish({**base, "status": status_of(p, start, end, None), "rate": None, "rate2": None, "formula": ""}, cells)
     first, last = p["first"], p["last"]
+    att = None                                               # his เวลาทำงาน days, when they are what his days come from
     own, prev = sheet_rows(p, ctx)                           # HQ's sheet of this very month (HQ already paid it), else the latest one before
     ref = own or prev
     parts, deds = (ref or {}).get("parts") or {}, (ref or {}).get("deductions") or {}
@@ -1308,8 +1434,22 @@ def build_person(p: dict, ctx: dict) -> dict:
             cells["bags"] = cell("miss" if rc["missing"] else "ok", rc["zong"], f"{rc['zong']:,} ซอง", gap)
     else:
         driver = ctx["route_own"].get((rule or {}).get("rides_with"))
-        if scans:
-            cells["days"] = cell("carry", len(scans), f"{len(scans)} วัน", f"มีสแกน {len(scans)} วัน ยังไม่ได้สรุปเป็นวันทำงาน")
+        # สระบุรี: the attendance page's shifts and the owner's decision on each flagged day (owner, 28 Nov 2026). A เด็กรถ who follows
+        # his driver keeps the driver's days until every flagged day of his own is decided.
+        att = attendance_days(p, ctx) if p.get("branch") == ATT_BRANCH else None
+        if att and att["open"]:
+            ctx["att_open"][p["id"]] = att["open"]
+        helper_waits = bool(att and att["open"] and driver)
+        if att and not helper_waits:
+            cells["days"] = attendance_cell(att, driver, first, last, rate2)
+            ctx["att_used"].add(p["id"])
+            through = ctx.get("att_through")
+            if through and through < min(last, ctx["upto"]):      # the fingerprint file stops short: days after it are not known yet
+                c = cells["days"]
+                cells["days"] = {**c, "state": "carry" if c["state"] == "ok" else c["state"], "note": f"{c['note']} · ไฟล์สแกนนิ้วมีถึง {dmy(through)} เท่านั้น"}
+        elif scans and not helper_waits:
+            lost = " · โหลดเวลาทำงานไม่สำเร็จ" if ctx.get("attendance") is None and p.get("branch") == ATT_BRANCH else ""
+            cells["days"] = cell("carry", len(scans), f"{len(scans)} วัน", f"มีสแกน {len(scans)} วัน ยังไม่ได้สรุปเป็นวันทำงาน{lost}")
         elif driver and driver["early"]:
             cells["days"] = cell("carry", 0, "0 วัน", f"ตามคนขับ {driver['who']} · {EARLY}")
         elif driver:                                         # a เด็กรถ: his driver's own days stand in for his
@@ -1319,6 +1459,9 @@ def build_person(p: dict, ctx: dict) -> dict:
                              else cell("carry", n, f"{n} วัน", f"ตามคนขับ {driver['who']}: {n} วัน (ยังไม่ยืนยัน)"))
         else:
             cells["days"] = cell("miss", note="ยังไม่มีสแกนนิ้ว / ใบสรุปวันหยุด")
+        if helper_waits:                                     # his own days are not settled yet: the driver's stand in, and the wait is said
+            c = cells["days"]
+            cells["days"] = {**c, "note": f"{c['note']} · {open_words(att['open'])} (ยังใช้วันของคนขับ)"}
         if until:                                            # still in a route group, but the route ended before this period
             c = cells["days"]
             cells["days"] = {**c, "note": f"ขับรถสายถึง {dmy(until)} · {c['note']}"}          # route_until is the last day he drove
@@ -1326,9 +1469,10 @@ def build_person(p: dict, ctx: dict) -> dict:
             cells["sales"] = cell("miss", note=f"ยังไม่มีแหล่งข้อมูล (ใบ HQ {my(ref['month'])} คิดจากยอดขาย {money(ref['sales'])})")
         if bags and not until:
             cells["bags"] = cell("miss", note="ยังไม่มีแหล่งข้อมูล")
-    if rate2:
+    if rate2 and "split" not in cells["days"]:               # which of his days were truck-only is not known: no pay can come of it yet
         c = cells["days"]
-        cells["days"] = {**c, "note": " · ".join(x for x in (c["note"], f"ต้องแยกวันออกรถ ({money(rate2)})") if x)}
+        cells["days"] = {**c, "state": "carry" if c["state"] == "ok" else c["state"],
+                         "note": " · ".join(x for x in (c["note"], f"ต้องแยกวันออกรถ ({money(rate2)})") if x)}
 
     # ---- OT hours, trip money (Kaeng Khoi)
     kk = p.get("branch") == "แก่งคอย"
@@ -1351,6 +1495,9 @@ def build_person(p: dict, ctx: dict) -> dict:
 
     # ---- deductions: HQ's own sheet of the month when there is one, else the latest sheet before it as the stand-in
     fines = ctx["fines"].get(p["id"], [])
+    # a ค่าแรงเต็ม + หักเงิน day on the attendance page: the day is paid in full, the amount is a fine (owner, 28 Nov 2026). The same day
+    # and amount on a ใบเตือน is the same fine, counted once.
+    att_fines = [f for f in (att or {}).get("fines", []) if not any(x["day"] == f["day"] and abs(x["amount"] - f["amount"]) < 0.01 for x in fines)]
     # เบิกล่วงหน้า from the month's own lists (never for a month HQ already worked out): the cell, or why the lists cannot settle him
     drawn, doubt = (None, "") if own else advance_cell(p, ctx, prev)
     if own:
@@ -1358,7 +1505,7 @@ def build_person(p: dict, ctx: dict) -> dict:
         for key in ("savings", "advance", "common", "other", "sso"):
             if _f(deds.get(key)) > 0:
                 cells[key] = cell("ok", _f(deds[key]), money(deds[key]), said)
-        if not fines and _f(deds.get("shortage")) > 0:
+        if not fines and not att_fines and _f(deds.get("shortage")) > 0:
             cells["penalty"] = cell("ok", _f(deds["shortage"]), money(deds["shortage"]), "เงินขาด " + said)
     elif ctx["prev_failed"]:
         cells["advance"] = cells["savings"] = cells["sso"] = cell("miss", note="โหลดใบสรุปเงินเดือน HQ ไม่สำเร็จ")
@@ -1395,9 +1542,11 @@ def build_person(p: dict, ctx: dict) -> dict:
         cells["advance"] = {**cells["advance"], "note": f"{cells['advance']['note']} · {doubt}"}
     card = _f(((prev or own or {}).get("deductions") or {}).get("card"))
     cells["loan"] = loan_cell(ctx["loans"].get(p["id"], []), card)                    # ทำบัตร of the last sheet IS this loan: never both
-    if fines:
-        total = round(sum(f["amount"] for f in fines), 2)
-        cells["penalty"] = cell("ok", total, money(total), "ใบเตือน " + ", ".join(f"{dmy(f['day'])} {money(f['amount'])}" for f in fines))
+    if fines or att_fines:
+        total = round(sum(f["amount"] for f in fines + att_fines), 2)
+        words = [f"{label} " + ", ".join(f"{dmy(f['day'])} {money(f['amount'])}" for f in got)
+                 for label, got in (("ใบเตือน", fines), ("เวลาทำงาน (ค่าแรงเต็ม + หักเงิน)", att_fines)) if got]
+        cells["penalty"] = cell("ok", total, money(total), " · ".join(words))
     status = status_of(p, start, end, rate)
     if status["key"] == "resigned" and owed and owed["balance"] > 0 and not owed["refunded"]:
         cells["refund"] = refund_cell(owed, short=True)
@@ -1700,6 +1849,22 @@ def build_files(people: list[dict], src: dict, ctx: dict, month: str) -> list[di
                  "summary": f["summary"] + "\nมีรหัสที่ไม่อยู่ในรายชื่อพนักงาน: " + ", ".join(strangers[:6])
                             + (f" และอีก {len(strangers) - 6} รหัส" if len(strangers) > 6 else "") + " — เพิ่มพนักงานก่อน ไม่งั้นไม่ถูกนับ"}
         out.append(set_aside(f) if held(branch) else f)
+    # ---- the owner's decisions on the attendance page: the flagged days of สระบุรี's staff whose days come from it (count_attendance)
+    if "attendance_reviews" in src and not held(ATT_BRANCH):
+        title = "ตัดสินวันที่สแกนไม่ครบ (เวลาทำงาน สระบุรี)"
+        if ctx["attendance"] is None:
+            out.append(_file("attendance_review", title, "bad", "โหลดไม่สำเร็จ", "#attendance", "เวลาทำงาน"))
+        else:
+            used = [p for p in people if p["id"] in ctx["att_used"] and not p["hold"]]
+            waits = sorted(((p, ctx["att_open"][p["id"]]) for p in people if p["id"] in ctx["att_open"] and not p["hold"]),
+                           key=lambda x: (-len(x[1]), x[0]["code"]))
+            n = sum(len(d) for _, d in waits)
+            if waits:
+                out.append(_file("attendance_review", title, "bad", "\n".join(
+                    [f"รอตัดสิน {n:,} วัน ของ {len(waits)} คน (ยังไม่นับเป็นวันทำงาน)"] + [f"{_who(p)}: {runs(d)}" for p, d in waits[:6]]
+                    + ([f"และอีก {len(waits) - 6} คน"] if len(waits) > 6 else [])), "#attendance", "เวลาทำงาน"))
+            elif used:
+                out.append(_file("attendance_review", title, "ok", f"ตัดสินครบแล้ว · วันทำงานของ {len(used)} คน มาจากหน้า เวลาทำงาน", "#attendance", "เวลาทำงาน"))
     # ---- the branch papers (acc_docs: the script's "2026-11-saraburi", the drop box's "docs:2026-11:<branch>:mid|end")
     docs, inbox = src.get("docs"), src.get("inbox") or []
     waiting = sum(1 for f in inbox if f.get("kind") == "scan" and f.get("status") in WAITING)       # a file kept on purpose ("stored") is not waiting
@@ -1852,13 +2017,14 @@ def build_decisions(people: list[dict], ctx: dict) -> list[dict]:
         out.append({"title": f"{', '.join(_who(p) for p in tubes[:3])}: ค่าคอม {pct}% คิดจากยอดหลอดอย่างเดียว หรือรวมยอดซอง",
                     "detail": f"แบบคำนวณเขียนว่า \"ยอดขาย × {pct}%\" แต่ค่าซองจ่ายแยกแล้ว {bag} บาท/ซอง — หน้านี้ใช้ยอดหลอดอย่างเดียว (ตามที่ HQ คิด) "
                               "ถ้าต้องรวมยอดซองด้วยต้องแจ้ง"})
-    two = [p for p in worked if p["rate2"]]
+    # two rates: settled for whoever rides with one driver (his days split by the driver's own days, attendance_cell); still open for
+    # the others (the spare / event riders go out on any truck)
+    two = [p for p in worked if p["rate2"] and "split" not in p["cells"]["days"]]
     if two:
         out.append({"title": "พนักงานผลิตที่ออกรถด้วย: ต้องรู้จำนวนวันออกรถอย่างเดียว",
                     "detail": ", ".join(f"{_who(p)} ({money(p['rate'])} / {money(p['rate2'])})" for p in two[:6])
-                              + " — วันออกรถอย่างเดียวคิดอัตราที่สอง ตอนนี้ยังไม่มีที่บันทึกว่าเป็นวันไหน"})
-    out.append({"title": "สแกนนิ้วครั้งเดียวในวัน: นับเป็น 1 วันเต็มหรือไม่",
-                "detail": "HQ นับเป็น 1 วันเต็ม (ไม่เคยจ่ายครึ่งวัน) — ต้องตกลงก่อนใช้สแกนนิ้วสรุปเป็นวันทำงาน"})
+                              + " — วันออกรถอย่างเดียวคิดอัตราที่สอง: แยกวันได้เมื่อตั้งว่าออกรถกับคนขับคนไหน และวันทำงานมาจากหน้า เวลาทำงาน (ตัดสินครบ)"})
+    # a single scan: settled on 28 Nov 2026 -- the owner decides each flagged day on the attendance page (build_files: attendance_review)
     # what the owner said he would bring: shown while a stand-in is still in its place
     waiting = []
     standing = sum(1 for p in worked if p["cells"]["sso"]["state"] == "carry")
@@ -1956,7 +2122,13 @@ def build(src: dict, month: str, today: date) -> dict:
            "cash": cash_fuel_view(src["cash_fuel"]) if src.get("cash_fuel") is not None else None,
            "trucks": trucks_by_driver(src.get("drivers") or [], src.get("vehicles") or []),
            "unknown": unknown_codes(src.get("uploads"), employees, start, end), "base_rate": {}, "off_rule": set(),
+           # เวลาทำงาน: the attendance page's own month, worked out once for the run ({} for a caller that never asked, None = not readable)
+           "attendance": ({} if "attendance_reviews" not in src else None if src.get("attendance_reviews") is None or src.get("punches") is None
+                          else attendance_month(month, employees, src["punches"], src["attendance_reviews"])),
+           "att_open": {}, "att_used": set(),
            "hold_ids": {p["id"] for p in people if not p["left_before"] and held(p.get("branch"))}}
+    # the last day the สระบุรี scans reach: days from เวลาทำงาน are only whole when the file covers the period up to yesterday
+    ctx["att_through"] = max((d for pid, ds in scans.items() if (by_id.get(pid) or {}).get("branch") == ATT_BRANCH for d in ds), default=None)
     # every route driver's own days first: a helper's days follow his driver's. early = nothing is expected of him yet.
     ctx["route_own"] = {}
     for p in people:
@@ -2015,7 +2187,11 @@ def _read(month: str) -> dict:
     from app import supabase
     start, end = period_bounds(month)
     s, e = start.isoformat(), end.isoformat()
-    cut = [start + timedelta(days=i) for i in range(0, (end - start).days + 1, 8)] + [end + timedelta(days=1)]     # scans in four slices
+    # the scans in slices of 8 days, over the window the attendance page reads (app/attendance.py _load_month): the earlier weeks teach it
+    # each worker's usual start, and a night shift of the 25th ends on the 26th -- the same scans give the same shifts and flags the owner
+    # decided on. Only the period's own dates count as scans (build).
+    a0, a1 = start - timedelta(days=att_rules.USUAL_DAYS), end + timedelta(days=3)
+    cut = [a0 + timedelta(days=i) for i in range(0, (a1 - a0).days, 8)] + [a1]
     back = add_month(month, -LOOK_BACK)                      # HQ's sheets: the last months whole, everything older only for the savings
 
     def scans(a: date, b: date) -> Callable[[], list]:
@@ -2034,6 +2210,9 @@ def _read(month: str) -> dict:
                                                                                    "order": "day.asc,id.asc"})),
         ("split", "ยอดขายรายวัน (แยกซอง/หลอด)", lambda: supabase.select_all("route_driver_settings", {"select": SELECTS["route_driver_settings"], "order": "employee_id.asc"})),
         *[(f"punches{i}", "สแกนนิ้ว", scans(cut[i], cut[i + 1])) for i in range(len(cut) - 1)],
+        # the owner's decision on each flagged work day (เวลาทำงาน): with the scans, the working days of สระบุรี's staff (attendance_days)
+        ("attendance_reviews", "เวลาทำงาน (การตัดสินรายวัน)", lambda: supabase.select_all("attendance_reviews", {
+            "select": SELECTS["attendance_reviews"], "work_date": f"gte.{s}", "and": f"(work_date.lte.{e})", "order": "employee_id.asc,work_date.asc"})),
         ("uploads", "ไฟล์สแกนนิ้ว", lambda: supabase.select_all("attendance_uploads", {"select": SELECTS["attendance_uploads"], "period_end": f"gte.{s}",
                                                                                       "and": f"(period_start.lte.{e})", "order": "created_at.asc,id.asc"})),
         ("loans", "เงินกู้", lambda: supabase.select_all("employee_loans", {"select": SELECTS["employee_loans"], "order": "loan_date.desc,id.asc"})),
