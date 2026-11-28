@@ -238,3 +238,18 @@ def test_a_few_paper_fuel_lines_do_not_push_her_cash_fuel_page_out():
     k = ("สระบุรี", "2026-11", 1)
     assert acc.cash_fuel_covered_by_papers(paper, {k: 49127}) == set()
     assert acc.cash_fuel_covered_by_papers(paper, {k: 1500}) == {k}      # papers booked before her: they keep it, never both
+
+
+def test_a_paper_line_takes_the_cash_fuel_line_of_its_own_truck_first():
+    """Two truck-52 fills misdated 21/11 on the paper must not take truck 38's 21/11 line from truck 38's own paper line (28 Nov 2026)."""
+    from app import inbox_ai
+    vehicles = [{"id": "v52", "vehicle_number": "52", "plate_number": "2ฒฉ 3732", "branch": "สระบุรี"},
+                {"id": "v38", "vehicle_number": "38", "plate_number": "84-7169", "branch": "สระบุรี"}]
+    batch = {"month": "2026-11", "branch": "สระบุรี", "pages": [
+        {"page": 7, "lines": [["21/11", "เติมน้ำมัน (52)", 1000.0, "6130", "น้ำมันเงินสด", {"v": "2ฒฉ 3732"}],
+                              ["21/11", "เติมน้ำมัน (52)", 1000.0, "6130", "น้ำมันเงินสด", {"v": "2ฒฉ 3732"}]]},
+        {"page": 8, "lines": [["21/11", "เติมน้ำมัน (38)", 1000.0, "6130", "น้ำมันเงินสด", {"v": "84-7169"}]]}]}
+    done = [{"day": "2026-11-20", "amount": 1000, "vehicle_id": "v52"}, {"day": "2026-11-20", "amount": 1000, "vehicle_id": "v52"},
+            {"day": "2026-11-21", "amount": 1000, "vehicle_id": "v38"}]
+    assert len(inbox_ai.skip_cash_fuel(batch, done, vehicles)) == 3
+    assert all(ln[5].get("skip") for pg in batch["pages"] for ln in pg["lines"])

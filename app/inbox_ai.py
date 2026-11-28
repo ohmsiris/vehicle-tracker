@@ -620,7 +620,7 @@ def skip_cash_fuel(batch: dict, done: list[dict], vehicles: Optional[list] = Non
         return (v or {}).get("id")
     lines = [(p, ln) for p in batch.get("pages") or [] for ln in p.get("lines") or [] if ln[3] == "6130"]
     month = batch.get("month") or ""
-    out, rest = [], []
+    out = []
 
     def take(pred) -> Optional[dict]:
         for i, r in enumerate(left):
@@ -628,28 +628,33 @@ def skip_cash_fuel(batch: dict, done: list[dict], vehicles: Optional[list] = Non
                 return left.pop(i)
         return None
 
-    for p, ln in lines:
-        d = _line_day(ln[0], month)
-        amt = round(float(ln[2]), 2)
-        if d and take(lambda r: r["day"] == d and r["amount"] == amt):
-            out.append((p, ln))
-        else:
-            rest.append((p, ln))
-    rest2 = []
-    for p, ln in rest:
-        d, vid = _line_day(ln[0], month), truck(ln)
-        hit = take(lambda r: r["day"] == d and r["vehicle_id"] == vid) if vid and d else None
-        if hit:
-            ln[5]["cf_amount"] = hit["amount"]
-            out.append((p, ln))
-        else:
-            rest2.append((p, ln))
-    # the same amount on another day -- never her line of ANOTHER truck (both trucks known and different: a different fill-up;
-    # e.g. the owner deleted the paper line that was hers, 28 Nov 2026)
-    for p, ln in rest2:
-        amt, vid = round(float(ln[2]), 2), truck(ln)
-        if take(lambda r: r["amount"] == amt and not (vid and r["vehicle_id"] and r["vehicle_id"] != vid)):
-            out.append((p, ln))
+    # passes, most certain first, each over every line still open: a paper line takes the line of ITS truck before another truck's
+    # line of the same day and amount (28 Nov 2026: two truck-52 fills dated 21/11 on the paper took truck 38's 21/11 line, and
+    # truck 38's own paper line was then booked again)
+    same = lambda vid, r: bool(vid and r["vehicle_id"] and r["vehicle_id"] == vid)
+    clash = lambda vid, r: bool(vid and r["vehicle_id"] and r["vehicle_id"] != vid)
+    passes = [
+        lambda d, amt, vid: (lambda r: r["day"] == d and r["amount"] == amt and same(vid, r)) if d else None,
+        lambda d, amt, vid: (lambda r: r["day"] == d and r["amount"] == amt and not clash(vid, r)) if d else None,
+        lambda d, amt, vid: (lambda r: r["day"] == d and same(vid, r)) if d and vid else None,          # an amount misread: hers wins
+        # the same amount on another day -- never her line of ANOTHER truck (both trucks known and different: a different fill-up;
+        # e.g. the owner deleted the paper line that was hers, 28 Nov 2026)
+        lambda d, amt, vid: (lambda r: r["amount"] == amt and not clash(vid, r)),
+        lambda d, amt, vid: (lambda r: r["day"] == d and r["amount"] == amt) if d else None,              # a plate misread
+    ]
+    rest = lines
+    for i, mk in enumerate(passes):
+        still = []
+        for p, ln in rest:
+            pred = mk(_line_day(ln[0], month), round(float(ln[2]), 2), truck(ln))
+            hit = take(pred) if pred else None
+            if hit:
+                if i == 2:
+                    ln[5]["cf_amount"] = hit["amount"]
+                out.append((p, ln))
+            else:
+                still.append((p, ln))
+        rest = still
     for p, ln in out:
         ln[5]["skip"] = True
         ln[5].setdefault("page", p.get("page"))
