@@ -19,10 +19,11 @@ this module is everything around them:
   booked file of that kind and month is re-read and re-booked; a rebook that fails is reported (rebook_failed), never silently undone.
   The new booking is written FIRST; only the keys the earlier booking of this file held and the new one does not are then taken back.
   A reader's ValueError (acc_docs.BadBatch ...) is a Thai InboxError and the row is left as it was.
-* one action per file at a time: book / choose / reread / remove / ai hold a per-file lock; a second one is refused (Busy, 409).
+* one action per file at a time: book / choose / reread / reread pages / remove / ai hold a per-file lock; a second one is refused (Busy, 409).
 * reread / choose: read again (a reader got better, the employees list changed, the owner answered). A booked file is re-booked only
   when the new read can book; otherwise the booking stays exactly as it is and the new read waits in preview["pending"] (row_view
-  pending + its conflicts) for the owner.
+  pending + its conflicts) for the owner. reread pages (28 Nov 2026): only the pages asked for are read again by the AI, from the
+  images the first read stored (inbox_ai.reread_pages) -- for an advance list read before the reader took its deduction columns.
 * remove: unbook (only the keys this file still owns; a reader's unbook may ask for rebooks, which run after), delete the stored file
   and the AI page images, delete the row.
 * ai: only when the server has an Anthropic key and the owner clicked (the page shows the page count first). Runs in a background
@@ -643,6 +644,43 @@ def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Op
     return {**out, "booked_again": booked, "rebook_failed": v.get("rebook_failed") or [], "message": v.get("message") or ""}
 
 
+def reread_pages(file_id: str, pages, see_pay: bool = True, hr: str = "none") -> dict:
+    """อ่านหน้านี้ใหม่ on ตรวจเอกสารก่อนลงบัญชี (owner, 28 Nov 2026): these pages of an AI-read file read again by the AI from the
+    images stored at the first read, with the reader's current schema (inbox_ai.reread_pages: one paid call a page) -- a mid-month
+    advance list read before the reader returned ส่วนกลาง / ความผิด / อุปกรณ์ gets them without paying for the whole file again. The
+    preview is rebuilt keeping the owner's line fixes and บันทึกในพนักงาน; a booked file is booked again as a re-read that can book is
+    (_reprocess). One action per file (busy lock), refused while the AI reads it or a re-read waits for a choice. The tokens are added
+    to the file's ai_usage -- a read that failed after a call still counts them. Returns what get() does, with "reread"
+    ({pages, failed}), "booked_again", "rebook_failed" and "message"."""
+    from app.config import settings
+    if not settings.anthropic_api_key:
+        raise InboxError("ยังไม่ได้ตั้งค่า AI บนเซิร์ฟเวอร์ (ANTHROPIC_API_KEY)")
+    ai = _optional("inbox_ai")
+    if ai is None or not hasattr(ai, "reread_pages"):
+        raise InboxError("ส่วนอ่านด้วย AI ยังไม่พร้อม")
+    with _busy(file_id):
+        row = _get(file_id)
+        if not see_pay and _is_payroll(row):
+            raise Forbidden(PAY_HIDDEN)
+        _refuse_running(row)
+        if pending_of(row):
+            raise InboxError("อ่านใหม่แล้วยังมีเรื่องต้องเลือก — เลือกก่อน แล้วค่อยอ่านหน้าใหม่")
+        base = base_preview(row)
+        if not _ai_read(row) or not base.get("ai_pages"):
+            raise InboxError("ไฟล์นี้ไม่มีหน้าที่ AI อ่านไว้ — อ่านหน้าใหม่ไม่ได้")
+        try:
+            new = ai.reread_pages({**base, "ai_usage": row.get("ai_usage") or base.get("ai_usage")}, pages, row.get("choices") or {})
+        except ai.InboxAIError as exc:
+            spent = getattr(exc, "usage", None)
+            if spent and spent.get("calls") and spent != (row.get("ai_usage") or base.get("ai_usage")):
+                _save(row["id"], {"preview": {**(row.get("preview") or {}), "ai_usage": spent}, "ai_usage": spent})
+            raise InboxError(str(exc))
+        done = new.pop("reread", None) or {}
+        v, booked = _reprocess({**row, "ai_usage": new.get("ai_usage")}, row.get("choices") or {}, {row["id"]}, fresh=new)
+    out = get(file_id, see_pay, hr)
+    return {**out, "reread": done, "booked_again": booked, "rebook_failed": v.get("rebook_failed") or [], "message": v.get("message") or ""}
+
+
 def download(file_id: str, see_pay: bool = True) -> tuple[bytes, str, str, bool]:
     """(bytes, media type to send, file name, show inline?). Only PDFs and pictures are shown inline (serve_as)."""
     row = _get(file_id)
@@ -692,14 +730,18 @@ def _carry(base: dict, new: dict) -> dict:
     return new
 
 
-def _reprocess(row: dict, choices: dict, visited: set) -> tuple[dict, bool]:
+def _reprocess(row: dict, choices: dict, visited: set, fresh: Optional[dict] = None) -> tuple[dict, bool]:
     """Read the file again (with these choices). (row_view, did it book?).
     Not booked: the new read replaces the old one. Booked: READ FIRST. Only a read that can book replaces the booking (the new booking
     is written, then whatever the old one held and the new one does not is taken back). A read with a question, a store-only read or a
-    failed read leaves the booking exactly as it is; the question waits in preview["pending"] for the owner."""
+    failed read leaves the booking exactly as it is; the question waits in preview["pending"] for the owner.
+    fresh: a new read made already (reread_pages: some pages read again by the AI) -- used as it is, never rebuilt a second time."""
     was_booked = row.get("status") == "booked"
     base = base_preview(row)
-    if _ai_read(row):
+    if fresh is not None:
+        preview = _normal(fresh, None)
+        kind, error = row.get("kind") or preview.get("kind"), None
+    elif _ai_read(row):
         ai = _optional("inbox_ai")
         fn = getattr(ai, "apply_choices", None) if ai else None
         preview = _normal(fn(base, choices) if fn else apply_choices(base, choices), None)

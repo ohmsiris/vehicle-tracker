@@ -388,8 +388,69 @@ function ickPageEl(pg) {
   const side = pg.money ? ickTable(pg)      // a page the AI found no money on can still take a missed line
     : pg.canAdd && ick.editable ? el("div", { class: "ick-stack" }, ickCard(pg), ickTable(pg)) : ickCard(pg);
   const onPage = ickHrSplit(ick.f, pg).onPage;              // บันทึกในพนักงาน of a memo page (a loan line's sits under its line)
+  const adv = pg.read_kind === "advance" ? ickAdvEl(pg) : null;   // the list's ส่วนกลาง / ความผิด / อุปกรณ์ per person (28 Nov 2026)
   return el("section", { class: "ick-page", id: `ickP${pg.n}`, "data-page": String(pg.n) }, head,
-    el("div", { class: "ick-grid" }, ickScan(pg), onPage.length ? el("div", { class: "ick-stack" }, side, ...onPage.map(ickHrEl)) : side));
+    el("div", { class: "ick-grid" }, ickScan(pg), onPage.length || adv ? el("div", { class: "ick-stack" }, side, adv, ...onPage.map(ickHrEl)) : side));
+}
+
+// ---------------------------------------------------------------- ใบเบิกกลางเดือน: ส่วนกลาง / ความผิด / อุปกรณ์ per person (owner, 28 Nov 2026)
+// The AI page read's advance_rows (app/inbox_ai.py), shown so the owner can compare them with the scan -- READ-ONLY for now: the pay page
+// (app/payroll.py deduct_view) takes them from here. A page read before the reader returned them has none: อ่านหน้านี้ใหม่ reads that
+// page again from its stored image (one paid AI call, POST /api/accounts/inbox/<id>/pages/reread).
+const ICK_ADV_COLS = [["common", "ส่วนกลาง"], ["fault", "ความผิด"], ["other", "อุปกรณ์"]];
+
+// {old: read before advance_rows existed, rows: [{code, name, amount, common, fault, other, unsure}], sums: {common, fault, other}}
+function ickAdvRows(f, n) {
+  const page = (((f && f.preview) || {}).ai_pages || []).find((p) => p && p.n === n) || {};
+  if (!Object.prototype.hasOwnProperty.call(page, "advance_rows")) return { old: true, rows: [], sums: { common: 0, fault: 0, other: 0 } };
+  const rows = (page.advance_rows || []).filter((r) => r && typeof r === "object");
+  const sums = {};
+  for (const [k] of ICK_ADV_COLS) sums[k] = Math.round(rows.reduce((s, r) => s + (Number.isFinite(ickNum(r[k])) ? ickNum(r[k]) : 0), 0) * 100) / 100;
+  return { old: false, rows, sums };
+}
+
+function ickAdvEl(pg) {
+  const got = ickAdvRows(ick.f, pg.n);
+  const busy = ick.rereading === pg.n;
+  const btn = ick.editable && pg.image ? el("button", { class: "btn small", type: "button", "data-ibx-file": ick.f.id, disabled: !!ick.rereading,
+    text: busy ? "กำลังอ่านใหม่…" : "อ่านหน้านี้ใหม่ (เอาส่วนกลาง / ความผิด)", onclick: () => ickReread(pg) }) : null;
+  const cellOf = (v) => { const t = String(v ?? "").trim(); return t ? (Number.isFinite(ickNum(t)) ? fmtMoney(ickNum(t)) : t) : "–"; };
+  const body = got.old
+    ? el("p", { class: "small warn-text", text: "หน้านี้อ่านก่อนมีช่องส่วนกลาง / ความผิด / อุปกรณ์ — หน้าคำนวณเงินเดือนยังเอายอดเหล่านี้ไปใช้ไม่ได้ จนกว่าจะอ่านหน้านี้ใหม่" })
+    : !got.rows.length ? el("p", { class: "small muted", text: "AI ไม่ได้อ่านแถวรายคนของหน้านี้ — ถ้ากระดาษมีช่องส่วนกลาง / ความผิด ให้อ่านหน้านี้ใหม่" })
+    : el("div", { class: "ick-adv-wrap" }, el("table", { class: "ick-adv" },
+      el("thead", {}, el("tr", {}, ...["รหัส", "ชื่อ", "จำนวนเงิน", ...ICK_ADV_COLS.map((c) => c[1])].map((t) => el("th", { text: t })))),
+      el("tbody", {}, ...got.rows.map((r) => el("tr", { class: r.unsure ? "unsure" : "" },
+        el("td", { text: r.code || "–" }), el("td", { text: `${r.name || ""}${r.unsure ? " (อ่านไม่ชัด)" : ""}` }), el("td", { class: "num", text: cellOf(r.amount) }),
+        ...ICK_ADV_COLS.map(([k]) => el("td", { class: "num", text: cellOf(r[k]) }))))),
+      el("tfoot", {}, el("tr", {}, el("td", { colspan: "3", text: `รวม ${got.rows.length} คน` }),
+        ...ICK_ADV_COLS.map(([k]) => el("td", { class: "num", text: fmtMoney(got.sums[k]) }))))));
+  return el("div", { class: "ick-card ick-adv-card" },
+    el("strong", { text: "ส่วนกลาง / ความผิด / อุปกรณ์ รายคน (ดูอย่างเดียว เทียบกับรูป)" }), body,
+    el("p", { class: "small muted", text: "หน้าคำนวณเงินเดือนใช้ยอดเหล่านี้ · ถ้าอ่านผิด แก้ที่นี่ยังไม่ได้ ให้อ่านหน้านี้ใหม่" }), btn);
+}
+
+async function ickReread(pg) {
+  const f = ick.f;
+  if (!f || ick.rereading) return;
+  if (ickDirty()) { ickSay("มีการแก้ที่ยังไม่ได้บันทึก — บันทึกการแก้ก่อน แล้วค่อยอ่านหน้านี้ใหม่", true); return; }
+  if (!confirm(`อ่านหน้า ${pg.n} ใหม่ด้วย AI เพื่อเอาช่องส่วนกลาง / ความผิด / อุปกรณ์ รายคน?\nใช้ค่า AI 1 ครั้ง (1 หน้า) · บรรทัดของหน้านี้จะอ่านใหม่ด้วย${f.status === "booked" ? " และไฟล์นี้จะลงบัญชีใหม่ทันที" : ""}`)) return;
+  ick.rereading = pg.n;
+  ickRender();
+  await ibxRun(f.id, async () => {
+    try {
+      const res = await api(`/api/accounts/inbox/${f.id}/pages/reread`, jsonOpts("POST", { pages: [pg.n] }));
+      if (ick.f === f) {
+        const failed = ibxRebookFailed(res).map((x) => x.text);
+        const bad = ((res.reread || {}).failed || []).length > 0;
+        ick.msg = res.message ? { text: res.message, bad: true }
+          : { text: `${bad ? `อ่านหน้า ${pg.n} ใหม่ไม่สำเร็จ — ยังใช้ที่อ่านไว้เดิม` : `อ่านหน้า ${pg.n} ใหม่แล้ว`}${res.booked_again ? " · ลงบัญชีใหม่แล้ว" : ""}${failed.length ? ` · ${failed.join(" · ")}` : ""}`, bad: bad || failed.length > 0 };
+        ickTake(res);
+      }
+    } catch (err) { ick.msg = { text: err.message, bad: true }; }
+  });
+  ick.rereading = null;
+  ickRender();
 }
 
 function ickScan(pg) {

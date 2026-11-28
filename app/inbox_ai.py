@@ -148,6 +148,22 @@ _WORK = {
     },
     "required": ["code", "name", "days", "ot", "trip", "note", "unsure"],
 }
+# a row of a mid-month advance list (รายการเบิกกลางเดือน: ลำดับ, Scan No., รายชื่อ, แผนก, จำนวนเงิน, ลงชื่อ, ส่วนกลาง, ความผิด, อุปกรณ์/อื่นๆ;
+# owner, 28 Nov 2026 -- the source of each person's ส่วนกลาง, ความผิด and อุปกรณ์ on the pay page). As with _WORK, numbers come as written
+# (text, "" when blank): the deduction columns are handwritten (ส่วนกลาง often in red) and a blank must never become a guessed 0.
+_ADV = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "code": {"type": "string", "description": "the staff code (Scan No.) as printed, e.g. SB-FR001; '' when none"},
+        "name": {"type": "string", "description": "the name as printed (รายชื่อ)"},
+        "amount": {"type": "string", "description": "จำนวนเงิน (the advance) as written, e.g. '3000'; '' when blank"},
+        "common": {"type": "string", "description": "ส่วนกลาง as written, e.g. '350'; '' when blank, a dash, or the list has no such column"},
+        "fault": {"type": "string", "description": "ความผิด (fault money) as written; '' when blank, a dash, or no such column"},
+        "other": {"type": "string", "description": "อุปกรณ์ / อื่นๆ as written; '' when blank, a dash, or no such column"},
+        "unsure": {"type": "boolean", "description": "true if the code or any of these numbers could not be read with confidence"},
+    },
+    "required": ["code", "name", "amount", "common", "fault", "other", "unsure"],
+}
 PAGE_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "properties": {
@@ -171,11 +187,13 @@ PAGE_SCHEMA = {
                  "required": ["party", "doc_no", "date", "period_month", "total", "what", "account"]},
         "work_rows": {"type": "array", "items": _WORK,
                       "description": "ONLY for a per-person work record table (บันทึกการทำงาน) with วันทำงาน / OT / ค่าเที่ยว columns; else []"},
+        "advance_rows": {"type": "array", "items": _ADV,
+                         "description": "ONLY for page_kind advance: one row per person of the list, with its deduction columns; else []"},
         "summary": {"type": "string", "description": "one short Thai line: what this page is"},
         "person": {"type": "string", "description": "who a memo / payslip is about; empty if none"},
     },
     "required": ["page_kind", "title", "date_from", "date_to", "written_total", "cover_parts", "lines", "branch_hints",
-                 "employee_codes", "bill", "work_rows", "summary", "person"],
+                 "employee_codes", "bill", "work_rows", "advance_rows", "summary", "person"],
 }
 
 PROMPT = """You read ONE scanned page of a Thai ice factory's papers (company สระบุรีวารีเทพ; two branches: สระบุรี, code SRB / SB, and
@@ -216,6 +234,12 @@ work_rows: ONLY on a per-person table with a วันทำงาน column (da
   เบิกกลางเดือน). One row per person, top to bottom: code, name, days, ot, trip as WRITTEN (handwritten digits; "" for a blank cell;
   a word such as "เบี้ยขยัน" or "-" in a cell goes to note, not to the number). Such a page is still page_kind advance when it has the
   advance column. Every other page: [].
+advance_rows: ONLY on page_kind advance (a mid-month advance list, รายการเบิกกลางเดือน, or its signed copy). One row per person printed
+  on the list, top to bottom -- also a person printed with no amount: code = the Scan No. column (SB-FR001 ...), name = รายชื่อ, amount =
+  จำนวนเงิน, and the deduction columns when the list has them: common = ส่วนกลาง (often handwritten in red), fault = ความผิด, other =
+  อุปกรณ์ / อื่นๆ. Every number as WRITTEN ("350", "1,000"); "" for a blank cell, a dash, or a column the list does not have. Not a
+  typed total row. unsure = true when the code or any of these numbers could not be read with confidence. The page's lines stay
+  exactly as above (one 1500 line per person with an amount). Every other page: [].
 bill: filled ONLY for page_kind bill (on other pages: every text "", total null, account 7900): party = who issued it; doc_no;
   date (YYYY-MM-DD); period_month = YYYY-MM of the month the bill is FOR when stated (ประจำเดือน / รอบการใช้), else "";
   total = the amount to pay; what = what it is for, short Thai; account = best account.
@@ -447,6 +471,107 @@ def apply_choices(preview: dict, choices: dict) -> dict:
                      usage=preview.get("ai_usage"), images=preview.get("ai_images") or {}, line_edits=preview.get("line_edits"))
     if "hr_items" in preview:                          # บันทึกในพนักงาน (app/inbox_hr.py): kept like the line fixes, never read again here
         out["hr_items"] = preview["hr_items"]
+    return out
+
+
+MAX_REREAD = 10                                        # pages one อ่านหน้านี้ใหม่ may send (a click is one page; a whole file is อ่านด้วย AI)
+_LINE_KEY_RE = re.compile(r"^p(\d{1,3}):l\d{1,4}$")
+
+
+def _add_usage(total: Optional[dict], used: list[dict]) -> dict:
+    """The file's ai_usage with these calls added (the counters the page shows)."""
+    from app.extraction import MODEL
+    out = dict(total or {"model": MODEL, "calls": 0, "input_tokens": 0, "output_tokens": 0})
+    out["model"] = out.get("model") or MODEL
+    for u in used:
+        out["calls"] = int(out.get("calls") or 0) + 1
+        out["input_tokens"] = int(out.get("input_tokens") or 0) + int(u.get("input_tokens") or 0)
+        out["output_tokens"] = int(out.get("output_tokens") or 0) + int(u.get("output_tokens") or 0)
+    return out
+
+
+def _page_image(path: str) -> bytes:
+    from app import supabase
+    return supabase.storage_download_private(path)
+
+
+def reread_pages(preview: dict, pages, choices: Optional[dict] = None, fetch: Optional[Callable[[str], bytes]] = None) -> dict:
+    """อ่านหน้านี้ใหม่ (owner, 28 Nov 2026): read only these pages again, from the page images stored at the first read
+    (preview["ai_images"]), with the CURRENT schema and prompt -- one AI call per page, its tokens added to ai_usage. Made for a
+    mid-month advance list read before the reader returned advance_rows (ส่วนกลาง / ความผิด / อุปกรณ์): the rest of the file is not
+    paid for again. Those pages are replaced in ai_pages and the preview is rebuilt (from_pages) keeping the owner's line fixes and
+    บันทึกในพนักงาน as apply_choices does -- except the fixes of a re-read page whose number of lines changed: they are keyed by line
+    number, so they would land on other lines; they are dropped, and a flag says so. A page that fails keeps its earlier read (a flag
+    says so); every page failing raises InboxAIError with the usage spent. Never writes: the engine (app/inbox.py) saves the result.
+    fetch(path) -> the image bytes (the private bucket by default)."""
+    _check_enabled()
+    reads = [dict(r) for r in preview.get("ai_pages") or [] if isinstance(r, dict)]
+    if not reads:
+        raise InboxAIError("ไฟล์นี้ไม่มีหน้าที่ AI อ่านไว้ — อ่านด้วย AI ก่อน")
+    try:
+        want = sorted({int(n) for n in (pages or [])})
+    except (TypeError, ValueError):
+        raise InboxAIError("เลขหน้าไม่ถูกต้อง")
+    if not want:
+        raise InboxAIError("เลือกหน้าที่จะอ่านใหม่ก่อน")
+    if len(want) > MAX_REREAD:
+        raise InboxAIError(f"อ่านใหม่ได้ครั้งละไม่เกิน {MAX_REREAD} หน้า")
+    have = {r.get("n"): r for r in reads}
+    images = preview.get("ai_images") if isinstance(preview.get("ai_images"), dict) else {}
+    for n in want:
+        if n not in have:
+            raise InboxAIError(f"ไฟล์นี้ไม่มีหน้า {n}")
+        if not isinstance(images.get(str(n)) or images.get(n), str):
+            raise InboxAIError(f"ไม่มีรูปหน้า {n} ที่เก็บไว้ตอนอ่านครั้งแรก — ต้องอ่านทั้งไฟล์ใหม่ด้วย AI")
+    fetch = fetch or _page_image
+    total = int(preview.get("pages") or len(reads))
+    usage, done, failed = preview.get("ai_usage"), {}, []
+    for n in want:
+        try:
+            jpeg = fetch(images.get(str(n)) or images.get(n))
+        except Exception as exc:                       # noqa: BLE001 -- nothing was sent: no tokens
+            logger.warning("inbox AI re-read: page %d image failed: %r", n, exc)
+            failed.append((n, "เปิดรูปหน้านี้ไม่ได้"))
+            continue
+        try:
+            out, used = read_page(jpeg, n, total)
+        except InboxAIError as exc:
+            usage = _add_usage(usage, getattr(exc, "usages", None) or [])
+            if getattr(exc, "fatal", False):           # the request itself is refused: every page would be
+                exc.usage = usage
+                raise
+            failed.append((n, str(exc)))
+            continue
+        usage = _add_usage(usage, used)
+        out["n"] = n
+        done[n] = out
+    if not done:
+        err = InboxAIError("อ่านใหม่ไม่สำเร็จ: " + " · ".join(f"หน้า {n} {why}" for n, why in failed))
+        err.usage = usage
+        raise err
+    edits = preview.get("line_edits") if isinstance(preview.get("line_edits"), dict) else None
+    dropped: list = []
+    if edits and edits.get("edits"):
+        moved = {n for n, new in done.items() if len(new.get("lines") or []) != len(have[n].get("lines") or [])}
+        keep = {}
+        for k, v in edits["edits"].items():
+            m = _LINE_KEY_RE.match(str(k))
+            if m and int(m.group(1)) in moved:
+                dropped.append(int(m.group(1)))
+            else:
+                keep[k] = v
+        if dropped:
+            edits = {**edits, "edits": keep}
+    reads = [done.get(r.get("n"), r) for r in reads]
+    out = from_pages(reads, preview.get("file_name") or "", dict(choices or {}), usage=usage, images=images,
+                     line_edits=edits if edits and (edits.get("edits") or edits.get("added")) else None)
+    if "hr_items" in preview:
+        out["hr_items"] = preview["hr_items"]
+    notes = [f"อ่านหน้า {n} ใหม่ไม่สำเร็จ ({why}) — ยังใช้ที่อ่านไว้เดิม" for n, why in failed]
+    for n in sorted(set(dropped)):
+        notes.append(f"หน้า {n} อ่านใหม่แล้วจำนวนบรรทัดไม่เท่าเดิม — การแก้บรรทัดของหน้านี้ที่บันทึกไว้ {dropped.count(n)} บรรทัดถูกเอาออก ตรวจหน้านี้อีกครั้ง")
+    out["flags"] = notes + list(out.get("flags") or [])
+    out["reread"] = {"pages": sorted(done), "failed": [n for n, _ in failed]}
     return out
 
 
@@ -1175,6 +1300,9 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
     worked = sum(len(r.get("work_rows") or []) for r in reads)
     if worked:                                       # the work record's days / OT / ค่าเที่ยว: used by the pay page, not booked here
         pv["note"] = (pv.get("note") or "") + f" · บันทึกการทำงาน {worked} คน (วัน / OT / ค่าเที่ยว) ใช้ในหน้าคำนวณเงินเดือน"
+    listed = sum(len(r.get("advance_rows") or []) for r in reads if r.get("page_kind") == "advance")
+    if listed:                                       # the advance lists' ส่วนกลาง / ความผิด / อุปกรณ์: used by the pay page, not booked here
+        pv["note"] = (pv.get("note") or "") + f" · ใบเบิกกลางเดือน {listed} คน (ส่วนกลาง / ความผิด / อุปกรณ์) ใช้ในหน้าคำนวณเงินเดือน"
     return pv
 
 

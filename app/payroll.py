@@ -23,6 +23,11 @@ with the cover page's advance total, and every line found its one person -- othe
 says why. A person with two lines, or whose code was only guessed, is a stand-in to check. Lines that find nobody on the pay list are
 returned as "advance_unmatched".
 
+ส่วนกลาง, ความผิด and อุปกรณ์ / อื่นๆ (owner, 28 Nov 2026) come from the same lists' own columns (advance_rows of the page read, app/inbox_ai.py):
+ส่วนกลาง and อุปกรณ์ are the sums of the person's rows; ความผิด joins the ใบเตือน and attendance fines in the penalty cell (the same amount as
+one of his ใบเตือน of the period is one fine, counted once). Green only when his branch's lists are complete, booked and every page was
+read with these columns; a list read before them must be read again (inbox_ai.reread_pages, อ่านหน้านี้ใหม่ on the check page).
+
 วันทำงาน (28 Nov 2026): สระบุรี's staff who are not route drivers take their days from the attendance page (app/attendance.py build_month over
 the same scans, with the owner's decision on every flagged day -- count_attendance has the owner's rule); a เด็กรถ keeps his driver's days
 until his own flagged days are decided; someone with a second rate who rides with one driver gets his days split into plant and truck days
@@ -142,10 +147,12 @@ KINDS = [
     ("savings", "สะสม", "สะสม", "ใบสรุปเงินเดือน HQ ล่าสุด (เจ้าของยืนยัน 27/11/2026: หักตามใบ HQ)", None, None, ""),
     ("advance", "เบิกล่วงหน้า", "เบิก", "ใบเบิกกลางเดือนในกล่องรับไฟล์ (อ่านรายคน) · ถ้ายังไม่มี ใช้ยอดจากใบ HQ ล่าสุดแทน", "#accounts-in", "ลงข้อมูล / แนบไฟล์", ""),
     ("loan", "เงินกู้ / ทำบัตร", "กู้", "เงินกู้ในระบบ (ตารางผ่อนของเดือนนี้)", "#loans", "เงินกู้", ""),
-    ("common", "ส่วนกลาง", "ส่วนกลาง", "เขียนมือในใบเบิกกลางเดือน", None, None, "ยังไม่มีที่ลงในระบบ"),
-    ("penalty", "เงินขาด / ความผิด", "ปรับ", "ใบเตือนที่มีค่าปรับ ลงวันที่ในงวด", "#documents", "ใบเตือน / บันทึกข้อความ",
-     "เงินขาดของคนขับ: ยังไม่มีที่ลงในระบบ"),
-    ("other", "อุปกรณ์ / อื่นๆ", "อื่นๆ", "เขียนมือในเอกสารสิ้นเดือน", None, None, "ยังไม่มีที่ลงในระบบ"),
+    # ส่วนกลาง / ความผิด / อุปกรณ์ (owner, 28 Nov 2026): the deduction columns of the mid-month list, read per person by the drop box
+    ("common", "ส่วนกลาง", "ส่วนกลาง", "ช่องส่วนกลางในใบเบิกกลางเดือน (กล่องรับไฟล์ อ่านรายคน)", "#accounts-in", "ลงข้อมูล / แนบไฟล์", ""),
+    ("penalty", "เงินขาด / ความผิด", "ปรับ", "ใบเตือนที่มีค่าปรับ ลงวันที่ในงวด · ช่องความผิดในใบเบิกกลางเดือน (ยอดเดียวกันของคนเดียวกัน นับครั้งเดียว)",
+     "#documents", "ใบเตือน / บันทึกข้อความ", "เงินขาดของคนขับ: ยังไม่มีที่ลงในระบบ"),
+    ("other", "อุปกรณ์ / อื่นๆ", "อื่นๆ", "ช่องอุปกรณ์ / อื่นๆ ในใบเบิกกลางเดือน (กล่องรับไฟล์ อ่านรายคน)", "#accounts-in", "ลงข้อมูล / แนบไฟล์",
+     "ที่เขียนในเอกสารสิ้นเดือน: ยังไม่มีที่ลงในระบบ"),
     ("sso", "ปกส.", "ปกส.", "รายชื่อประกันสังคม (สปส.1-10)", None, None, "ตามรายชื่อ สปส.1-10 ที่เจ้าของส่งมา · คนที่ไม่มีในรายชื่อ ใช้ยอดจากใบ HQ ล่าสุดแทน (รอเจ้าของตรวจ)"),
     ("refund", "คืนเงินสะสม", "คืนสะสม", "ยอดสะสมยกไปในใบ HQ ล่าสุด ของคนที่ลาออก", None, None, ""),
 ]
@@ -748,6 +755,38 @@ def page_lines(page: dict) -> list[dict]:
     return rows
 
 
+DEDUCT_COLS = (("common", "ส่วนกลาง"), ("fault", "ความผิด"), ("other", "อุปกรณ์ / อื่นๆ"))
+
+
+def page_rows(page: dict) -> Optional[list[dict]]:
+    """The per-person rows of one advance-list page with its deduction columns (advance_rows, app/inbox_ai.py; owner, 28 Nov 2026:
+    ส่วนกลาง, ความผิด and อุปกรณ์ / อื่นๆ are written on the list beside each name). None = the page was read before the reader returned
+    them (no advance_rows at all): it must be read again for these columns. Each row {code, raw, name, amount, common, fault, other,
+    bad, unsure}: a blank or a dash is 0; bad = the columns whose writing is no number ("3S0") -- unknown, never 0. A typed total
+    row (no code, a name like รวม) is nobody's."""
+    if "advance_rows" not in page:
+        return None
+    out = []
+    for r in page.get("advance_rows") or []:
+        if not isinstance(r, dict):
+            continue
+        code, _rest, raw = read_code(r.get("code"))
+        by_name, name, raw_name = read_code(r.get("name"))
+        code, raw = code or by_name, raw or ("" if by_name else raw_name)
+        if not code and not raw and TOTAL_RE.search(name):
+            continue
+        row = {"code": code, "raw": raw, "name": name, "amount": _amount(r.get("amount")), "bad": [], "unsure": bool(r.get("unsure"))}
+        for key, _label in DEDUCT_COLS:
+            text = str(r.get(key) if r.get(key) is not None else "").strip()
+            v = _amount(text) if text.strip("-–— ") else 0.0
+            if v is None or v < 0:
+                row["bad"].append(key)
+                v = 0.0
+            row[key] = round(v, 2)
+        out.append(row)
+    return out
+
+
 def page_blanks(page: dict) -> int:
     """How many advance lines of a page (account 1500) carry no amount that can be used: none, 0, or text that is no number."""
     return sum(1 for ln in page.get("lines") or [] if isinstance(ln, dict) and str(ln.get("account") or "").strip() == ADVANCE_ACCOUNT
@@ -809,6 +848,7 @@ def advance_lists(files: Optional[list[dict]]) -> list[dict]:
                 g = {"key": key, "name": name, "title": _norm(p.get("title")), "pages": []}
                 groups.append(g)
             g["pages"].append((p, page_lines(p)))
+            g.setdefault("rows", []).append((p, page_rows(p)))
         failed = [p.get("n") for p in pages if p.get("page_kind") == "error"]
         named = [b for b in f.get("branches") or [] if b in BRANCHES]
         # the cover page's own figure for the advances: written apart from the lists, so it shows a list page that is not in the scan
@@ -838,6 +878,12 @@ def advance_lists(files: Optional[list[dict]]) -> list[dict]:
                                      | {ln["code"] for ln in lines if ln["code"]})}
             entry["lines"] = [{**ln, "file": entry["file"], "short": entry["short"], "branch": branch, "page": p.get("n"), "title": _norm(p.get("title")),
                                "list": name} for p, got in g["pages"] for ln in got]
+            # the deduction columns (ส่วนกลาง / ความผิด / อุปกรณ์): old = pages read before the reader returned them; empty = pages read
+            # with them that gave no row while the page has advance lines (the reader skipped the table)
+            entry["rows"] = [{**r, "file": entry["file"], "short": entry["short"], "branch": branch, "page": p.get("n"), "list": name}
+                             for p, got in g["rows"] if got for r in got]
+            entry["old_pages"] = [p.get("n") for p, got in g["rows"] if got is None]
+            entry["empty_pages"] = [p.get("n") for p, got in g["rows"] if got == [] and page_lines(p)]
             out.append(entry)
     out.sort(key=lambda x: (BRANCHES.index(x["branch"]) if x["branch"] in BRANCHES else 9, x["file"], _f(x["pages"][0] if x["pages"] else 0)))
     return out
@@ -881,9 +927,13 @@ def work_records(files: Optional[list[dict]]) -> dict[str, dict]:
     return out
 
 
+OLD_READ = "อ่านก่อนมีช่องส่วนกลาง / ความผิด"
+REREAD = "ต้องกด “อ่านหน้านี้ใหม่” ในหน้าตรวจเอกสาร"
+
+
 def no_advance(failed: bool = False) -> dict:
     """What advance_view gives for a month with no list at all (failed = the drop box could not be read)."""
-    return {"lists": [], "by_person": {}, "branches": {}, "clashed": {}, "failed": failed}
+    return {"lists": [], "by_person": {}, "branches": {}, "clashed": {}, "deduct": {}, "failed": failed}
 
 
 def advance_view(files: Optional[list[dict]], employees: list[dict]) -> dict:
@@ -915,29 +965,45 @@ def advance_view(files: Optional[list[dict]], employees: list[dict]) -> dict:
             names.setdefault(key, []).append(e)
     by_person: dict = {}
     clashed: dict = {}
+
+    def match(ln: dict, mark: bool = True) -> Optional[dict]:
+        """The employee a line (or a row of the deduction columns) is: by its code, else by the full name (how, clash set on it).
+        mark: a code / name clash also tells the code's own person's advance cell (the lines only: a row never changes the advance)."""
+        e = by_code.get(ln["code"]) if ln["code"] else None
+        same = names.get(name_key(ln["name"])) or []
+        named = same[0] if len(same) == 1 else None
+        if named is not None and (e is None or named["id"] != e["id"]):
+            ln.update(how="name", clash=(e.get("code") or "") if e else "")
+            if e and mark:
+                clashed[e["id"]] = ln["name"]
+            e = named
+        else:
+            ln.update(how="code" if e else "", clash="")
+        ln["employee"] = e["id"] if e else None
+        return e
+
+    deduct: dict = {}                                                 # employee id -> his rows of the deduction columns
     for lst in lists:
         lst["nobody"] = 0
         for ln in lst["lines"]:
-            e = by_code.get(ln["code"]) if ln["code"] else None
-            same = names.get(name_key(ln["name"])) or []
-            named = same[0] if len(same) == 1 else None
-            if named is not None and (e is None or named["id"] != e["id"]):
-                ln.update(how="name", clash=(e.get("code") or "") if e else "")
-                if e:
-                    clashed[e["id"]] = ln["name"]
-                e = named
-            else:
-                ln.update(how="code" if e else "", clash="")
-            ln["employee"] = e["id"] if e else None
+            e = match(ln)
             if e:
                 by_person.setdefault(e["id"], []).append(ln)
             else:
                 lst["nobody"] += 1
+        lst["rows_nobody"] = 0
+        for r in lst["rows"]:
+            e = match(r, mark=False)
+            if e:
+                deduct.setdefault(e["id"], []).append(r)
+            elif r["common"] or r["fault"] or r["other"] or r["bad"]:  # a deduction that is nobody's: someone's is not known
+                lst["rows_nobody"] += 1
     branches: dict = {}
     for lst in lists:
         if not lst["branch"]:
             continue
-        b = branches.setdefault(lst["branch"], {"lists": [], "people": 0, "total": 0.0, "booked": True, "files": [], "why": [], "named": set()})
+        b = branches.setdefault(lst["branch"], {"lists": [], "people": 0, "total": 0.0, "booked": True, "files": [], "why": [], "named": set(),
+                                                "deduct_why": [], "old": False})
         b["named"].update(lst["named"])
         b["people"] += len(lst["lines"])
         b["total"] = round(b["total"] + lst["total"], 2)
@@ -954,6 +1020,13 @@ def advance_view(files: Optional[list[dict]], employees: list[dict]) -> dict:
             b["why"].append(f"{lst['name']}: มี {guessed} บรรทัดที่ไม่มีรหัส ใช้รหัสตามลำดับในหน้า")
         if lst["cover_why"] and lst["cover_why"] not in b["why"]:
             b["why"].append(lst["cover_why"])
+        if lst["old_pages"]:                                          # read before the reader took the deduction columns
+            b["old"] = True
+            b["deduct_why"].append(f"{lst['name']}: หน้า {', '.join(str(n) for n in lst['old_pages'])} {OLD_READ} — {REREAD} ({lst['short']})")
+        if lst["empty_pages"]:
+            b["deduct_why"].append(f"{lst['name']}: หน้า {', '.join(str(n) for n in lst['empty_pages'])} อ่านช่องส่วนกลาง / ความผิดรายคนไม่ได้ — {REREAD}")
+        if lst["rows_nobody"]:
+            b["deduct_why"].append(f"{lst['name']}: มี {lst['rows_nobody']} แถวที่มีส่วนกลาง / ความผิด / อุปกรณ์ แต่จับคู่กับพนักงานไม่ได้")
     for b in branches.values():
         seen: dict = {}                                               # a person (else a code that found nobody) -> his lines on the branch's lists
         for lst in b["lists"]:
@@ -967,7 +1040,13 @@ def advance_view(files: Optional[list[dict]], employees: list[dict]) -> dict:
                 b["why"].append((f"รหัส {code}" if code else got[0]["name"]) + f" มี {len(got)} บรรทัด อาจอ่านรหัสผิด")
         b["complete"] = not b["why"]
         b["kinds"] = {c[3:5] for c in b["named"]}
-    return {"lists": lists, "by_person": by_person, "branches": branches, "clashed": clashed, "failed": False}
+        # ส่วนกลาง / ความผิด / อุปกรณ์ are settled the way the advance is, AND only once the lists are booked and every page of them
+        # was read with those columns (the same lists, the same people: deduct_view). A page to read again is said first: only that
+        # needs the AI.
+        b["deduct_why"] += [f"ใบเบิกยังยืนยันไม่ได้ว่าครบ ({b['why'][0]})"] if b["why"] else []
+        b["deduct_why"] += [] if b["booked"] else ["ยังไม่ได้กดลงบัญชีใบเบิกในกล่องรับไฟล์"]
+        b["deduct_ok"] = not b["deduct_why"]
+    return {"lists": lists, "by_person": by_person, "branches": branches, "clashed": clashed, "deduct": deduct, "failed": False}
 
 
 def before_words(prev: Optional[dict], month: str) -> tuple[Optional[float], str]:
@@ -1029,6 +1108,102 @@ def advance_cell(p: dict, ctx: dict, prev: Optional[dict]) -> tuple[Optional[dic
         return cell("ok", 0, "0", words + (f" · {said}" if was else "")), ""
     more = f" และอีก {len(b['why']) - 1} เรื่อง" if len(b["why"]) > 1 else ""
     return None, f"ไม่มียอดเบิกในใบเบิกกลางเดือน แต่ยังยืนยันไม่ได้ว่าใบเบิกครบ ({b['why'][0]}{more})"
+
+
+def deduct_view(p: dict, ctx: dict) -> Optional[dict]:
+    """What the month's advance lists say about this person's ส่วนกลาง, ความผิด and อุปกรณ์ / อื่นๆ (owner, 28 Nov 2026: written on the
+    list beside his advance). None: they say nothing about him -- no list of his branch, or none of his kind of staff (his code's
+    prefix) and no row of his. Else {rows, sums {common, fault, other}, doubt (why the figures cannot be green yet: his branch's
+    reasons -- a list not confirmed complete, not booked, read before these columns existed -- then his own: a row marked unsure, two
+    rows, a column that is no number, a code that is someone else's), known (a row of his was read with these columns), on_list (his
+    name is on the lists at all), files}. The drop box could not be read: doubt says so."""
+    adv = ctx["advance"]
+    if adv["failed"]:
+        return {"rows": [], "sums": {k: 0.0 for k, _ in DEDUCT_COLS}, "doubt": ["โหลดใบเบิกกลางเดือนไม่สำเร็จ"], "known": False, "on_list": False, "files": []}
+    b = adv["branches"].get(p.get("branch"))
+    rows = adv.get("deduct", {}).get(p["id"]) or []
+    code = read_code(p.get("code"))[0] or ""
+    if not b or (not rows and code[3:5] not in b["kinds"]):
+        return None
+    doubt = list(b["deduct_why"])
+    if len(rows) > 1:
+        doubt.append(f"มีชื่อ {len(rows)} แถวในใบเบิก อาจอ่านรหัสผิด ต้องตรวจกับใบเบิก")
+    if any(r["unsure"] for r in rows):
+        doubt.append("อ่านไม่ชัด ต้องตรวจกับใบเบิก")
+    bad = [label for key, label in DEDUCT_COLS if any(key in r["bad"] for r in rows)]
+    if bad:
+        doubt.append(f"ช่อง{' / '.join(bad)}อ่านเป็นตัวเลขไม่ได้ ต้องดูกระดาษ")
+    if any(r.get("clash") for r in rows):
+        doubt.append("รหัสในใบเป็นของคนอื่น จับคู่จากชื่อ ต้องตรวจ")
+    on_list = bool(rows) or bool(adv["by_person"].get(p["id"])) or code in b["named"]
+    return {"rows": rows, "sums": {k: round(sum(r[k] for r in rows), 2) for k, _ in DEDUCT_COLS}, "doubt": doubt, "known": bool(rows),
+            "on_list": on_list, "files": list(dict.fromkeys(r["short"] for r in rows)) or list(b["files"])}
+
+
+def deduct_words(doubt: list[str]) -> str:
+    """The first reason, and how many more."""
+    return doubt[0] + (f" และอีก {len(doubt) - 1} เรื่อง" if len(doubt) > 1 else "")
+
+
+def unknown(dv: Optional[dict], key: str) -> bool:
+    """Is his figure of this column not known at all: he is on the lists but no row of his was read with the columns, or his row's
+    writing in it is no number?"""
+    return bool(dv) and ((dv["on_list"] and not dv["known"]) or any(key in r["bad"] for r in dv["rows"]))
+
+
+def deduct_cell(key: str, label: str, dv: dict, before: float, prev_month: Optional[str]) -> Optional[dict]:
+    """The ส่วนกลาง / อุปกรณ์ cell from the lists (deduct_view), or None = nothing to show (NA). before = what HQ's latest sheet took
+    (ส่วนกลาง changes every month: only said, never carried). ok once the lists are settled: his figure, or 0 when the list has none
+    for him but HQ took some last time. Not settled: his figure as a stand-in (carry) with the reason; nothing read for him while he
+    is on the lists or HQ took some: miss with the reason -- a list read before these columns says it must be read again."""
+    v = dv["sums"][key]
+    said = f"ตามใบเบิกกลางเดือน {', '.join(dv['files'])} (ช่อง{label})"
+    hq = f"ใบ HQ {my(prev_month)} หัก {money(before)}" if before > 0 and prev_month else ""
+    if not dv["doubt"]:
+        if v > 0:
+            return cell("ok", v, money(v), " · ".join(x for x in (said, hq) if x))
+        if hq:
+            return cell("ok", 0, "0", f"ใบเบิกกลางเดือนไม่มียอด{label}ของคนนี้ — งวดนี้ไม่หัก · {hq}")
+        return None
+    if v > 0:
+        return cell("carry", v, money(v), " · ".join(x for x in (said, deduct_words(dv["doubt"]), hq) if x))
+    if hq or unknown(dv, key):
+        return cell("miss", note=" · ".join(x for x in (f"ยังไม่รู้ยอด{label}งวดนี้: {deduct_words(dv['doubt'])}", hq) if x))
+    return None
+
+
+def penalty_cell(fines: list[dict], att_fines: list[dict], dv: Optional[dict]) -> Optional[dict]:
+    """เงินขาด / ความผิด: the ใบเตือน fines dated in the period, the attendance page's ค่าแรงเต็ม + หักเงิน fines, and the ความผิด column of
+    the mid-month list (owner, 28 Nov 2026) -- the note says which is which. A list's ความผิด of the same amount as one of HIS ใบเตือน
+    fines of the period is the same fine written twice (nothing on the list says which letter it is): counted once, and the note
+    says so. ok unless the list's figure is not settled (carry, with the reason); no fine anywhere while his row could not be read
+    with the column: miss. None = nothing to show."""
+    faults = [r["fault"] for r in (dv or {}).get("rows", []) if r["fault"] > 0]
+    left = list(fines)
+    same, extra = [], []
+    for amount in faults:
+        hit = next((f for f in left if abs(f["amount"] - amount) < 0.01), None)
+        if hit:
+            left.remove(hit)
+            same.append((amount, hit))
+        else:
+            extra.append(amount)
+    if not fines and not att_fines and not faults:
+        if dv and dv["doubt"] and unknown(dv, "fault"):
+            return cell("miss", note=f"ยังไม่รู้ความผิดในใบเบิกกลางเดือน: {deduct_words(dv['doubt'])}")
+        return None
+    total = round(sum(f["amount"] for f in fines + att_fines) + sum(extra), 2)
+    words = [f"{label} " + ", ".join(f"{dmy(f['day'])} {money(f['amount'])}" for f in got)
+             for label, got in (("ใบเตือน", fines), ("เวลาทำงาน (ค่าแรงเต็ม + หักเงิน)", att_fines)) if got]
+    if extra:
+        words.append("ความผิดในใบเบิกกลางเดือน " + ", ".join(money(a) for a in extra))
+    for amount, f in same:
+        words.append(f"ความผิดในใบเบิกกลางเดือน {money(amount)} = ใบเตือน {dmy(f['day'])} {money(f['amount'])} (ยอดและคนตรงกัน นับครั้งเดียว)")
+    state = "ok"
+    if dv and dv["doubt"] and (faults or unknown(dv, "fault")):
+        state = "carry"
+        words.append(("ความผิดในใบเบิกกลางเดือน: " if faults else "ยังไม่รู้ความผิดในใบเบิกกลางเดือน: ") + deduct_words(dv["doubt"]))
+    return cell(state, total, money(total), " · ".join(words))
 
 
 def advance_unmatched(adv: dict, rows: list[dict], employees: list[dict]) -> list[dict]:
@@ -1542,11 +1717,18 @@ def build_person(p: dict, ctx: dict) -> dict:
         cells["advance"] = {**cells["advance"], "note": f"{cells['advance']['note']} · {doubt}"}
     card = _f(((prev or own or {}).get("deductions") or {}).get("card"))
     cells["loan"] = loan_cell(ctx["loans"].get(p["id"], []), card)                    # ทำบัตร of the last sheet IS this loan: never both
-    if fines or att_fines:
-        total = round(sum(f["amount"] for f in fines + att_fines), 2)
-        words = [f"{label} " + ", ".join(f"{dmy(f['day'])} {money(f['amount'])}" for f in got)
-                 for label, got in (("ใบเตือน", fines), ("เวลาทำงาน (ค่าแรงเต็ม + หักเงิน)", att_fines)) if got]
-        cells["penalty"] = cell("ok", total, money(total), " · ".join(words))
+    # ส่วนกลาง, ความผิด and อุปกรณ์ / อื่นๆ from the deduction columns of the month's own lists (owner, 28 Nov 2026; never for a month
+    # HQ already worked out -- HQ's own figures stand, above)
+    dv = None if own else deduct_view(p, ctx)
+    if dv:
+        for key, label in (("common", "ส่วนกลาง"), ("other", "อุปกรณ์ / อื่นๆ")):
+            before = _f(deds.get(key)) if key == "common" and prev else 0.0
+            got = deduct_cell(key, label, dv, before, (prev or {}).get("month"))
+            if got is not None:
+                cells[key] = got
+    pen = penalty_cell(fines, att_fines, dv)
+    if pen is not None:
+        cells["penalty"] = pen
     status = status_of(p, start, end, rate)
     if status["key"] == "resigned" and owed and owed["balance"] > 0 and not owed["refunded"]:
         cells["refund"] = refund_cell(owed, short=True)
@@ -1722,8 +1904,21 @@ def kind_notes(ctx: dict) -> dict[str, str]:
         out["other"] = "ยังไม่ได้อัปโหลดเอกสารสิ้นเดือนครบ จึงยังไม่รู้ว่ามีของใคร"
     if advance is None or not all(advance.get(b) for b in branches):
         out["common"] = "ยังไม่ได้อัปโหลดใบเบิกกลางเดือนครบ จึงยังไม่รู้ว่างวดนี้หักของใคร"
-    else:
-        out["common"] = "มีใบเบิกแล้ว แต่ยังไม่มีที่ลงยอดส่วนกลางรายคน"
+        return out
+    # the lists are in: read per person with their deduction columns (deduct_view), or booked the older way (pages only)
+    read = ctx["advance"]["branches"]
+    lack = [b for b in branches if b not in read]
+    if lack:
+        out["common"] = "มีใบเบิกแล้ว แต่ยังไม่มีที่ลงยอดส่วนกลางรายคน (ใบเบิกของ " + ", ".join(lack) + " ไม่ได้อ่านจากกล่องรับไฟล์)"
+        return out
+    why = [w for b in branches for w in read[b]["deduct_why"]]
+    if why:
+        words = deduct_words(why)
+        out["common"] = f"มีใบเบิกแล้ว แต่ยังยืนยันยอดส่วนกลางรายคนไม่ได้: {words}"
+        out["other"] = f"ยังยืนยันช่องอุปกรณ์ / อื่นๆ ในใบเบิกกลางเดือนไม่ได้: {words}"
+        out.setdefault("penalty", f"ยังยืนยันช่องความผิดในใบเบิกกลางเดือนไม่ได้: {words}")
+    elif "other" in out and out["other"] == "ยังไม่รู้ว่ามีของใคร":     # the lists say it; only the end-of-month papers would add more
+        del out["other"]
     return out
 
 

@@ -1403,6 +1403,20 @@ def api_inbox_reread(file_id: str, x_app_token: str = Header(default=""), token:
     return _inbox_call(inbox.reread, file_id)
 
 
+@app.post("/api/accounts/inbox/{file_id}/pages/reread")
+def api_inbox_pages_reread(file_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""),
+                           x_hr_pin: str = Header(default="")) -> dict:
+    """อ่านหน้านี้ใหม่ ({"pages": [9, 10]}; owner, 28 Nov 2026): only these pages read again by the AI from the images stored at the
+    first read (one paid call a page) -- an advance list read before the reader took ส่วนกลาง / ความผิด / อุปกรณ์. A booked file is
+    booked again. Answers what GET /api/accounts/inbox/<id> does, with "reread"."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    pages = body.get("pages") if isinstance(body, dict) else None
+    if not isinstance(pages, list):
+        raise HTTPException(422, "เลือกหน้าที่จะอ่านใหม่ก่อน")
+    return _inbox_call(inbox.reread_pages, file_id, pages, _sees_pay(x_app_token or token), _hr_access(x_app_token or token, x_hr_pin))
+
+
 @app.post("/api/accounts/inbox/{file_id}/ai")
 def api_inbox_ai(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """อ่านด้วย AI (only on the owner's click; runs in the background, the page polls the list)."""

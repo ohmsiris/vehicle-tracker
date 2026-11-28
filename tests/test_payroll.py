@@ -1896,3 +1896,107 @@ def test_the_loader_reads_the_decisions_and_the_attendance_window(monkeypatch):
     slices = [p for t, p in seen if t == "attendance_punches"]
     # the attendance page's own window: 45 days before the period (the usual start), to the 27th (a night shift of the 25th ends on the 26th)
     assert min(p["punched_at"] for p in slices) == "gte.2026-09-11T00:00:00" and max(p["and"] for p in slices) == "(punched_at.lt.2026-11-28T00:00:00)"
+
+
+# --------------------------------------------------------------------------------------------- ส่วนกลาง / ความผิด / อุปกรณ์ from the list (28 Nov 2026)
+def adv_row(code, amount="3000", common="", fault="", other="", unsure=False, name="คน ทดสอบ"):
+    """A row of advance_rows as the drop box's reader gives it (numbers as written, "" when blank)."""
+    return {"code": code, "name": name, "amount": amount, "common": common, "fault": fault, "other": other, "unsure": unsure}
+
+
+def deduct_pages(rows9, rows10=None):
+    """factory_pages (complete, nothing unsure) with the deduction columns read; rows10 None = page 10 read before they existed."""
+    p = factory_pages(unsure=False)
+    p[0]["advance_rows"] = rows9
+    if rows10 is not None:
+        p[1]["advance_rows"] = rows10
+    return p
+
+
+ROWS9 = [adv_row("SB-FR001", common="350"), adv_row("SB-FR002", "5,000", common="630", fault="500"), adv_row("SB-FR004", common="294", other="1,200"),
+         adv_row("SB-FR005", "2000", common="-", fault="300"), adv_row("SB-FR006", common=""), adv_row("SB-FR007", "")]
+ROWS10 = [adv_row("SB-FR008", common="343"), adv_row("", "19,000", name="รวม")]
+
+
+def test_page_rows_read_the_deduction_columns_as_written():
+    got = pw.page_rows(page(9, [], codes=[]) | {"advance_rows": ROWS9 + ROWS10 + [adv_row("SB-FR009", common="3S0")]})
+    assert [(r["code"], r["amount"], r["common"], r["fault"], r["other"], r["bad"]) for r in got] == [
+        ("SB-FR001", 3000, 350, 0, 0, []), ("SB-FR002", 5000, 630, 500, 0, []), ("SB-FR004", 3000, 294, 0, 1200, []), ("SB-FR005", 2000, 0, 300, 0, []),
+        ("SB-FR006", 3000, 0, 0, 0, []), ("SB-FR007", None, 0, 0, 0, []), ("SB-FR008", 3000, 343, 0, 0, []), ("SB-FR009", 3000, 0, 0, 0, ["common"])]
+    assert pw.page_rows(page(9, [])) is None                                     # read before the reader returned them
+    assert pw.page_rows(page(9, []) | {"advance_rows": [adv_row("", name="นาย ก SB-FR003")]})[0]["code"] == "SB-FR003"     # the code in the name
+
+
+def test_common_other_and_fault_come_from_the_booked_list():
+    letters = [{"id": 1, "employee_id": "SB-FR002", "doc_date": "2026-11-03", "status": "signed", "penalty": 500},      # the same fine as the paper's
+               {"id": 2, "employee_id": "SB-FR005", "doc_date": "2026-11-04", "status": "signed", "penalty": 200}]      # another fine of his
+    prevs = [prev("SB-FR001", {"advance": 3000, "common": 400}), prev("SB-FR006", {"advance": 3000, "common": 120}), prev("SB-FR007")]
+    out = pw.build(advance_src(None, prevs=prevs, penalties=letters, advance_files=[box(deduct_pages(ROWS9, ROWS10), status="booked")]), MONTH, TODAY)
+    c = {p["code"][-1]: p["cells"] for p in out["people"]}
+    said = f"ตามใบเบิกกลางเดือน {SRB}"
+    assert c["1"]["common"] == {"state": "ok", "value": 350, "text": "350", "note": f"{said} (ช่องส่วนกลาง) · ใบ HQ 10/2026 หัก 400"}
+    assert c["2"]["common"]["value"] == 630 and c["8"]["common"] == {"state": "ok", "value": 343, "text": "343", "note": f"{said} (ช่องส่วนกลาง)"}
+    assert c["4"]["other"] == {"state": "ok", "value": 1200, "text": "1,200", "note": f"{said} (ช่องอุปกรณ์ / อื่นๆ)"}
+    assert c["6"]["common"] == {"state": "ok", "value": 0, "text": "0", "note": "ใบเบิกกลางเดือนไม่มียอดส่วนกลางของคนนี้ — งวดนี้ไม่หัก · ใบ HQ 10/2026 หัก 120"}
+    assert c["5"]["common"]["state"] == "na" and c["7"]["common"]["state"] == "na" and c["9"]["common"]["state"] == "na"     # nothing to take
+    # the paper's 500 and SB-FR002's own ใบเตือน of 500 are one fine: counted once; SB-FR005's 300 on the paper is another than his letter's 200
+    assert c["2"]["penalty"] == {"state": "ok", "value": 500, "text": "500", "note": "ใบเตือน 03/11/2026 500 · ความผิดในใบเบิกกลางเดือน 500 = ใบเตือน 03/11/2026 500 (ยอดและคนตรงกัน นับครั้งเดียว)"}
+    assert c["5"]["penalty"] == {"state": "ok", "value": 500, "text": "500", "note": "ใบเตือน 04/11/2026 200 · ความผิดในใบเบิกกลางเดือน 300"}
+    assert c["1"]["penalty"]["state"] == "na"
+    assert kind(out, "common")["note"] == "" and (kind(out, "common")["need"], kind(out, "common")["ok"]) == (5, 5)
+    assert kind(out, "common")["link"] == "#accounts-in" and not kind(out, "common")["later"] and "ช่องความผิด" in kind(out, "penalty")["source"]
+
+
+def test_a_paper_fault_of_another_person_or_amount_is_not_his_letter():
+    letters = [{"id": 1, "employee_id": "SB-FR001", "doc_date": "2026-11-03", "status": "signed", "penalty": 500},      # 500, but SB-FR001's
+               {"id": 2, "employee_id": "SB-FR002", "doc_date": "2026-10-01", "status": "signed", "penalty": 500}]      # his, but before the period
+    out = pw.build(advance_src(None, penalties=letters, advance_files=[box(deduct_pages(ROWS9, ROWS10), status="booked")]), MONTH, TODAY)
+    assert one(out, "SB-FR002")["cells"]["penalty"] == {"state": "ok", "value": 500, "text": "500", "note": "ความผิดในใบเบิกกลางเดือน 500"}
+    assert one(out, "SB-FR001")["cells"]["penalty"] == {"state": "ok", "value": 500, "text": "500", "note": "ใบเตือน 03/11/2026 500"}
+
+
+def test_the_deduction_columns_wait_for_booking_and_a_clear_read():
+    # read, not booked: a figure is a stand-in, nothing more is asked of the others
+    out = pw.build(advance_src(None, advance_files=[box(deduct_pages(ROWS9, ROWS10))]), MONTH, TODAY)
+    c = one(out, "SB-FR001")["cells"]
+    assert c["common"] == {"state": "carry", "value": 350, "text": "350", "note": f"ตามใบเบิกกลางเดือน {SRB} (ช่องส่วนกลาง) · ยังไม่ได้กดลงบัญชีใบเบิกในกล่องรับไฟล์"}
+    assert one(out, "SB-FR002")["cells"]["penalty"]["state"] == "carry" and one(out, "SB-FR006")["cells"]["common"]["state"] == "na"
+    assert kind(out, "common")["note"].startswith("มีใบเบิกแล้ว แต่ยังยืนยันยอดส่วนกลางรายคนไม่ได้: ยังไม่ได้กดลงบัญชี")
+    # booked, but one row marked unsure / a column that is no number: only that person waits
+    rows = [dict(r) for r in ROWS9]
+    rows[0] = adv_row("SB-FR001", common="350", unsure=True)
+    rows[2] = adv_row("SB-FR004", common="2?4")
+    out = pw.build(advance_src(None, advance_files=[box(deduct_pages(rows, ROWS10), status="booked")]), MONTH, TODAY)
+    assert one(out, "SB-FR001")["cells"]["common"]["state"] == "carry" and "อ่านไม่ชัด" in one(out, "SB-FR001")["cells"]["common"]["note"]
+    assert one(out, "SB-FR004")["cells"]["common"] == {"state": "miss", "value": None, "text": "", "note": "ยังไม่รู้ยอดส่วนกลางงวดนี้: ช่องส่วนกลางอ่านเป็นตัวเลขไม่ได้ ต้องดูกระดาษ"}
+    assert one(out, "SB-FR008")["cells"]["common"]["state"] == "ok"
+    # a list that cannot be confirmed complete holds every figure of the branch
+    out = pw.build(advance_src(None, advance_files=[box(deduct_pages(ROWS9, ROWS10) [:1] + [factory_pages(last_total=22000)[1] | {"advance_rows": ROWS10}],
+                                                    status="booked")]), MONTH, TODAY)
+    assert one(out, "SB-FR008")["cells"]["common"]["state"] == "carry" and "ยังยืนยันไม่ได้ว่าครบ" in one(out, "SB-FR008")["cells"]["common"]["note"]
+
+
+def test_a_list_read_before_the_columns_must_be_read_again():
+    out = pw.build(advance_src(None, advance_files=[box(deduct_pages(ROWS9), status="booked")]), MONTH, TODAY)        # page 10: an old read
+    again = f"ช่าง / ออฟฟิศ / ฝ่ายผลิต: หน้า 10 อ่านก่อนมีช่องส่วนกลาง / ความผิด — ต้องกด “อ่านหน้านี้ใหม่” ในหน้าตรวจเอกสาร ({SRB})"
+    assert one(out, "SB-FR008")["cells"]["common"] == {"state": "miss", "value": None, "text": "", "note": f"ยังไม่รู้ยอดส่วนกลางงวดนี้: {again}"}
+    assert one(out, "SB-FR008")["cells"]["other"]["note"] == f"ยังไม่รู้ยอดอุปกรณ์ / อื่นๆงวดนี้: {again}"
+    assert one(out, "SB-FR008")["cells"]["penalty"] == {"state": "miss", "value": None, "text": "", "note": f"ยังไม่รู้ความผิดในใบเบิกกลางเดือน: {again}"}
+    assert one(out, "SB-FR001")["cells"]["common"] == {"state": "carry", "value": 350, "text": "350",
+                                                        "note": f"ตามใบเบิกกลางเดือน {SRB} (ช่องส่วนกลาง) · {again}"}
+    assert one(out, "SB-FR009")["cells"]["common"]["state"] == "na"                                 # on no list: nothing asked of him
+    assert again in kind(out, "common")["note"] and again in kind(out, "other")["note"]
+    # the whole file read before (every test above it): every person on the list is asked, none is green
+    old = pw.build(advance_src(factory_pages(unsure=False), advance_files=[box(factory_pages(unsure=False), status="booked")]), MONTH, TODAY)
+    assert all(one(old, f"SB-FR00{i}")["cells"]["common"]["state"] == "miss" for i in (1, 2, 4, 5, 6, 7, 8))
+    # a month HQ already worked out keeps HQ's own figures
+    done = pw.build(advance_src(None, prevs=[prev("SB-FR001", {"common": 63}, month=MONTH)], advance_files=[box(deduct_pages(ROWS9, ROWS10), status="booked")]),
+                    MONTH, TODAY)
+    assert one(done, "SB-FR001")["cells"]["common"]["note"] == "ตามใบ HQ 11/2026 (HQ คิดงวดนี้แล้ว)"
+
+
+def test_a_deduction_row_that_finds_nobody_holds_the_branch():
+    rows = ROWS9 + [adv_row("SB-FR077", common="350")]                                        # no such person: someone's ส่วนกลาง is not known
+    out = pw.build(advance_src(None, advance_files=[box(deduct_pages(rows, ROWS10), status="booked")]), MONTH, TODAY)
+    c = one(out, "SB-FR001")["cells"]["common"]
+    assert c["state"] == "carry" and "มี 1 แถวที่มีส่วนกลาง / ความผิด / อุปกรณ์ แต่จับคู่กับพนักงานไม่ได้" in c["note"]

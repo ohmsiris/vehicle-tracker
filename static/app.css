@@ -2813,6 +2813,17 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ick-card p, .ick-parts { margin: 0; }
 .ick-parts { padding-left: 18px; }
 .ick-stack { display: grid; gap: 10px; min-width: 0; }
+/* ใบเบิกกลางเดือน: ส่วนกลาง / ความผิด / อุปกรณ์ per person, read-only beside the scan (28 Nov 2026) */
+.ick-adv-card { justify-items: stretch; }
+.ick-adv-card > .btn { justify-self: start; }
+.ick-adv-wrap { overflow-x: auto; max-width: 100%; }
+.ick-adv { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ick-adv th, .ick-adv td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.ick-adv th { font-weight: 650; color: var(--muted); font-size: 12px; }
+.ick-adv td:nth-child(2) { white-space: normal; min-width: 120px; }
+.ick-adv .num { text-align: right; font-variant-numeric: tabular-nums; }
+.ick-adv tr.unsure td { background: var(--warn-soft); }
+.ick-adv tfoot td { font-weight: 650; border-top: 2px solid var(--line-strong); border-bottom: 0; }
 /* a narrower column (a laptop with the sidebar open): each line on two rows, and the column names on the same two rows above them */
 @container (max-width: 760px) {
   .ick-r { grid-template-columns: 128px minmax(0, 1fr) minmax(0, 1fr) 96px 44px; grid-template-areas: "date text text amt act" "acc acc veh dest dest"; }
