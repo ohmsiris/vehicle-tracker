@@ -12,7 +12,9 @@ with the shop อิซูซุจึงกงเฮงแก่งคอย (-
 import re
 import sys
 import warnings
+from datetime import date
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -37,6 +39,27 @@ def plate_key(text) -> str:
 VENDOR = DEFAULT_VENDOR
 
 
+def _words(text) -> str:
+    """A line's wording without the shop's tags: "ชุดปีกนกบน(อีซูซุ)(ใหม่) - BP" and "ชุดปีกนกบน" are the same line."""
+    text = re.sub(r"\((?:อีซูซุ|ใหม่|ตรีเพชร|ไม่มียี่ห้อ)\)|\s-\s*BP|\s+", "", dh.normalise(str(text or "")))
+    return text.lower()
+
+
+def same_job(visit: dict, bills: list[dict]) -> Optional[dict]:
+    """The bill already on the site that IS this visit (1ฒย4267, 28 Nov 2026: the report's 14/08 and 19/10 visits were the bills dated
+    12/08 and 26/09): within 60 days, and at least 60% of the visit's lines (at least 3) are on the bill."""
+    mine = {_words(ln["description"]) for ln in visit["lines"] if len(_words(ln["description"])) >= 4}
+    if len(mine) < 3:
+        return None
+    for b in bills:
+        if abs((date.fromisoformat(str(b["event_date"])[:10]) - visit["date"]).days) > 60:
+            continue
+        theirs = " ".join(b["words"])
+        if sum(1 for w in mine if w in theirs) >= 0.6 * len(mine):
+            return b
+    return None
+
+
 def main(paths: list[str], apply: bool) -> None:
     vehicles = supabase.select_all("vehicles", {"select": "id,plate_number,vehicle_number,branch,active", "order": "id.asc"})
     by_plate = {plate_key(v["plate_number"]): v for v in vehicles}
@@ -54,11 +77,26 @@ def main(paths: list[str], apply: bool) -> None:
             by_day.setdefault(str(e["event_date"])[:10], []).append(e)
         add, same, conflicts = [], [], []
         kms = {e.get("mileage") for e in have if e.get("mileage")}
+        bills = [b for b in supabase.select_all("maintenance_events", {"select": "id,event_date,mileage", "vehicle_id": f"eq.{v['id']}", "source": "eq.bill",
+                                                                     "order": "event_date.asc,id.asc"})]
+        for b in bills:
+            b["words"] = [_words(x["description"]) for x in supabase.select_all("bill_line_items", {"select": "description", "event_id": f"eq.{b['id']}", "order": "id.asc"})]
+        known = [(date.fromisoformat(str(e["event_date"])[:10]), e["mileage"]) for e in have if e.get("mileage")] + [(x["date"], x["mileage"]) for x in rep["visits"] if x["mileage"]]
         for visit in rep["visits"]:
             day = visit["date"].isoformat()
+            twin = same_job(visit, bills)
+            if twin:
+                print(f"    = {day}: the same job as the bill of {twin['event_date']} already on the site -- not added")
+                same.append(day)
+                continue
+            # the dealer stamps the reading of the INVOICE day on visits invoiced together: a reading above what the truck showed later is not his
+            later = [km for d, km in known if d > visit["date"] and km < (visit["mileage"] or 0)]
+            if later:
+                print(f"    ~ {day}: report says {visit['mileage']:,} km but the site has {max(later):,} km after that day -- added without the km")
+                visit["mileage"] = None
             # a bill photographed by hand is usually dated on the INVOICE day, not the day the truck went in: check both, and the odometer alone
             hit = by_day.get(day, []) + (by_day.get(visit["invoice_date"].isoformat(), []) if visit.get("invoice_date") else [])
-            if visit["mileage"] in kms or any(e.get("mileage") == visit["mileage"] for e in hit):
+            if (visit["mileage"] and visit["mileage"] in kms) or any(visit["mileage"] and e.get("mileage") == visit["mileage"] for e in hit):
                 same.append(day)
             elif hit:
                 conflicts.append((day, visit["mileage"], [e.get("mileage") for e in hit]))
@@ -69,7 +107,7 @@ def main(paths: list[str], apply: bool) -> None:
         for day, km, other in conflicts:
             print(f"    CONFLICT {day}: report says {km:,} km, the site has {other} -- not added")
         for x in add:
-            print(f"    + {x['date']}  {x['mileage']:>8,} km  {len(x['lines']):>3} lines")
+            print(f"    + {x['date']}  {x['mileage'] or 0:>8,} km  {len(x['lines']):>3} lines")
         plan.append((v, add))
     total = sum(len(a) for _, a in plan)
     print(f"\n{total} visits to add")
@@ -96,7 +134,7 @@ def main(paths: list[str], apply: bool) -> None:
                        "event": {"event_date": visit["date"].isoformat(), "mileage": visit["mileage"], "branch": v["branch"], "vendor": VENDOR or None,
                                  "notes": f"{SOURCE_NOTE} · ออกใบแจ้งหนี้ {visit['invoice_date'].strftime('%d/%m/')}{visit['invoice_date'].year + 543}"}}
             res = events.save_event(payload, [])
-            print(f"  saved #{v['vehicle_number']} {visit['date']} {visit['mileage']:,} km -> {res['event_id']}")
+            print(f"  saved #{v['vehicle_number']} {visit['date']} {visit['mileage'] or 0:,} km -> {res['event_id']}")
     print("written")
 
 

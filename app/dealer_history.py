@@ -17,7 +17,7 @@ from typing import Optional
 DATE_RE = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
 MILEAGE_RE = re.compile(r"^\d{1,3}(?:,\d{3})+$|^\d+$")
 QTY_RE = re.compile(r"^(\d+(?:\.\d+)?)(?:\s+(\S+))?$")
-TYPES = {"ค่าแรง", "อะไหล่", "วัสดุสิ้นเปลือง", "งานนอก", "ค่าบริการ"}
+TYPES = {"ค่าแรง", "อะไหล่", "วัสดุสิ้นเปลือง", "งานนอก", "ค่าบริการ", "จัดจ้างภายนอก"}      # จัดจ้างภายนอก: work sent to another shop (1ฒย4267, 19/10/2569)
 HEADER_END = "ค้างซ่อม"                     # the last column title: the header block of a page ends with it
 PLATE_RE = re.compile(r"^(\d?[ก-ฮ]{1,3}\d{1,4})\s+([ก-ฮ]{2,})$")
 

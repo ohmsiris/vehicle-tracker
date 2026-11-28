@@ -76,3 +76,11 @@ def test_a_report_is_read_into_visits_and_lines_and_a_visit_continued_on_the_nex
     assert (oil["kind"], oil["description"], oil["quantity"], oil["unit"]) == ("อะไหล่", "น้ำมันเครื่อง SEMI 10W30 CI4 6L", 1.0, "EA")
     assert (wash["kind"], wash["quantity"], wash["unit"]) == ("วัสดุสิ้นเปลือง", 1.0, None)                              # a quantity with no unit
     assert (gasket["description"], gasket["quantity"], gasket["unit"]) == ("ปะเก็นเหลวสีดำ", 10.0, "G1C")
+
+
+def test_work_sent_to_another_shop_is_its_own_line():
+    text = "\n".join(["ค้างซ่อม", "19/10/2569", "26/10/2569", "487,485", "อะไหล่", "เหล็กแบน8\"X1/8\" 9กก. (ไม่มียี่ห้อ)", "1.00 EA",
+                      "จัดจ้างภายนอก", "ซ่อมพ่นเสริมเหล็กเพลากลาง", " "])
+    lines = dh.parse_report_text(text)["visits"][0]["lines"]
+    assert [(ln["kind"], ln["description"], ln["note"]) for ln in lines] == [
+        ("อะไหล่", "เหล็กแบน8\"X1/8\" 9กก. (ไม่มียี่ห้อ)", None), ("จัดจ้างภายนอก", "ซ่อมพ่นเสริมเหล็กเพลากลาง", None)]
