@@ -599,10 +599,10 @@ def test_stand_in_fills_by_status(swap_db):
     by = {e["source_id"]: round(sum(ln["credit"] for ln in e["lines"]), 2) for e in b["entries"]}
     assert by == {"fuel:bangchak:2026-11:NM:842051": 1400,          # ปกติ + สลับรถ (คนขับเดิม): the route's own driver, as before
                   "fuel:bangchak:2026-11:NM:842051:sub": 900,       # สลับคนขับ + both-swapped on a day the route has a row (sold / สำรองขับ)
-                  "fuel:bangchak:2026-11:NM:1ฒถ2090": 200}          # both-swapped, no row for route #25 that day: the truck filled
+                  "fuel:bangchak:2026-11:NM:1ฒถ2090:sub": 200}      # both-swapped, no row for route #25 that day: the truck filled, still free
     # the totals are what they were: per file, per station, and route #25's plate keeps its whole route fuel
     assert b["rows_total"] == b["file_total"] == 2500 and p["flags"] == [x for x in p["flags"] if "ยอดรวม" not in x]
-    sub = next(e for e in b["entries"] if e["source_id"].endswith(":sub"))
+    sub = next(e for e in b["entries"] if e["source_id"].endswith("842051:sub"))
     assert "คนขับแทน" in sub["description"] and sub["lines"][0]["vehicle_id"] == 2 and sub["branch"] == "สระบุรี"
     assert next(r for r in b["rows"] if "คนขับแทน" in r["text"])["text"].endswith("· 3 ครั้ง")
     # every fill by another driver or in another truck is listed, with where it went and whether it is a stand-in's
@@ -656,7 +656,7 @@ def test_stand_in_entries_are_never_legacy_and_book_with_their_station(swap_db):
     out = fuel.book(p, "file-swap")
     assert out["batches"] == ["fuel:bangchak:2026-11:NM"] and out["booked"] == 2500 and out["legacy_removed"] == 0
     assert ("acc_entries", {"source_id": "like.fuel:bangchak:2026-11:NM:*"}) in swap_db.deleted       # the :sub entry goes with its station
-    assert sorted(e["source_id"] for e in swap_db.entries) == ["fuel:bangchak:2026-11:NM:1ฒถ2090", "fuel:bangchak:2026-11:NM:842051",
+    assert sorted(e["source_id"] for e in swap_db.entries) == ["fuel:bangchak:2026-11:NM:1ฒถ2090:sub", "fuel:bangchak:2026-11:NM:842051",
                                                                "fuel:bangchak:2026-11:NM:842051:sub"]
     from app import acc_checks
     assert {acc_checks.batch_of(e) for e in swap_db.entries} == {"fuel:bangchak:2026-11"}
@@ -668,7 +668,7 @@ def test_payroll_reads_the_drop_boxs_stand_in_entries(swap_db):
     entries = [{"source_id": e["source_id"], "lines": [{"vehicle_id": ln["vehicle_id"], "credit": ln["credit"]} for ln in e["lines"]]}
                for e in p["batches"][0]["entries"]]
     v = payroll.card_fuel_view(entries)
-    assert v["by_vehicle"] == {2: 1400, 1: 200} and v["stand_in"] == {2: 900}
+    assert v["by_vehicle"] == {2: 1400} and v["stand_in"] == {2: 900, 1: 200}      # a stand-in's fill is free on any truck (28 Nov 2026)
     assert v["stations"]["bangchak"] == {"trucks": 2, "total": 2500}            # the statement keeps every baht; #25 is one truck
 
 
@@ -682,7 +682,7 @@ def test_cardfuel_tail_key():
 
 def test_both_swapped_with_no_route_plate_goes_to_the_truck_filled_and_is_flagged(swap_db):
     """สลับทั้งคนขับและรถ on a row with no ทะเบียนรถประจำเบอร์นี้: whose route it was cannot be told -- the truck filled has it as an
-    ordinary fill (not a stand-in's), the list says so and the owner is asked to check."""
+    stand-in's fill, free for every commission (owner, 28 Nov 2026), the list says so and the owner is asked to check."""
     def row(n, d, own, filled, status, amt):
         return [n, d, "งวดที่ 1", "25", own, filled, "x", "แจ็ค ทดสอบ", "x", status, None, 10, 40, amt, None]
     rows = [row(1, datetime(2026, 11, 1), "84-2051", "84-2051", "ปกติ", 1000),
@@ -691,8 +691,8 @@ def test_both_swapped_with_no_route_plate_goes_to_the_truck_filled_and_is_flagge
     sheets["NM บันทึกเติมน้ำมัน"] = [NOV_HEAD] + rows + [[None] * 10 + ["รวมทั้งหมด"] + [None] * 4]
     p = fuel.read(sniff_file("เติมน้ำมัน_NM_26ตค-25พย69.xlsx", _xlsx(sheets)))
     by = {e["source_id"]: round(sum(ln["credit"] for ln in e["lines"]), 2) for e in p["batches"][0]["entries"]}
-    assert by == {"fuel:bangchak:2026-11:NM:842051": 1000, "fuel:bangchak:2026-11:NM:1ฒถ2090": 300}
+    assert by == {"fuel:bangchak:2026-11:NM:842051": 1000, "fuel:bangchak:2026-11:NM:1ฒถ2090:sub": 300}
     (x,) = p["swaps"]
-    assert (x["booked_plate"], x["stand_in"], x["check"]) == ("1ฒถ 2090", False, True)
+    assert (x["booked_plate"], x["stand_in"], x["check"]) == ("1ฒถ 2090", True, True)
     assert x["where"] == "ลงที่รถที่เติม 1ฒถ 2090 — แถวนี้ไม่มีทะเบียนประจำสาย"
     assert any("ไม่มีทะเบียนรถประจำเบอร์" in f and "04/11/2026 1ฒถ 2090 300.00" in f for f in p["flags"])

@@ -699,7 +699,7 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
         where = f"ลงที่สาย {label}"
         if kind == "both" and not own and filled:
             # no route plate on the row: whose route it was cannot be told -- the truck filled has it as its own fuel, to check
-            plate, stand_in = filled, False
+            plate, stand_in = filled, True            # still a stand-in's fill: free for every commission (owner, 28 Nov 2026)
             where = f"ลงที่รถที่เติม {filled} — แถวนี้ไม่มีทะเบียนประจำสาย"
             unsure_plate = True
             noroute.append(x)
@@ -712,7 +712,9 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
                 unsure.append(x)
                 where += " (ยังตรวจยอดขายรายวันไม่ได้)"
             elif x["day"].isoformat() not in info["days"]:
-                plate, stand_in = filled, False       # the route sold nothing that day: the truck actually filled had the fuel
+                # the route sold nothing that day: the truck actually filled had the fuel -- still free for every commission ("if anyone
+                # drove for another, the fuel should come off as free", owner 28 Nov 2026): never charged to that truck's own driver
+                plate, stand_in = filled, True
                 where = f"ลงที่รถที่เติม {filled} — ไม่มียอดขายสาย {label} วันนี้"
                 moved.append(x)
         if kind:
