@@ -24,3 +24,21 @@ def test_no_text_no_suggestion_and_a_model_failure_keeps_the_account(monkeypatch
     assert a.suggest("ส่วยตำรวจ") == {"account": None, "source": None, "like": None}
     monkeypatch.setattr(a, "from_model", lambda t: "7910")
     assert a.suggest("ส่วยตำรวจ") == {"account": "7910", "source": "ai", "like": None}
+
+
+def test_a_wage_line_follows_the_person_it_names():
+    """ชัชวาลย์ อักษรกิ่ง is a driver: his ตกหล่น is 6200, not ค่าแรงฝ่ายผลิต; สุทธิสาร's trip to fetch trucks is 6200 (28 Nov 2026)."""
+    from app import wage_account as w
+    staff = [{"full_name": "ชัชวาลย์ อักษรกิ่ง", "position": "พนักงานขับรถหน้าโรง", "status": "active"},
+             {"full_name": "สุทธิสาร หอยสังข์", "position": "พนักงานขับรถหน้าโรง", "status": "active"},
+             {"full_name": "จรูญ มินฉิมพลี", "position": "ช่าง", "status": "active"},
+             {"full_name": "สำเนา ทิพเนตร", "position": "หัวหน้างาน", "status": "active"},
+             {"full_name": "วินัย ทิพเนตร", "position": "พนักงานขับรถสาย", "status": "active"},
+             {"full_name": "มาลี ใจดี", "position": "เสมียนออฟฟิศ", "status": "active"}]
+    assert w.account("ตกหล่น ชัชวาลย์ อักษรกิ่ง 4 วัน", "5400", staff) == "6200"
+    assert w.account("ไปเอารถเบอร์ 9 กับเบอร์ 15 = สุทธิสาร-พิมพ์", "7900", staff) == "6200"
+    assert w.account("ช่างจรูญ (ขาด 4 วัน)", "5400", staff) == "5400"
+    assert w.account("สิทธินา ทิพเนตร (ขาด 4 วัน)", "5400", staff) == "5400"     # a surname two people share: left as read
+    assert w.account("ค่าแรง มาลี ใจดี", "5400", staff) == "7100"
+    assert w.account("ซื้อน้ำ สุทธิสาร", "7900", staff) == "7900"                  # not a wage line
+    assert w.account("เติมน้ำมัน สุทธิสาร", "6130", staff) == "6130"

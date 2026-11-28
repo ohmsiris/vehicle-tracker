@@ -117,7 +117,9 @@ def suggest(text: str) -> dict:
     except Exception as exc:                            # noqa: BLE001 -- the books could not be read: ask the model
         logger.warning("account history failed: %r", exc)
         hit = None
+    from app import wage_account
+    staff = wage_account.people()
     if hit:
-        return {"account": hit[0], "source": "history", "like": hit[1]}
+        return {"account": wage_account.account(text, hit[0], staff), "source": "history", "like": hit[1]}
     acc = from_model(text)
-    return {"account": acc, "source": "ai" if acc else None, "like": None}
+    return {"account": wage_account.account(text, acc, staff) if acc else None, "source": "ai" if acc else None, "like": None}

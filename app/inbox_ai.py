@@ -85,7 +85,7 @@ CHART = [
     ("6100", "ซ่อมรถ", "ซ่อมรถ อะไหล่รถ รถยก / ลากรถ"),
     ("6110", "ยางรถ", "ปะยาง ยางรถ"),
     ("6130", "น้ำมันเงินสด", "เติมน้ำมันรถ / รถยก / มอเตอร์ไซค์ (ค่าน้ำมันรถ)"),
-    ("6200", "ค่าแรงพนักงานขับรถ", "เบี้ยเลี้ยงคนขับ ค่าแรงเด็กรถ เบี้ยขยันคนขับ"),
+    ("6200", "ค่าแรงพนักงานขับรถ", "เบี้ยเลี้ยงคนขับ ค่าเที่ยว ไปเอารถ / ไปส่งรถ ค่าแรงเด็กรถ เบี้ยขยันคนขับ ค่าแรงตกหล่นของคนขับ"),
     ("6300", "ภาษีรถ / พรบ. / ตรวจสภาพ", "ค่าตรวจสภาพรถ ต่อภาษี พรบ."),
     ("7100", "เงินเดือนสำนักงาน", "ค่าแรงเสมียน เงินเดือนออฟฟิศ"),
     ("7110", "ประกันสังคม", "ประกันสังคม กองทุนเงินทดแทน"),
@@ -1153,6 +1153,8 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
 
 def _batch(reads: list[dict], name: str, key: str, month: str, branch: str, half: str, feed: str, vehicles: list[dict]) -> tuple[dict, list[str]]:
     """The page reads -> the BATCH acc_docs.build takes (the same shape as data/acc_docs/*.py), and what the reader noticed."""
+    from app import wage_account
+    staff = wage_account.people() if _db_ready() else []
     h_from, h_to = half_range(month, half)
     m_from, m_to = month_range(month)
     batch = {"batch": key, "month": month, "branch": branch, "files": {"f": name}, "covers": [], "pages": [], "memos": [], "fuel_table": None}
@@ -1194,6 +1196,8 @@ def _batch(reads: list[dict], name: str, key: str, month: str, branch: str, half
                 acc = ln.get("account") if ln.get("account") in PARTY else "7900"
                 if k == "fuel":
                     acc = "6130"
+                else:                                      # a wage line goes to the account of the person it names (owner, 28 Nov 2026)
+                    acc = wage_account.account(ln.get("text") or "", acc, staff)
                 opt = {"key": f"p{n}:l{len(lines) + 1}"}     # the batch line number acc_docs.build gives it (the owner's edits use it)
                 if ln.get("plate") or ln.get("truck_number"):
                     v, _ = match_truck(ln.get("plate"), ln.get("truck_number"), vehicles, branch)
