@@ -441,12 +441,17 @@ def loan_dues(loans: list[dict], entries: list[dict], month: str) -> dict[str, l
             state, amount = ("ok", recorded) if recorded > 0 else (None, 0.0)
         elif loan.get("repay_mode") == "flexible":
             state, amount = ("ok", recorded) if recorded > 0 else ("miss", None)
+        elif due > 0 and overdue <= 0:
+            # on the schedule: the app records it as deducted when the pay month closes (loans.close_month) -- nobody presses หักแล้ว
+            # any more (owner, 28 Nov 2026)
+            state, amount = "ok", due
         elif due > 0 or overdue > 0:
             state, amount = "carry", due
         else:
             state, amount = ("ok", recorded) if recorded > 0 else (None, 0.0)
         if state:
-            out.setdefault(loan["employee_id"], []).append({"state": state, "amount": amount, "balance": s["balance"], "overdue": overdue, "loan": loan})
+            out.setdefault(loan["employee_id"], []).append({"state": state, "amount": amount, "balance": s["balance"], "overdue": overdue, "loan": loan,
+                                                            "recorded": recorded})
     return out
 
 
@@ -462,6 +467,8 @@ def loan_cell(items: list[dict], prev_card: float = 0) -> dict:
         elif i["state"] == "carry":                           # this month's instalment and anything older are two facts: never one sum
             text = " · ".join(x for x in (f"{money(i['amount'])} ตามตาราง" if i["amount"] > 0 else "งวดนี้ไม่มีตามตาราง",
                                           f"ค้างจากเดือนก่อน {money(i['overdue'])}" if i["overdue"] > 0 else "") if x) + ' — ยังไม่ได้กด "หักแล้ว"'
+        elif i["amount"] and not i.get("recorded"):
+            text = f"{money(i['amount'])} ตามตาราง (บันทึกหักให้เองเมื่อปิดงวด)"
         else:
             text = f"{money(i['amount'])} หักแล้ว"
         notes.append((f"{kind}: " if kind else "") + text)
@@ -1756,22 +1763,25 @@ def build_files(people: list[dict], src: dict, ctx: dict, month: str) -> list[di
         on_list = {p["id"] for p in people if not p["hold"]}                  # the same people the loan kind counts
         items = [i for pid, rows in ctx["loans"].items() if pid in on_list for i in rows]
         held_ids = {p["id"] for p in people if p["hold"]}                     # a branch set aside: said, never part of the to-do
-        kept = [i for pid, rows in ctx["loans"].items() if pid in held_ids for i in rows if i["state"] != "ok"]
+        kept = [i for pid, rows in ctx["loans"].items() if pid in held_ids for i in rows if i["state"] != "ok" or not i.get("recorded", 1)]
         kept_baht = sum(i["amount"] or 0 for i in kept)
         due = [i for i in items if i["state"] == "carry" and i["amount"] > 0]
         late = [i for i in items if i["state"] == "carry" and i["overdue"] > 0]
-        done = [i for i in items if i["state"] == "ok"]
+        auto = [i for i in items if i["state"] == "ok" and i["amount"] and not i.get("recorded", 1)]      # recorded by itself at the close
+        done = [i for i in items if i["state"] == "ok" and i not in auto]
         loose = [i for i in items if i["state"] == "miss"]
         tail = ((f" · ค้างจากเดือนก่อน {len(late)} รายการ {money(sum(i['overdue'] for i in late))} บาท" if late else "")
                 + (f" · ผ่อนไม่ตายตัว {len(loose)} รายการ ต้องใส่ยอดเอง" if loose else "")
                 + (f" · {aside} {len(kept)} รายการ" + (f" {money(kept_baht)} บาท" if kept_baht else "") if kept else ""))
         if due:
-            state, words = "warn", f"ยังไม่ได้กด {len(due)} รายการ {money(sum(i['amount'] for i in due))} บาท" + (f" (กดแล้ว {len(done)})" if done else "")
-        elif done:
-            state, words = "ok", f"กดแล้ว {len(done)} รายการ {money(sum(i['amount'] for i in done))} บาท"
+            state, words = "warn", f"ต้องดู {len(due)} รายการ {money(sum(i['amount'] for i in due))} บาท" + (f" (บันทึกแล้ว {len(done)})" if done else "")
+        elif auto or done:
+            state, words = "ok", " · ".join(x for x in (
+                f"ตามตาราง {len(auto)} รายการ {money(sum(i['amount'] for i in auto))} บาท — บันทึกว่าหักให้เองเมื่อปิดงวด (วันที่ 26)" if auto else "",
+                f"บันทึกแล้ว {len(done)} รายการ {money(sum(i['amount'] for i in done))} บาท" if done else "") if x)
         else:
             state, words = "info", "เดือนนี้ไม่มีงวดที่ต้องหัก"
-        out.append(_file("loans_mark", "เงินกู้: กด \"หักแล้ว\" ของเดือนนี้", "warn" if (loose or late) and state != "warn" else state, words + tail, "#loans", "เงินกู้"))
+        out.append(_file("loans_mark", "เงินกู้: งวดของเดือนนี้", "warn" if (loose or late) and state != "warn" else state, words + tail, "#loans", "เงินกู้"))
     # ---- HQ's sheets: the one before (the stand-in for เบิก / สะสม / ปกส.) and this month's own (to compare against)
     n = ctx["hq_done"]
     if not n:

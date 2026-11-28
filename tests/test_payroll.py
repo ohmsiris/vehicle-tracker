@@ -486,7 +486,8 @@ def test_loans_come_from_the_schedule_and_the_card_column_is_never_carried_too()
     s = src(employees=people, rules=[rule(c) for c in "ABCDEF"], rates=[rate(c) for c in "ABCDEF"], pay_prev=prevs, loans=loans, loan_entries=entries)
     out = pw.build(s, MONTH, TODAY)
     a = one(out, "A")["cells"]
-    assert a["loan"] == {"state": "carry", "value": 1500, "text": "1,500", "note": 'ทำบัตร / passport: 1,500 ตามตาราง — ยังไม่ได้กด "หักแล้ว"'}
+    # on the schedule: recorded by itself when the pay month closes -- nobody presses หักแล้ว (owner, 28 Nov 2026)
+    assert a["loan"] == {"state": "ok", "value": 1500, "text": "1,500", "note": "ทำบัตร / passport: 1,500 ตามตาราง (บันทึกหักให้เองเมื่อปิดงวด)"}
     assert [k for k, c in a.items() if c["value"] == 1500] == ["loan"]                        # last month's ทำบัตร IS this loan: one place only
     assert "card" not in pw.KEYS
     assert one(out, "B")["cells"]["loan"] == {"state": "ok", "value": 1500, "text": "1,500", "note": "1,500 หักแล้ว"}
@@ -494,12 +495,12 @@ def test_loans_come_from_the_schedule_and_the_card_column_is_never_carried_too()
     assert (c["state"], c["value"], c["note"]) == ("miss", None, "ต้องใส่ยอด (ผ่อนไม่ตายตัว) คงเหลือ 3,000")
     assert one(out, "D")["cells"]["loan"]["state"] == "na"                                    # starts next month
     e = one(out, "E")["cells"]["loan"]
-    assert (e["state"], e["value"]) == ("carry", 1500) and e["note"].startswith("อุบัติเหตุ: 1,500 ตามตาราง")           # the last instalment is what is left
+    assert (e["state"], e["value"]) == ("ok", 1500) and e["note"].startswith("อุบัติเหตุ: 1,500 ตามตาราง")           # the last instalment is what is left
     assert one(out, "F")["cells"]["loan"]["state"] == "na"
     k = kind(out, "loan")
-    assert (k["need"], k["ok"], k["carry"], k["miss"], k["state"]) == (4, 1, 2, 1, "bad")
+    assert (k["need"], k["ok"], k["carry"], k["miss"], k["state"]) == (4, 3, 0, 1, "bad")      # scheduled instalments are ok: recorded by themselves at the close (28 Nov 2026)
     f = file(out, "loans_mark")
-    assert f["state"] == "warn" and f["summary"] == "ยังไม่ได้กด 2 รายการ 3,000 บาท (กดแล้ว 1) · ผ่อนไม่ตายตัว 1 รายการ ต้องใส่ยอดเอง"
+    assert f["state"] == "warn" and f["summary"] == "ตามตาราง 2 รายการ 3,000 บาท — บันทึกว่าหักให้เองเมื่อปิดงวด (วันที่ 26) · บันทึกแล้ว 1 รายการ 1,500 บาท · ผ่อนไม่ตายตัว 1 รายการ ต้องใส่ยอดเอง"
 
 
 def test_an_instalment_still_unmarked_from_an_earlier_month_is_said():
@@ -513,7 +514,7 @@ def test_an_instalment_still_unmarked_from_an_earlier_month_is_said():
     assert a["note"] == 'งวดนี้ไม่มีตามตาราง · ค้างจากเดือนก่อน 1,500 — ยังไม่ได้กด "หักแล้ว"'
     assert (b["value"], b["note"]) == (1500, '1,500 ตามตาราง · ค้างจากเดือนก่อน 1,500 — ยังไม่ได้กด "หักแล้ว"')      # this month's figure; the older one beside it
     f = file(out, "loans_mark")
-    assert (f["state"], f["summary"]) == ("warn", "ยังไม่ได้กด 1 รายการ 1,500 บาท · ค้างจากเดือนก่อน 2 รายการ 3,000 บาท")
+    assert (f["state"], f["summary"]) == ("warn", "ต้องดู 1 รายการ 1,500 บาท · ค้างจากเดือนก่อน 2 รายการ 3,000 บาท")
 
 
 def test_loans_all_marked_or_none_due():
@@ -958,8 +959,8 @@ def test_the_loans_to_do_leaves_out_a_branch_on_hold():
     entries = [paid("A", "2026-10"), paid("K", "2026-10", 500), paid("K2", "2026-10", 2000)]
     out = pw.build(src(employees=people, rules=[rule(p["id"]) for p in people], loans=loans, loan_entries=entries), MONTH, TODAY)
     f, k = file(out, "loans_mark"), kind(out, "loan")
-    assert (f["state"], f["summary"]) == ("warn", "ยังไม่ได้กด 1 รายการ 1,500 บาท · แก่งคอยพักไว้ก่อน 2 รายการ 500 บาท")
-    assert (k["need"], k["carry"], k["miss"], k["hold"]) == (1, 1, 0, 2)
+    assert (f["state"], f["summary"]) == ("ok", "ตามตาราง 1 รายการ 1,500 บาท — บันทึกว่าหักให้เองเมื่อปิดงวด (วันที่ 26) · แก่งคอยพักไว้ก่อน 2 รายการ 500 บาท")
+    assert (k["need"], k["carry"], k["miss"], k["hold"]) == (1, 0, 0, 2)
 
 
 def test_the_groups_rule_keeps_its_numbers_when_someone_is_left_in_it_after_his_route():
@@ -1720,3 +1721,13 @@ def test_his_own_cash_fill_in_another_truck_counts_to_him():
     free = pw.stand_in_fuel(p, {"id": "V27"}, {"card": None, "cash": pw.cash_fuel_view(cash),
                                                 "route_own": {"D1": {"spare": [date(2026, 11, 15)]}}})
     assert free["elsewhere"] == 700 and free["total"] == 0          # 14/11 is his; 15/11 he was off (สำรองขับ); 16/11 someone else's
+
+
+def test_the_loans_month_closes_by_itself_on_the_26th():
+    """No more หักแล้ว button (owner, 28 Nov 2026): from the 26th the ended pay month's instalments are recorded; 1st-25th catches the
+    month before."""
+    from datetime import date
+    from app import loans
+    assert loans.month_to_close(date(2026, 11, 26)) == "2026-11" and loans.month_to_close(date(2026, 11, 28)) == "2026-11"
+    assert loans.month_to_close(date(2026, 12, 3)) == "2026-11" and loans.month_to_close(date(2026, 11, 25)) == "2026-10"
+    assert loans.month_to_close(date(2027, 1, 10)) == "2026-12"

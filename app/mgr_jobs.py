@@ -163,8 +163,27 @@ def _active() -> list[dict]:
 
 
 # ------------------------------------------------------------------ background loop
+_loans_at = 0.0
+LOANS_EVERY = 3600.0      # the loans' month close is checked once an hour (it writes only what is not recorded yet)
+
+
+def close_loans() -> int:
+    """Records the instalments of a pay month that has ended (loans.close_month, owner 28 Nov 2026), at most once an hour. Never raises."""
+    global _loans_at
+    if time.monotonic() - _loans_at < LOANS_EVERY and _loans_at:
+        return 0
+    _loans_at = time.monotonic()
+    try:
+        from app import loans
+        return loans.close_month()["recorded"]
+    except Exception:
+        logger.exception("loans month close failed")
+        return 0
+
+
 def tick() -> int:
-    """Makes the recurring tickets that have come due. Never raises."""
+    """Makes the recurring tickets that have come due, and closes the loans' pay month once it has ended. Never raises."""
+    close_loans()
     try:
         return mgr.generate_recurring() if mgr.has_v12() else 0
     except Exception:

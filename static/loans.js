@@ -103,7 +103,8 @@ async function loadMonth() {
 function renderMonth() {
   const d = ln.monthData;
   if (!d) return;
-  $("lnMonthTotal").textContent = d.rows.length ? `${d.rows.length} คน · ต้องหัก ${lnMoney(d.total_due)} บาท${d.total_overdue ? ` · ค้างจากเดือนก่อน ${lnMoney(d.total_overdue)}` : ""}` : "เดือนนี้ไม่มียอดต้องหัก";
+  $("lnMonthTotal").textContent = d.rows.length ? `${d.rows.length} คน · ต้องหัก ${lnMoney(d.total_due)} บาท${d.total_overdue ? ` · ค้างจากเดือนก่อน ${lnMoney(d.total_overdue)}` : ""}`
+    + " · ระบบบันทึกว่าหักแล้วให้เองเมื่อปิดงวด (วันที่ 26) ไม่ต้องกด — ถ้าเดือนนี้ไม่หักใคร ให้เลื่อนเดือนเริ่มหักของสัญญานั้นก่อนวันที่ 26" : "เดือนนี้ไม่มียอดต้องหัก";
   $("lnApply").disabled = !d.rows.some((r) => r.due > 0);
   const head = el("tr", {}, ...["รหัส", "พนักงาน", "ต้องหักเดือนนี้", "ค้างก่อนหน้า", "บันทึกแล้ว", "คงเหลือ"].map((x) => el("th", { text: x })));
   const body = d.rows.map((r) => el("tr", { class: "emprow", onclick: () => goHash(`#loan=${r.loan_id}`) },

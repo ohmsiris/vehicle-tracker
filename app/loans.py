@@ -461,7 +461,7 @@ def month_deductions(month: str = "") -> dict:
     return {"month": month, "rows": rows, "total_due": round(sum(r["due"] for r in rows), 2), "total_overdue": round(sum(r["overdue_before"] for r in rows), 2)}
 
 
-def apply_month(month: str, loan_ids: Optional[list] = None) -> dict:
+def apply_month(month: str, loan_ids: Optional[list] = None, note: str = "") -> dict:
     """"หักแล้ว": record this month's deduction of each loan as a salary repayment (only what is still unpaid for that month)."""
     _require()
     today = employees.today_th()
@@ -471,7 +471,29 @@ def apply_month(month: str, loan_ids: Optional[list] = None) -> dict:
         if r["due"] <= 0 or (loan_ids and r["loan_id"] not in loan_ids):
             continue
         supabase.insert("employee_loan_entries", [{"loan_id": r["loan_id"], "kind": "repay", "amount": r["due"], "entry_date": today.isoformat(), "method": "salary",
-                                                    "pay_month": f"{month}-01", "note": f"หักเงินเดือน {month}"}])
+                                                    "pay_month": f"{month}-01", "note": note or f"หักเงินเดือน {month}"}])
         _refresh_status(_get(r["loan_id"]))
         done += 1
     return {"month": month, "recorded": done}
+
+
+# ------------------------------------------------------------------ recorded by itself when the pay month closes
+CLOSE_DAY = 26           # the company month ends on the 25th (26th - 25th): from the 26th its instalments are in that month's pay
+
+
+def month_to_close(today: date) -> str:
+    """The pay month that has ended: this calendar month from the 26th, else the one before (the 1st - 25th also catches a month the
+    job could not record on time)."""
+    m = this_month(today)
+    return m if today.day >= CLOSE_DAY else add_month(m, -1)
+
+
+def close_month(today: Optional[date] = None) -> dict:
+    """The owner does not press หักแล้ว any more (owner, 28 Nov 2026: "I should just be recording, not having to press หัก if we're doing
+    the salary"): once a pay month has ended, every instalment due on the schedule is recorded as deducted from that month's salary.
+    Only what is still unrecorded for that month is written (apply_month), so running it again never doubles. To leave a month out for
+    someone, change the loan's plan (เลื่อนเดือนเริ่มหัก) before the 26th, or delete that month's entry on the loan afterwards."""
+    if not has_v23():
+        return {"month": None, "recorded": 0}
+    month = month_to_close(today or employees.today_th())
+    return apply_month(month, note=f"หักเงินเดือน {month} (บันทึกอัตโนมัติเมื่อปิดงวด)")
