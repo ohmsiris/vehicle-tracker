@@ -859,7 +859,7 @@ async function ickHrAct(it, what, body) {
   });
   ickHr.busy = null;
   if (res && ick.f === f) {
-    if (what === "apply" || what === "person") delete ickHr.drafts[it.id];
+    if (what === "apply") delete ickHr.drafts[it.id];   // picking the person keeps the fields the owner corrected
     ickHrTake(res);
   }
   ickHrRepaint(it.page);

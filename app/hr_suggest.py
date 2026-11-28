@@ -112,6 +112,8 @@ def dismiss(sid: str) -> dict:
 def write_resign(emp: dict, end_date: str, reason: Optional[str]) -> str:
     """ลาออก, or -- someone already marked resigned -- the last day / reason corrected."""
     if emp.get("status") == "resigned":
+        if emp.get("start_date") and end_date < str(emp["start_date"]):   # what employees.clean_resign checks for a new one
+            raise Invalid("วันสุดท้ายต้องไม่ก่อนวันเริ่มงาน")
         supabase.update("employees", {"id": f"eq.{emp['id']}"}, {"end_date": end_date, "end_reason": reason or emp.get("end_reason")})
         return f"แก้วันสุดท้ายเป็น {end_date}"
     employees.resign(emp["id"], {"end_date": end_date, "reason": reason})

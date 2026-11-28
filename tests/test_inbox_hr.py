@@ -494,6 +494,85 @@ def test_the_same_bytes_read_again_keep_what_was_recorded(monkeypatch, pv):
     assert [(it["id"], it["status"]) for it in got["hr_items"]] == [("a", "applied"), ("b", "pending"), ("c", "pending")]
 
 
+# ------------------------------------------------------------------ review fixes (28 Nov 2026)
+def test_a_dismiss_here_never_overwrites_what_the_queue_recorded(db, read):
+    """พนักงาน › จากเอกสารสิ้นเดือน already applied p17 (same batch key): ไม่บันทึก here and เอากลับมา leave that row alone."""
+    db.t["hr_suggestions"].append({"id": "s1", "batch": "docs:2026-11:สระบุรี:end", "page": 17, "kind": "warning", "employee_code": "SB-FR034",
+                                   "payload": {}, "status": "applied", "result": "เพิ่มหนังสือเตือนครั้งที่ 2 (เซ็นแล้ว)"})
+    inbox_hr.dismiss(FID, "p17:warning:SB-FR034")
+    inbox_hr.reopen(FID, "p17:warning:SB-FR034")
+    assert [(h["id"], h["status"], h["result"]) for h in db.t["hr_suggestions"]] == [("s1", "applied", "เพิ่มหนังสือเตือนครั้งที่ 2 (เซ็นแล้ว)")]
+    inbox_hr.apply(FID, "p17:warning:SB-FR034", {})                        # nor does a บันทึก here
+    assert [(h["id"], h["status"]) for h in db.t["hr_suggestions"]] == [("s1", "applied")]
+
+
+def test_a_dismiss_here_leaves_a_waiting_queue_row_and_an_applied_one_here_replaces_it(db, read):
+    db.t["hr_suggestions"].append({"id": "s2", "batch": "docs:2026-11:สระบุรี:end", "page": 14, "kind": "loan", "employee_code": "SB-FR024",
+                                   "payload": {}, "status": "pending", "result": None})
+    inbox_hr.dismiss(FID, "p14:loan:SB-FR024")
+    inbox_hr.reopen(FID, "p14:loan:SB-FR024")
+    assert [(h["id"], h["status"]) for h in db.t["hr_suggestions"]] == [("s2", "pending")]
+    inbox_hr.apply(FID, "p14:loan:SB-FR024", {})
+    assert [(h["id"], h["status"], h["result"].endswith(inbox_hr.HERE)) for h in db.t["hr_suggestions"]] == [("s2", "applied", True)]
+
+
+def test_a_recorded_warning_keeps_the_level_it_was_written_with(db, read):
+    inbox_hr.apply(FID, "p17:warning:SB-FR034", {"fields": {"level": None}})   # left on "ตามระบบ"
+    assert items_of(db)["p17:warning:SB-FR034"]["fields"]["level"] == 2
+    assert hr_view()["p17:warning:SB-FR034"]["dest"] == "พนักงาน · นายลามิน (SB-FR034) · หนังสือเตือนครั้งที่ 2"
+
+
+def test_a_last_day_before_the_first_day_is_refused(db, read):
+    next(p for p in db.t["employees"] if p["code"] == "SB-FR101")["start_date"] = "2026-08-01"
+    assert hr_view()["p21:resign:SB-FR101"]["block"] == "วันสุดท้ายต้องไม่ก่อนวันเริ่มงาน (01/08/2569)"
+    with pytest.raises(inbox.InboxError, match="วันสุดท้ายต้องไม่ก่อนวันเริ่มงาน"):
+        inbox_hr.apply(FID, "p21:resign:SB-FR101", {})
+    from app import hr_suggest
+    emp = next(p for p in db.t["employees"] if p["code"] == "SB-FR101")
+    with pytest.raises(employees.InvalidEmployee, match="วันสุดท้ายต้องไม่ก่อนวันเริ่มงาน"):
+        hr_suggest.write_resign(emp, "2026-06-02", None)
+    assert emp["end_date"] == "2026-11-02"
+
+
+def test_a_code_with_a_fourth_digit_is_not_a_shorter_one():
+    more = PEOPLE + [{"id": uid(10), "code": "SB-FR1010", "prefix": "นาย", "full_name": "สมชาย", "nickname": "", "branch": "สระบุรี", "status": "active"}]
+    assert inbox_hr.norm_code("SB-FR1010") is None and inbox_hr.norm_code("SB-FR101") == "SB-FR101"
+    assert inbox_hr.resolve("SB-FR1010", "", more)[0]["code"] == "SB-FR1010"
+    assert inbox_hr.resolve("SB-FR0761", "", more) == (None, None)
+
+
+def test_a_new_read_never_hides_another_person_behind_an_old_decision():
+    old = [{"id": "p20:resign:x", "page": 20, "kind": "resign", "line_key": None, "employee_name_read": "A", "employee_code": "SB-FR024",
+            "status": "applied"}]
+    new = [{"id": "p20:resign:x", "page": 20, "kind": "resign", "line_key": None, "employee_name_read": "B", "employee_code": None, "status": "pending"},
+           {"id": "p20:resign:x:2", "page": 20, "kind": "resign", "line_key": None, "employee_name_read": "A", "employee_code": None, "status": "pending"}]
+    got = inbox_hr.merge(old, new)
+    assert [(it["employee_name_read"], it["status"]) for it in got] == [("B", "pending"), ("A", "applied")]
+    assert len({it["id"] for it in got}) == 2 and got[1]["id"] == "p20:resign:x"
+    # a stable id (the person's code) still matches when the name is written another way
+    old = [{"id": "p17:warning:SB-FR034", "page": 17, "kind": "warning", "employee_name_read": "ลามิน", "employee_code": "SB-FR034", "status": "applied"}]
+    new = [{"id": "p17:warning:SB-FR034", "page": 17, "kind": "warning", "employee_name_read": "นายลามิน", "employee_code": "SB-FR034", "status": "pending"}]
+    assert inbox_hr.merge(old, new) == old
+
+
+def test_tokens_spent_are_counted_when_making_the_items_fails(db, pv, client_hr, monkeypatch):
+    monkeypatch.setattr(inbox_hr, "build_items", lambda *a: (_ for _ in ()).throw(KeyError("x")))
+    with pytest.raises(inbox_hr.HrReadError) as exc:
+        inbox_hr.read_items(pv)
+    assert exc.value.usage["calls"] == 1
+    p = json.loads(json.dumps(pv))
+    usage = {"model": "m", "calls": 2, "input_tokens": 10, "output_tokens": 5}
+    inbox_ai._read_hr(p, usage)
+    assert usage["calls"] == 3 and "hr_items" not in p
+
+
+def test_the_people_are_read_before_the_paid_call(db, pv, client_hr, monkeypatch):
+    monkeypatch.setattr(inbox_hr, "_people", lambda: (_ for _ in ()).throw(supabase.SupabaseError("down")))
+    with pytest.raises(supabase.SupabaseError):
+        inbox_hr.read_items(pv)
+    assert client_hr.hr_calls == 0
+
+
 # ------------------------------------------------------------------ the routes and who may use them
 def _client(monkeypatch):
     from fastapi.testclient import TestClient

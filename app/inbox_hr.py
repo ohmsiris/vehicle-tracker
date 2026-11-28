@@ -41,9 +41,9 @@ KIND_TH = {"warning": "หนังสือเตือน", "resign": "ลา�
 LOAN_KINDS = ("loan", "advance", "accident", "other")
 HR_PAGE_KINDS = ("memo", "other")                # the AI's page_kind for memos, warnings, resignations (pay lists are "payslip")
 LOAN_ACCOUNT = "1510"                            # เงินกู้พนักงาน on the expense list
-CODE_RE = re.compile(r"SB\s*-?\s*(FR|PD|KK)\s*-?\s*(\d{3})", re.I)
+CODE_RE = re.compile(r"SB\s*-?\s*(FR|PD|KK)\s*-?\s*(\d{3})(?!\d)", re.I)   # never the first 3 digits of a longer number
 EMP_COLS = "id,code,prefix,gender,full_name,nickname,branch,position,status,start_date,end_date,end_reason,driver_id"
-MAX_OUTPUT_TOKENS = 8000
+MAX_OUTPUT_TOKENS = 16000                    # thinking and the JSON share it; 8000 was overrun on the page reads (inbox_ai)
 MAX_PARSE_ATTEMPTS = 2
 EFFORT = "high"
 NAME_SURE = 0.75                                 # a name match at least this good ...
@@ -209,14 +209,21 @@ def add_usage(a: Optional[dict], b: Optional[dict]) -> Optional[dict]:
 
 
 def read_items(preview: dict, people: Optional[list] = None) -> tuple[list, dict]:
-    """(items, usage). No HR page and no 1510 line: no call at all ([], {})."""
+    """(items, usage). No HR page and no 1510 line: no call at all ([], {}). The people are read before the paid call (a failed
+    list then costs nothing), and anything failing after it still reports the tokens it cost (HrReadError.usage)."""
     src = sources(preview)
     if not src["pages"] and not src["lines"]:
         return [], {}
-    raw, usage = _ask(src)
     if people is None:
         people = _people() if supabase.configured() else []
-    return build_items(raw, src, people), usage
+    raw, usage = _ask(src)
+    try:
+        return build_items(raw, src, people), usage
+    except Exception as exc:                           # noqa: BLE001 -- the tokens were spent: they are counted all the same
+        logger.exception("inbox HR: building the items failed")
+        err = HrReadError(f"อ่านเรื่องพนักงานไม่สำเร็จ ({exc})")
+        err.usage = usage
+        raise err from exc
 
 
 # ------------------------------------------------------------------ who it is about
@@ -257,7 +264,7 @@ def name_score(paper: str, p: dict) -> float:
 def resolve(code, name, people: list[dict]) -> tuple[Optional[dict], Optional[str]]:
     """(the employee, "code" | "name") -- the code first, else a sure name match; (None, None) when nobody is sure."""
     by_code = {str(p.get("code") or "").upper(): p for p in people}
-    for c in (norm_code(code), re.sub(r"\s+", "", str(code or "")).upper(), norm_code(name)):
+    for c in (re.sub(r"\s+", "", str(code or "")).upper(), norm_code(code), norm_code(name)):   # the exact code first
         if c and c in by_code:
             return by_code[c], "code"
     if not str(name or "").strip():
@@ -369,11 +376,43 @@ def build_items(raw: list, src: dict, people: list[dict]) -> list[dict]:
     return out
 
 
+def _sig(it: dict) -> tuple:
+    """What an item is about, whatever its id: an unresolved person's id is only its place in the answer (p20:resign:x, x:2)."""
+    who = re.sub(r"\s+", "", str(it.get("employee_name_read") or "")) or str(it.get("code_read") or "")
+    return it.get("page"), it.get("kind"), it.get("line_key") or None, who
+
+
+def _stable_id(it: dict) -> bool:
+    """The id names the thing itself: the person's code, or the expense line (not a place in the answer)."""
+    return bool(it.get("employee_code")) or (bool(it.get("line_key")) and it.get("id") == _safe_id(f"{it['line_key']}:{it['kind']}"))
+
+
 def merge(old: Optional[list], new: list) -> list:
-    """อ่านเรื่องพนักงาน again: what the owner already recorded or set aside stays as it is; the rest is the new read."""
-    decided = {it["id"]: it for it in old or [] if it.get("status") in ("applied", "dismissed")}
-    ids = {it["id"] for it in new}
-    return [decided.get(it["id"], it) for it in new] + [it for it in decided.values() if it["id"] not in ids]
+    """อ่านเรื่องพนักงาน again: what the owner already recorded or set aside stays as it is; the rest is the new read. A decided item
+    takes the place of the new one about the same thing -- the same stable id, else the same page / kind / line / name read -- never
+    of a different person who only got the same positional id; a new item whose id is taken gets a fresh one."""
+    decided = [it for it in old or [] if it.get("status") in ("applied", "dismissed")]
+    used: set[int] = set()
+    out = []
+    for n in new:
+        hit = next((i for i, d in enumerate(decided) if i not in used and d["id"] == n["id"] and _stable_id(n)), None)
+        if hit is None:
+            hit = next((i for i, d in enumerate(decided) if i not in used and _sig(d) == _sig(n)), None)
+        if hit is not None:
+            used.add(hit)
+        out.append(decided[hit] if hit is not None else n)
+    out += [d for i, d in enumerate(decided) if i not in used]
+    kept = {it["id"] for it in out if it.get("status") in ("applied", "dismissed")}
+    taken = {it["id"] for it in out}
+    for k, it in enumerate(out):
+        if it.get("status") in ("applied", "dismissed") or it["id"] not in kept:
+            continue
+        base, i = it["id"], 2
+        while f"{base}:{i}" in taken:
+            i += 1
+        out[k] = {**it, "id": f"{base}:{i}"}
+        taken.add(out[k]["id"])
+    return out
 
 
 def carried(items: Optional[list]) -> Optional[list]:
@@ -571,6 +610,8 @@ def state_of(it: dict, ctx: dict, today: Optional[date] = None) -> dict:
 
     if kind == "resign":
         end = f.get("end_date")
+        if end and emp.get("start_date") and end < str(emp["start_date"]):
+            out["block"] = f"วันสุดท้ายต้องไม่ก่อนวันเริ่มงาน ({dmy(emp['start_date'])})"
         if gone:
             if end and emp.get("end_date") == end:
                 out.update(now=f"ลาออกแล้ว วันสุดท้าย {dmy(emp['end_date'])} — มีแล้ว ตรงกัน", block="มีแล้ว ตรงกัน — ไม่มีอะไรต้องบันทึก",
@@ -680,7 +721,7 @@ def view(preview: dict, access: str = "none", ai_ready: bool = False) -> dict:
     for it in items:
         st = state_of(it, ctx, today)
         if it.get("status") == "applied":                # recorded: what it says now is the result, never "record it again"
-            st.update(block="บันทึกแล้ว", now=None)
+            st.update(block="บันทึกแล้ว", now=None, dest=it.get("dest") or st.get("dest"))   # and where it went, as it was then
         it.update(st)
     return out
 
@@ -721,26 +762,41 @@ def _batch_key(row: dict, p: dict) -> str:
     return str(((p.get("batches") or [{}])[0] or {}).get("key") or (p.get("acc_docs_batch") or {}).get("batch") or f"inbox:{row['id']}")
 
 
+HERE = "(จากหน้าตรวจเอกสาร)"                    # marks the พนักงาน-queue rows this page wrote (the only ones it may take back)
+
+
+def _hkey(row: dict, p: dict, it: dict) -> dict:
+    return {"batch": f"eq.{_batch_key(row, p)}", "page": f"eq.{int(it['page'])}", "kind": f"eq.{it['kind']}",
+            "employee_code": f"eq.{it['employee_code']}"}
+
+
 def _history(row: dict, p: dict, it: dict, status: str) -> None:
-    """พนักงาน › จากเอกสารสิ้นเดือน shows what was decided here too. Never fails the write it follows: before schema_v95.sql the table
-    refuses kind role_change, and a history row is not worth undoing a recorded warning for."""
+    """พนักงาน › จากเอกสารสิ้นเดือน shows what was decided here too. The documents import (hr_suggest.sync_batch) uses the same batch
+    key, so a row may be there already: one recorded there ("applied") is never overwritten, and a ไม่บันทึก here leaves a row of the
+    queue as it is (it is that page's own decision). Never fails the write it follows: before schema_v95.sql the table refuses kind
+    role_change, and a history row is not worth undoing a recorded warning for."""
     if not it.get("employee_code"):
         return
     rec = {"batch": _batch_key(row, p), "page": int(it["page"]), "kind": it["kind"], "employee_code": it["employee_code"],
            "payload": it.get("fields") or {}, "summary": it.get("summary") or None, "status": status,
-           "result": (it.get("result") or ("ไม่บันทึก (จากหน้าตรวจเอกสาร)" if status == "dismissed" else ""))[:300], "decided_at": _now_iso()}
+           "result": (f"{(it.get('result') or '')[:270]} {HERE}" if status == "applied" else f"ไม่บันทึก {HERE}"), "decided_at": _now_iso()}
     try:
+        have = supabase.select("hr_suggestions", {"select": "id,status,result", **_hkey(row, p, it), "limit": "1"})
+        if have and (have[0].get("status") == "applied" or status == "dismissed"):
+            return
         supabase.insert("hr_suggestions", [rec], on_conflict="batch,page,kind,employee_code")
     except supabase.SupabaseError:
         logger.warning("inbox HR: hr_suggestions row not written (%s %s) -- schema_v95.sql not applied yet?", it["kind"], it["employee_code"])
 
 
 def _unhistory(row: dict, p: dict, it: dict) -> None:
+    """เอากลับมา: only the ไม่บันทึก row this page wrote goes; an applied one, or one the พนักงาน queue decided, stays."""
     if not it.get("employee_code"):
         return
     try:
-        supabase.delete("hr_suggestions", {"batch": f"eq.{_batch_key(row, p)}", "page": f"eq.{int(it['page'])}", "kind": f"eq.{it['kind']}",
-                                           "employee_code": f"eq.{it['employee_code']}", "status": "eq.dismissed"})
+        for h in supabase.select("hr_suggestions", {"select": "id,status,result", **_hkey(row, p, it)}):
+            if h.get("status") == "dismissed" and str(h.get("result") or "").endswith(HERE):
+                supabase.delete("hr_suggestions", {"id": f"eq.{h['id']}"})
     except supabase.SupabaseError:
         logger.warning("inbox HR: could not take back the dismissed hr_suggestions row")
 
@@ -808,8 +864,10 @@ def apply(file_id: str, item_id: str, body: Optional[dict] = None, who: str = ""
             result = _write(trial, emp, f, ctx, ref, st.get("level"))
         except employees.InvalidEmployee as exc:
             raise _err(str(exc))
+        if it["kind"] == "warning":                   # the level written, so a later count (which includes this one) never relabels it
+            f = {**f, "level": f.get("level") or st.get("level")}
         it.update(fields=f, employee_code=emp["code"], match=trial["match"], status="applied", result=result, applied_at=_now_iso(),
-                  applied_by=(who or "")[:80] or None)
+                  applied_by=(who or "")[:80] or None, dest=st.get("dest"))
         _store(row["id"], p, items)
         _history(row, p, it, "applied")
 
