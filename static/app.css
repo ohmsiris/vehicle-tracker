@@ -2731,7 +2731,7 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ick-noimg { margin: 0; padding: 40px 12px; text-align: center; color: var(--muted); background: var(--surface-2); }
 .ick-lines { container-type: inline-size; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 12px 10px; }
 .ick-r { display: grid; gap: 6px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line);
-  grid-template-columns: 136px minmax(140px, 1fr) 104px minmax(140px, 180px) minmax(120px, 160px) minmax(150px, 220px) 52px;
+  grid-template-columns: 128px minmax(110px, 1fr) 92px minmax(118px, 170px) minmax(96px, 150px) minmax(130px, 220px) 44px;
   grid-template-areas: "date text amt acc veh dest act"; }
 .ick-r > .c-date { grid-area: date; } .ick-r > .c-text { grid-area: text; } .ick-r > .c-amt { grid-area: amt; } .ick-r > .c-acc { grid-area: acc; }
 .ick-r > .c-veh { grid-area: veh; } .ick-r > .c-dest { grid-area: dest; } .ick-r > .c-act { grid-area: act; text-align: right; }
@@ -2746,6 +2746,7 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ick-r .chg input, .ick-r .chg select { border-color: var(--warn); background: var(--warn-soft); }
 .ick-r.new input, .ick-r.new select { border-color: var(--accent); }
 .ick-r.edited > .c-text input:not(:focus) { box-shadow: inset 3px 0 0 var(--accent); }
+.ick-r.unapplied input, .ick-r.unapplied select, .ick-r .unapplied input, .ick-r .unapplied select { border-color: var(--bad); border-style: dashed; }
 .ick-r.cashfuel, .ick-r.deleted { opacity: .6; }
 .ick-r.cashfuel:focus-within, .ick-r.cashfuel:hover { opacity: 1; }
 .ick-r.cashfuel input, .ick-r.cashfuel select, .ick-r.deleted input, .ick-r.deleted select { background: var(--surface-2); color: var(--text-2); }
@@ -2755,6 +2756,7 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ick-dest.book { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .ick-dest.cashfuel { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
 .ick-dest.noted { display: inline-block; background: var(--surface-2); color: var(--muted); border-color: var(--line-strong); }
+.ick-dest.unapplied { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
 .ick-dest.deleted { background: transparent; color: var(--muted); border-color: var(--bad); text-decoration: line-through; }
 .ick-divider { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; font-size: 12px; font-weight: 650; color: var(--muted); }
 .ick-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line-strong); }
@@ -2763,12 +2765,15 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ick-card { display: grid; gap: 6px; justify-items: start; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; min-width: 0; overflow-wrap: anywhere; }
 .ick-card p, .ick-parts { margin: 0; }
 .ick-parts { padding-left: 18px; }
-@container (max-width: 900px) {
-  .ick-r { grid-template-columns: 136px minmax(0, 1fr) minmax(0, 1fr) 104px 48px; grid-template-areas: "date text text amt act" "acc acc veh dest dest"; }
-  .ick-r.head { display: none; }
+.ick-stack { display: grid; gap: 10px; min-width: 0; }
+/* a narrower column (a laptop with the sidebar open): each line on two rows, and the column names on the same two rows above them */
+@container (max-width: 760px) {
+  .ick-r { grid-template-columns: 128px minmax(0, 1fr) minmax(0, 1fr) 96px 44px; grid-template-areas: "date text text amt act" "acc acc veh dest dest"; }
+  .ick-r.head { row-gap: 0; }
 }
 @container (max-width: 480px) {
   .ick-r { grid-template-columns: minmax(0, 1fr) 100px 44px; grid-template-areas: "date amt act" "text text text" "acc acc acc" "veh veh veh" "dest dest dest"; }
+  .ick-r.head { display: none; }
 }
 @media (max-width: 900px) {
   .ick-top { position: static; }

@@ -267,11 +267,28 @@ def test_page_pictures_and_fixes_over_the_routes(db, engine, monkeypatch):
     assert c.get(f"/api/accounts/inbox/{FID}/page/9", headers=h).status_code == 404
     db.rows[FID]["preview"]["ai_images"]["3"] = "accdocs/../payroll/secret.jpg"              # never outside the drop box's own pictures
     assert c.get(f"/api/accounts/inbox/{FID}/page/3", headers=h).status_code == 404
-    r = c.post(f"/api/accounts/inbox/{FID}/edits", headers=h, json={"line_edits": {"edits": {"p2:l1": {"amount": 450}}}})
+    ver = c.get(f"/api/accounts/inbox/{FID}", headers=h).json()["edits_version"]
+    r = c.post(f"/api/accounts/inbox/{FID}/edits", headers=h, json={"line_edits": {"edits": {"p2:l1": {"amount": 450}}}, "version": ver})
     assert r.status_code == 200, r.text
-    assert row_of(r.json()["preview"], "p2:l1")["amount"] == 450.0
-    bad = c.post(f"/api/accounts/inbox/{FID}/edits", headers=h, json={"line_edits": {"edits": {"p2:l1": {"amount": -1}}}})
+    assert row_of(r.json()["preview"], "p2:l1")["amount"] == 450.0 and r.json()["edits_version"] != ver
+    bad = c.post(f"/api/accounts/inbox/{FID}/edits", headers=h,
+                 json={"line_edits": {"edits": {"p2:l1": {"amount": -1}}}, "version": r.json()["edits_version"]})
     assert bad.status_code == 422 and "มากกว่า 0" in bad.json()["detail"]
+    stale = c.post(f"/api/accounts/inbox/{FID}/edits", headers=h, json={"line_edits": {"edits": {"p3:l2": {"amount": 1400}}}, "version": ver})
+    assert stale.status_code == 422 and "จากที่อื่น" in stale.json()["detail"]
+    no_ver = c.post(f"/api/accounts/inbox/{FID}/edits", headers=h, json={"line_edits": {"edits": {"p3:l2": {"amount": 1400}}}})
+    assert no_ver.status_code == 422
+    assert row_of(db.rows[FID]["preview"], "p2:l1")["amount"] == 450.0 and "p3:l2" not in db.rows[FID]["preview"]["line_edits"]["edits"]
+
+
+def test_a_tab_opened_before_another_save_cannot_wipe_its_fixes(db, engine):
+    scan_row(db, status="booked", batches=["docs:2026-11:สระบุรี:mid"], booked_total=4500)
+    opened = inbox.get(FID)["edits_version"]                           # A and B open the same file
+    inbox.save_edits(FID, {"edits": {"p2:l1": {"delete": True}}}, version=opened)              # A deletes a line
+    with pytest.raises(inbox.InboxError, match="จากที่อื่น"):                                   # B, opened before, fixes another
+        inbox.save_edits(FID, {"edits": {"p3:l2": {"amount": 1400}}}, version=opened)
+    assert db.rows[FID]["preview"]["line_edits"]["edits"] == {"p2:l1": {"delete": True}}
+    assert len(engine) == 1                                            # booked again once, with A's delete
 
 
 def test_a_payroll_files_pages_need_the_pay_menu(db, engine, monkeypatch):
@@ -290,3 +307,35 @@ def test_the_new_paths_belong_to_the_inputs_menu_only():
 def test_the_check_page_route_is_a_sub_page_of_the_inputs_menu():
     hashes = users.MENUS["accounts_in"]["hash"]
     assert f"#accounts-in/check={FID}".startswith(f"{hashes}/")       # users.js staffMayOpen: a menu's own sub-pages
+
+
+# ------------------------------------------------------------------ the truck a fix picks, and cash fuel after a delete (review, 28 Nov 2026)
+def test_a_truck_picked_without_a_plate_is_booked_to_that_truck(monkeypatch):
+    veh = VEH + [{"id": "kx", "vehicle_number": "5", "plate_number": None, "branch": "แก่งคอย"}]
+    monkeypatch.setattr(supabase, "configured", lambda: False)
+    monkeypatch.setattr(inbox_ai, "_vehicles", lambda: veh)
+    le = {"edits": {"p2:l2": {"vehicle_id": "kx", "account": "6100"}},
+          "added": [{"id": "x1", "page": 2, "date": "2026-11-01", "text": "ซ่อม", "amount": 50, "account": "6100", "vehicle_id": "kx"}]}
+    pv = inbox_ai.from_pages(reads(), "x.pdf", {}, line_edits=le)       # a สระบุรี file; truck 5 of สระบุรี is v5
+    for key in ("p2:l2", "p2:x1"):
+        r = row_of(pv, key)
+        assert r["vehicle_id"] == "kx" and r["dest"].endswith("รถ 5") and r["branch"] == "แก่งคอย"
+    assert [e["lines"][0]["vehicle_id"] for e in pv["batches"][0]["entries"] if e["lines"][0]["account"] == "6100"] == ["kx", "kx"]
+
+
+def test_deleting_her_paper_line_never_skips_another_trucks_fuel(monkeypatch, off_db):
+    monkeypatch.setattr(inbox_ai, "_cash_fuel_lines", lambda m, b, h: [{"day": "2026-10-27", "amount": 1500, "vehicle_id": "v5"}])
+    pv = inbox_ai.from_pages(reads(), "x.pdf", {}, line_edits={"edits": {"p3:l1": {"delete": True}}})
+    assert row_of(pv, "p3:l2")["dest_kind"] == "book" and row_of(pv, "p3:l1")["dest_kind"] == "deleted"   # truck 31 is not hers
+    pv = inbox_ai.from_pages(reads(), "x.pdf", {}, line_edits={"edits": {"p3:l1": {"date": "2026-10-29"}}})
+    assert row_of(pv, "p3:l1")["dest_kind"] == "cashfuel"              # her truck, another day (a date misread): still hers
+
+
+def test_files_read_before_the_check_page_keep_the_dialog(off_db):
+    pv = inbox_ai.from_pages(reads(), "x.pdf", {})
+    assert inbox.checkable(pv)
+    old = json.loads(json.dumps(pv))
+    for r in old["batches"][0]["rows"]:
+        r.pop("key", None)
+        r.pop("dest_kind", None)
+    assert not inbox.checkable(old) and not inbox.checkable(ic.empty_preview("cheques", "เช็ค", batches=[]))

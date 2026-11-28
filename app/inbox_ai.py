@@ -608,8 +608,16 @@ def skip_cash_fuel(batch: dict, done: list[dict], vehicles: Optional[list] = Non
     first the same day and amount; then the same day and truck (an amount misread: her checked 500 read as 600 off the paper -- her
     page wins, owner 28 Nov 2026); then the same amount on another day (a date misread: 31/10 read as 3/10). A fuel line she does not have
     (no truck written, so she left it out) stays booked from the paper -- nothing is lost. Returns the lines marked."""
-    from collections import Counter
     left = [{"day": str(r["day"])[:10], "amount": round(float(r["amount"]), 2), "vehicle_id": r.get("vehicle_id")} for r in done]
+
+    def truck(ln) -> Optional[str]:
+        """The id of the line's truck: the one the owner picked (opt["vid"]), else the plate written on the paper."""
+        opt = ln[5] or {}
+        if opt.get("vid"):
+            return opt["vid"]
+        plate = opt.get("v")
+        v = match_truck(plate, None, vehicles, batch.get("branch"))[0] if plate and vehicles else None
+        return (v or {}).get("id")
     lines = [(p, ln) for p in batch.get("pages") or [] for ln in p.get("lines") or [] if ln[3] == "6130"]
     month = batch.get("month") or ""
     out, rest = [], []
@@ -629,19 +637,18 @@ def skip_cash_fuel(batch: dict, done: list[dict], vehicles: Optional[list] = Non
             rest.append((p, ln))
     rest2 = []
     for p, ln in rest:
-        d, plate = _line_day(ln[0], month), (ln[5] or {}).get("v")
-        v = match_truck(plate, None, vehicles, batch.get("branch"))[0] if plate and vehicles else None
-        hit = take(lambda r: r["day"] == d and r["vehicle_id"] == v["id"]) if v and d else None
+        d, vid = _line_day(ln[0], month), truck(ln)
+        hit = take(lambda r: r["day"] == d and r["vehicle_id"] == vid) if vid and d else None
         if hit:
             ln[5]["cf_amount"] = hit["amount"]
             out.append((p, ln))
         else:
             rest2.append((p, ln))
-    by_amount = Counter(r["amount"] for r in left)
+    # the same amount on another day -- never her line of ANOTHER truck (both trucks known and different: a different fill-up;
+    # e.g. the owner deleted the paper line that was hers, 28 Nov 2026)
     for p, ln in rest2:
-        amt = round(float(ln[2]), 2)
-        if by_amount[amt] > 0:
-            by_amount[amt] -= 1
+        amt, vid = round(float(ln[2]), 2), truck(ln)
+        if take(lambda r: r["amount"] == amt and not (vid and r["vehicle_id"] and r["vehicle_id"] != vid)):
             out.append((p, ln))
     for p, ln in out:
         ln[5]["skip"] = True
@@ -688,8 +695,13 @@ def chart_list() -> list[list[str]]:
     return [[c, n] for c, n, _ in CHART]
 
 
-def _vehicle_of(v, vehicles: list[dict], branch: Optional[str] = None) -> Optional[dict]:
-    """The vehicle a line's opt["v"] names, the way acc_docs.build finds it (plate first, then the number within the branch)."""
+def _vehicle_of(v, vehicles: list[dict], branch: Optional[str] = None, vid=None) -> Optional[dict]:
+    """The vehicle a line's opt names, the way acc_docs.build finds it: the id the owner picked (opt["vid"]) first, then the plate,
+    then the number within the branch."""
+    if vid:
+        hit = next((x for x in vehicles if x.get("id") == vid), None)
+        if hit:
+            return hit
     if not v:
         return None
     p = norm_plate(v)
@@ -763,12 +775,13 @@ def apply_line_edits(batch: dict, line_edits: Optional[dict], vehicles: list[dic
             pass
         if e.get("account") in PARTY:
             acc, party = e["account"], PARTY[e["account"]]
-        if "vehicle_id" in e:
-            plate = _plate_for(e["vehicle_id"], vehicles) if e["vehicle_id"] else None
+        if "vehicle_id" in e:                          # the id itself decides the truck (a truck with no plate is named by its
+            plate = _plate_for(e["vehicle_id"], vehicles) if e["vehicle_id"] else None     # number, which repeats across branches)
             if plate:
-                opt["v"] = plate
+                opt["v"], opt["vid"] = plate, e["vehicle_id"]
             elif not e["vehicle_id"]:
                 opt.pop("v", None)
+                opt.pop("vid", None)
         text = text.replace(" (อ่านไม่ชัด)", "").replace("(อ่านไม่ชัด)", "").strip() or text
         opt["edited"] = True
         return (dm, text, amount, acc, party, opt)
@@ -780,7 +793,7 @@ def apply_line_edits(batch: dict, line_edits: Optional[dict], vehicles: list[dic
             e = edits.get(key) if key else None
             if isinstance(e, dict) and e.get("delete"):
                 deleted.append({"key": key, "page": p["page"], "date": _line_day(ln[0], month), "text": ln[1], "amount": ln[2],
-                                "account": ln[3], "v": (ln[5] or {}).get("v")})
+                                "account": ln[3], "v": (ln[5] or {}).get("v"), "vid": (ln[5] or {}).get("vid")})
                 continue
             kept.append(fix(ln, e, key) if isinstance(e, dict) and e else ln)
         p["lines"] = kept
@@ -814,7 +827,7 @@ def apply_line_edits(batch: dict, line_edits: Optional[dict], vehicles: list[dic
         opt = {"key": f"p{n}:{a['id']}", "added": True, "edited": True}
         plate = _plate_for(a.get("vehicle_id"), vehicles) if a.get("vehicle_id") else None
         if plate:
-            opt["v"] = plate
+            opt["v"], opt["vid"] = plate, a["vehicle_id"]
         p["lines"].append((dm, (str(a.get("text") or "").strip() or "-")[:200], amount, acc, PARTY[acc], opt))
 
     for p in [x for x in batch["pages"] if not x["lines"]]:    # every line deleted: the page is filed with no money
@@ -1063,7 +1076,7 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
         unsure = "(อ่านไม่ชัด)" in (e.get("description") or "")
         m = re.search(r":p(\d+):l(\d+)$", e.get("source_id") or "")
         opt = ((line_at.get((int(m.group(1)), int(m.group(2)))) if m else None) or [None] * 6)[5] or {}
-        veh = _vehicle_of(opt.get("v"), vehicles, branch)
+        veh = _vehicle_of(opt.get("v"), vehicles, branch, opt.get("vid"))
         rows.append({"date": e["entry_date"], "text": e["description"], "party": e["party"], "amount": float(debit["debit"]),
                      "role": role_of(debit["account"], unsure), "account": debit["account"], "flag": "อ่านไม่ชัด" if unsure else None,
                      "page": e["doc_page"], "branch": e["branch"], "key": opt.get("key"), "vehicle_id": debit.get("vehicle_id"),
@@ -1071,14 +1084,14 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
                      "edited": bool(opt.get("edited")), "added": bool(opt.get("added"))})
     for dm, text, amount, account, party, opt in skipped:
         her = f" ({opt['cf_amount']:,.2f})" if opt.get("cf_amount") not in (None, amount) else ""
-        veh = _vehicle_of(opt.get("v"), vehicles, branch)
+        veh = _vehicle_of(opt.get("v"), vehicles, branch, opt.get("vid"))
         unsure = "(อ่านไม่ชัด)" in (text or "")
         rows.append({"date": _line_day(dm, month), "text": text, "party": party, "amount": 0.0, "read_amount": float(amount), "role": "info",
                      "account": account, "flag": "อ่านไม่ชัด" if unsure else None, "page": opt.get("page"), "key": opt.get("key"),
                      "vehicle_id": (veh or {}).get("id"), "dest": f"มีแล้วในน้ำมันเงินสด{her}", "dest_kind": "cashfuel",
                      "edited": bool(opt.get("edited")), "added": bool(opt.get("added"))})
     for x in deleted:
-        veh = _vehicle_of(x.get("v"), vehicles, branch)
+        veh = _vehicle_of(x.get("v"), vehicles, branch, x.get("vid"))
         rows.append({"date": x["date"], "text": x["text"], "party": PARTY.get(x["account"]), "amount": 0.0, "read_amount": float(x["amount"]),
                      "role": "info", "account": x["account"], "flag": None, "page": x["page"], "key": x["key"],
                      "vehicle_id": (veh or {}).get("id"), "dest": "ลบแล้ว · ไม่ลง", "dest_kind": "deleted", "edited": True, "added": False})

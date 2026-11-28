@@ -50,6 +50,7 @@ def build(batch: dict, vehicles: list[dict]) -> dict:
     """The rows to write for one batch: {docs: [...], entries: [...], problems: [...]}. Each entry carries `doc_page` to link it
     to its doc after insert. A page whose lines do not add up to its written total is a 'mismatch' (kept, flagged)."""
     month, branch, name = batch["month"], batch["branch"], batch["batch"]
+    by_id = {v["id"]: v for v in vehicles if v.get("id")}
     by_plate = {norm_plate(v["plate_number"]): v for v in vehicles if v.get("plate_number")}
     by_number = {}
     for v in vehicles:
@@ -86,7 +87,9 @@ def build(batch: dict, vehicles: list[dict]) -> dict:
             if opt.get("skip"):          # counted in the page total, not booked (e.g. fuel the bookkeeper already has on the cash-fuel page)
                 continue
             v = None
-            if opt.get("v"):
+            if opt.get("vid"):           # the truck the owner picked on ตรวจเอกสารก่อนลงบัญชี (28 Nov 2026): its id decides
+                v = by_id.get(opt["vid"])
+            if not v and opt.get("v"):
                 v = by_plate.get(norm_plate(opt["v"])) or by_number.get(str(opt["v"]))
                 if not v:
                     problems.append(f"หน้า {p['page']} บรรทัด {i}: ไม่พบรถ {opt['v']}")

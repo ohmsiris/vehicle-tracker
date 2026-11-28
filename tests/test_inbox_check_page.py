@@ -108,3 +108,35 @@ def test_where_a_line_goes_is_worked_out_as_the_owner_types(preview, tmp_path):
     assert got[2] == ["book", "บัญชี 6100 ซ่อมรถ · รถ #5 (1ฒถ 2085)"]
     assert got[3:5] == ["บัญชี 1510 เงินกู้พนักงาน", "บัญชี 1500 เงินเบิกล่วงหน้า"]
     assert got[5:] == ["2025-12-26", "2026-11-11", True]
+
+
+def test_saved_fixes_the_server_left_out_are_marked_and_the_servers_dest_is_shown(preview, tmp_path):
+    got = run("""(() => {
+      const rows = DATA.preview.batches[0].rows;
+      const r = rows.find((x) => x.key === "p3:l2");
+      r.vehicle_id = null; r.dest = "บัญชี 6130 น้ำมันเงินสด · รถ 99-9999 (ไม่พบในทะเบียนรถ)";      // the paper's truck is not in the register
+      // saved: a date the server could not use (another month picked since) and an added line it left out
+      const saved = { edits: { "p2:l1": { date: "2026-12-01" } },
+                      added: [{ id: "x9", page: 2, date: "2026-12-02", text: "ค่าส่ง", amount: 40, account: "7300", vehicle_id: null }] };
+      ick.saved = saved;
+      const d = ickCopy(saved);
+      ick.draft = d;
+      const p2 = ickPages(DATA).find((p) => p.n === 2), p3 = ickPages(DATA).find((p) => p.n === 3);
+      const l1 = ickLinesOf(p2, d).find((l) => l.key === "p2:l1"), x9 = ickLinesOf(p2, d).find((l) => l.key === "p2:x9");
+      const out = { l1: [[...ickChanged(l1)], [...l1.unapplied]], x9: [x9.state, ickDest(x9)[0]], sum: ickPageSum(ickLinesOf(p2, d)),
+                    p3: ickDest(ickLinesOf(p3, d).find((l) => l.key === "p3:l2"), DATA.accounts, DATA.vehicles) };
+      d.added[0].date = "2026-11-02";                               // the owner fixes it: waiting to be saved again
+      out.x9b = ickLinesOf(p2, d).find((l) => l.key === "p2:x9").state;
+      ickSet(l1, "date", l1.base.date);                             // the read date typed back: a fix against what is saved
+      out.l1b = d.edits["p2:l1"];
+      const old = JSON.parse(JSON.stringify(DATA.preview));
+      for (const x of old.batches[0].rows) { delete x.key; delete x.dest_kind; }
+      out.checkable = [ickCheckable(DATA.preview), ickCheckable(old)];
+      return out;
+    })()""", preview, tmp_path)
+    assert got["l1"] == [[], ["date"]]                                 # not "changed": saved, but not used
+    assert got["x9"] == ["unapplied", "unapplied"] and got["sum"] == 1500   # x9 not counted (p2:l2 back: not deleted in this draft)
+    assert got["x9b"] == "new"
+    assert got["p3"] == ["book", "บัญชี 6130 น้ำมันเงินสด · รถ 99-9999 (ไม่พบในทะเบียนรถ)"]
+    assert got["l1b"] == {"date": "2026-10-26"}
+    assert got["checkable"] == [True, False]

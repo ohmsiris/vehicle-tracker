@@ -81,6 +81,8 @@ const NAV_OF = {
 const HR_VIEWS = ["employees", "employee", "loans", "loan", "attendance", "documents", "document"];
 
 function showView(name) {
+  // fixes on ตรวจเอกสารก่อนลงบัญชี not saved: asked first, also from the sidebar items that open their page without a hash (28 Nov 2026)
+  if (name !== "inboxCheck" && typeof ickMayLeave === "function" && !ickMayLeave("")) return;
   for (const v of VIEW_NAMES) $(v + "View").hidden = v !== name;
   if (["capture", "busy", "review", "done"].includes(name)) lastBillView = name === "busy" ? "capture" : name;
   for (const id of new Set(Object.values(NAV_OF))) $(id).classList.toggle("active", id === NAV_OF[name]);

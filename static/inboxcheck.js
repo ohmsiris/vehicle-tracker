@@ -10,7 +10,7 @@
 //     with them, a booked file is booked again with them); ลงบัญชี books exactly what is left, and waits while a fix is not saved.
 // Every other file keeps the dialog (inbox.js ibxPreview). Loaded after inbox.js (ibxBadge, ibxRun, ibxSuperseded ... at call time).
 
-const ick = { id: null, f: null, page: null, saved: null, draft: null, msg: null, seq: 0, wired: false, editable: false };
+const ick = { id: null, f: null, page: null, saved: null, draft: null, version: null, msg: null, seq: 0, wired: false, editable: false, ro: null };
 const ICK_MONEY = new Set(["expense", "fuel", "advance"]);        // pages whose lines are booked (acc_docs.build)
 const ICK_ADDABLE = new Set(["expense", "fuel"]);                 // pages a missed line can be added to (as the AI read them)
 const ICK_LINE = new Set(["book", "cashfuel", "deleted"]);        // rows that are lines of a page (noted rows are about a page)
@@ -114,10 +114,21 @@ function ickPages(f) {
 }
 
 // the lines of one page as the screen shows them: the server's row with the fixes not saved yet laid over it.
-// state: book (goes to the books) / new (added here, not saved) / cashfuel (already on the cash-fuel page) / deleted
-function ickLinesOf(pg, draft) {
-  const d = draft || ickEmpty();
+// state: book (goes to the books) / new (added here, not saved) / unapplied (an added line saved but the server could not use it --
+// e.g. its date fell outside the half after another month was picked) / cashfuel (already on the cash-fuel page) / deleted.
+// l.chg: the fields changed on the screen and not saved yet (draft against saved); l.unapplied: fields saved but not what the server
+// used (its row still shows the read value) -- both per field, so a fix the server left out is never mistaken for one waiting to save.
+function ickLinesOf(pg, draft, saved) {
+  const d = draft || ickEmpty(), s = saved || ick.saved || ickEmpty();
   const out = [], seen = new Set();
+  const savedAdded = (id) => (s.added || []).find((x) => x.id === id);
+  const fieldsOf = (base, dE, sE) => {
+    const val = (e, f) => (e && e[f] !== undefined ? e[f] : base[f]);
+    const chg = new Set(ICK_FIELDS.filter((f) => !ickEq(f, val(dE, f), val(sE, f))));
+    const un = new Set(ICK_FIELDS.filter((f) => !chg.has(f) && sE && sE[f] !== undefined
+      && !ickEq(f, f === "text" ? String(sE[f] ?? "").replace(ICK_UNSURE, "") : sE[f], base[f])));
+    return [chg, un];
+  };
   for (const r of pg.rows) {
     if (!ICK_LINE.has(r.dest_kind) || !r.key) continue;
     const base = {
@@ -128,32 +139,40 @@ function ickLinesOf(pg, draft) {
     if (m) {                                        // a line the owner added earlier (saved)
       seen.add(m[1]);
       const a = (d.added || []).find((x) => x.id === m[1]);
-      out.push({ key: r.key, id: m[1], row: r, base, v: a ? ickOverlay(base, a) : base, added: true, flag: false,
+      const [chg, un] = fieldsOf(base, a, savedAdded(m[1]));
+      out.push({ key: r.key, id: m[1], row: r, base, v: a ? ickOverlay(base, a) : base, added: true, inSaved: true, flag: false, chg, unapplied: un,
         state: !a || a._gone ? "deleted" : r.dest_kind === "deleted" ? "book" : r.dest_kind });
       continue;
     }
     const e = (d.edits || {})[r.key] || {};
-    const v = ickOverlay(base, e);
-    out.push({ key: r.key, row: r, base, v, added: false, flag: !!r.flag,
+    const [chg, un] = fieldsOf(base, e, (s.edits || {})[r.key]);
+    out.push({ key: r.key, row: r, base, v: ickOverlay(base, e), added: false, flag: !!r.flag, chg, unapplied: un,
       state: e.delete ? "deleted" : r.dest_kind === "deleted" ? "book" : r.dest_kind });
   }
+  const blank = { date: "", text: "", amount: "", account: "7900", vehicle_id: "" };
   for (const a of d.added || []) {
-    if (Number(a.page) !== pg.n || seen.has(a.id) || a._gone) continue;
-    const blank = { date: "", text: "", amount: "", account: "7900", vehicle_id: "" };
-    out.push({ key: `p${pg.n}:${a.id}`, id: a.id, row: null, base: null, v: ickOverlay(blank, a), added: true, flag: false, state: "new" });
+    if (Number(a.page) !== pg.n || seen.has(a.id)) continue;
+    const sa = savedAdded(a.id);
+    if (a._gone && !sa) continue;
+    const v = ickOverlay(blank, a);
+    // saved but no row came back: the server left it out (its reason is in หมายเหตุจากการอ่าน); changed since, it waits to be saved again
+    const same = !!sa && ICK_FIELDS.every((f) => ickEq(f, v[f], ickOverlay(blank, sa)[f]));
+    out.push({ key: `p${pg.n}:${a.id}`, id: a.id, row: null, base: null, v, added: true, inSaved: !!sa, flag: false,
+      chg: same ? new Set() : new Set(ICK_FIELDS), unapplied: same ? new Set(ICK_FIELDS) : new Set(),
+      state: a._gone ? "deleted" : same ? "unapplied" : "new" });
   }
-  const order = { book: 0, new: 0, cashfuel: 1, deleted: 2 };
+  const order = { book: 0, new: 0, unapplied: 0, cashfuel: 1, deleted: 2 };
   return out.map((l, i) => [l, i]).sort((x, y) => order[x[0].state] - order[y[0].state] || x[1] - y[1]).map((x) => x[0]);
 }
 
+// the fields typed on the screen and not saved yet
 function ickChanged(l) {
-  if (!l.base) return new Set(ICK_FIELDS);
-  return new Set(ICK_FIELDS.filter((f) => !ickEq(f, l.v[f], l.base[f])));
+  return l.chg || new Set(l.base ? [] : ICK_FIELDS);
 }
 
 // รวมบรรทัด of a page: what is left on it (cash-fuel lines count, as acc_docs.build counts them against the paper)
 function ickPageSum(lines) {
-  return Math.round(lines.filter((l) => l.state !== "deleted").reduce((s, l) => s + (Number.isFinite(ickNum(l.v.amount)) ? ickNum(l.v.amount) : 0), 0) * 100) / 100;
+  return Math.round(lines.filter((l) => l.state !== "deleted" && l.state !== "unapplied").reduce((s, l) => s + (Number.isFinite(ickNum(l.v.amount)) ? ickNum(l.v.amount) : 0), 0) * 100) / 100;
 }
 
 function ickAccName(code, accounts) {
@@ -175,9 +194,14 @@ function ickDestText(account, vid, accounts, vehicles) {
   return `บัญชี ${account}${name ? ` ${name}` : ""}${v ? ` · รถ ${ickVehLabel(v)}` : ""}`;
 }
 
+// the server's own text while nothing on the line waits to be saved (it also says when the paper's truck is not in the register);
+// worked out here only for a line changed on the screen, or added and not saved yet
 function ickDest(l, accounts, vehicles) {
   if (l.state === "deleted") return ["deleted", "ลบแล้ว · ไม่ลง"];
-  if (l.state === "cashfuel") return ["cashfuel", `${l.row.dest}${ickChanged(l).size ? " · ตรวจใหม่เมื่อบันทึก" : ""}`];
+  if (l.state === "unapplied") return ["unapplied", "ใส่ไม่ได้ · ไม่ลงบัญชี — ดูหมายเหตุจากการอ่าน แล้วแก้ให้ถูก"];
+  const changed = ickChanged(l).size > 0;
+  if (l.state === "cashfuel") return ["cashfuel", `${l.row.dest}${changed ? " · ตรวจใหม่เมื่อบันทึก" : ""}`];
+  if (l.row && l.row.dest && !changed) return ["book", l.row.dest];
   return ["book", ickDestText(l.v.account, l.v.vehicle_id, accounts, vehicles)];
 }
 
@@ -206,7 +230,7 @@ function ickWire() {
   window.addEventListener("resize", ickMeasure);
 }
 
-// fleet.js route(): leaving with fixes not saved asks first (the sidebar, the browser's Back)
+// fleet.js route() and app.js showView(): leaving with fixes not saved asks first (the sidebar, its hashless items, the browser's Back)
 function ickMayLeave(h) {
   if (!ick.id || $("inboxCheckView").hidden || h === `accounts-in/check=${ick.id}` || !ickDirty()) return true;
   if (confirm(ICK_LEAVE)) { ick.draft = ickCopy(ick.saved); return true; }
@@ -230,7 +254,7 @@ async function openInboxCheck(id) {
     return;
   }
   if (seq !== ick.seq) return;
-  if (!(f.preview || {}).acc_docs_batch) {           // not an AI-read expense paper: the dialog, on the drop box
+  if (!ickCheckable(f.preview)) {                     // not an AI-read expense paper (or one read before this page): the dialog
     ick.id = null;
     history.replaceState(null, "", "#accounts-in");
     await openAccounts("in");
@@ -241,18 +265,25 @@ async function openInboxCheck(id) {
   ickRender();
 }
 
+// the same rule as app/inbox.row_view "check": an AI-read expense paper whose rows say where they go (one read before this page has
+// none -- it stays on the dialog, whose อ่านใหม่ (no AI cost) gives it them)
+function ickCheckable(p) {
+  return !!(p && p.acc_docs_batch && (((p.batches || [])[0] || {}).rows || []).some((r) => r.key && r.dest_kind));
+}
+
 function ickTake(f) {
   ick.f = f;
   ick.saved = ickCopy((f.preview || {}).line_edits);
   ick.draft = ickCopy(ick.saved);
-  const rows = (((f.preview || {}).batches || [])[0] || {}).rows || [];
-  ick.editable = rows.some((r) => ICK_LINE.has(r.dest_kind) && r.key) && f.status !== "ai_running" && !f.pending;
+  ick.version = f.edits_version || "";
+  ick.editable = ickCheckable(f.preview) && f.status !== "ai_running" && !f.pending;
 }
 
 function ickSay(text, bad = false) {
   ick.msg = text ? { text, bad } : null;
   const box = $("ickMsg");
   if (box) fill(box, ick.msg ? el("span", { class: ick.msg.bad ? "warn-text" : "ok-text", text: ick.msg.text }) : null);
+  if (box && !window.ResizeObserver) ickMeasure();
 }
 
 function ickRender() {
@@ -264,12 +295,27 @@ function ickRender() {
     el("div", { id: "ickMain", class: "ick-main" }, ...shown.map(ickPageEl), !pages.length ? el("p", { class: "muted", text: "ไม่มีหน้าในไฟล์นี้" }) : null));
   ickRefresh();
   ickMeasure();
+  ickWatchTop();
 }
 
-// the bar's height, so the scan sticks just under it
+// the bar's height, so the scan sticks just under it -- measured again whenever the bar grows or shrinks (หมายเหตุจากการอ่าน opened,
+// a message shown, a narrower window), not only on render
 function ickMeasure() {
   const top = document.querySelector("#inboxCheckView .ick-top"), body = $("ickBody");
   if (top && body) body.style.setProperty("--ick-top", `${top.offsetHeight}px`);
+}
+
+function ickWatchTop() {
+  const top = document.querySelector("#inboxCheckView .ick-top");
+  if (!top) return;
+  if (window.ResizeObserver) {
+    if (!ick.ro) ick.ro = new ResizeObserver(() => ickMeasure());
+    ick.ro.disconnect();
+    ick.ro.observe(top);
+  } else {
+    const det = top.querySelector("details");
+    if (det) det.addEventListener("toggle", ickMeasure);
+  }
 }
 
 function ickTop(f) {
@@ -287,9 +333,6 @@ function ickTop(f) {
     el("button", { class: "btn small primary", type: "button", text: ibxChoiceLabel(f), onclick: ickChoose })) : null;
   const flags = (p.flags || []).length ? el("details", { class: "ick-flags" }, el("summary", { text: `หมายเหตุจากการอ่าน (${p.flags.length})` }),
     el("ul", { class: "small" }, ...p.flags.map((x) => el("li", { text: x })))) : null;
-  const oldRead = !ick.editable && f.status !== "ai_running" && !f.pending ? el("div", { class: "ick-note" },
-    "ไฟล์นี้อ่านไว้ก่อนมีหน้าแก้รายการ — กด อ่านใหม่ (ไม่เสียค่า AI) แล้วแก้ได้ ",
-    el("button", { class: "btn small", type: "button", "data-ibx-file": f.id, text: "อ่านใหม่", onclick: ickReread })) : null;
   return el("div", { class: "ick-top" },
     el("div", { class: "ick-bar" }, back, el("h2", { text: f.file_name || "ไฟล์" }), ibxBadge(f),
       el("div", { class: "ick-actions" }, fileLink, save, book)),
@@ -300,7 +343,7 @@ function ickTop(f) {
     f.pending ? el("div", { class: "ick-note warn", text: `อ่านใหม่แล้ว ${f.pending.message || "ต้องเลือกก่อน"} — รายการเดิมยังอยู่ในบัญชี · เลือกก่อนแล้วค่อยแก้รายการ` }) : null,
     sup ? el("div", { class: "ick-note warn", text: `ไฟล์นี้ถูกแทนที่ด้วย ${sup.by || "ไฟล์ที่ส่งทีหลัง"} — รายการของไฟล์นั้นอยู่ในบัญชีแทน` })
       : f.error ? el("div", { class: "ick-note warn", text: f.error }) : null,
-    conflicts, oldRead, flags);
+    conflicts, flags);
 }
 
 function ickStrip(pages) {
@@ -315,7 +358,8 @@ function ickPageEl(pg) {
   const head = el("div", { class: "ick-page-head" }, el("h3", { text: `หน้า ${pg.n}` }), pg.kind_th ? el("span", { class: "badge", text: pg.kind_th }) : null,
     pg.title ? el("span", { class: "muted small", text: pg.title }) : null);
   return el("section", { class: "ick-page", id: `ickP${pg.n}`, "data-page": String(pg.n) }, head,
-    el("div", { class: "ick-grid" }, ickScan(pg), pg.money ? ickTable(pg) : ickCard(pg)));
+    el("div", { class: "ick-grid" }, ickScan(pg), pg.money ? ickTable(pg)      // a page the AI found no money on can still take a missed line
+      : pg.canAdd && ick.editable ? el("div", { class: "ick-stack" }, ickCard(pg), ickTable(pg)) : ickCard(pg)));
 }
 
 function ickScan(pg) {
@@ -349,7 +393,7 @@ function ickCard(pg) {
 
 function ickTable(pg) {
   const lines = ickLinesOf(pg, ick.draft);
-  const on = lines.filter((l) => l.state === "book" || l.state === "new"), off = lines.filter((l) => l.state === "cashfuel" || l.state === "deleted");
+  const on = lines.filter((l) => l.state === "book" || l.state === "new" || l.state === "unapplied"), off = lines.filter((l) => l.state === "cashfuel" || l.state === "deleted");
   const total = el("div", { class: "ick-total", "data-total": String(pg.n) });
   const add = pg.canAdd && ick.editable ? el("button", { class: "btn small", type: "button", text: "+ เพิ่มบรรทัด", onclick: () => ickAdd(pg, lines) }) : null;
   const box = el("div", { class: "ick-lines" },
@@ -416,7 +460,13 @@ function ickLineEl(pg, l0) {
     cells.date, cells.text, cells.amount, cells.account, cells.vehicle_id, cell("dest", dest), cell("act", del));
   const paint = () => {
     const ch = ickChanged(l);
-    for (const f of ICK_FIELDS) cells[f].classList.toggle("chg", l.state !== "new" && ch.has(f));
+    row.className = `ick-r ${l.state}${l.row && l.row.edited ? " edited" : ""}`;
+    for (const f of ICK_FIELDS) {
+      const un = l.state !== "unapplied" && l.unapplied.has(f) && !ch.has(f);       // saved, but not what the server used
+      cells[f].classList.toggle("chg", l.state !== "new" && ch.has(f));
+      cells[f].classList.toggle("unapplied", un);
+      cells[f].title = un ? "ที่แก้ไว้ใช้ไม่ได้ — ดูหมายเหตุจากการอ่าน" : "";
+    }
     veh.hidden = !ickTruckAcc().has(acc.value) && !veh.value;
     const [k, t] = ickDest(l, ick.f.accounts, ick.f.vehicles);
     dest.className = `ick-dest ${k}`;
@@ -455,14 +505,15 @@ function ickSet(l, field, value) {
   }
   const e = { ...(d.edits[l.key] || {}) };
   const saved = ((ick.saved.edits || {})[l.key] || {})[field];
-  if (ickEq(field, value, l.base[field])) { if (saved !== undefined) e[field] = saved; else delete e[field]; }
+  if (saved !== undefined && ickEq(field, value, saved)) e[field] = saved;              // typed back to what is saved
+  else if (saved === undefined && ickEq(field, value, l.base[field])) delete e[field];  // typed back to what was read: no fix
   else e[field] = value;
   if (Object.keys(e).length) d.edits[l.key] = e; else delete d.edits[l.key];
 }
 
 function ickToggle(pg, l) {
   const d = ick.draft;
-  if (l.state === "new") d.added = d.added.filter((a) => a.id !== l.id);
+  if (l.added && !l.inSaved) d.added = d.added.filter((a) => a.id !== l.id);
   else if (l.added) {
     const a = d.added.find((x) => x.id === l.id);
     if (a) { if (a._gone) delete a._gone; else a._gone = true; }
@@ -515,7 +566,7 @@ function ickRefresh() {
     // รวมแถว = what will be booked; the paper's own total also holds the fuel already on the cash-fuel page, so the difference counts it
     let rows = 0, cf = 0;
     for (const pg of ickPages(f)) {
-      if (!pg.money) continue;
+      if (!pg.money && !pg.canAdd) continue;
       for (const l of ickLinesOf(pg, ick.draft)) {
         const a = Number.isFinite(ickNum(l.v.amount)) ? ickNum(l.v.amount) : 0;
         if (l.state === "book" || l.state === "new") rows += a; else if (l.state === "cashfuel") cf += a;
@@ -534,13 +585,17 @@ async function ickSave() {
   if (!ick.f || !ickDirty() || ick.saving) return;
   const f = ick.f;
   ick.saving = true;
+  const main = $("ickMain");
+  if (main) { main.inert = true; main.setAttribute("aria-busy", "true"); }      // nothing typed while it saves (a re-book takes seconds)
   ickRefresh();
   let res = null;
   await ibxRun(f.id, async () => {
-    try { res = await api(`/api/accounts/inbox/${f.id}/edits`, jsonOpts("POST", { line_edits: ickPayload(ick.draft) })); }
+    // version: the fixes this page opened with -- saved from another tab meanwhile, the server refuses instead of wiping them
+    try { res = await api(`/api/accounts/inbox/${f.id}/edits`, jsonOpts("POST", { line_edits: ickPayload(ick.draft), version: ick.version })); }
     catch (err) { ick.msg = { text: err.message, bad: true }; }
   });
   ick.saving = false;
+  if (main) { main.inert = false; main.removeAttribute("aria-busy"); }
   if (res) {
     const failed = ibxRebookFailed(res).map((x) => x.text);
     ick.msg = res.message ? { text: res.message, bad: true }
@@ -569,19 +624,9 @@ async function ickBook() {
 // a question to answer (month, branch, half, replace): the dialog's choose flow, then this page again
 function ickChoose() {
   const id = ick.id;
+  if (ickDirty() && !confirm("มีการแก้ที่ยังไม่ได้บันทึก — ไปเลือกโดยทิ้งการแก้นี้ไหม? (กด ยกเลิก แล้วบันทึกการแก้ก่อนได้)")) return;
   ibxPreview(id).then(() => {
     const dlg = $("ibxDialog");
     if (dlg) dlg.addEventListener("close", () => { if (ick.id === id && !$("inboxCheckView").hidden) openInboxCheck(id); }, { once: true });
   });
-}
-
-async function ickReread() {
-  const f = ick.f;
-  const warn = ibxRereadWarning(f);
-  if (warn && !confirm(`${f.file_name}\n${warn}\n\nอ่านใหม่ไหม?`)) return;
-  await ibxRun(f.id, async () => {
-    try { await api(`/api/accounts/inbox/${f.id}/reread`, { method: "POST" }); ick.msg = { text: "อ่านใหม่แล้ว — แก้รายการได้" }; }
-    catch (err) { ick.msg = { text: err.message, bad: true }; }
-  });
-  openInboxCheck(f.id);
 }

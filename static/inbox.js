@@ -423,7 +423,7 @@ async function ibxPreview(id) {
   const roles = f.roles || {};
   const err = el("p", { class: "error", hidden: true });
   const fileLink = el("a", { class: "btn small", href: `/api/accounts/inbox/${f.id}/file?token=${encodeURIComponent(state.token)}`, target: "_blank", rel: "noopener", text: "เปิดไฟล์" });
-  const toCheck = p.acc_docs_batch ? el("button", { class: "btn small primary", type: "button", text: "ตรวจ / แก้รายการ (ทั้งหน้า)",
+  const toCheck = f.check ? el("button", { class: "btn small primary", type: "button", text: "ตรวจ / แก้รายการ (ทั้งหน้า)",
     onclick: () => { dlg.close(); goHash(`#accounts-in/check=${f.id}`); } }) : null;
   const head = el("div", { class: "acx-rv-head" }, el("h3", { text: f.file_name }), ibxBadge(f), toCheck, fileLink,
     el("button", { class: "btn small", type: "button", text: "ปิด", onclick: () => dlg.close() }));

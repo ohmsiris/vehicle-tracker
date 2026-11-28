@@ -1280,11 +1280,12 @@ def api_inbox_page(file_id: str, n: int, x_app_token: str = Header(default=""), 
 
 @app.post("/api/accounts/inbox/{file_id}/edits")
 def api_inbox_edits(file_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
-    """บันทึกการแก้ ({"line_edits": {"edits": {...}, "added": [...]}}): the owner's fixes to the lines before (or after) ลงบัญชี; the
-    preview is rebuilt with them, a booked file is booked again with them."""
+    """บันทึกการแก้ ({"line_edits": {"edits": {...}, "added": [...]}, "version": <edits_version the page opened with>}): the owner's
+    fixes to the lines before (or after) ลงบัญชี; the preview is rebuilt with them, a booked file is booked again with them. A version
+    that no longer matches (fixes saved from another tab meanwhile) is refused, never overwritten."""
     from app import inbox
     _check_token(x_app_token, token)
-    return _inbox_call(inbox.save_edits, file_id, body.get("line_edits"), _sees_pay(x_app_token or token))
+    return _inbox_call(inbox.save_edits, file_id, body.get("line_edits"), _sees_pay(x_app_token or token), str(body.get("version") or ""))
 
 
 @app.post("/api/accounts/inbox/{file_id}/choose")

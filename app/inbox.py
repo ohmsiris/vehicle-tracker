@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 import logging
 import re
 import threading
@@ -368,6 +369,15 @@ def _num(x) -> Optional[float]:
         return None
 
 
+def checkable(preview: dict) -> bool:
+    """Opened on ตรวจเอกสารก่อนลงบัญชี: an AI-read expense paper whose rows say where they go (key / dest_kind). One read before that
+    page (28 Nov 2026) has neither -- it keeps the dialog (its อ่านใหม่, no AI cost, gives them) instead of showing empty pages."""
+    if not preview.get("acc_docs_batch"):
+        return False
+    rows = ((preview.get("batches") or [{}])[0] or {}).get("rows") or []
+    return any(r.get("key") and r.get("dest_kind") for r in rows)
+
+
 def row_view(row: dict, running: Optional[set] = None) -> dict:
     """One dropped file as the list shows it (the full preview stays on the server until the owner opens it)."""
     p = base_preview(row)
@@ -386,7 +396,7 @@ def row_view(row: dict, running: Optional[set] = None) -> dict:
             "pages": p.get("pages"), "needs_ai": bool(p.get("needs_ai")), "store_only": bool(p.get("store_only")),
             "superseded": bool(sup_by) and status == "stored", "superseded_by": sup_by,
             "remove_note": p.get("remove_note") or "",
-            "check": bool(p.get("acc_docs_batch")),        # an AI-read expense paper: opened on ตรวจเอกสารก่อนลงบัญชี (28 Nov 2026)
+            "check": checkable(p),                         # an AI-read expense paper: opened on ตรวจเอกสารก่อนลงบัญชี (28 Nov 2026)
             "pending": ({"status": pend.get("status"), "status_label": STATUS_LABEL.get(pend.get("status"), pend.get("status")),
                          "message": PENDING_MSG.get(pend.get("status"), ""), "note": (pend["preview"].get("note") or "")} if pend else None),
             "conflicts": ((pend["preview"] if pend else p).get("conflicts") or []),
@@ -569,7 +579,17 @@ def get(file_id: str, see_pay: bool = True) -> dict:
             out["accounts"] = ai.chart_list()
             out["truck_accounts"] = list(ai.TRUCK_ACCOUNTS)
             out["vehicles"] = [{k: v.get(k) for k in ("id", "vehicle_number", "plate_number", "branch")} for v in ai._vehicles()]
+        out["edits_version"] = edits_version(out["preview"])
     return out
+
+
+def edits_version(preview: dict) -> str:
+    """A fingerprint of the fixes saved on a file (preview["line_edits"]): the check page sends back the one it opened with, so a tab
+    opened before someone else saved cannot wipe their fixes (28 Nov 2026)."""
+    le = preview.get("line_edits") if isinstance(preview.get("line_edits"), dict) else {}
+    if not le.get("edits") and not le.get("added"):
+        le = {}
+    return hashlib.sha256(json.dumps(le, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()[:16]
 
 
 def page_image(file_id: str, page: int, see_pay: bool = True) -> bytes:
@@ -586,10 +606,12 @@ def page_image(file_id: str, page: int, see_pay: bool = True) -> bytes:
     raise NotFound("ไม่มีรูปหน้านี้")
 
 
-def save_edits(file_id: str, line_edits: dict, see_pay: bool = True) -> dict:
+def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Optional[str] = None) -> dict:
     """บันทึกการแก้ on ตรวจเอกสารก่อนลงบัญชี (owner, 28 Nov 2026): the owner's fixes to the lines of an AI-read expense paper, checked
     strictly (inbox_ai.clean_line_edits), stored in the preview (line_edits) and the preview rebuilt with them the way อ่านใหม่ does --
-    no AI call. A booked file is booked again at once with the fixes (as a re-read that can book is). Returns what get() does."""
+    no AI call. A booked file is booked again at once with the fixes (as a re-read that can book is). version: edits_version of the
+    fixes the page opened with (the route always passes it): fixes saved since -- another tab, the bookkeeper -- refuse the save instead
+    of being wiped. Returns what get() does."""
     ai = _optional("inbox_ai")
     if ai is None:
         raise InboxError("ส่วนอ่านด้วย AI ยังไม่พร้อม")
@@ -601,6 +623,8 @@ def save_edits(file_id: str, line_edits: dict, see_pay: bool = True) -> dict:
         base = base_preview(row)
         if not base.get("acc_docs_batch") or not _ai_read(row):
             raise InboxError("ไฟล์นี้ไม่ใช่เอกสารเบิกที่อ่านด้วย AI — แก้รายการที่นี่ไม่ได้")
+        if version is not None and version != edits_version(base):
+            raise InboxError("มีการแก้ไฟล์นี้จากที่อื่นแล้ว — เปิดหน้าตรวจใหม่ (การแก้ในหน้านี้ยังไม่ได้บันทึก)")
         try:
             clean = ai.clean_line_edits(base, line_edits, ai._vehicles())
         except ValueError as exc:
