@@ -368,9 +368,20 @@ def half_key(entry: dict) -> tuple:
     return entry.get("branch"), p["month"], p["half"]
 
 
-def cash_fuel_covered_by_papers(entries: list[dict]) -> set:
-    """(branch, month, half) whose mid / end papers booked 6130 fuel themselves (not the cash-fuel page's own entries)."""
-    return {half_key(e) for e in entries if not str(e.get("source_id") or "").startswith(CASH_FUEL_PREFIX)}
+def cash_fuel_covered_by_papers(entries: list[dict], cash_totals: Optional[dict] = None) -> set:
+    """(branch, month, half) whose mid / end papers booked 6130 fuel themselves (not the cash-fuel page's own entries).
+    With cash_totals ({half_key: the cash-fuel page's total}): only a half where the papers booked at least half as much fuel as her
+    page holds -- the papers were booked before she did it, with all their fuel. A paper read after she did it books only the few fuel
+    lines she does not have (inbox_ai.skip_cash_fuel); those must not push her whole page out of the books (owner, 28 Nov 2026: the
+    mid-November papers' 1,300 left 49,127 of her fuel out)."""
+    papers = [e for e in entries if not str(e.get("source_id") or "").startswith(CASH_FUEL_PREFIX)]
+    if cash_totals is None:
+        return {half_key(e) for e in papers}
+    booked: dict = {}
+    for e in papers:
+        k = half_key(e)
+        booked[k] = booked.get(k, 0.0) + sum(float(l.get("debit") or 0) for l in e.get("acc_lines") or [] if l.get("account") == "6130")
+    return {k for k, amt in booked.items() if amt >= 0.5 * float(cash_totals.get(k) or 0)}
 
 
 def _sync_cash_fuel(lo: str, hi: str, vehicles: dict) -> int:
@@ -380,11 +391,15 @@ def _sync_cash_fuel(lo: str, hi: str, vehicles: dict) -> int:
     except supabase.SupabaseError:
         return 0                                           # the cash-fuel tables are not there: nothing to book
     # a branch and half whose PAPERS already booked their fuel (booked before the bookkeeper did that half) keeps the papers' fuel: never both
-    paper_fuel = supabase.select_all("acc_entries", {"select": "branch,entry_date,source_id,acc_lines!inner(account)", "acc_lines.account": "eq.6130",
+    paper_fuel = supabase.select_all("acc_entries", {"select": "branch,entry_date,source_id,acc_lines!inner(account,debit)", "acc_lines.account": "eq.6130",
                                                      "source": "in.(midmonth,endmonth)", "entry_date": f"gte.{lo}", "and": f"(entry_date.lte.{hi})",
                                                      "order": "id.asc"})
-    covered = cash_fuel_covered_by_papers(paper_fuel)
-    entries = [x for x in (cash_fuel_entry(r, vehicles.get(r.get("vehicle_id"))) for r in rows) if x and half_key(x) not in covered]
+    mine = [x for x in (cash_fuel_entry(r, vehicles.get(r.get("vehicle_id"))) for r in rows) if x]
+    totals: dict = {}
+    for x in mine:
+        totals[half_key(x)] = totals.get(half_key(x), 0.0) + x["lines"][0]["debit"]
+    covered = cash_fuel_covered_by_papers(paper_fuel, totals)
+    entries = [x for x in mine if half_key(x) not in covered]
     supabase.delete("acc_entries", {"source_id": f"like.{CASH_FUEL_PREFIX}*", "entry_date": f"gte.{lo}", "and": f"(entry_date.lte.{hi})"})
     _insert_entries(entries)
     return len(entries)

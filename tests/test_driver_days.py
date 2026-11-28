@@ -216,3 +216,25 @@ def test_papers_that_already_booked_fuel_keep_it_cash_fuel_is_not_added_twice():
     late = acc.cash_fuel_entry({"id": 9, "branch": "สระบุรี", "month": "2026-11", "batch": 2, "day": "2026-11-12", "amount": 800, "checked": True}, None)
     early = acc.cash_fuel_entry({"id": 10, "branch": "สระบุรี", "month": "2026-11", "batch": 1, "day": "2026-10-28", "amount": 800, "checked": True}, None)
     assert acc.half_key(late) in covered and acc.half_key(early) not in covered
+
+
+def test_paper_fuel_with_a_misread_amount_is_matched_by_day_and_truck():
+    """Her checked 500 for truck 15 on 13/11 read as 600 off the paper: same day, same truck -> skipped, her amount shown (28 Nov 2026)."""
+    from app import inbox_ai
+    vehicles = [{"id": "v15", "vehicle_number": "15", "plate_number": "1ฒบ 6254", "branch": "สระบุรี"}]
+    batch = {"month": "2026-11", "branch": "สระบุรี",
+             "pages": [{"page": 7, "lines": [["13/11", "เติมน้ำมัน 1ฒม 6254 (15)", 600.0, "6130", "น้ำมันเงินสด", {"v": "1ฒบ 6254"}],
+                                              ["20/11", "ค่าน้ำมัน เสมียน", 250.0, "6130", "น้ำมันเงินสด", {}]]}]}
+    skipped = inbox_ai.skip_cash_fuel(batch, [{"day": "2026-11-13", "amount": 500, "vehicle_id": "v15"}], vehicles)
+    assert [x[2] for x in skipped] == [600.0] and skipped[0][5]["cf_amount"] == 500.0
+    assert not batch["pages"][0]["lines"][1][5].get("skip")                # not on her page: booked from the paper
+
+
+def test_a_few_paper_fuel_lines_do_not_push_her_cash_fuel_page_out():
+    """Mid-Nov: the papers booked 1,300 of fuel she did not have; her page held 49,127 -- hers must stay in the books (28 Nov 2026)."""
+    from app import accounting as acc
+    paper = [{"branch": "สระบุรี", "entry_date": "2026-11-01", "source_id": "docs:2026-11:สระบุรี:mid:p2:l15",
+              "acc_lines": [{"account": "6130", "debit": 1300}]}]
+    k = ("สระบุรี", "2026-11", 1)
+    assert acc.cash_fuel_covered_by_papers(paper, {k: 49127}) == set()
+    assert acc.cash_fuel_covered_by_papers(paper, {k: 1500}) == {k}      # papers booked before her: they keep it, never both

@@ -594,34 +594,49 @@ def _cash_fuel_lines(month: str, branch: str, half: str) -> list[dict]:
         return []
     from app import supabase
     try:
-        return supabase.select_all("cash_fuel_lines", {"select": "day,amount", "month": f"eq.{month}", "branch": f"eq.{branch}",
+        return supabase.select_all("cash_fuel_lines", {"select": "day,amount,vehicle_id", "month": f"eq.{month}", "branch": f"eq.{branch}",
                                                        "batch": f"eq.{1 if half == 'mid' else 2}", "checked": "eq.true", "dup_of": "is.null",
                                                        "order": "id.asc"})
     except Exception:                                  # noqa: BLE001 -- no answer: book the paper's fuel as before
         return []
 
 
-def skip_cash_fuel(batch: dict, done: list[dict]) -> list:
+def skip_cash_fuel(batch: dict, done: list[dict], vehicles: Optional[list] = None) -> list:
     """Mark the paper's fuel lines (6130) that ARE on the cash-fuel page as not booked (acc_docs still counts them in the page total):
-    first the same day and amount, then the same amount on another day (a date misread: 31/10 read as 3/10). A fuel line she does not have
+    first the same day and amount; then the same day and truck (an amount misread: her checked 500 read as 600 off the paper -- her
+    page wins, owner 28 Nov 2026); then the same amount on another day (a date misread: 31/10 read as 3/10). A fuel line she does not have
     (no truck written, so she left it out) stays booked from the paper -- nothing is lost. Returns the lines marked."""
     from collections import Counter
-    by_day = Counter((str(r["day"])[:10], round(float(r["amount"]), 2)) for r in done)
+    left = [{"day": str(r["day"])[:10], "amount": round(float(r["amount"]), 2), "vehicle_id": r.get("vehicle_id")} for r in done]
     lines = [(p, ln) for p in batch.get("pages") or [] for ln in p.get("lines") or [] if ln[3] == "6130"]
     month = batch.get("month") or ""
     out, rest = [], []
+
+    def take(pred) -> Optional[dict]:
+        for i, r in enumerate(left):
+            if pred(r):
+                return left.pop(i)
+        return None
+
     for p, ln in lines:
         d = _line_day(ln[0], month)
-        k = (d, round(float(ln[2]), 2))
-        if d and by_day[k] > 0:
-            by_day[k] -= 1
+        amt = round(float(ln[2]), 2)
+        if d and take(lambda r: r["day"] == d and r["amount"] == amt):
             out.append((p, ln))
         else:
             rest.append((p, ln))
-    by_amount = Counter()
-    for (day, amt), n in by_day.items():
-        by_amount[amt] += n
+    rest2 = []
     for p, ln in rest:
+        d, plate = _line_day(ln[0], month), (ln[5] or {}).get("v")
+        v = match_truck(plate, None, vehicles, batch.get("branch"))[0] if plate and vehicles else None
+        hit = take(lambda r: r["day"] == d and r["vehicle_id"] == v["id"]) if v and d else None
+        if hit:
+            ln[5]["cf_amount"] = hit["amount"]
+            out.append((p, ln))
+        else:
+            rest2.append((p, ln))
+    by_amount = Counter(r["amount"] for r in left)
+    for p, ln in rest2:
         amt = round(float(ln[2]), 2)
         if by_amount[amt] > 0:
             by_amount[amt] -= 1
@@ -743,7 +758,7 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
     batch, flags = _batch(reads, name, key, month, branch, half, feed, vehicles)
     pv["flags"] += flags
     done = _cash_fuel_lines(month, branch, half)
-    skipped = skip_cash_fuel(batch, done) if done else []
+    skipped = skip_cash_fuel(batch, done, vehicles) if done else []
     if skipped:
         kept = [ln for p_ in batch.get("pages") or [] for ln in p_.get("lines") or [] if ln[3] == "6130" and not ln[5].get("skip")]
         pv["flags"].append(f"น้ำมันเงินสด {len(skipped)} รายการ ({sum(x[2] for x in skipped):,.2f} บาท) อยู่ในหน้าน้ำมันเงินสดแล้ว (คนทำบัญชีตรวจแล้ว) — ไม่ลงซ้ำจากเอกสารนี้"
@@ -767,7 +782,8 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
                      "role": role_of(debit["account"], unsure), "account": debit["account"], "flag": "อ่านไม่ชัด" if unsure else None,
                      "page": e["doc_page"], "branch": e["branch"]})
     for dm, text, amount, account, party, opt in skipped:
-        rows.append({"date": None, "text": f"{text} — อยู่ในน้ำมันเงินสดแล้ว ไม่ลงซ้ำ", "party": party, "amount": 0.0, "role": "info",
+        her = f" (หน้าน้ำมันเงินสด {opt['cf_amount']:,.2f})" if opt.get("cf_amount") not in (None, amount) else ""
+        rows.append({"date": None, "text": f"{text} — อยู่ในน้ำมันเงินสดแล้ว{her} ไม่ลงซ้ำ", "party": party, "amount": 0.0, "role": "info",
                      "account": account, "flag": None, "page": opt.get("page")})
     for d in out["docs"]:
         if d["kind"] in ("memo", "other") or (d["kind"] == "cover" and d.get("read_total") is None):
