@@ -69,8 +69,10 @@ LEGACY_STATIONS = ("NM", "ห้วยบง")
 # who pays each station's card (the batch's branch) -- owner to confirm (28 Nov 2026): NM and ห้วยบง are on Saraburi's card (owner,
 # 9 Nov 2026); แก่งคอย's statement is a tax invoice of its own for Kaeng Khoi's trucks, booked to แก่งคอย until the owner says otherwise.
 BC_PAYER = {"NM": "สระบุรี", "ห้วยบง": "สระบุรี", "แก่งคอย": "แก่งคอย"}
-# whose trucks fill at each station: a truck number / plate tail both plants have resolves to this branch's truck (acc_cardfuel)
-BC_TRUCKS = {"NM": "สระบุรี", "ห้วยบง": "สระบุรี", "แก่งคอย": "แก่งคอย"}
+# a station only one plant's trucks use: a truck number / plate tail both plants have resolves to that branch's truck (acc_cardfuel).
+# NM and ห้วยบง are not here: Kaeng Khoi's front-of-plant trucks fill there too, so a tail both plants share stays unresolved (flagged)
+# and a row with no plate is not guessed from its truck number -- exactly as before Nov 2026.
+BC_TRUCKS = {"แก่งคอย": "แก่งคอย"}
 BC_SHEET = "บันทึกเติมน้ำมัน"
 BC_CHECK = "ตรวจสอบยอดรวม"
 BC_ABOUT = "คำอธิบาย"
@@ -526,6 +528,7 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
     title = str(((_sheet(book, prefix, BC_ABOUT) or [[None]])[0] or [None])[0] or "")
     flags, conflicts = [], []
     fills = []
+    no_plate: dict = {}                               # fill index -> "#<truck number>" for a row with no plate
     for r in log:
         if not r or not isinstance(r[0], (int, float)) or isinstance(r[0], bool):
             continue                                  # header, the "รวมทั้งหมด" line (no row number) and notes
@@ -537,7 +540,7 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
         plate = r[col["ทะเบียนรถที่เติมจริง"]] or (r[col["ทะเบียนรถประจำเบอร์นี้"]] if "ทะเบียนรถประจำเบอร์นี้" in col else None)
         number = str(r[col["รถเบอร์"]] or "").strip() if "รถเบอร์" in col and col["รถเบอร์"] < len(r) else ""
         if not str(plate or "").strip() and re.fullmatch(r"\d{1,3}", number):
-            plate = f"#{number}"                      # no plate at all: the truck number, of the station's own branch (BC_TRUCKS)
+            no_plate[len(fills)] = f"#{number}"       # no plate at all: the truck number -- used only where one plant fills (below)
         fills.append((d, str(plate or "ไม่ระบุทะเบียน").strip(), amount))
     if not fills:
         return None
@@ -565,6 +568,11 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
                           "options": [{"value": x, "label": x} for x in BC_STATIONS], "default": None}]
         elif any(x["source"].startswith("รูปแบบไฟล์") for x in sig) and not picked:
             flags.append(f"ไฟล์ไม่ได้เขียนชื่อสถานี — ถือเป็น {station} จากรูปแบบไฟล์")
+
+    # a row with no plate goes by its truck number only at a station one plant's trucks use (BC_TRUCKS: แก่งคอย); at NM / ห้วยบง both
+    # plants fill and truck numbers repeat, so it stays "ไม่ระบุทะเบียน" (flagged, not tied to a truck) as before
+    if BC_TRUCKS.get(station):
+        fills = [(d, no_plate.get(i, plate), a) for i, (d, plate, a) in enumerate(fills)]
 
     # month: the company month most of the baht falls in, the period in the title, the period in the file name
     by_month: dict = defaultdict(float)

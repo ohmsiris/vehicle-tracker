@@ -442,6 +442,26 @@ def test_the_same_truck_number_at_nm_is_saraburis():
     assert acc_cardfuel.build("2026-11", "bangchak", {"6248": 10.0}, two, prefer="แก่งคอย")["entries"][0]["lines"][0]["vehicle_id"] == 1
 
 
+def test_at_nm_and_huai_bong_a_shared_tail_or_a_bare_truck_number_is_not_guessed(db):
+    """Kaeng Khoi's front-of-plant trucks fill at NM and ห้วยบง too, so there the drop box never picks a plant: a plate the sheet turned
+    into digits that both plants' trucks end in stays unresolved and flagged (as before Nov 2026), and a row with no plate is not tied
+    to a truck by its number (numbers repeat between the plants). Only the แก่งคอย station decides by its branch."""
+    from app import inbox_r_fuel
+    assert inbox_r_fuel.BC_TRUCKS == {"แก่งคอย": "แก่งคอย"}
+    db.tables["vehicles"] = VEHICLES + KK_VEHICLES + [{"id": 51, "plate_number": "กข-1025", "vehicle_number": 9, "branch": "สระบุรี"},
+                                                      {"id": 52, "plate_number": "บพ-1025", "vehicle_number": 12, "branch": "แก่งคอย"}]
+    fills = [(datetime(2026, 11, 2), "9", "-1025", 1000), (datetime(2026, 11, 3), "5", None, 500), (datetime(2026, 11, 4), "5", "86-8971", 200)]
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_26ตค-25พย69.xlsx", _xlsx(_nov_sheets("NM", NM_TITLE, fills, 1700))))
+    (b,) = p["batches"]
+    assert b["branch"] == "สระบุรี" and b["rows_total"] == 1700
+    vid = {e["source_id"].rsplit(":", 1)[-1]: e["lines"][0]["vehicle_id"] for e in b["entries"]}
+    assert vid == {"1025": None, "ไม่ระบุทะเบียน": None, "868971": 31}          # the KK truck at NM by its full plate: KK's
+    assert any("ไม่พบรถทะเบียน -1025" in x for x in p["flags"]) and any("ไม่พบรถทะเบียน ไม่ระบุทะเบียน" in x for x in p["flags"])
+    # the same tail at แก่งคอย is Kaeng Khoi's truck
+    p = fuel.read(sniff_file("เติมน้ำมัน_แก่งคอย_30ตค-24พย69.xlsx", _xlsx(_nov_sheets("แก่งคอย", KK_TITLE, fills[:1], 1000))))
+    assert p["batches"][0]["entries"][0]["lines"][0]["vehicle_id"] == 52
+
+
 def test_kaeng_khoi_pdf_is_recognised_with_its_station():
     f = Dropped(name="เติมน้ำมัน_แก่งคอย_30ตค-24พย69_สรุปรายคนขับ_แนวนอน.pdf", data=b"%PDF-", ext=".pdf", pages=1,
                 text="สรุปรายคนขับ — สาขาแก่งคอย — 30/10/69 – 24/11/69\nชื่อจริง\nชื่อเล่น\nจำนวนครั้งที่เติม\nรวมลิตร\n"

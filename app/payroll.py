@@ -151,8 +151,10 @@ STATIONS = {"bangchak": "บางจาก", "pt": "PT"}
 # A Reader workbook may hold several stations (Nov 2026: NM + ห้วยบง in one file): still one key per station, so nothing changes here.
 BANGCHAK_STATIONS = ("NM", "ห้วยบง", "แก่งคอย")
 BANGCHAK_LEGACY = ("NM", "ห้วยบง")                # what one of the older combined entries stands for
-# whose trucks fill at each station (inbox_r_fuel.BC_TRUCKS): a station's statement is waited for by that branch's trucks only
-BANGCHAK_BRANCH = {"NM": "สระบุรี", "ห้วยบง": "สระบุรี", "แก่งคอย": "แก่งคอย"}
+# who waits for each station's statement: a station not named here is waited for by EVERY truck -- Kaeng Khoi's trucks fill at NM
+# and ห้วยบง too (Nov 2026: 1ฒบ 6252, 1ฒบ 6248, ...), so a missing NM / ห้วยบง file must hold their fuel cell as well. Only แก่งคอย, which
+# only Kaeng Khoi's trucks use, is waited for by แก่งคอย's trucks alone (same as inbox_r_fuel.BC_TRUCKS).
+BANGCHAK_BRANCH = {"แก่งคอย": "แก่งคอย"}
 BANGCHAK_FROM = {"แก่งคอย": "2026-11"}            # the first month a station has a statement (Kaeng Khoi's trucks moved to บางจาก then)
 ESTIMATE = "est-"
 HALVES = (1, 2)                                   # cash fuel comes in two halves of the pay month: 26th - 10th, 11th - 25th
@@ -489,8 +491,8 @@ def card_fuel_view(entries: Optional[list[dict]]) -> dict:
     lack = the statements still absent, by name: "บางจาก" / "PT" when nothing of the station is booked, "บางจาก ห้วยบง" when another
     of บางจาก's station files is in but not this one (a truck that fills there would otherwise read as a false 0). One of the older
     combined entries ("fuel:bangchak:<month>:<plate>") covers NM and ห้วยบง. แก่งคอย is waited for from BANGCHAK_FROM on.
-    lack_by_branch = lack as one branch's trucks see it: a station's file is waited for by its own branch's trucks (BANGCHAK_BRANCH);
-    "บางจาก" / "PT" by everyone. estimated = stations with an estimate among their entries: a figure to go on, not a statement.
+    lack_by_branch = lack as one branch's trucks see it: "บางจาก แก่งคอย" is waited for by Kaeng Khoi's trucks only (BANGCHAK_BRANCH);
+    everything else (NM, ห้วยบง, "บางจาก", "PT") by every truck, whichever plant it belongs to. estimated = stations with an estimate among their entries: a figure to go on, not a statement.
     trucks = different trucks, however many entries each has."""
     by_vehicle: dict = {}
     stations: dict = {}

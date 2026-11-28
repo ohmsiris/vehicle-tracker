@@ -1621,9 +1621,11 @@ def test_card_fuel_counts_every_bangchak_station_per_truck():
     # without the แก่งคอย file: only Kaeng Khoi's trucks wait for it
     v = pw.card_fuel_view([nm, hb, pt])
     assert v["lack"] == ["บางจาก แก่งคอย"] and v["lack_by_branch"] == {"สระบุรี": [], "แก่งคอย": ["บางจาก แก่งคอย"]}
-    # only the แก่งคอย file: Saraburi's trucks wait for NM and ห้วยบง, Kaeng Khoi's for nothing more
+    # only the แก่งคอย file: every truck waits for NM and ห้วยบง -- Kaeng Khoi's trucks fill there too (1ฒบ 6248 at both, Nov 2026)
     v = pw.card_fuel_view([kk, pt])
-    assert v["lack_by_branch"] == {"สระบุรี": ["บางจาก NM", "บางจาก ห้วยบง"], "แก่งคอย": []}
+    assert v["lack_by_branch"] == {"สระบุรี": ["บางจาก NM", "บางจาก ห้วยบง"], "แก่งคอย": ["บางจาก NM", "บางจาก ห้วยบง"]}
+    v = pw.card_fuel_view([nm, kk, kk14, pt])
+    assert v["lack_by_branch"] == {"สระบุรี": ["บางจาก ห้วยบง"], "แก่งคอย": ["บางจาก ห้วยบง"]}
     # before November nobody waits for แก่งคอย; nothing of PT booked is everyone's
     old = pw.card_fuel_view([{"source_id": "fuel:bangchak:2026-10:NM:842682", "lines": [{"vehicle_id": "V27", "credit": 1}]},
                              {"source_id": "fuel:bangchak:2026-10:ห้วยบง:842682", "lines": [{"vehicle_id": "V27", "credit": 1}]}])
@@ -1642,3 +1644,6 @@ def test_a_kaeng_khoi_truck_waits_for_the_kaeng_khoi_station():
     assert c["state"] == "miss" and "ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน บางจาก แก่งคอย" in c["note"] and "บัตร 500" in c["note"]
     c = one(pw.build({**s, "card_fuel": [nm, hb, kk, PT]}, MONTH, TODAY), "D1")["cells"]["fuel"]
     assert (c["state"], c["value"]) == ("ok", 7500) and c["note"].endswith("บัตร 6,500 + เงินสด 1,000")
+    # ... and for NM / ห้วยบง, where Kaeng Khoi's trucks fill too: with the ห้วยบง file missing the cell waits, never a short "ok"
+    c = one(pw.build({**s, "card_fuel": [nm, kk, PT]}, MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert c["state"] == "miss" and "ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน บางจาก ห้วยบง" in c["note"]
