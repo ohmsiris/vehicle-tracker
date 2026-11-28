@@ -7,7 +7,14 @@
 // "ใส่ลายเซ็น" is ticked. An issued paper is drawn from the snapshot frozen at issue (so it never changes). Data: /api/documents (app/documents.py).
 // Loaded BEFORE app.js: nothing here runs at load time; helpers from app.js / board.js / employees.js are used at call time.
 
-const dc = { all: [], opts: null, ready: true, hasSig: false, sig: null, cur: null, loans: [], draft: null };
+// emp = #documents/emp=<employee id>: only that person's papers (the pay page's "ใบเตือนของคนนี้", owner 29 Nov 2026)
+const dc = { all: [], opts: null, ready: true, hasSig: false, sig: null, cur: null, loans: [], draft: null, emp: null };
+
+// "emp=<employee id>" -> the id; anything else -> null. Pure.
+function dcParseSub(sub) {
+  const m = /^emp=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(String(sub || ""));
+  return m ? m[1] : null;
+}
 
 const THAI_MONTHS_FULL = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
 const BLANK_NAME = "(" + " ".repeat(36) + ")";             // an empty name in brackets that survives HTML whitespace
@@ -50,9 +57,11 @@ async function dcSignature() {
 }
 
 // ------------------------------------------------------------------ the list
-async function openDocuments() {
+async function openDocuments(sub = "") {
   showView("documents");
   showErr("docError", "");
+  dc.emp = dcParseSub(sub);
+  if (dc.emp) for (const id of ["dcSearch", "dcType", "dcStatus"]) $(id).value = "";        // one person: all his papers
   if (!(await dcLoad())) return;
   $("docNeedsV24").hidden = dc.ready;
   renderSignatureBox();
@@ -121,8 +130,8 @@ async function removeSignature() {
 function visibleDocuments() {
   const tokens = $("dcSearch").value.trim().split(/\s+/).map(empNorm).filter(Boolean);
   const type = $("dcType").value, status = $("dcStatus").value;
-  $("dcClear").hidden = !(tokens.length || type || status !== "");
-  return dc.all.filter((d) => !type || d.doc_type === type).filter((d) => !status || d.status === status)
+  $("dcClear").hidden = !(tokens.length || type || status !== "" || dc.emp);
+  return dc.all.filter((d) => !dc.emp || d.employee_id === dc.emp).filter((d) => !type || d.doc_type === type).filter((d) => !status || d.status === status)
     .filter((d) => !tokens.length || tokens.every((t) => empNorm([d.employee, d.code, d.number, d.subject, d.type_label].join("|")).includes(t)));
 }
 
@@ -133,7 +142,9 @@ function renderDocuments() {
     el("td", { class: "emcode", text: d.number || "—" }), el("td", { text: `${d.type_label}${d.doc_type === "warning" && d.warning_level != null ? ` · ${dcLevelShort(d.warning_level)}` : ""}` }),
     el("td", {}, el("div", { class: "emname", text: d.employee }), el("div", { class: "muted small", text: d.code })), el("td", { class: "small", text: d.subject }),
     el("td", { text: d.date_text }), el("td", {}, dcStatusBadge(d))));
-  fill($("dcCount"), `พบ ${rows.length} ฉบับ`);
+  const mine = dc.emp ? dc.all.find((d) => d.employee_id === dc.emp) : null;
+  fill($("dcCount"), `พบ ${rows.length} ฉบับ`, dc.emp ? el("span", { class: "muted", text: ` · เฉพาะ ${mine ? `${mine.code} ${mine.employee}` : "คนนี้"} ` }) : null,
+    dc.emp ? el("button", { class: "btn small", type: "button", text: "ดูทุกคน", onclick: () => goHash("#documents") }) : null);
   $("dcList").replaceChildren(rows.length ? el("div", { class: "tablewrap" }, el("table", { class: "emptable lntable" }, el("thead", {}, head), el("tbody", {}, ...body)))
     : el("p", { class: "muted empty", text: dc.all.length ? "ไม่พบเอกสารที่ตรงกับตัวกรอง" : "ยังไม่มีเอกสาร — กด “+ ใบเตือน” หรือ “+ บันทึกข้อความ”" }));
 }
@@ -141,6 +152,7 @@ function renderDocuments() {
 const dcLevelShort = (n) => ({ 0: "ว่ากล่าวด้วยวาจา", 1: "ครั้งที่ 1", 2: "ครั้งที่ 2", 3: "ครั้งสุดท้าย" }[n] || "");
 
 function clearDocFilters() {
+  if (dc.emp) { dc.emp = null; history.replaceState(null, "", "#documents"); }
   $("dcSearch").value = "";
   $("dcType").value = "";
   $("dcStatus").value = "";

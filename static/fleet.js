@@ -32,23 +32,24 @@ function route() {
   if (h === "tax-invoices" || h.startsWith("tax-invoices/")) return openTaxInvoices(h.slice(13));
   if (h === "roster") return openRoster();
   if (h === "employees") return openEmployees();
-  if (h === "loans") return openLoans();
-  if (h === "attendance") return openAttendance();
+  // the pages the pay page opens on one person (owner, 29 Nov 2026): #loans/emp=<id>, #attendance/<month>[/emp=<id>], #documents/emp=<id>
+  if (h === "loans" || h.startsWith("loans/")) return openLoans(h.slice(6));
+  if (h === "attendance" || h.startsWith("attendance/")) return openAttendance(h.slice(11));
   if (h === "payroll" || h.startsWith("payroll/")) return openPayroll(h.slice(8));
-  if (h === "documents") return openDocuments();
+  if (h === "documents" || h.startsWith("documents/")) return openDocuments(h.slice(10));
   const dcx = /^document=(.+)$/.exec(h);
   if (dcx && UUID_RE.test(dcx[1])) return openDocument(dcx[1]);
   const lnx = /^loan=(.+)$/.exec(h);
   if (lnx && UUID_RE.test(lnx[1])) return openLoan(lnx[1]);
-  const emx = /^employee=(.+)$/.exec(h);
-  if (emx && UUID_RE.test(emx[1])) return openEmployee(emx[1]);
+  const emx = empParseHash(h);                                                     // #employee=<id>/rates: scrolled to that card
+  if (emx) return openEmployee(emx.id, emx.part);
   if (h === "plan") return openPlan();
   if (h === "tyre-stock") return openTyreStock();
   if (h === "odometers") return openOdometers();
   if (h === "accounts") return openAccounts("out");
   if (h === "accounts-in") return openAccounts("in");
-  const ick_ = /^accounts-in\/check=(.+)$/.exec(h);                                 // ตรวจเอกสารก่อนลงบัญชี (inboxcheck.js)
-  if (ick_ && UUID_RE.test(ick_[1])) return openInboxCheck(ick_[1]);
+  const ick_ = ickParseHash(h);                                                    // ตรวจเอกสารก่อนลงบัญชี (inboxcheck.js), /page=<n>: on that page
+  if (ick_) return openInboxCheck(ick_.id, ick_.page);
   if (h === "electricity") return openElectricity();
   if (h === "routes") return openRoutes();
   if (h === "sales-sheets" || h.startsWith("sales-sheets/")) return openSalesSheets(h.slice(13));

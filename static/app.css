@@ -2849,3 +2849,29 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ibx-sw.head { font-weight: 600; color: var(--muted); }
 .ibx-sw .num { text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 700px) { .ibx-sw { grid-template-columns: 1fr 1fr; } }
+
+/* คำนวณเงินเดือน: each cell's "แก้ที่ ... →" links, the person's pay rule form, and the way back from the page a link opened (29 Nov 2026) */
+.pw-go { margin-top: 3px; line-height: 1.6; }
+.pw-go-a { color: var(--accent); text-decoration: none; white-space: nowrap; border-radius: 4px; font-weight: 600; }
+a.pw-go-a:hover, button.pw-go-a:hover { text-decoration: underline; }
+button.pw-go-a { text-decoration: none; font-weight: 600; }
+.pw-go-a:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-rule { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+.pw-rule > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; font-size: 13.5px; border-radius: var(--radius-sm); }
+.pw-rule > summary:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-rule[open] > summary { border-bottom: 1px solid var(--line); }
+.pw-rule > p { margin: 0 12px 10px; }
+.pw-rule-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 16px; padding: 10px 12px; align-items: start; }
+.pw-rule-f { display: grid; gap: 3px; font-size: 13px; }
+.pw-rule-f > span { font-weight: 600; color: var(--text-2); }
+.pw-rule-f input[type="text"], .pw-rule-f select { min-height: 36px; box-sizing: border-box; width: 100%; }
+.pw-rule-c { display: flex; align-items: center; gap: 8px; align-self: end; min-height: 36px; }
+.pw-rule-act { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.pw-back { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 8px 12px;
+  border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-soft); box-shadow: var(--shadow-sm); }
+.pw-back-a { color: var(--accent); font-weight: 650; text-decoration: none; border-radius: 4px; }
+.pw-back-a:hover { text-decoration: underline; }
+.pw-back-a:focus-visible, .pw-back-x:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-back-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw-back-x { margin-left: auto; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 18px; line-height: 1; padding: 4px 8px; cursor: pointer; border-radius: 6px; }
+@media (max-width: 760px) { .pw-rule-form { grid-template-columns: 1fr 1fr; } .pw-back-who { display: none; } }

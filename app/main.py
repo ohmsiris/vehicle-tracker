@@ -2829,6 +2829,14 @@ def api_payroll_checklist(month: str = Query(default=""), fresh: bool = Query(de
     return _pw_call(payroll.load, month, mgr.today_th(), fresh=fresh)
 
 
+@app.patch("/api/payroll/rules/{employee_id}")
+def api_payroll_rule_save(employee_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """One person's pay rule, fixed from the pay page's unfolded person (owner, 29 Nov 2026): the owner only. app/payroll_rules.py."""
+    from app import mgr, payroll_rules
+    _check_owner(x_app_token, token)
+    return _pw_call(payroll_rules.save, employee_id, body, mgr.today_th())
+
+
 @app.get("/api/payables")
 def api_payables(x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """Every shop: what it is owed, its bills (wherever they were recorded) and its payments."""

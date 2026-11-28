@@ -7,7 +7,14 @@
 // (/api/loans/preview), the same code that saves it. Data: /api/loans (app/loans.py). Same PIN lock as พนักงาน.
 // Loaded BEFORE app.js: nothing here runs at load time; helpers from app.js / board.js / dashboard.js / employees.js are used at call time.
 
-const ln = { all: [], totals: null, opts: null, ready: true, month: "", cur: null, editing: null, timer: null };
+// emp = #loans/emp=<employee id>: only that person's loans (the pay page's "เงินกู้ของคนนี้", owner 29 Nov 2026)
+const ln = { all: [], totals: null, opts: null, ready: true, month: "", cur: null, editing: null, timer: null, emp: null };
+
+// "emp=<employee id>" -> the id; anything else -> null. Pure.
+function lnParseSub(sub) {
+  const m = /^emp=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(String(sub || ""));
+  return m ? m[1] : null;
+}
 
 const lnMoney = (n) => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const lnMonthLabel = (ym) => (ym ? beMonth(ym) : "");
@@ -31,13 +38,20 @@ async function lnLoad() {
 }
 
 // ------------------------------------------------------------------ the list
-async function openLoans() {
+async function openLoans(sub = "") {
   showView("loans");
   showErr("loanError", "");
+  const was = ln.emp;
+  ln.emp = lnParseSub(sub);
   if (!(await lnLoad())) return;
   $("loanNeedsV23").hidden = ln.ready;
   if (!$("lnMonth").value) $("lnMonth").value = ln.month;
   fillLoanFilters();
+  if (ln.emp) {                                   // one person: every loan of his, whatever its state, no other filter
+    $("lnSearch").value = "";
+    $("lnStatus").value = "all";
+    for (const id of ["lnKind", "lnBranch"]) $(id).value = "";
+  } else if (was) $("lnStatus").value = "active";
   renderLoans();
   loadMonth();
 }
@@ -53,8 +67,9 @@ function fillLoanFilters() {
 function visibleLoans() {
   const tokens = $("lnSearch").value.trim().split(/\s+/).map(empNorm).filter(Boolean);
   const status = $("lnStatus").value, kind = $("lnKind").value, branch = $("lnBranch").value;
-  $("lnClear").hidden = !(tokens.length || kind || branch || status !== "active");
+  $("lnClear").hidden = !(tokens.length || kind || branch || status !== "active" || ln.emp);
   return ln.all
+    .filter((l) => !ln.emp || l.employee_id === ln.emp)
     .filter((l) => (status === "all" ? true : l.status === status))
     .filter((l) => !kind || l.kind === kind)
     .filter((l) => !branch || l.branch === branch)
@@ -76,12 +91,15 @@ function renderLoans() {
     el("td", { class: "small", text: l.plan }),
     el("td", { class: "small", text: l.next ? `${lnMonthLabel(l.next.month)} · ${lnMoney(l.next.amount)}` : l.status === "active" ? "—" : "" }),
     el("td", {}, l.status === "active" ? null : lnBadge(LN_STATUS, l.status))));
-  fill($("lnCount"), `พบ ${rows.length} สัญญา`);
+  const mine = ln.emp ? ln.all.find((l) => l.employee_id === ln.emp) : null;
+  fill($("lnCount"), `พบ ${rows.length} สัญญา`, ln.emp ? el("span", { class: "muted", text: ` · เฉพาะ ${mine ? `${mine.code} ${mine.employee}` : "คนนี้"} ` }) : null,
+    ln.emp ? el("button", { class: "btn small", type: "button", text: "ดูทุกคน", onclick: () => goHash("#loans") }) : null);
   $("lnList").replaceChildren(rows.length ? el("div", { class: "tablewrap" }, el("table", { class: "emptable lntable" }, el("thead", {}, head), el("tbody", {}, ...body)))
-    : el("p", { class: "muted empty", text: ln.all.length ? "ไม่พบเงินกู้ที่ตรงกับตัวกรอง" : "ยังไม่มีเงินกู้ — กด “+ บันทึกเงินกู้ใหม่”" }));
+    : el("p", { class: "muted empty", text: ln.emp ? "คนนี้ยังไม่มีเงินกู้ — กด “+ บันทึกเงินกู้ใหม่”" : ln.all.length ? "ไม่พบเงินกู้ที่ตรงกับตัวกรอง" : "ยังไม่มีเงินกู้ — กด “+ บันทึกเงินกู้ใหม่”" }));
 }
 
 function clearLoanFilters() {
+  if (ln.emp) { ln.emp = null; history.replaceState(null, "", "#loans"); }
   $("lnSearch").value = "";
   $("lnStatus").value = "active";
   for (const id of ["lnKind", "lnBranch"]) $(id).value = "";

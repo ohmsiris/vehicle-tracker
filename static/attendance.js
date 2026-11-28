@@ -17,6 +17,13 @@ const atHM = (m) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
 const atKey = (eid, date) => `${eid}|${date}`;
 const atIsFlag = (d) => d.flag === "single" || d.flag === "short";
 
+// "<month>" or "<month>/emp=<employee id>" (the pay page opens one person's card; owner, 29 Nov 2026) -> { month, emp }. Pure.
+function atParseSub(sub) {
+  const [m, e] = String(sub || "").split("/");
+  const x = /^emp=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(e || "");
+  return { month: /^20\d\d-(0[1-9]|1[0-2])$/.test(m || "") ? m : "", emp: x ? x[1] : null };
+}
+
 // ------------------------------------------------------------------ loading
 async function atLoad(month) {
   try {
@@ -35,12 +42,19 @@ async function atLoad(month) {
   }
 }
 
-async function openAttendance() {
+async function openAttendance(sub = "") {
   showView("attendance");
   showErr("atError", "");
-  if (!(await atLoad($("atMonth").value || ""))) { $("atKpis").replaceChildren(); $("atList").replaceChildren(); $("atSuggest").hidden = true; $("atHistory").hidden = true; return; }
+  const want = atParseSub(sub);
+  if (want.emp) {                                 // one person: his card open, every filter off so it shows
+    at.open.add(want.emp);
+    for (const [id, v] of [["atShow", "all"], ["atKind", ""], ["atBranch", ""], ["atPosition", ""], ["atSearch", ""]]) $(id).value = v;
+  }
+  if (!(await atLoad(want.month || $("atMonth").value || ""))) { $("atKpis").replaceChildren(); $("atList").replaceChildren(); $("atSuggest").hidden = true; $("atHistory").hidden = true; return; }
   atFillFilters();
   renderAttendance();
+  const card = want.emp ? [...document.querySelectorAll("#atList .atcard")].find((c) => c.dataset.emp === want.emp) : null;
+  if (card) card.scrollIntoView({ block: "start" });
 }
 
 function atFillFilters() {
@@ -122,7 +136,7 @@ function atCard(p) {
       p.deduct ? el("span", { class: "badge", text: `หัก ${atMoney(p.deduct)} ฿` }) : null,
       el("span", { class: "muted small", text: `${c.days} วัน · ${atHM(c.minutes)} ชม.` }),
       el("span", { class: "atcaret", text: open ? "▾" : "▸" })));
-  const card = el("div", { class: `card atcard${c.open ? " hasopen" : ""}` }, head);
+  const card = el("div", { class: `card atcard${c.open ? " hasopen" : ""}`, "data-emp": p.employee_id }, head);
   if (open) card.append(atBody(p));
   return card;
 }

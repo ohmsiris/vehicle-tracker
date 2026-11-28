@@ -200,7 +200,19 @@ function tenure(startIso, endIso) {
   return y || m ? [y ? `${y} ปี` : "", m ? `${m} เดือน` : ""].filter(Boolean).join(" ") : "ไม่ถึงเดือน";
 }
 
-async function openEmployee(id) {
+// "employee=<id>" or "employee=<id>/<card>" (the pay page opens the card a value is fixed in; owner, 29 Nov 2026) -> { id, part }. Pure.
+const EMP_PARTS = { rates: "empRatesBox", loans: "empLoansBox", docs: "empDocsBox", pay: "empPayBox" };
+function empParseHash(h) {
+  const m = /^employee=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(rates|loans|docs|pay))?$/i.exec(String(h || ""));
+  return m ? { id: m[1], part: m[2] || "" } : null;
+}
+function empScrollTo(part) {
+  const box = EMP_PARTS[part] ? document.getElementById(EMP_PARTS[part]) : null;
+  const card = box && box.closest("section");
+  if (card) card.scrollIntoView({ block: "start" });
+}
+
+async function openEmployee(id, part = "") {
   showView("employee");
   showErr("empDetailError", "");
   if (!id) { goHash("#employees"); return; }
@@ -214,7 +226,11 @@ async function openEmployee(id) {
     $("empBody").replaceChildren();
     return;
   }
-  renderEmployee();
+  const drawn = renderEmployee();
+  if (!EMP_PARTS[part]) return;
+  empScrollTo(part);
+  await drawn;                                    // the cards above it grow as they load: in view again once they have
+  if (emp.current && emp.current.id === id && !$("employeeView").hidden) empScrollTo(part);
 }
 
 function renderEmployee() {
@@ -243,11 +259,8 @@ function renderEmployee() {
     el("section", { class: "card tkcard" }, el("h3", { text: "ใบเตือน / บันทึกข้อความ" }), el("div", { id: "empDocsBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))),
     /ขับรถ/.test(e.position || "") ? el("section", { class: "card tkcard" }, el("h3", { text: "ใบขับขี่" }), el("div", { id: "empLicBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))) : null,
     el("section", { class: "card tkcard emp-pay" }, el("h3", { text: "เงินเดือนรายเดือน" }), el("div", { id: "empPayBox" }, el("p", { class: "muted small", text: "กำลังโหลด…" }))));
-  renderEmployeeLoans(e);
-  renderEmployeeDocs(e);
-  renderEmployeeRates(e);
-  if (typeof renderEmployeePay === "function") renderEmployeePay(e);
-  if (typeof lcEmployeeBox === "function") lcEmployeeBox(e);
+  return Promise.allSettled([renderEmployeeLoans(e), renderEmployeeDocs(e), renderEmployeeRates(e),
+    typeof renderEmployeePay === "function" ? renderEmployeePay(e) : null, typeof lcEmployeeBox === "function" ? lcEmployeeBox(e) : null]);
 }
 
 // ------------------------------------------------------------------ the daily wage, its history and the probation period

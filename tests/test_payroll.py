@@ -1140,7 +1140,7 @@ def test_a_list_is_complete_by_a_running_total_or_by_page_totals():
     assert (x["name"], x["pages"], len(x["lines"]), x["total"], x["written"], x["complete"], x["why"]) == ("พนักงานขับรถ", [7, 8], 3, 9000, 9000, True, "")
     assert (x["branch"], x["file"], x["short"], x["status"], x["cover"], x["cover_why"]) == ("สระบุรี", f"{SRB}.pdf", SRB, "read", None, "")
     assert x["lines"][2] == {"code": "SB-PD003", "raw": "", "name": "นาย ค", "amount": 3000, "unsure": False, "via": "text", "file": f"{SRB}.pdf", "short": SRB,
-                             "branch": "สระบุรี", "page": 8, "title": DRIVERS, "list": "พนักงานขับรถ"}
+                             "file_id": "f1", "branch": "สระบุรี", "page": 8, "title": DRIVERS, "list": "พนักงานขับรถ"}
     # a total per page
     x = one_list([page(9, [a, b], total=6000), page(10, [c], total=3000)])
     assert (x["total"], x["written"], x["complete"]) == (9000, 9000, True)

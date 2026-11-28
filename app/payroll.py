@@ -212,6 +212,9 @@ SELECTS = {
 }
 
 
+SSO_BY_OWNER = "เจ้าของแก้ในหน้าคำนวณเงินเดือน"   # sso_source of a ปกส. the owner set on the pay page (app/payroll_rules.py)
+
+
 class PayrollError(ValueError):
     """Refused, with a message shown as it is."""
 
@@ -880,11 +883,11 @@ def advance_lists(files: Optional[list[dict]], signed: bool = False) -> list[dic
                      "cover": cover, "cover_why": cover_why,
                      "named": sorted({c for p, _got in g["pages"] for c in (read_code(x)[0] for x in p.get("employee_codes") or []) if c}
                                      | {ln["code"] for ln in lines if ln["code"]})}
-            entry["lines"] = [{**ln, "file": entry["file"], "short": entry["short"], "branch": branch, "page": p.get("n"), "title": _norm(p.get("title")),
-                               "list": name} for p, got in g["pages"] for ln in got]
+            entry["lines"] = [{**ln, "file": entry["file"], "short": entry["short"], "file_id": entry["file_id"], "branch": branch, "page": p.get("n"),
+                               "title": _norm(p.get("title")), "list": name} for p, got in g["pages"] for ln in got]
             # the deduction columns (ส่วนกลาง / ความผิด / อุปกรณ์): old = pages read before the reader returned them; empty = pages read
             # with them that gave no row while the page has advance lines (the reader skipped the table)
-            entry["rows"] = [{**r, "file": entry["file"], "short": entry["short"], "branch": branch, "page": p.get("n"), "list": name}
+            entry["rows"] = [{**r, "file": entry["file"], "short": entry["short"], "file_id": entry["file_id"], "branch": branch, "page": p.get("n"), "list": name}
                              for p, got in g["rows"] if got for r in got]
             entry["old_pages"] = [p.get("n") for p, got in g["rows"] if got is None]
             entry["empty_pages"] = [p.get("n") for p, got in g["rows"] if got == [] and page_lines(p)]
@@ -914,7 +917,7 @@ def work_records(files: Optional[list[dict]]) -> dict[str, dict]:
                 code = read_code(w.get("code"))[0] or read_code(w.get("name"))[0]
                 row = {"code": code, "name": _norm(w.get("name")), "days": _amount(w.get("days")), "ot": _amount(w.get("ot")),
                        "trip": _amount(w.get("trip")), "note": _norm(w.get("note")), "unsure": bool(w.get("unsure")),
-                       "file": _norm(f.get("file_name")), "short": short_name(f.get("file_name")), "page": pg.get("n"), "clash": ""}
+                       "file": _norm(f.get("file_name")), "short": short_name(f.get("file_name")), "file_id": f.get("id"), "page": pg.get("n"), "clash": ""}
                 if not code or (row["days"], row["ot"], row["trip"]) == (None, None, None):
                     continue                                  # nobody's, or nothing written for him
                 if code in mine:                              # the same code twice in one file: a misread code -- not trusted
@@ -1598,12 +1601,14 @@ def build_person(p: dict, ctx: dict) -> dict:
     group = (rule or {}).get("pay_group") or ""
     base = {"id": p["id"], "code": p.get("code") or "", "name": _norm(p.get("full_name")), "nickname": p.get("nickname") or "", "branch": p.get("branch") or "",
             "position": p.get("position") or "", "group": group, "group_label": GROUP_LABELS.get(group, group),
-            "hold": not p["left_before"] and held(p.get("branch"))}        # set aside with his branch: listed, in no count
+            "hold": not p["left_before"] and held(p.get("branch")),       # set aside with his branch: listed, in no count
+            "rule": {k: rule.get(k) for k in RULE_FIELDS} if rule else None}
     cells = {k: NA for k in KEYS}
     owed = ctx["owed"].get(p["id"])
     if p["left_before"]:
         cells["refund"] = refund_cell(owed)
-        return _finish({**base, "status": status_of(p, start, end, None), "rate": None, "rate2": None, "formula": ""}, cells)
+        return _finish({**base, "status": status_of(p, start, end, None), "rate": None, "rate2": None, "formula": "",
+                        "go": {"refund": [{"to": "employee", "emp": p["id"], "part": "pay"}]}}, cells)
     first, last = p["first"], p["last"]
     att = None                                               # his เวลาทำงาน days, when they are what his days come from
     own, prev = sheet_rows(p, ctx)                           # HQ's sheet of this very month (HQ already paid it), else the latest one before
@@ -1812,8 +1817,85 @@ def build_person(p: dict, ctx: dict) -> dict:
     status = status_of(p, start, end, rate)
     if status["key"] == "resigned" and owed and owed["balance"] > 0 and not owed["refunded"]:
         cells["refund"] = refund_cell(owed, short=True)
-    return _finish({**base, "status": status, "rate": cells["rate"]["value"], "rate2": rate2,
+    go = person_go(p, rule, ctx, route=route, att_used=p["id"] in ctx["att_used"], work=work, fines=fines,
+                   att_fined=bool(att_fines or att_same), dv=dv, hq=bool(own or prev))
+    return _finish({**base, "status": status, "rate": cells["rate"]["value"], "rate2": rate2, "go": go,
                     "formula": person_formula(group, rule, spans, (end - start).days + 1, ot=cells["ot"]["state"] != "na")}, cells)
+
+
+# --------------------------------------------------------------------------------------------- where each value is fixed (pure)
+# owner, 29 Nov 2026: "when I want to edit เงินกู้ I have to find the page, find the person, find the field". Each cell of the unfolded
+# person names the place its value comes from, already on that person: person["go"] = {cell key: [ref]}, a ref being one of
+#   {to: "rules"}                                  the pay rule itself, edited on the pay page (PATCH /api/payroll/rules/<id>)
+#   {to: "employee", emp, part: rates|pay}         the employee page: the daily rate / HQ's monthly sheets (สะสม, the stand-ins)
+#   {to: "driver-days", emp, say?}                 ยอดขายรายวัน of that driver, this month (a เด็กรถ: his driver's)
+#   {to: "attendance", emp}                        เวลาทำงาน of this month, his card open
+#   {to: "check", file, n, say}                    the drop-box file's check page, on the page the line was read from
+#   {to: "loan", id} / {to: "loans", emp}          one loan / every loan of his
+#   {to: "document", id, say} / {to: "documents", emp}   one ใบเตือน / every paper of his
+#   {to: "cash-fuel"} / {to: "accounts-in", say?}  the month's cash fuel / the drop box
+# static/payroll.js pwGoHref turns a ref into the page's hash.
+RULE_FIELDS = ("pay_group", "commission_pct", "bag_rate", "bonus", "rate2", "rides_with", "sso", "sso_source")
+GO_MAX = 4                                        # links of one kind a cell shows at most
+
+
+def check_refs(rows: list[dict], say: str) -> list[dict]:
+    """The drop-box pages some lines / rows were read from: one ref per (file, page), in their order."""
+    out, seen = [], set()
+    for r in rows:
+        fid, n = (r or {}).get("file_id"), (r or {}).get("page")
+        if not fid or n is None or (fid, n) in seen:
+            continue
+        seen.add((fid, n))
+        out.append({"to": "check", "file": fid, "n": n, "say": say})
+    return out[:GO_MAX]
+
+
+def person_go(p: dict, rule: Optional[dict], ctx: dict, *, route: bool, att_used: bool, work: Optional[dict], fines: list[dict],
+              att_fined: bool, dv: Optional[dict], hq: bool) -> dict:
+    """{cell key: [ref]}: where each value of this person is fixed (see above). Only places that exist; none twice."""
+    pid, rule = p["id"], rule or {}
+    go: dict = {}
+
+    def add(key: str, *refs) -> None:
+        for r in refs:
+            if r and r not in go.setdefault(key, []):
+                go[key].append(r)
+
+    rules = {"to": "rules"}
+    pay = {"to": "employee", "emp": pid, "part": "pay"}
+    drop = {"to": "accounts-in"}
+    add("group", rules)
+    add("sso", rules, pay if hq and rule.get("sso") is None else None)
+    add("rate", {"to": "employee", "emp": pid, "part": "rates"}, rules if rule.get("rate2") else None)
+    if route:
+        for key in ("days", "sales", "bags"):
+            add(key, {"to": "driver-days", "emp": pid})
+    else:
+        if work:
+            add("days", *check_refs([work], "บันทึกการทำงาน"))
+        if att_used or ctx["scans"].get(pid):
+            add("days", {"to": "attendance", "emp": pid})
+        if rule.get("rides_with"):
+            add("days", {"to": "driver-days", "emp": rule["rides_with"], "say": "ของคนขับ"}, rules)
+    if rule.get("rate2"):
+        add("days", rules)
+    add("fuel", {"to": "cash-fuel"}, {"to": "accounts-in", "say": "บัตรน้ำมัน"})
+    for key in ("ot", "trip"):
+        add(key, *(check_refs([work], "บันทึกการทำงาน") if work else [drop]))
+    lines = ctx["advance"]["by_person"].get(pid) or []
+    add("advance", *(check_refs(lines, "ใบเบิกกลางเดือน") or [drop, pay if hq else None]))
+    rows = (dv or {}).get("rows") or []
+    for key in ("common", "other"):
+        add(key, *(check_refs([r for r in rows if r.get(key)], "ใบเบิก") or check_refs(rows, "ใบเบิก") or [drop]), pay if hq and key == "common" else None)
+    add("penalty", *[{"to": "document", "id": f["id"], "say": f"ใบเตือน {dmy(f['day'])}"} for f in fines if f.get("id")][:GO_MAX],
+        {"to": "attendance", "emp": pid} if att_fined else None, *check_refs([r for r in rows if r.get("fault")], "ใบเบิก"),
+        {"to": "documents", "emp": pid})
+    ids = list(dict.fromkeys(i["loan"]["id"] for i in ctx["loans"].get(pid, []) if (i.get("loan") or {}).get("id")))
+    add("loan", *([{"to": "loan", "id": ids[0]}] if len(ids) == 1 else []), {"to": "loans", "emp": pid})
+    add("savings", pay)
+    add("refund", pay)
+    return go
 
 
 LATIN_RE = re.compile(r"[A-Za-z]{3,}")
@@ -2367,7 +2449,7 @@ def build(src: dict, month: str, today: date) -> dict:
         day = _d(doc.get("doc_date"))
         if day and start <= day <= end and _f(doc.get("penalty")) > 0 and doc.get("status") not in ("draft", "cancelled"):
             # offence: the day of the offence written on the letter (its doc_date is the day it was issued, often later)
-            fines.setdefault(doc["employee_id"], []).append({"day": day, "amount": _f(doc["penalty"]), "offence": _d(doc.get("offence"))})
+            fines.setdefault(doc["employee_id"], []).append({"day": day, "amount": _f(doc["penalty"]), "offence": _d(doc.get("offence")), "id": doc.get("id")})
     # HQ's sheets: this month's own rows (HQ already worked the month out), and per person the LATEST row before it -- the stand-in.
     # HQ's sheet of the month before may never come (IceBox is taking the calculation over), so an older one is used and named.
     sheets = src.get("pay_prev")
@@ -2383,7 +2465,8 @@ def build(src: dict, month: str, today: date) -> dict:
     before = [str(r["month"]) for r in sheets or [] if r.get("month") and str(r["month"]) < month]
     sheet = max(before) if before else None
     rules = {r["employee_id"]: r for r in src.get("rules") or []}
-    sso_list = next((r.get("sso_source") for r in (rules or {}).values() if r and r.get("sso_source")), None)      # the สปส.1-10 list in use
+    sso_list = next((r.get("sso_source") for r in (rules or {}).values()            # the สปส.1-10 list in use (never the owner's own fix)
+                     if r and r.get("sso_source") and not str(r["sso_source"]).startswith(SSO_BY_OWNER)), None)
     ctx = {"month": month, "start": start, "end": end, "upto": upto, "rules": rules, "sso_list": sso_list, "rates": rates, "route": route, "scans": scans, "scan_count": scan_count, "fines": fines, "owed": owed,
            # the mid-month advance lists read from the drop box: who drew what (None = that read failed; a caller that never asked has none)
            "advance": advance_view(src.get("advance_files", []), employees),

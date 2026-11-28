@@ -20,7 +20,8 @@ const PW_STATUS_SAY = { working: "ทำงาน", new: "พนักงาน�
 // months = the last list the server gave; def = the month it picks when none is asked for; kinds / people = what is unfolded;
 // filter / branch / group / status / kind / q = the filters of the per-person table (kind = "people who are not ok for this input");
 // rules = the rules card is unfolded (it opens that way); unmatched = the list under เบิกล่วงหน้า is unfolded
-const pw_ = { seq: 0, data: null, months: [], def: "", busy: false, filter: "all", branch: "", group: "", status: "", kind: "", q: "", kinds: new Set(), people: new Set(), rules: true, unmatched: false };
+// focus = the person to scroll to once the table is drawn (a way back from another page, a saved pay rule)
+const pw_ = { seq: 0, data: null, months: [], def: "", busy: false, filter: "all", branch: "", group: "", status: "", kind: "", q: "", kinds: new Set(), people: new Set(), rules: true, unmatched: false, focus: null };
 
 const pwN = (v) => Number(v || 0).toLocaleString("en-US");
 const pwNorm = (s) => String(s || "").toLowerCase().replace(/[\s\-_.]/g, "");
@@ -71,10 +72,117 @@ function pwLink(link, label) {
   return el("a", { class: "pw-link", href: link }, label || "เปิดหน้า", el("span", { "aria-hidden": "true", text: " ›" }));
 }
 
+// ------------------------------------------------------------------ where each value is fixed (owner, 29 Nov 2026)
+// "When I want to edit เงินกู้ I have to find the page, find the person, find the field": every cell of the unfolded person links to the
+// place its value comes from, already on that person (the server's p.go = {cell key: [ref]}, app/payroll.py person_go), and the page it
+// opens shows a slim bar back to this month with the person open (pwBackBar, from app.js showView). These helpers are pure: tests run
+// them in Node (tests/test_payroll_page.py).
+const PW_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PW_BACK_KEY = "vt_pw_back";
+const PW_BACK_HOURS = 8;               // a way back older than this is forgotten
+const pwIsId = (v) => typeof v === "string" && PW_UUID_RE.test(v);
+
+// "#payroll/<month>/emp=<id>" -> { month, emp } ("" / null for a part that is not there or not valid)
+function pwParseSub(sub) {
+  const [m, e] = String(sub || "").split("/");
+  const x = /^emp=(.+)$/.exec(e || "");
+  return { month: PW_MONTH_RE.test(m || "") ? m : "", emp: x && pwIsId(x[1]) ? x[1] : null };
+}
+const pwBackHash = (month, emp) => (PW_MONTH_RE.test(month || "") ? `#payroll/${month}${pwIsId(emp) ? `/emp=${emp}` : ""}` : "#payroll");
+
+// One ref of p.go -> { href, label } (a page of this site), { edit: true, label } (the pay rule, edited on this page) or null.
+function pwGoHref(ref, month) {
+  if (!ref || typeof ref !== "object") return null;
+  const m = PW_MONTH_RE.test(month || "") ? month : "";
+  let href = "", label = "";
+  switch (ref.to) {
+    case "rules": return { edit: true, label: "แก้ในหน้านี้" };
+    case "employee":
+      if (pwIsId(ref.emp) && (ref.part === "rates" || ref.part === "pay")) { href = `#employee=${ref.emp}/${ref.part}`; label = ref.part === "rates" ? "ค่าแรง หน้าพนักงาน" : "ใบ HQ หน้าพนักงาน"; }
+      break;
+    case "driver-days":
+      if (pwIsId(ref.emp) && m) { href = `#driver-days/${ref.emp}/${m}`; label = `ยอดขายรายวัน${ref.say ? ` ${ref.say}` : ""}`; }
+      break;
+    case "attendance":
+      if (pwIsId(ref.emp) && m) { href = `#attendance/${m}/emp=${ref.emp}`; label = "เวลาทำงาน"; }
+      break;
+    case "check":
+      if (pwIsId(ref.file) && Number.isInteger(ref.n) && ref.n > 0 && ref.n < 1000) { href = `#accounts-in/check=${ref.file}/page=${ref.n}`; label = `${ref.say || "เอกสาร"} หน้า ${ref.n}`; }
+      break;
+    case "loan":
+      if (pwIsId(ref.id)) { href = `#loan=${ref.id}`; label = "เงินกู้"; }
+      break;
+    case "loans":
+      if (pwIsId(ref.emp)) { href = `#loans/emp=${ref.emp}`; label = "เงินกู้ของคนนี้"; }
+      break;
+    case "document":
+      if (pwIsId(ref.id)) { href = `#document=${ref.id}`; label = ref.say || "ใบเตือน"; }
+      break;
+    case "documents":
+      if (pwIsId(ref.emp)) { href = `#documents/emp=${ref.emp}`; label = "ใบเตือนของคนนี้"; }
+      break;
+    case "cash-fuel": href = m ? `#cash-fuel/${m}` : "#cash-fuel"; label = "น้ำมันเงินสด"; break;
+    case "accounts-in": href = "#accounts-in"; label = ref.say ? `${ref.say} (กล่องรับไฟล์)` : "กล่องรับไฟล์"; break;
+    default: return null;
+  }
+  return href && PW_LINK_RE.test(href) ? { href, label } : null;
+}
+// every link of one cell of a person, in the server's order
+const pwGoLinks = (p, key, month) => (((p && p.go) || {})[key] || []).map((r) => pwGoHref(r, month)).filter(Boolean);
+
+// What the pay page sends when the pay rule form is saved: only what changed. A box left empty is null; a number that is no number
+// is sent as typed, so the server says what is wrong with it.
+function pwRuleChanges(rule, v) {
+  const r = rule || {}, out = {};
+  const was = (x) => (x == null || x === "" ? null : Number(x));
+  const now = (x) => { const t = String(x == null ? "" : x).replace(/,/g, "").trim(); return t === "" ? null : Number.isFinite(Number(t)) ? Number(t) : String(x).trim(); };
+  if (v.pay_group && v.pay_group !== (r.pay_group || "")) out.pay_group = v.pay_group;
+  for (const k of ["commission_pct", "bag_rate", "rate2", "sso"]) {
+    if (!(k in v)) continue;
+    const n = now(v[k]);
+    if (n !== was(r[k])) out[k] = n;
+  }
+  if ("bonus" in v && !!v.bonus !== !!r.bonus) out.bonus = !!v.bonus;
+  if ("rides_with" in v && (v.rides_with || null) !== (r.rides_with || null)) out.rides_with = v.rides_with || null;
+  return out;
+}
+
+// the way back, remembered for this tab only: { month, emp, who, at }
+function pwRemember(month, p) {
+  try { sessionStorage.setItem(PW_BACK_KEY, JSON.stringify({ month, emp: p && p.id, who: p ? pwWho(p) : "", at: Date.now() })); } catch (e) { /* storage blocked: no bar */ }
+}
+function pwForget() { try { sessionStorage.removeItem(PW_BACK_KEY); } catch (e) { /* blocked */ } }
+function pwBackMarker(now) {
+  let b = null;
+  try { b = JSON.parse(sessionStorage.getItem(PW_BACK_KEY) || "null"); } catch (e) { return null; }
+  if (!b || typeof b !== "object" || !PW_MONTH_RE.test(b.month || "") || !(Number(b.at) > 0)) return null;
+  if ((now || Date.now()) - Number(b.at) > PW_BACK_HOURS * 3600e3) return null;
+  return { month: b.month, emp: pwIsId(b.emp) ? b.emp : null, who: typeof b.who === "string" ? b.who.slice(0, 80) : "" };
+}
+const pwMonthShort = (key) => { const [y, m] = String(key).split("-").map(Number); return `${TH_MONTHS[m - 1]} ${y}`; };
+
+// app.js showView: every page but this one shows "← กลับไปคำนวณเงินเดือน <เดือน>" while a way back is remembered
+function pwBackBar(view) {
+  const bar = typeof document !== "undefined" ? document.getElementById("pwBack") : null;
+  if (!bar) return;
+  const back = view === "payroll" ? null : pwBackMarker();
+  bar.hidden = !back;
+  if (!back) { bar.replaceChildren(); return; }
+  fill(bar, el("a", { class: "pw-back-a", href: pwBackHash(back.month, back.emp), text: `← กลับไปคำนวณเงินเดือน ${pwMonthShort(back.month)}` }),
+    back.who ? el("span", { class: "muted small pw-back-who", text: back.who }) : null,
+    el("button", { class: "pw-back-x", type: "button", "aria-label": "ปิดแถบนี้", title: "ปิดแถบนี้", text: "×", onclick: () => { pwForget(); bar.hidden = true; } }));
+}
+
 // ------------------------------------------------------------------ loading
 function openPayroll(sub) {
   showView("payroll");
-  return pwLoad(PW_MONTH_RE.test(sub || "") ? sub : "", false);
+  const want = pwParseSub(sub);
+  pwForget();                                 // back on the pay page: the bar has done its job
+  if (want.emp) {                             // from another page's way back: that person open, every filter off so he shows
+    pw_.people.add(want.emp);
+    Object.assign(pw_, { focus: want.emp, filter: "all", branch: "", group: "", status: "", kind: "", q: "" });
+  }
+  return pwLoad(want.month, false);
 }
 
 async function pwLoad(month, fresh) {
@@ -142,6 +250,16 @@ function pwRender() {
     pwPeopleCard(d),
     failed.length ? el("p", { class: "muted small pw-failed", text: `โหลดไม่ได้บางส่วน: ${failed.join(", ")}` }) : null);
   pwDrawPeople();
+  pwShowFocus();
+}
+
+// the person a way back (or a saved pay rule) asked for: in view, unfolded
+function pwShowFocus() {
+  const id = pw_.focus;
+  if (!id) return;
+  pw_.focus = null;
+  const row = [...document.querySelectorAll("#pwPeople tr.pw-person")].find((r) => r.dataset.pwId === id);
+  if (row) row.scrollIntoView({ block: "center" });
 }
 
 // One line under the tiles when the period is not an ordinary closed one: HQ already worked it out, or it is still running.
@@ -471,9 +589,97 @@ function pwDetail(p, cols) {
     used.length ? el("dl", { class: "pw-notes" }, ...used.map((c) => {
       const x = cells[c.key], xs = pwCellState(x), text = pwCellText(x);
       return el("div", { class: `pw-note ${xs}` }, el("dt", {}, pwMark(xs), ` ${c.label || c.key}`),
-        el("dd", {}, text ? el("b", { class: "pw-v", text }) : null, text && x.note ? " · " : null, x.note || (text ? null : el("span", { class: "muted", text: PW_MARK[xs][2] }))));
+        el("dd", {}, text ? el("b", { class: "pw-v", text }) : null, text && x.note ? " · " : null, x.note || (text ? null : el("span", { class: "muted", text: PW_MARK[xs][2] })),
+          pwGoEl(p, c.key)));
     })) : el("p", { class: "muted small", text: "คนนี้ไม่มีช่องที่ต้องใช้ในการคำนวณ" }),
-    off.length && used.length && !pwGone(p) ? el("p", { class: "muted small pw-off", text: `ไม่มีในงวดนี้: ${off.map((c) => c.label || c.key).join(", ")}` }) : null);
+    off.length && used.length && !pwGone(p) ? el("p", { class: "muted small pw-off", text: `ไม่มีในงวดนี้: ${off.map((c) => c.label || c.key).join(", ")}` }) : null,
+    pwRuleBox(p));
+}
+
+// The pay rule's own fields are edited on this page (no other page has them): the owner only -- the server refuses anyone else.
+const pwCanEdit = () => !(typeof isStaff === "function" && isStaff());
+
+// "แก้ที่ เวลาทำงาน → · ใบเบิกกลางเดือน หน้า 3 →" under a cell's note: each opens that place on this person and remembers the way back
+function pwGoEl(p, key) {
+  const month = (pw_.data || {}).month;
+  const links = pwGoLinks(p, key, month).filter((g) => (g.edit ? pwCanEdit() && !pwGone(p) : !(isStaff() && !staffMayOpen(g.href.slice(1)))));
+  if (!links.length) return null;
+  return el("div", { class: "pw-go small" }, el("span", { class: "muted", text: "แก้ที่ " }),
+    ...links.flatMap((g, i) => [i ? el("span", { class: "muted", "aria-hidden": "true", text: " · " }) : null, g.edit
+      ? el("button", { class: "pw-inline pw-go-a", type: "button", text: `${g.label} →`, onclick: () => pwOpenRule(p, key) })
+      : el("a", { class: "pw-go-a", href: g.href, text: `${g.label} →`, onclick: () => pwRemember(month, p) })]));
+}
+
+// which box of the pay rule form a cell's "แก้ในหน้านี้" puts the cursor in
+const PW_RULE_FOCUS = { group: "pay_group", sso: "sso", rate: "rate2", days: "rides_with" };
+const PW_ROUTE_GROUPS = ["DRV-A", "DRV-B", "DRV-C", "DRV-D", "DRV-E"];
+
+function pwOpenRule(p, key) {
+  const box = [...document.querySelectorAll(".pw-rule")].find((b) => b.dataset.pwId === p.id);
+  if (!box) return;
+  box.open = true;
+  const field = box.querySelector(`[name="${PW_RULE_FOCUS[key] || "pay_group"}"]`);
+  box.scrollIntoView({ block: "nearest" });
+  if (field) field.focus();
+}
+
+// กติกาคิดเงินของคนนี้: group, commission, baht per ซอง, เบี้ยขยัน, the second rate, the driver a เด็กรถ rides with, ปกส.
+function pwRuleBox(p) {
+  if (!pwCanEdit() || pwGone(p) || !p.id) return null;
+  const r = p.rule || {};
+  const people = ((pw_.data || {}).people || []).filter(Boolean);
+  const drivers = people.filter((x) => x.id !== p.id && !pwGone(x) && (PW_ROUTE_GROUPS.includes(x.group) || x.position === "พนักงานขับรถสาย"))
+    .sort((a, b) => String(a.code || "").localeCompare(String(b.code || "")));
+  if (r.rides_with && !drivers.some((x) => x.id === r.rides_with)) {
+    const was = people.find((x) => x.id === r.rides_with);
+    drivers.unshift(was || { id: r.rides_with, code: "", name: "คนขับเดิม (ไม่อยู่ในรายชื่องวดนี้)" });
+  }
+  const msg = el("span", { class: "small pw-rule-msg", role: "status" });
+  const num = (name, label, value, hint) => el("label", { class: "pw-rule-f" }, el("span", { text: label }),
+    el("input", { name, type: "text", inputmode: "decimal", autocomplete: "off", value: value == null ? "" : String(value) }),
+    hint ? el("small", { class: "muted", text: hint }) : null);
+  const group = el("select", { name: "pay_group" }, r.pay_group ? null : el("option", { value: "", text: "ยังไม่ได้ตั้ง" }),
+    ...PW_GROUPS.map((g) => el("option", { value: g, text: g })));
+  group.value = r.pay_group || "";
+  const rides = el("select", { name: "rides_with" }, el("option", { value: "", text: "ไม่ตามใคร" }),
+    ...drivers.map((x) => el("option", { value: x.id, text: `${x.code || ""} ${x.name || ""}${pwNick(x) ? ` (${pwNick(x)})` : ""}`.trim() })));
+  rides.value = r.rides_with || "";
+  const bonus = el("input", { name: "bonus", type: "checkbox" });
+  bonus.checked = !!r.bonus;
+  const save = el("button", { class: "btn small primary", type: "submit", text: "บันทึกกติกา" });
+  const form = el("form", { class: "pw-rule-form", action: "javascript:void 0" },
+    el("label", { class: "pw-rule-f" }, el("span", { text: "กลุ่มคิดเงิน" }), group),
+    num("commission_pct", "ค่าคอม (%)", r.commission_pct, ""),
+    num("bag_rate", "บาทต่อซอง", r.bag_rate, ""),
+    el("label", { class: "pw-rule-f pw-rule-c" }, bonus, el("span", { text: "ได้เบี้ยขยัน" })),
+    num("rate2", "อัตราที่สอง (บาท/วัน)", r.rate2, "วันออกรถอย่างเดียว · ว่าง = ไม่มี"),
+    el("label", { class: "pw-rule-f" }, el("span", { text: "เด็กรถ: ตามคนขับ" }), rides),
+    num("sso", "ปกส. (บาท/เดือน)", r.sso, "0 = ไม่หัก (ไม่อยู่ในประกันสังคม) · ว่าง = ใช้ยอดจากใบ HQ ล่าสุด"),
+    el("div", { class: "pw-rule-act" }, save, msg));
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = form.elements;
+    const body = pwRuleChanges(p.rule, { pay_group: f.pay_group.value, commission_pct: f.commission_pct.value, bag_rate: f.bag_rate.value, bonus: f.bonus.checked,
+      rate2: f.rate2.value, rides_with: f.rides_with.value, sso: f.sso.value });
+    if (!Object.keys(body).length) { fill(msg, "ไม่มีอะไรเปลี่ยน"); return; }
+    save.disabled = true;
+    fill(msg, "กำลังบันทึก…");
+    try {
+      await api(`/api/payroll/rules/${p.id}`, jsonOpts("PATCH", body));
+    } catch (err) {
+      save.disabled = false;
+      fill(msg, el("span", { class: "warn-text", text: `บันทึกไม่สำเร็จ: ${err.message}` }));
+      return;
+    }
+    pw_.people.add(p.id);
+    pw_.focus = p.id;                         // the whole month is read again: this person's cells follow the new rule
+    await pwLoad(((pw_.data || {}).month) || "", true);
+  });
+  return el("details", { class: "pw-rule", "data-pw-id": p.id },
+    el("summary", {}, "แก้กติกาคิดเงินของคนนี้", el("span", { class: "muted small", text: " กลุ่ม · ค่าคอม · ซอง · เบี้ยขยัน · อัตราที่สอง · ตามคนขับ · ปกส." })),
+    form,
+    r.sso_source ? el("p", { class: "muted small", text: `ปกส. ตอนนี้: ${r.sso_source}` }) : null,
+    el("p", { class: "muted small", text: "ค่าแรงต่อวัน แก้ที่หน้าพนักงาน · จ่ายโดยบริษัท / HQ แก้ที่ปุ่ม “แก้ไข” ของหน้าพนักงาน" }));
 }
 
 // cols = every column (the unfolded row lists them all), ins = the ones drawn as narrow columns
@@ -486,7 +692,7 @@ function pwPersonRows(p, cols, ins) {
   const tone = ["ok", "carry", "miss"].includes(p.state) ? p.state : "";
   const nick = pwNick(p);
   // someone set aside with his branch: the row is muted and its edge carries no colour (his own marks stay, to be read when wanted)
-  const row = el("tr", { class: `pw-person ${p.hold ? "hold" : tone}${pw_.people.has(id) ? " open" : ""}`,
+  const row = el("tr", { class: `pw-person ${p.hold ? "hold" : tone}${pw_.people.has(id) ? " open" : ""}`, "data-pw-id": id,
     onclick: () => {                // the button's own click bubbles up to here, so keyboard and mouse share one path
       const open = detail.hidden;
       if (open) { pw_.people.add(id); if (!cell.firstChild) cell.append(pwDetail(p, cols)); } else pw_.people.delete(id);

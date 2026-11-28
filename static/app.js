@@ -89,6 +89,7 @@ function showView(name) {
   // The truck pages are addressed by the URL hash (so Back works); every other page clears it.
   if (!FLEET_VIEWS.includes(name) && location.hash) history.replaceState(null, "", location.pathname + location.search);
   if (!HR_VIEWS.includes(name)) $("hrLockBox").hidden = true;       // the PIN box belongs to the พนักงาน pages only, it must not follow you to the others
+  if (typeof pwBackBar === "function") pwBackBar(name);    // the way back to คำนวณเงินเดือน, when a page was opened from it (payroll.js)
   closeSidebarIfDrawer();
   window.scrollTo(0, 0);
 }
