@@ -351,3 +351,16 @@ def test_thuk_laew_takes_the_unsure_mark_off_without_changing_the_line(off_db):
     after = next(ln for ln in lines_of(inbox_ai.from_pages(reads(), "x.pdf", {}, line_edits=got), 2) if ln[5]["key"] == "p2:l3")
     assert after[1] == before[1].replace(" (อ่านไม่ชัด)", "") and after[2:4] == before[2:4]
     assert not row_of(inbox_ai.from_pages(reads(), "x.pdf", {}, line_edits=got), "p2:l3")["flag"]
+
+
+def test_a_list_over_two_pages_with_one_total_under_the_last_page_is_ok():
+    """แก่งคอย's เบิกกลางเดือน (owner, 29 Nov 2026): 93,000 on page 6, 39,000 on page 7, and 132,000 written under page 7 = the whole list."""
+    from app import acc_docs
+    t = "บันทึกการทำงาน+เบิกกลางเดือน"
+    batch = {"batch": "docs:2026-11:แก่งคอย:mid", "month": "2026-11", "branch": "แก่งคอย", "covers": [], "files": {}, "pages": [
+        {"page": 6, "file_page": 6, "feed": "midmonth", "kind": "advance", "title": t, "written_total": None, "lines": [("1/11", "เบิก", 93000.0, "1500", "เบิกกลางเดือน", {})]},
+        {"page": 7, "file_page": 7, "feed": "midmonth", "kind": "advance", "title": t, "written_total": 132000, "lines": [("1/11", "เบิก", 39000.0, "1500", "เบิกกลางเดือน", {})]}]}
+    out = acc_docs.build(batch, [])
+    assert [d["status"] for d in out["docs"]] == ["ok", "ok"] and not out["problems"]
+    batch["pages"][1]["written_total"] = 140000                                 # really short: still a mismatch
+    assert acc_docs.build(batch, [])["docs"][1]["status"] == "mismatch"

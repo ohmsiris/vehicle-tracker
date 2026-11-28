@@ -231,18 +231,26 @@ function ickWire() {
   window.addEventListener("resize", ickMeasure);
 }
 
+// "accounts-in/check=<file id>" or ".../page=<n>" (the pay page opens a list on the page a person's line was read from; owner,
+// 29 Nov 2026) -> { id, page } (page null = the first page); anything else -> null. Pure.
+function ickParseHash(h) {
+  const m = /^accounts-in\/check=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/page=([1-9]\d{0,2}))?$/i.exec(String(h || ""));
+  return m ? { id: m[1], page: m[2] ? Number(m[2]) : null } : null;
+}
+
 // fleet.js route() and app.js showView(): leaving with fixes not saved asks first (the sidebar, its hashless items, the browser's Back)
 function ickMayLeave(h) {
-  if (!ick.id || $("inboxCheckView").hidden || h === `accounts-in/check=${ick.id}` || !ickDirty()) return true;
+  if (!ick.id || $("inboxCheckView").hidden || (ickParseHash(h) || {}).id === ick.id || !ickDirty()) return true;
   if (confirm(ICK_LEAVE)) { ick.draft = ickCopy(ick.saved); return true; }
   history.replaceState(null, "", `#accounts-in/check=${ick.id}`);
   return false;
 }
 
-async function openInboxCheck(id) {
+async function openInboxCheck(id, page = null) {
   showView("inboxCheck");
   ickWire();
   if (ick.id !== id) { ick.page = null; ick.stripX = 0; ick.msg = null; ick.saved = ick.draft = null; ick.autoAcc = ick.manualAcc = null; ickHr.drafts = {}; ickHr.msgs = {}; }
+  if (Number.isInteger(page) && page > 0) ick.page = page;          // a page asked for by the link (ickRender falls back to the first)
   ick.id = id;
   const seq = ++ick.seq;
   fill($("ickBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
@@ -509,10 +517,20 @@ function ickPaintTotal(pg, box) {
   const target = box || document.querySelector(`#inboxCheckView [data-total="${pg.n}"]`);
   if (!target) return;
   const a = ickPageSum(ickLinesOf(pg, ick.draft)), b = pg.written;
-  if (b == null) { fill(target, el("span", { class: "muted", text: `รวมบรรทัด ${fmtMoney(a)} ฿ · ไม่มียอดบนกระดาษ` })); return; }
-  const ok = Math.abs(a - b) < 0.5;
-  fill(target, el("span", { class: ok ? "ok-text" : "warn-text",
-    text: ok ? `✓ รวมบรรทัด ${fmtMoney(a)} = บนกระดาษ ${fmtMoney(b)} ฿` : `รวมบรรทัด ${fmtMoney(a)} · บนกระดาษ ${fmtMoney(b)} · ต่าง ${fmtMoney(Math.abs(a - b))} ฿` }));
+  if (b == null) { fill(target, el("span", { class: "muted", text: `รวมบรรทัด ${fmtMoney(a)} ฿ · ไม่มียอดบนกระดาษ (ยอดรวมอาจเขียนไว้ที่หน้าถัดไป)` })); return; }
+  // a list over two pages has one total, written under its last page, for the whole list (owner, 29 Nov 2026)
+  let before = 0;
+  const all = ickPages(ick.f);
+  for (let i = all.findIndex((x) => x.n === pg.n) - 1; i >= 0; i--) {
+    const q = all[i];
+    if (q.kind !== pg.kind || q.title !== pg.title || q.written != null) break;
+    before += ickPageSum(ickLinesOf(q, ick.draft));
+  }
+  const ok = Math.abs(a - b) < 0.5, run = !ok && before > 0 && Math.abs(a + before - b) < 0.5;
+  fill(target, el("span", { class: ok || run ? "ok-text" : "warn-text",
+    text: ok ? `✓ รวมบรรทัด ${fmtMoney(a)} = บนกระดาษ ${fmtMoney(b)} ฿`
+      : run ? `✓ รวมบรรทัด ${fmtMoney(a)} + หน้าก่อน ${fmtMoney(before)} = บนกระดาษ ${fmtMoney(b)} ฿ (ยอดรวมทั้งใบ)`
+        : `รวมบรรทัด ${fmtMoney(a)} · บนกระดาษ ${fmtMoney(b)} · ต่าง ${fmtMoney(Math.abs(a - b))} ฿` }));
 }
 
 function ickAccSelect(code) {

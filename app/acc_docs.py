@@ -72,6 +72,7 @@ def build(batch: dict, vehicles: list[dict]) -> dict:
                 "page": p["page"], "kind": kind, "title": p.get("title"), "written_total": p.get("written_total"),
                 "note": p.get("note"), "summary": p.get("summary"), "person": p.get("person"), **extra}
 
+    carry: dict = {}                     # (kind, title) -> what the list's earlier pages without a total of their own add up to
     for p in batch["pages"]:
         if p["kind"] not in ("expense", "fuel", "advance"):
             raise BadBatch(f"page {p['page']}: kind {p['kind']}")
@@ -102,6 +103,13 @@ def build(batch: dict, vehicles: list[dict]) -> dict:
                                       {"account": credit, "debit": 0.0, "credit": amount, "branch": line_branch, "vehicle_id": None, "memo": None}]})
         total = round(total, 2)
         status = "ok" if p.get("written_total") is None or abs(total - p["written_total"]) < 0.5 else "mismatch"
+        # a list that runs over two pages has its total written once, on its last page, for the whole list (owner, 29 Nov 2026: แก่งคอย's
+        # เบิกกลางเดือน -- 93,000 on page 6 + 39,000 on page 7 = the 132,000 written under page 7)
+        key = (p["kind"], p.get("title"))
+        before = carry.get(key, 0.0)
+        if status == "mismatch" and before and abs(before + total - p["written_total"]) < 0.5:
+            status = "ok"
+        carry[key] = round(before + total, 2) if p.get("written_total") is None else 0.0
         if status == "mismatch":
             problems.append(f"หน้า {p['page']} ({p['title']}): อ่านได้ {total:,.0f} เขียนไว้ {p['written_total']:,.0f}")
         docs.append(doc(p, p["kind"], read_total=total, status=status, date_from=min(dates).isoformat(), date_to=max(dates).isoformat()))
