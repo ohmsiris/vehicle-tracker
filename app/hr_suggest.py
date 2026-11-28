@@ -8,6 +8,10 @@ confirms or skips each one. Nothing changes in พนักงาน without tha
   loan        a factory loan / accident deduction -> employee_loans; never a second one: if the person already has an active loan of that
               kind (the balances entered on 30 Sep), it only says so
   loan_terms  a memo changing how a loan is paid back -> that loan's plan
+  role_change a memo moving someone (พนักงานขับรถสาย -> หน้าโรง ...) -> employees.change_role, and the new daily rate from that day
+
+The writes (write_*) are shared with ตรวจเอกสารก่อนลงบัญชี (app/inbox_hr.py), which records items straight away and leaves an
+applied / dismissed row here so the history below shows them too (owner, 28 Nov 2026).
 
 sync_batch is called by the documents import; pending items are rebuilt from the papers, confirmed / skipped ones are kept as they are.
 """
@@ -16,7 +20,8 @@ from typing import Optional
 
 from app import documents, employees, loans, supabase
 
-KINDS = {"resign": "ลาออก / เลิกจ้าง", "warning": "หนังสือเตือน", "loan": "เงินกู้ / หักค่าเสียหาย", "loan_terms": "เปลี่ยนการผ่อน"}
+KINDS = {"resign": "ลาออก / เลิกจ้าง", "warning": "หนังสือเตือน", "loan": "เงินกู้ / หักค่าเสียหาย", "loan_terms": "เปลี่ยนการผ่อน",
+         "role_change": "เปลี่ยนตำแหน่ง"}          # role_change: recorded from ตรวจเอกสารก่อนลงบัญชี (schema_v95.sql)
 Invalid = type("Invalid", (employees.InvalidEmployee,), {})
 
 
@@ -101,48 +106,102 @@ def dismiss(sid: str) -> dict:
     return list_suggestions()
 
 
+# ------------------------------------------------------------------ the writes, shared with ตรวจเอกสารก่อนลงบัญชี (app/inbox_hr.py)
+# The owner records HR items straight from the check page too (owner, 28 Nov 2026: "record them straight away"): both places write
+# through these, so a resign / warning / loan written from either is the same row. The caller decides what counts as "already there".
+def write_resign(emp: dict, end_date: str, reason: Optional[str]) -> str:
+    """ลาออก, or -- someone already marked resigned -- the last day / reason corrected."""
+    if emp.get("status") == "resigned":
+        supabase.update("employees", {"id": f"eq.{emp['id']}"}, {"end_date": end_date, "end_reason": reason or emp.get("end_reason")})
+        return f"แก้วันสุดท้ายเป็น {end_date}"
+    employees.resign(emp["id"], {"end_date": end_date, "reason": reason})
+    return f"บันทึกลาออก วันสุดท้าย {end_date}"
+
+
+def warnings_of(emp_id: str) -> list[dict]:
+    return supabase.select_all("employee_documents", {"select": "id,doc_type,doc_date,status,warning_level", "employee_id": f"eq.{emp_id}",
+                                                      "order": "doc_date.asc"})
+
+
+def warning_on(history: list[dict], doc_date: str) -> bool:
+    """A warning of that date is already there (not cancelled): never a second one."""
+    return any(d.get("doc_type") == "warning" and d.get("doc_date") == doc_date and d.get("status") != "cancelled" for d in history)
+
+
+def write_warning(emp: dict, p: dict, note: str, history: Optional[list] = None) -> tuple[str, int]:
+    """A หนังสือเตือน printed and signed outside the app -> a 'signed' warning (level = p["level"] or one more than the last), so the
+    count is right and its ค่าปรับ (content.penalty_amount) reaches the pay page (app/payroll.py reads it by doc_date)."""
+    history = warnings_of(emp["id"]) if history is None else history
+    level = int(p.get("level") or documents.next_level(history))
+    doc = {"doc_type": "warning", "employee_id": emp["id"], "branch": emp["branch"], "doc_date": p["doc_date"],
+           "subject": p.get("subject") or documents.WARNING_SUBJECT, "warning_level": level,
+           "content": {"offence_date": p.get("offence_date") or "", "offence": p.get("offence") or "", "punishment": p.get("punishment") or "",
+                       "penalty_amount": p.get("penalty_amount"), "show_witnesses": False},
+           "with_signature": False, "status": "signed", "issued_at": f"{p['doc_date']}T09:00:00+07:00", "acknowledged_date": p["doc_date"],
+           "notes": note}
+    doc["snapshot"] = documents._snapshot(doc, emp, None)
+    supabase.insert("employee_documents", [doc])
+    return f"เพิ่มหนังสือเตือนครั้งที่ {level} (เซ็นแล้ว)", level
+
+
+def write_loan(emp: dict, p: dict, memo_ref: str) -> str:
+    loans.create_loan({"employee_id": emp["id"], "kind": p.get("loan_kind") or "loan", "amount": p["amount"], "loan_date": p["loan_date"],
+                       "reason": p.get("reason"), "memo_ref": memo_ref, "repay_mode": "monthly_fixed", "repay_amount": p["repay_amount"],
+                       "first_month": p.get("first_month")})
+    return f"เพิ่มเงินกู้ {float(p['amount']):,.0f} ผ่อน {float(p['repay_amount']):,.0f}/เดือน"
+
+
+def write_loan_terms(loan: dict, p: dict) -> str:
+    loans.edit_loan(loan["id"], {"repay_mode": "monthly_fixed", "repay_amount": p["repay_amount"], "first_month": p.get("first_month")})
+    return f"เปลี่ยนเป็นผ่อน {float(p['repay_amount']):,.0f}/เดือน เริ่ม {p.get('first_month')}"
+
+
+def write_role_change(emp: dict, p: dict, memo_ref: str) -> str:
+    """เปลี่ยนตำแหน่ง through employees.change_role (the history row, then position / branch, then the driver record) and, when the
+    memo gives one, the new daily rate from that day in employee_rates -- where the pay page reads it (app/payroll.rate_spans:
+    SB-PD011 350 to 17/11, 400 from 18/11). Position and branch already as asked: only the rate is written."""
+    from app import rates
+    parts = []
+    branch = p.get("to_branch") or emp.get("branch")
+    if p["to_position"] != (emp.get("position") or None) or branch != emp.get("branch"):
+        employees.change_role(emp["id"], {"position": p["to_position"], "branch": branch, "change_date": p["change_date"],
+                                          "reason": p.get("reason") or memo_ref})
+        parts.append(f"เปลี่ยนตำแหน่งเป็น {p['to_position']} จาก {p['change_date']}")
+    if p.get("daily_rate"):
+        rates.add_rate(emp["id"], {"daily_rate": p["daily_rate"], "effective_from": p["change_date"], "kind": "normal",
+                                   "reason": p.get("reason") or f"เปลี่ยนตำแหน่งเป็น {p['to_position']}", "memo_ref": memo_ref})
+        parts.append(f"ค่าแรง {float(p['daily_rate']):,.0f}/วัน จาก {p['change_date']}")
+    return " · ".join(parts)
+
+
 def apply(sid: str) -> dict:
     s = _get(sid)
     emp = _by_code().get(s["employee_code"])
     if not emp:
         raise Invalid("ไม่พบรหัสนี้ในรายชื่อพนักงาน — เพิ่มพนักงานก่อน หรือกด 'ไม่ใช้'")
     p = s["payload"]
+    ref = f"{s['batch']} หน้า {s['page']}"
     if s["kind"] == "resign":
-        if emp.get("status") == "resigned":
-            supabase.update("employees", {"id": f"eq.{emp['id']}"}, {"end_date": p["end_date"], "end_reason": p.get("reason") or emp.get("end_reason")})
-            result = f"แก้วันสุดท้ายเป็น {p['end_date']}"
-        else:
-            employees.resign(emp["id"], {"end_date": p["end_date"], "reason": p.get("reason")})
-            result = f"บันทึกลาออก วันสุดท้าย {p['end_date']}"
+        result = write_resign(emp, p["end_date"], p.get("reason"))
     elif s["kind"] == "warning":
-        history = [d for d in supabase.select_all("employee_documents", {"select": "*", "employee_id": f"eq.{emp['id']}", "order": "doc_date.asc"})]
-        if any(d["doc_type"] == "warning" and d["doc_date"] == p["doc_date"] and d["status"] != "cancelled" for d in history):
+        history = warnings_of(emp["id"])
+        if warning_on(history, p["doc_date"]):
             result = "มีหนังสือเตือนวันนี้อยู่แล้ว — ไม่ได้เพิ่มซ้ำ"
         else:
-            doc = {"doc_type": "warning", "employee_id": emp["id"], "branch": emp["branch"], "doc_date": p["doc_date"],
-                   "subject": p.get("subject") or documents.WARNING_SUBJECT, "warning_level": p.get("level") or documents.next_level(history),
-                   "content": {"offence_date": p.get("offence_date") or "", "offence": p.get("offence") or "", "punishment": p.get("punishment") or "",
-                               "penalty_amount": p.get("penalty_amount"), "show_witnesses": False},
-                   "with_signature": False, "status": "signed", "issued_at": f"{p['doc_date']}T09:00:00+07:00", "acknowledged_date": p["doc_date"],
-                   "notes": f"บันทึกจากเอกสารสิ้นเดือน ({s['batch']} หน้า {s['page']}) — กระดาษออกนอกโปรแกรม เซ็นแล้ว"}
-            doc["snapshot"] = documents._snapshot(doc, emp, None)
-            supabase.insert("employee_documents", [doc])
-            result = f"เพิ่มหนังสือเตือนครั้งที่ {doc['warning_level']} (เซ็นแล้ว)"
+            result = write_warning(emp, p, f"บันทึกจากเอกสารสิ้นเดือน ({ref}) — กระดาษออกนอกโปรแกรม เซ็นแล้ว", history)[0]
     elif s["kind"] == "loan":
         kind = p.get("loan_kind", "loan")
         same = [ln for ln in _active_loans().get(emp["id"], []) if ln["kind"] == kind]
         if same:
             result = "มีเงินกู้ประเภทนี้อยู่แล้ว — ไม่ได้เพิ่มซ้ำ (แก้ยอดในหน้าเงินกู้ถ้าไม่ตรง)"
         else:
-            loans.create_loan({"employee_id": emp["id"], "kind": kind, "amount": p["amount"], "loan_date": p["loan_date"], "reason": p.get("reason"),
-                               "memo_ref": f"{s['batch']} หน้า {s['page']}", "repay_mode": "monthly_fixed", "repay_amount": p["repay_amount"],
-                               "first_month": p.get("first_month")})
-            result = f"เพิ่มเงินกู้ {float(p['amount']):,.0f} ผ่อน {float(p['repay_amount']):,.0f}/เดือน"
+            result = write_loan(emp, p, ref)
+    elif s["kind"] == "role_change":
+        result = write_role_change(emp, p, ref)
     else:   # loan_terms
         same = [ln for ln in _active_loans().get(emp["id"], []) if ln["kind"] == p.get("loan_kind", "loan")]
         if not same:
             raise Invalid("ไม่พบเงินกู้ที่ยังผ่อนอยู่ของคนนี้")
-        loans.edit_loan(same[0]["id"], {"repay_mode": "monthly_fixed", "repay_amount": p["repay_amount"], "first_month": p.get("first_month")})
-        result = f"เปลี่ยนเป็นผ่อน {float(p['repay_amount']):,.0f}/เดือน เริ่ม {p.get('first_month')}"
+        result = write_loan_terms(same[0], p)
     _decide(sid, "applied", result)
     return list_suggestions()

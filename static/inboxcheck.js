@@ -6,6 +6,7 @@
 //   * fixed straight away: วันที่, รายการ (names too), บาท, บัญชี, รถ; ลบ a misread line (เอาคืน brings it back); + เพิ่มบรรทัด a missed one;
 //   * ไปที่, a column of its own: where every line will go (an account and truck, already on the cash-fuel page, a note, deleted).
 //     Lines that are not booked are greyed and grouped at the bottom of their page, the reason in ไปที่ -- never glued onto the text;
+//   * บันทึกในพนักงาน (app/inbox_hr.py): HR pages and staff loans recorded straight away, each item by its own buttons (bottom of file);
 //   * บันทึกการแก้ (Ctrl+S) sends every fix at once (POST /api/accounts/inbox/<id>/edits, app/inbox.save_edits: the preview is rebuilt
 //     with them, a booked file is booked again with them); ลงบัญชี books exactly what is left, and waits while a fix is not saved.
 // Every other file keeps the dialog (inbox.js ibxPreview). Loaded after inbox.js (ibxBadge, ibxRun, ibxSuperseded ... at call time).
@@ -241,7 +242,7 @@ function ickMayLeave(h) {
 async function openInboxCheck(id) {
   showView("inboxCheck");
   ickWire();
-  if (ick.id !== id) { ick.page = null; ick.msg = null; ick.saved = ick.draft = null; ick.autoAcc = ick.manualAcc = null; }
+  if (ick.id !== id) { ick.page = null; ick.msg = null; ick.saved = ick.draft = null; ick.autoAcc = ick.manualAcc = null; ickHr.drafts = {}; ickHr.msgs = {}; }
   ick.id = id;
   const seq = ++ick.seq;
   fill($("ickBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
@@ -292,7 +293,8 @@ function ickRender() {
   if (ick.page !== "all" && !pages.some((x) => x.n === ick.page)) ick.page = pages.length ? pages[0].n : "all";
   const shown = ick.page === "all" ? pages : pages.filter((x) => x.n === ick.page);
   fill($("ickBody"), ickTop(f), ickStrip(pages),
-    el("div", { id: "ickMain", class: "ick-main" }, ...shown.map(ickPageEl), !pages.length ? el("p", { class: "muted", text: "ไม่มีหน้าในไฟล์นี้" }) : null));
+    el("div", { id: "ickMain", class: "ick-main" }, ick.page === "all" ? ickHrAll(f) : null, ...shown.map(ickPageEl),
+      !pages.length ? el("p", { class: "muted", text: "ไม่มีหน้าในไฟล์นี้" }) : null));
   ickRefresh();
   ickMeasure();
   ickWatchTop();
@@ -328,6 +330,9 @@ function ickTop(f) {
   const book = f.status === "read" && !sup ? el("button", { id: "ickBook", class: "btn primary", type: "button", "data-ibx-file": f.id, text: "ลงบัญชี", onclick: ickBook })
     : sup && (p.batches || []).length ? el("button", { id: "ickBook", class: "btn", type: "button", "data-ibx-file": f.id, text: "ลงบัญชีไฟล์นี้อีกครั้ง", onclick: ickBook }) : null;
   const why = el("span", { id: "ickWhy", class: "ick-why" });
+  const hr = f.hr || {};
+  const hrRead = hr.can_read && hr.access === "ok" ? el("button", { id: "ickHrRead", class: "btn", type: "button", "data-ibx-file": f.id, onclick: ickHrRead,
+    title: "อ่านหน้าเรื่องพนักงานและรายการเงินกู้พนักงานของไฟล์นี้ด้วย AI (ใช้ค่า AI เล็กน้อย)", text: "อ่านเรื่องพนักงาน" }) : null;
   const conflicts = (f.conflicts || []).length ? el("div", { class: "ick-note warn" },
     el("strong", { text: "ยังมีเรื่องที่ต้องเลือกก่อนลงบัญชี: " }), (f.conflicts || []).map((c) => c.message || IBX_CONFLICT[c.key] || "ต้องเลือก").join(" · "), " ",
     el("button", { class: "btn small primary", type: "button", text: ibxChoiceLabel(f), onclick: ickChoose })) : null;
@@ -335,10 +340,10 @@ function ickTop(f) {
     el("ul", { class: "small" }, ...p.flags.map((x) => el("li", { text: x })))) : null;
   return el("div", { class: "ick-top" },
     el("div", { class: "ick-bar" }, back, el("h2", { text: f.file_name || "ไฟล์" }), ibxBadge(f),
-      el("div", { class: "ick-actions" }, fileLink, save, book)),
+      el("div", { class: "ick-actions" }, fileLink, hrRead, save, book)),
     el("div", { class: "ick-sub small" },
       el("span", { class: "muted", text: [(f.branches || []).join(", ") || p.branch, f.month ? `งวด ${ibxMonth(f.month)}` : null, half].filter(Boolean).join(" · ") }),
-      el("span", { id: "ickTotals" }), why, el("span", { id: "ickMsg", "aria-live": "polite" })),
+      el("span", { id: "ickTotals" }), el("span", { id: "ickHr", class: "ick-hr-count" }), why, el("span", { id: "ickMsg", "aria-live": "polite" })),
     f.status === "booked" ? el("div", { class: "ick-note" }, "ไฟล์นี้ลงบัญชีแล้ว — บันทึกการแก้แล้วระบบลงบัญชีใหม่ตามที่แก้ให้ทันที") : null,
     f.pending ? el("div", { class: "ick-note warn", text: `อ่านใหม่แล้ว ${f.pending.message || "ต้องเลือกก่อน"} — รายการเดิมยังอยู่ในบัญชี · เลือกก่อนแล้วค่อยแก้รายการ` }) : null,
     sup ? el("div", { class: "ick-note warn", text: `ไฟล์นี้ถูกแทนที่ด้วย ${sup.by || "ไฟล์ที่ส่งทีหลัง"} — รายการของไฟล์นั้นอยู่ในบัญชีแทน` })
@@ -347,19 +352,23 @@ function ickTop(f) {
 }
 
 function ickStrip(pages) {
-  const chip = (key, label, sub, warn) => el("button", { class: "ick-chip", type: "button", "aria-pressed": String(ick.page === key),
+  const chip = (key, label, sub, warn, hrN) => el("button", { class: "ick-chip", type: "button", "aria-pressed": String(ick.page === key),
     onclick: () => { ick.page = key; ickRender(); window.scrollTo(0, 0); } },
-    el("span", { text: label }), sub ? el("small", { text: sub }) : null, warn ? el("span", { class: "ick-dot", title: "ยอดไม่ตรง หรือมีบรรทัดอ่านไม่ชัด" }) : null);
+    el("span", { text: label }), sub ? el("small", { text: sub }) : null, warn ? el("span", { class: "ick-dot", title: "ยอดไม่ตรง หรือมีบรรทัดอ่านไม่ชัด" }) : null,
+    hrN ? el("span", { class: "ick-hrn", title: `เรื่องพนักงานรอบันทึก ${hrN} รายการ`, text: String(hrN) }) : null);
+  const allHr = ickHrItems(ick.f).filter((it) => it.status === "pending").length;
   return el("nav", { class: "ick-strip", "aria-label": "หน้าในไฟล์" },
-    ...pages.map((pg) => chip(pg.n, `หน้า ${pg.n}`, pg.kind_th, pg.warn)), chip("all", "ทุกหน้า", `${pages.length} หน้า`, false));
+    ...pages.map((pg) => chip(pg.n, `หน้า ${pg.n}`, pg.kind_th, pg.warn, ickHrPendingOn(ick.f, pg.n))), chip("all", "ทุกหน้า", `${pages.length} หน้า`, false, allHr));
 }
 
 function ickPageEl(pg) {
   const head = el("div", { class: "ick-page-head" }, el("h3", { text: `หน้า ${pg.n}` }), pg.kind_th ? el("span", { class: "badge", text: pg.kind_th }) : null,
     pg.title ? el("span", { class: "muted small", text: pg.title }) : null);
+  const side = pg.money ? ickTable(pg)      // a page the AI found no money on can still take a missed line
+    : pg.canAdd && ick.editable ? el("div", { class: "ick-stack" }, ickCard(pg), ickTable(pg)) : ickCard(pg);
+  const onPage = ickHrSplit(ick.f, pg).onPage;              // บันทึกในพนักงาน of a memo page (a loan line's sits under its line)
   return el("section", { class: "ick-page", id: `ickP${pg.n}`, "data-page": String(pg.n) }, head,
-    el("div", { class: "ick-grid" }, ickScan(pg), pg.money ? ickTable(pg)      // a page the AI found no money on can still take a missed line
-      : pg.canAdd && ick.editable ? el("div", { class: "ick-stack" }, ickCard(pg), ickTable(pg)) : ickCard(pg)));
+    el("div", { class: "ick-grid" }, ickScan(pg), onPage.length ? el("div", { class: "ick-stack" }, side, ...onPage.map(ickHrEl)) : side));
 }
 
 function ickScan(pg) {
@@ -396,12 +405,14 @@ function ickTable(pg) {
   const on = lines.filter((l) => l.state === "book" || l.state === "new" || l.state === "unapplied"), off = lines.filter((l) => l.state === "cashfuel" || l.state === "deleted");
   const total = el("div", { class: "ick-total", "data-total": String(pg.n) });
   const add = pg.canAdd && ick.editable ? el("button", { class: "btn small", type: "button", text: "+ เพิ่มบรรทัด", onclick: () => ickAdd(pg, lines) }) : null;
+  const byLine = ickHrSplit(ick.f, pg).byLine;
+  const withHr = (l) => [ickLineEl(pg, l), ...byLine.filter((it) => it.line_key === l.key).map(ickHrEl)];
   const box = el("div", { class: "ick-lines" },
     el("div", { class: "ick-r head", "aria-hidden": "true" }, ...["วันที่", "รายการ", "บาท", "บัญชี", "รถ", "ไปที่", ""].map((t, i) => el("span", { class: `c-${["date", "text", "amt", "acc", "veh", "dest", "act"][i]}`, text: t }))),
-    ...on.map((l) => ickLineEl(pg, l)),
+    ...on.flatMap(withHr),
     !on.length ? el("p", { class: "muted small ick-empty", text: "ไม่มีบรรทัดที่จะลงบัญชีจากหน้านี้" }) : null,
     off.length ? el("div", { class: "ick-divider", text: "ไม่ลงบัญชีจากหน้านี้" }) : null,
-    ...off.map((l) => ickLineEl(pg, l)),
+    ...off.flatMap(withHr),
     el("div", { class: "ick-foot" }, total, add));
   ickPaintTotal(pg, total);
   return box;
@@ -578,6 +589,15 @@ function ickRefresh() {
     book.className = n ? "btn" : book.textContent === "ลงบัญชี" ? "btn primary" : "btn";
   }
   if (why) why.textContent = n ? "บันทึกการแก้ก่อน แล้วค่อยลงบัญชี" : "";
+  const hrBox = $("ickHr"), hrRead = $("ickHrRead");
+  if (hrBox) {
+    const items = ickHrItems(f), pending = items.filter((it) => it.status === "pending");
+    const stuck = (f.hr || {}).access === "ok" ? pending.filter((it) => it.block).length : 0, waiting = pending.length - stuck;
+    hrBox.textContent = !items.length ? "" : !pending.length ? `เรื่องพนักงาน: ตัดสินครบแล้ว (${items.length})`
+      : `เรื่องพนักงาน: ${waiting} รอบันทึก${stuck ? ` · ${stuck} บันทึกไม่ได้ (มีแล้ว / ต้องเลือก) — กดไม่บันทึกหรือแก้` : ""}`;
+    hrBox.className = `ick-hr-count${waiting ? " wait" : ""}`;
+  }
+  if (hrRead) { hrRead.textContent = ickHr.reading ? "กำลังอ่าน…" : "อ่านเรื่องพนักงาน"; hrRead.disabled = ickHr.reading || ibx.busy.has(f.id); }
   if (totals) {
     const b = ((f.preview || {}).batches || [])[0] || {};
     // รวมแถว = what will be booked; the paper's own total also holds the fuel already on the cash-fuel page, so the difference counts it
@@ -646,4 +666,253 @@ function ickChoose() {
     const dlg = $("ibxDialog");
     if (dlg) dlg.addEventListener("close", () => { if (ick.id === id && !$("inboxCheckView").hidden) openInboxCheck(id); }, { once: true });
   });
+}
+
+// ---------------------------------------------------------------- บันทึกในพนักงาน (owner, 28 Nov 2026; app/inbox_hr.py)
+// HR pages and staff loans of the paper recorded STRAIGHT AWAY, one item at a time, each by its own buttons (never by ลงบัญชี): who
+// it goes to (the ไปที่ pill), the fields read from the paper (editable), what พนักงาน has now, then บันทึก / ไม่บันทึก.
+const ICK_HR_KIND = { warning: "หนังสือเตือน", resign: "ลาออก", loan: "เงินกู้", loan_terms: "เปลี่ยนการผ่อน", role_change: "เปลี่ยนตำแหน่ง" };
+const ICK_HR_FIELDS = {          // [field, label, input]
+  warning: [["doc_date", "วันที่หนังสือ", "date"], ["offence_date", "วันที่ทำผิด", "date"], ["level", "ครั้งที่", "level"],
+    ["offence", "ความผิด", "text"], ["punishment", "บทลงโทษ", "text"], ["penalty_amount", "หักเงิน (บาท)", "money"]],
+  resign: [["end_date", "วันสุดท้ายที่ทำงาน", "date"], ["reason", "เหตุผล", "text"]],
+  loan: [["loan_kind", "ประเภท", "loan_kind"], ["amount", "ยอดกู้ (บาท)", "money"], ["loan_date", "วันที่กู้", "date"],
+    ["repay_amount", "หักต่อเดือน (บาท)", "money"], ["first_month", "เริ่มหักเดือน", "month"], ["reason", "เหตุผล", "text"]],
+  loan_terms: [["repay_amount", "หักต่อเดือน (บาท)", "money"], ["first_month", "เริ่มหักเดือน", "month"]],
+  role_change: [["change_date", "มีผลวันที่", "date"], ["to_position", "ตำแหน่งใหม่", "position"], ["to_branch", "สาขา", "branch"],
+    ["daily_rate", "ค่าแรงต่อวัน (บาท)", "money"], ["reason", "เหตุผล", "text"]],
+};
+const ickHr = { drafts: {}, msgs: {}, busy: null, reading: false, people: null, loading: null };
+
+const ickHrItems = (f) => ((f && f.hr && f.hr.items) || []);
+const ickHrPendingOn = (f, n) => ickHrItems(f).filter((it) => it.page === n && it.status === "pending").length;
+
+// which items sit under a line of the page (a 1510 loan line) and which on the page itself (a memo; a line no longer shown)
+function ickHrSplit(f, pg) {
+  const keys = new Set(pg.rows.map((r) => r.key).filter(Boolean));
+  const mine = ickHrItems(f).filter((it) => it.page === pg.n);
+  return { byLine: mine.filter((it) => it.line_key && keys.has(it.line_key)), onPage: mine.filter((it) => !(it.line_key && keys.has(it.line_key))) };
+}
+
+// a field as its input shows it: the owner's draft over what was read (a month as YYYY-MM)
+function ickHrValue(it, field) {
+  const d = ickHr.drafts[it.id] || {};
+  const v = d[field] !== undefined ? d[field] : (it.fields || {})[field];
+  if (v == null) return "";
+  if (field === "first_month") return String(v).slice(0, 7);
+  return String(v);
+}
+
+const ickHrEdited = (it) => Object.keys(ickHr.drafts[it.id] || {}).length > 0;
+
+// DD/MM/YYYY (Buddhist year) HH:MM, Bangkok time
+function ickHrWhen(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const t = new Date(d.getTime() + 7 * 3600 * 1000);
+  const p = (x) => String(x).padStart(2, "0");
+  return `${p(t.getUTCDate())}/${p(t.getUTCMonth() + 1)}/${t.getUTCFullYear() + 543} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
+}
+
+function ickHrInput(it, field, label, kind, ro) {
+  const opts = (ick.f.hr || {}).options || {};
+  const value = ickHrValue(it, field);
+  let input;
+  if (kind === "level") {
+    input = el("select", {}, el("option", { value: "", text: `ตามระบบ${it.level ? ` (ครั้งที่ ${it.level})` : ""}` }),
+      ...[1, 2, 3].map((n) => el("option", { value: String(n), text: `ครั้งที่ ${n}` })));
+  } else if (kind === "loan_kind") {
+    input = el("select", {}, ...Object.entries(opts.loan_kinds || { loan: "เงินกู้ทั่วไป" }).map(([k, t]) => el("option", { value: k, text: t })));
+  } else if (kind === "position") {
+    const list = opts.positions || [];
+    input = el("select", {}, el("option", { value: "", text: "— เลือกตำแหน่ง —" }), ...list.map((p) => el("option", { value: p, text: p })));
+    if (value && !list.includes(value)) input.append(el("option", { value, text: value }));
+  } else if (kind === "branch") {
+    input = el("select", {}, el("option", { value: "", text: "สาขาเดิม" }), ...(opts.branches || []).map((b) => el("option", { value: b, text: b })));
+  } else {
+    input = el("input", { type: kind === "money" ? "text" : kind, value, inputmode: kind === "money" ? "decimal" : null, maxlength: kind === "text" ? "300" : null });
+  }
+  if (input.tagName === "SELECT") input.value = value;
+  input.disabled = ro;
+  const go = () => {
+    const d = { ...(ickHr.drafts[it.id] || {}) };
+    const read = (it.fields || {})[field];
+    const was = read == null ? "" : field === "first_month" ? String(read).slice(0, 7) : String(read);
+    if (input.value === was) delete d[field]; else d[field] = input.value;
+    if (Object.keys(d).length) ickHr.drafts[it.id] = d; else delete ickHr.drafts[it.id];
+    ickHrButtons(it);
+  };
+  input.addEventListener("input", go);
+  input.addEventListener("change", go);
+  return el("label", { class: `ick-hr-f f-${kind}` }, el("span", { class: "muted small", text: label }), input);
+}
+
+// the people to pick from (/api/employees, the HR section's own list): loaded once, the first time a picker is used
+async function ickHrPeople() {
+  if (ickHr.people) return ickHr.people;
+  if (!ickHr.loading) {
+    ickHr.loading = api("/api/employees").then((d) => { ickHr.people = d.employees || []; return ickHr.people; })
+      .catch((err) => { ickHr.loading = null; throw err; });
+  }
+  return ickHr.loading;
+}
+
+function ickHrPicker(it) {
+  const listId = `ickHrPeople-${it.id.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+  const list = el("datalist", { id: listId });
+  const input = el("input", { type: "search", list: listId, placeholder: "เปลี่ยนคน: ค้นหารหัส / ชื่อ", "aria-label": "เลือกพนักงาน", class: "ick-hr-pick" });
+  const fillList = async () => {
+    try {
+      const people = await ickHrPeople();
+      if (!list.children.length) {
+        list.append(...people.map((p) => el("option", { value: p.code,
+          label: `${p.display_name}${p.nickname ? ` (${p.nickname})` : ""} · ${p.position || "-"} · ${p.branch}${p.status === "resigned" ? " · ลาออกแล้ว" : ""}` })));
+      }
+    } catch (err) { ickHr.msgs[it.id] = { text: `โหลดรายชื่อไม่สำเร็จ: ${err.message}`, bad: true }; ickHrRepaint(it.page); }
+  };
+  input.addEventListener("focus", fillList, { once: true });
+  input.addEventListener("change", () => {
+    const code = input.value.trim().toUpperCase();
+    if (!code) return;
+    if (ickHr.people && !ickHr.people.some((p) => String(p.code).toUpperCase() === code)) {
+      ickHr.msgs[it.id] = { text: `ไม่พบรหัส ${code} — เลือกจากรายชื่อ`, bad: true };
+      ickHrRepaint(it.page);
+      return;
+    }
+    ickHrAct(it, "person", { employee_code: code });
+  });
+  return el("span", { class: "ick-hr-picker" }, input, list);
+}
+
+function ickHrNote(msg) {
+  return msg ? el("div", { class: msg.bad ? "warn-text small" : "ok-text small", text: msg.text }) : null;
+}
+
+function ickHrEl(it) {
+  const hr = ick.f.hr || {};
+  const busy = ickHr.busy === it.id;
+  const box = el("div", { class: `ick-hr ${it.status}`, "data-hr": it.id });
+  const head = el("div", { class: "ick-hr-head" }, el("span", { class: "badge ick-hr-kind", text: ICK_HR_KIND[it.kind] || it.kind }),
+    el("strong", { text: "บันทึกในพนักงาน" }), it.summary ? el("span", { class: "muted small", text: it.summary }) : null);
+  const dest = el("span", { class: `ick-dest hr${it.status === "dismissed" ? " off" : ""}`, text: it.dest || "พนักงาน" });
+  if (it.status === "applied") {
+    fill(box, head, dest, el("div", { class: "ick-hr-done" }, el("span", { class: "ok-text", text: `บันทึกแล้ว — ${it.result || ""}` }),
+      it.applied_at ? el("span", { class: "muted small", text: ` · ${ickHrWhen(it.applied_at)}${it.applied_by ? ` · ${it.applied_by}` : ""}` }) : null));
+    return box;
+  }
+  if (it.status === "dismissed") {
+    const back = el("button", { class: "linkbtn small", type: "button", text: "เอากลับมา", disabled: busy || hr.access !== "ok", onclick: () => ickHrAct(it, "reopen") });
+    fill(box, head, dest, el("div", { class: "ick-hr-off muted" }, "ไม่บันทึก · ", back), ickHrNote(ickHr.msgs[it.id]));
+    return box;
+  }
+  if (hr.access === "none") {
+    fill(box, head, dest, el("p", { class: "muted small", text: it.block || "บันทึกเรื่องพนักงานได้เฉพาะผู้ที่มีเมนูรายชื่อพนักงาน" }));
+    return box;
+  }
+  if (hr.access === "locked") {
+    const pin = el("input", { type: "password", inputmode: "numeric", autocomplete: "off", placeholder: "PIN ส่วนพนักงาน", "aria-label": "PIN ส่วนพนักงาน" });
+    const go = el("button", { class: "btn small", type: "button", text: "ปลดล็อก", onclick: () => ickHrUnlock(pin.value.trim()) });
+    pin.addEventListener("keydown", (e) => { if (e.key === "Enter") ickHrUnlock(pin.value.trim()); });
+    fill(box, head, dest, el("div", { class: "ick-hr-lock" }, el("span", { class: "muted small", text: "ส่วนพนักงานล็อกอยู่ — ใส่ PIN เพื่อดูและบันทึก" }), pin, go));
+    return box;
+  }
+  const e = it.employee;
+  const who = el("div", { class: "ick-hr-who" }, el("span", { class: "muted small", text: "คน: " }),
+    e ? el("strong", { text: `${e.name} (${e.code})` }) : el("strong", { class: "warn-text", text: `ยังไม่ได้เลือก${it.employee_name_read ? ` — ในกระดาษ: ${it.employee_name_read}` : ""}` }),
+    e ? el("span", { class: "muted small", text: ` ${e.position || ""} · ${e.branch || ""}${e.status === "resigned" ? " · ลาออกแล้ว" : ""}` }) : null,
+    ickHrPicker(it));
+  const fields = el("div", { class: "ick-hr-fields" }, ...(ICK_HR_FIELDS[it.kind] || []).map(([f, label, kind]) => ickHrInput(it, f, label, kind, busy)));
+  const now = el("div", { class: "ick-hr-now small" }, el("span", { class: "muted", text: "ในระบบตอนนี้: " }), it.now || "—");
+  const save = el("button", { class: "btn small primary", type: "button", "data-hr-save": it.id, text: busy ? "กำลังบันทึก…" : "บันทึก", onclick: () => ickHrApply(it) });
+  const skip = el("button", { class: "btn small", type: "button", text: "ไม่บันทึก", disabled: busy, onclick: () => ickHrAct(it, "dismiss") });
+  const why = el("span", { class: "ick-hr-why small", "data-hr-why": it.id });
+  fill(box, head, dest, who, it.mismatch ? el("div", { class: "warn-text small", text: it.mismatch }) : null, fields, now,
+    el("div", { class: "ick-hr-act" }, save, skip, why), ickHrNote(ickHr.msgs[it.id]));
+  ickHrButtons(it, box);
+  return box;
+}
+
+// บันทึก is off, with the reason beside it, while the item would duplicate what is there (or nobody is picked) and nothing was changed
+function ickHrButtons(it, root) {
+  const scope = root || [...document.querySelectorAll("#inboxCheckView [data-hr]")].find((x) => x.dataset.hr === it.id);
+  if (!scope) return;
+  const save = scope.querySelector("[data-hr-save]"), why = scope.querySelector("[data-hr-why]");
+  const blocked = !!it.block && (!ickHrEdited(it) || !it.employee);
+  if (save) { save.disabled = blocked || ickHr.busy === it.id; save.title = blocked ? it.block : ""; }
+  if (why) why.textContent = blocked ? it.block : ickHrEdited(it) ? "แก้แล้ว — กดบันทึกเพื่อใช้ค่าที่แก้" : "";
+}
+
+function ickHrApply(it) {
+  ickHrAct(it, "apply", { fields: { ...(ickHr.drafts[it.id] || {}) }, employee_code: it.employee_code || null });
+}
+
+async function ickHrAct(it, what, body) {
+  if (ickHr.busy || !ick.f) return;
+  const f = ick.f;
+  ickHr.busy = it.id;
+  delete ickHr.msgs[it.id];
+  ickHrRepaint(it.page);
+  let res = null;
+  await ibxRun(f.id, async () => {
+    try { res = await api(`/api/accounts/inbox/${f.id}/hr/${encodeURIComponent(it.id)}/${what}`, jsonOpts("POST", body || {})); }
+    catch (err) { ickHr.msgs[it.id] = { text: err.status === 423 ? "ส่วนพนักงานล็อกอยู่ — ใส่ PIN ก่อน" : err.message, bad: true }; }
+  });
+  ickHr.busy = null;
+  if (res && ick.f === f) {
+    if (what === "apply" || what === "person") delete ickHr.drafts[it.id];
+    ickHrTake(res);
+  }
+  ickHrRepaint(it.page);
+  ickRefresh();
+}
+
+// a reply to an HR action: only the HR part of the file changes (line fixes waiting on the screen stay as they are)
+function ickHrTake(res) {
+  ick.f = { ...ick.f, hr: res.hr, ai_usage: res.ai_usage, preview: { ...(ick.f.preview || {}), hr_items: (res.preview || {}).hr_items } };
+}
+
+function ickHrRepaint(n) {
+  if (!ick.f) return;
+  if (ick.page === "all") { ickRender(); return; }
+  ickRepaint(n);
+  const strip = document.querySelector("#inboxCheckView .ick-strip");
+  if (strip) strip.replaceWith(ickStrip(ickPages(ick.f)));
+}
+
+async function ickHrUnlock(pin) {
+  if (!pin) return;
+  saveHrPin(pin);
+  try { ickHrTake(await api(`/api/accounts/inbox/${ick.id}`)); }
+  catch (err) { ickSay(err.message, true); return; }
+  ick.msg = ick.f.hr && ick.f.hr.access === "locked" ? { text: "PIN ไม่ถูกต้อง", bad: true } : null;
+  ickRender();
+}
+
+async function ickHrRead() {
+  const f = ick.f;
+  if (!f || ickHr.reading) return;
+  ickHr.reading = true;
+  ickRefresh();
+  await ibxRun(f.id, async () => {
+    try {
+      const res = await api(`/api/accounts/inbox/${f.id}/hr/read`, { method: "POST" });
+      if (ick.f === f) { ickHrTake(res); ick.msg = { text: `อ่านเรื่องพนักงานแล้ว: ${ickHrItems(ick.f).length} รายการ`, bad: false }; }
+    } catch (err) { ick.msg = { text: err.message, bad: true }; }
+  });
+  ickHr.reading = false;
+  ickRender();
+}
+
+// ทุกหน้า: every item of the file in one list, each with the page it is on
+function ickHrAll(f) {
+  const items = ickHrItems(f);
+  if (!items.length) return null;
+  const st = { pending: "รอบันทึก", applied: "บันทึกแล้ว", dismissed: "ไม่บันทึก" };
+  return el("section", { class: "ick-hr-all", id: "ickHrAll" }, el("h3", { text: `เรื่องพนักงานในไฟล์นี้ (${items.length})` }),
+    el("ul", {}, ...items.map((it) => el("li", { class: `s-${it.status}` },
+      el("button", { class: "linkbtn small", type: "button", text: `หน้า ${it.page}`, onclick: () => { ick.page = it.page; ickRender(); window.scrollTo(0, 0); } }),
+      el("span", { class: "badge ick-hr-kind", text: ICK_HR_KIND[it.kind] || it.kind }),
+      el("span", { class: "ick-hr-all-dest", text: (it.dest || "").replace(/^พนักงาน · /, "") }),
+      el("span", { class: `ick-hr-st ${it.status}${it.status === "pending" && it.block ? " stuck" : ""}`,
+        text: it.status === "pending" && it.block && (f.hr || {}).access === "ok" ? it.block : st[it.status] || it.status })))));
 }

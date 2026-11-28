@@ -48,7 +48,11 @@ def _earlier_ai(f: ic.Dropped):
 def read(f: ic.Dropped) -> dict:
     prev = _earlier_ai(f)
     if prev:                                           # the page reads only: another row's line fixes are that row's (28 Nov 2026)
-        return inbox_ai.apply_choices({k: v for k, v in prev.items() if k != "line_edits"}, f.choices)
+        base = {k: v for k, v in prev.items() if k != "line_edits"}
+        if "hr_items" in base:                         # what was recorded in พนักงาน stays recorded; a ไม่บันทึก waits again
+            from app import inbox_hr
+            base["hr_items"] = inbox_hr.carried(base["hr_items"])
+        return inbox_ai.apply_choices(base, f.choices)
     pages = f.pages if f.ext == ".pdf" else inbox_ai.page_count(f.name, f.data)
     h = inbox_ai.name_hints(f.name)
     hint = inbox_ai.hint_text(h)

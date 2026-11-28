@@ -563,9 +563,10 @@ def _is_payroll(row: dict) -> bool:
     return row.get("kind") == "payroll" or (pending_of(row) or {}).get("kind") == "payroll"
 
 
-def get(file_id: str, see_pay: bool = True) -> dict:
+def get(file_id: str, see_pay: bool = True, hr: str = "none") -> dict:
     """One file with its full preview (the preview dialog) and the role names. see_pay False (no employees menu): a payroll file shows
-    its totals only."""
+    its totals only. hr: may the caller record in พนักงาน -- "ok" / "locked" (HR PIN not given) / "none" -- for the check page's
+    บันทึกในพนักงาน (app/inbox_hr.view: what is there now is only worked out for "ok"; owner, 28 Nov 2026)."""
     row = _get(file_id)
     preview = row.get("preview") or {}
     if not see_pay and _is_payroll(row):
@@ -580,6 +581,9 @@ def get(file_id: str, see_pay: bool = True) -> dict:
             out["truck_accounts"] = list(ai.TRUCK_ACCOUNTS)
             out["vehicles"] = [{k: v.get(k) for k in ("id", "vehicle_number", "plate_number", "branch")} for v in ai._vehicles()]
         out["edits_version"] = edits_version(out["preview"])
+        hr_mod = _optional("inbox_hr")
+        if hr_mod is not None:
+            out["hr"] = hr_mod.view(out["preview"], hr, ai_ready())
     return out
 
 
@@ -606,7 +610,7 @@ def page_image(file_id: str, page: int, see_pay: bool = True) -> bytes:
     raise NotFound("ไม่มีรูปหน้านี้")
 
 
-def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Optional[str] = None) -> dict:
+def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Optional[str] = None, hr: str = "none") -> dict:
     """บันทึกการแก้ on ตรวจเอกสารก่อนลงบัญชี (owner, 28 Nov 2026): the owner's fixes to the lines of an AI-read expense paper, checked
     strictly (inbox_ai.clean_line_edits), stored in the preview (line_edits) and the preview rebuilt with them the way อ่านใหม่ does --
     no AI call. A booked file is booked again at once with the fixes (as a re-read that can book is). version: edits_version of the
@@ -635,7 +639,7 @@ def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Op
         else:
             stored.pop("line_edits", None)
         v, booked = _reprocess({**row, "preview": stored}, row.get("choices") or {}, {row["id"]})
-    out = get(file_id, see_pay)
+    out = get(file_id, see_pay, hr)
     return {**out, "booked_again": booked, "rebook_failed": v.get("rebook_failed") or [], "message": v.get("message") or ""}
 
 

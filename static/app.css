@@ -25,6 +25,7 @@
   --bad: #cf3d49;      --bad-soft: #fde9eb;
 
   --flag-bg: #fff5d8;  --flag-line: #ebc45b;   /* "the system isn't sure" highlight */
+  --hr: #7340c2;       --hr-soft: #f2ecfb;     --hr-line: #c9b3ee;   /* บันทึกในพนักงาน: what goes to the employees' records */
 
   --shadow-sm: 0 1px 2px rgba(27, 31, 39, .05);
   --shadow-md: 0 6px 20px rgba(27, 31, 39, .08);
@@ -44,6 +45,7 @@
   --warn: #e0a23c;  --warn-soft: #34290f;  --warn-line: #7a5d1c;
   --bad: #ff7b86;  --bad-soft: #3a1e23;
   --flag-bg: #3a3012;  --flag-line: #8a6d17;
+  --hr: #b896f2;  --hr-soft: #2a2240;  --hr-line: #57458a;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
   --shadow-md: 0 6px 20px rgba(0, 0, 0, .45);
   --ring: 0 0 0 3px rgba(107, 140, 255, .28);
@@ -1844,6 +1846,7 @@ dialog.ibx-dialog { width: min(1100px, 96vw); max-width: 96vw; max-height: 92vh;
 .hrs-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 .hrs-kind.hrs-resign { background: var(--bad-soft, #fde8e8); color: var(--bad); }
 .hrs-kind.hrs-warning { background: var(--warn-soft); color: var(--warn); }
+.hrs-kind.hrs-role_change { background: var(--hr-soft); color: var(--hr); }
 @media (max-width: 640px) { .hrs-row { flex-direction: column; } .hrs-actions { justify-content: flex-start; } }
 
 /* ---- รถสาย กำไรต่อคัน (routes.js) ---- */
@@ -2759,6 +2762,47 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ick-dest.noted { display: inline-block; background: var(--surface-2); color: var(--muted); border-color: var(--line-strong); }
 .ick-dest.unapplied { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
 .ick-dest.deleted { background: transparent; color: var(--muted); border-color: var(--bad); text-decoration: line-through; }
+.ick-dest.hr { background: var(--hr-soft); color: var(--hr); border-color: var(--hr); }
+.ick-dest.hr.off { background: transparent; color: var(--muted); border-color: var(--line-strong); }
+/* บันทึกในพนักงาน (28 Nov 2026): an HR item of the paper, recorded straight away by its own buttons */
+.ick-hr { display: grid; gap: 8px; min-width: 0; margin: 6px 0 10px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--hr-line);
+  border-left: 4px solid var(--hr); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.ick-lines > .ick-hr { margin: 4px 0 8px 24px; }
+.ick-hr.applied { border-color: var(--ok); border-left-color: var(--ok); background: var(--ok-soft); }
+.ick-hr.dismissed { border-color: var(--line); border-left-color: var(--line-strong); background: var(--surface-2); }
+.ick-hr-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.ick-hr-kind { background: var(--hr-soft); color: var(--hr); }
+.ick-hr-who { display: flex; gap: 4px 8px; align-items: center; flex-wrap: wrap; }
+.ick-hr-picker { flex: 1 1 200px; max-width: 320px; }
+.ick-hr-pick, .ick-hr-f input, .ick-hr-f select, .ick-hr-lock input { width: 100%; min-width: 0; font: inherit; font-size: 13px; padding: 5px 7px;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--text); }
+.ick-hr-pick:focus, .ick-hr-f input:focus, .ick-hr-f select:focus, .ick-hr-lock input:focus { outline: none; border-color: var(--hr); box-shadow: var(--ring); }
+.ick-hr-fields { display: grid; gap: 8px 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.ick-hr-f { display: grid; gap: 2px; min-width: 0; }
+.ick-hr-f.f-text { grid-column: span 2; }
+.ick-hr-f.f-money input { text-align: right; font-variant-numeric: tabular-nums; }
+.ick-hr-f .dtf { min-width: 0; }
+.ick-hr-f .dtf > .dtf-text { padding-right: 34px; }
+.ick-hr-now { padding: 6px 9px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; }
+.ick-hr-act { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ick-hr-why { color: var(--warn); font-weight: 600; }
+.ick-hr-lock { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ick-hr-lock input { width: 160px; }
+.ick-hr-count { font-weight: 600; color: var(--muted); }
+.ick-hr-count.wait { color: var(--hr); }
+.ick-chip .ick-hrn { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--hr);
+  color: var(--accent-text); font-size: 11px; font-weight: 700; line-height: 17px; text-align: center; }
+.ick-hr-all { margin: 0 0 22px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--hr-line); border-radius: var(--radius-sm); }
+.ick-hr-all h3 { margin: 0 0 6px; font-size: 15px; color: var(--hr); }
+.ick-hr-all ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ick-hr-all li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; padding: 3px 0; border-top: 1px dashed var(--line); }
+.ick-hr-all-dest { flex: 1 1 260px; min-width: 0; }
+.ick-hr-st { font-weight: 600; font-size: 12px; }
+.ick-hr-st.pending { color: var(--hr); } .ick-hr-st.pending.stuck { color: var(--warn); } .ick-hr-st.applied { color: var(--ok); } .ick-hr-st.dismissed { color: var(--muted); }
+@media (max-width: 640px) {
+  .ick-lines > .ick-hr { margin-left: 0; }
+  .ick-hr-f.f-text { grid-column: 1 / -1; }
+}
 .ick-divider { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; font-size: 12px; font-weight: 650; color: var(--muted); }
 .ick-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line-strong); }
 .ick-empty { margin: 8px 0; }

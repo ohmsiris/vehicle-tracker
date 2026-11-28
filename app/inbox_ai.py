@@ -412,7 +412,29 @@ def run(file_row: dict, data: bytes, on_progress: Optional[Callable] = None) -> 
         err.usage, err.partial_pages = usage, reads
         raise err from exc
     preview["flags"] = flags + preview["flags"]
+    if preview.get("acc_docs_batch"):
+        _read_hr(preview, usage)
     return preview
+
+
+def _read_hr(preview: dict, usage: dict) -> None:
+    """บันทึกในพนักงาน (owner, 28 Nov 2026): one text-only call over the memo pages and the 1510 staff-loan lines just read
+    (app/inbox_hr.read_items), its tokens added to this read's. A failure never fails the read: the check page offers
+    อ่านเรื่องพนักงาน instead."""
+    from app import inbox_hr
+    try:
+        items, used = inbox_hr.read_items(preview)
+    except Exception as exc:                           # noqa: BLE001
+        logger.warning("inbox AI: the HR read failed: %r", exc)
+        used, items = getattr(exc, "usage", None), None
+        preview["flags"].append(f"{exc if isinstance(exc, inbox_hr.HrReadError) else 'อ่านเรื่องพนักงานไม่สำเร็จ'}"
+                                " — กด “อ่านเรื่องพนักงาน” บนหน้าตรวจเพื่ออ่านใหม่")
+    total = inbox_hr.add_usage(usage, used)
+    if total is not usage and total:
+        usage.update(total)
+    preview["ai_usage"] = usage
+    if items is not None:
+        preview["hr_items"] = items
 
 
 def apply_choices(preview: dict, choices: dict) -> dict:
@@ -421,8 +443,11 @@ def apply_choices(preview: dict, choices: dict) -> dict:
     (owner, 28 Nov 2026)."""
     if not preview.get("ai_pages"):
         return preview
-    return from_pages(preview["ai_pages"], preview.get("file_name") or "", dict(choices or {}),
-                      usage=preview.get("ai_usage"), images=preview.get("ai_images") or {}, line_edits=preview.get("line_edits"))
+    out = from_pages(preview["ai_pages"], preview.get("file_name") or "", dict(choices or {}),
+                     usage=preview.get("ai_usage"), images=preview.get("ai_images") or {}, line_edits=preview.get("line_edits"))
+    if "hr_items" in preview:                          # บันทึกในพนักงาน (app/inbox_hr.py): kept like the line fixes, never read again here
+        out["hr_items"] = preview["hr_items"]
+    return out
 
 
 # ------------------------------------------------------------------ hints from the file name (a hint, never a decision)

@@ -76,7 +76,7 @@ function renderHrSuggestions(d) {
   const pending = (d.suggestions || []).filter((s) => s.status === "pending");
   const done = (d.suggestions || []).filter((s) => s.status !== "pending").slice(0, 12);
   if (!pending.length && !done.length) { $("empSuggest").replaceChildren(); return; }
-  const month = (b) => { const m = /^(\d{4})-(\d{2})/.exec(b || ""); return m ? `${["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."][+m[2] - 1]} ${String(+m[1] + 543).slice(2)}` : b; };
+  const month = (b) => { const m = /(\d{4})-(\d{2})/.exec(b || ""); return m ? `${["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."][+m[2] - 1]} ${String(+m[1] + 543).slice(2)}` : b; };
   const act = async (s, what) => {
     try { renderHrSuggestions(await api(`/api/hr/suggestions/${s.id}/${what}`, { method: "POST" })); if (what === "apply") empLoad().then((ok) => ok && renderEmployees()); }
     catch (err) { alert(err.message); }

@@ -1214,6 +1214,38 @@ def _sees_pay(supplied: str) -> bool:
     return users.sees_pay(users.session_user(supplied) if (supplied or "").startswith("u_") else None)
 
 
+def _hr_access(supplied: str, pin: str) -> str:
+    """บันทึกในพนักงาน on ตรวจเอกสารก่อนลงบัญชี (owner, 28 Nov 2026) writes employees, so it needs what the HR section needs today:
+    the owner, or a person whose menus reach /api/hr/ (รายชื่อพนักงาน -- what /api/hr/suggestions asks), AND the HR PIN when one is
+    set (employees.check_pin, as _hr_call). "ok" / "locked" (PIN not given) / "none" (a P&L-only or ลงข้อมูล-only person)."""
+    supplied = supplied or ""
+    if not _is_owner(supplied):
+        user = users.session_user(supplied) if supplied.startswith("u_") else None
+        if not user or not (users.is_owner_user(user) or users.allowed(users.clean_menus(user.get("menus")), "/api/hr/suggestions")):
+            return "none"
+    try:
+        employees.check_pin(pin)
+    except employees.PinRequired:
+        return "locked"
+    return "ok"
+
+
+def _inbox_hr_call(supplied: str, pin: str, fn, *args):
+    """An HR write from the check page: the inbox's own auth (the route checked the token; role_gate the ลงข้อมูล menu) plus the HR
+    section's (_hr_access). The inbox's Thai errors map as in _inbox_call; an employee write's own refusal is a 422."""
+    access = _hr_access(supplied, pin)
+    if access == "none":
+        raise HTTPException(403, "บันทึกเรื่องพนักงานได้เฉพาะผู้ที่มีเมนูรายชื่อพนักงาน (รวมค่าจ้าง) — ขอเจ้าของเพิ่มเมนูให้")
+    if access == "locked":
+        raise HTTPException(423, "ส่วนพนักงานล็อกอยู่ — ใส่ PIN ก่อน")
+    try:
+        return _inbox_call(fn, *args)
+    except employees.InvalidEmployee as exc:
+        raise HTTPException(422, str(exc))
+    except employees.NotFound:
+        raise HTTPException(404, "ไม่พบข้อมูลนี้")
+
+
 def _read_inbox_uploads(files: list[UploadFile]) -> list[tuple]:
     """The drop box's own upload: up to inbox.MAX_FILE_BYTES (50 MB) a file. A file over it is NOT read (data None) and is refused on
     its own by inbox.upload with a Thai message; the other files of the same upload go through."""
@@ -1245,11 +1277,12 @@ def api_inbox_list(month: str = "", x_app_token: str = Header(default=""), token
 
 
 @app.get("/api/accounts/inbox/{file_id}")
-def api_inbox_one(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
-    """One dropped file with its whole preview (the ดูก่อนลงบัญชี dialog)."""
+def api_inbox_one(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    """One dropped file with its whole preview (the ดูก่อนลงบัญชี dialog; on the check page also บันทึกในพนักงาน, whose "what is there
+    now" only someone with the HR section's access gets)."""
     from app import inbox
     _check_token(x_app_token, token)
-    return _inbox_call(inbox.get, file_id, _sees_pay(x_app_token or token))
+    return _inbox_call(inbox.get, file_id, _sees_pay(x_app_token or token), _hr_access(x_app_token or token, x_hr_pin))
 
 
 @app.get("/api/accounts/inbox/{file_id}/file")
@@ -1279,13 +1312,65 @@ def api_inbox_page(file_id: str, n: int, x_app_token: str = Header(default=""), 
 
 
 @app.post("/api/accounts/inbox/{file_id}/edits")
-def api_inbox_edits(file_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+def api_inbox_edits(file_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""),
+                    x_hr_pin: str = Header(default="")) -> dict:
     """บันทึกการแก้ ({"line_edits": {"edits": {...}, "added": [...]}, "version": <edits_version the page opened with>}): the owner's
     fixes to the lines before (or after) ลงบัญชี; the preview is rebuilt with them, a booked file is booked again with them. A version
     that no longer matches (fixes saved from another tab meanwhile) is refused, never overwritten."""
     from app import inbox
     _check_token(x_app_token, token)
-    return _inbox_call(inbox.save_edits, file_id, body.get("line_edits"), _sees_pay(x_app_token or token), str(body.get("version") or ""))
+    return _inbox_call(inbox.save_edits, file_id, body.get("line_edits"), _sees_pay(x_app_token or token), str(body.get("version") or ""),
+                       _hr_access(x_app_token or token, x_hr_pin))
+
+
+# ตรวจเอกสารก่อนลงบัญชี › บันทึกในพนักงาน (owner, 28 Nov 2026, app/inbox_hr.py): HR pages and staff loans recorded straight away, one
+# item at a time, by their own buttons (never by ลงบัญชี). Each answers what GET /api/accounts/inbox/<id> does.
+def _inbox_hr(file_id: str, supplied: str, pin: str, fn, *args) -> dict:
+    from app import inbox
+    _inbox_hr_call(supplied, pin, fn, *args)
+    return _inbox_call(inbox.get, file_id, _sees_pay(supplied), _hr_access(supplied, pin))
+
+
+@app.post("/api/accounts/inbox/{file_id}/hr/read")
+def api_inbox_hr_read(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""), x_hr_pin: str = Header(default="")) -> dict:
+    """อ่านเรื่องพนักงาน: one text-only AI call over the file's memo pages and 1510 lines (a file read before this page; costs tokens)."""
+    from app import inbox_hr
+    _check_token(x_app_token, token)
+    return _inbox_hr(file_id, x_app_token or token, x_hr_pin, inbox_hr.read_file, file_id)
+
+
+@app.post("/api/accounts/inbox/{file_id}/hr/{item_id}/apply")
+def api_inbox_hr_apply(file_id: str, item_id: str, body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default=""),
+                       x_hr_pin: str = Header(default="")) -> dict:
+    """บันทึก ({"fields": {...}, "employee_code": "SB-FR024"}): checked, refused when it would duplicate what is there, written in พนักงาน."""
+    from app import inbox_hr
+    _check_token(x_app_token, token)
+    return _inbox_hr(file_id, x_app_token or token, x_hr_pin, inbox_hr.apply, file_id, item_id, body, _who(x_app_token or token))
+
+
+@app.post("/api/accounts/inbox/{file_id}/hr/{item_id}/dismiss")
+def api_inbox_hr_dismiss(file_id: str, item_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""),
+                         x_hr_pin: str = Header(default="")) -> dict:
+    from app import inbox_hr
+    _check_token(x_app_token, token)
+    return _inbox_hr(file_id, x_app_token or token, x_hr_pin, inbox_hr.dismiss, file_id, item_id, _who(x_app_token or token))
+
+
+@app.post("/api/accounts/inbox/{file_id}/hr/{item_id}/reopen")
+def api_inbox_hr_reopen(file_id: str, item_id: str, x_app_token: str = Header(default=""), token: str = Query(default=""),
+                        x_hr_pin: str = Header(default="")) -> dict:
+    from app import inbox_hr
+    _check_token(x_app_token, token)
+    return _inbox_hr(file_id, x_app_token or token, x_hr_pin, inbox_hr.reopen, file_id, item_id)
+
+
+@app.post("/api/accounts/inbox/{file_id}/hr/{item_id}/person")
+def api_inbox_hr_person(file_id: str, item_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""),
+                        x_hr_pin: str = Header(default="")) -> dict:
+    """เลือกคน ({"employee_code": "SB-PD032"}): who the item is about, so the page shows that person's "what is there now"."""
+    from app import inbox_hr
+    _check_token(x_app_token, token)
+    return _inbox_hr(file_id, x_app_token or token, x_hr_pin, inbox_hr.set_person, file_id, item_id, body.get("employee_code"))
 
 
 @app.post("/api/accounts/inbox/{file_id}/choose")
