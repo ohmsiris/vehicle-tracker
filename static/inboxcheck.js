@@ -242,7 +242,7 @@ function ickMayLeave(h) {
 async function openInboxCheck(id) {
   showView("inboxCheck");
   ickWire();
-  if (ick.id !== id) { ick.page = null; ick.msg = null; ick.saved = ick.draft = null; ick.autoAcc = ick.manualAcc = null; ickHr.drafts = {}; ickHr.msgs = {}; }
+  if (ick.id !== id) { ick.page = null; ick.stripX = 0; ick.msg = null; ick.saved = ick.draft = null; ick.autoAcc = ick.manualAcc = null; ickHr.drafts = {}; ickHr.msgs = {}; }
   ick.id = id;
   const seq = ++ick.seq;
   fill($("ickBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
@@ -292,9 +292,12 @@ function ickRender() {
   const pages = ickPages(f);
   if (ick.page !== "all" && !pages.some((x) => x.n === ick.page)) ick.page = pages.length ? pages[0].n : "all";
   const shown = ick.page === "all" ? pages : pages.filter((x) => x.n === ick.page);
+  const was = document.querySelector("#inboxCheckView .ick-strip");
+  if (was) ick.stripX = was.scrollLeft;
   fill($("ickBody"), ickTop(f), ickStrip(pages),
     el("div", { id: "ickMain", class: "ick-main" }, ick.page === "all" ? ickHrAll(f) : null, ...shown.map(ickPageEl),
       !pages.length ? el("p", { class: "muted", text: "ไม่มีหน้าในไฟล์นี้" }) : null));
+  ickStripRestore();
   ickRefresh();
   ickMeasure();
   ickWatchTop();
@@ -353,12 +356,30 @@ function ickTop(f) {
 
 function ickStrip(pages) {
   const chip = (key, label, sub, warn, hrN) => el("button", { class: "ick-chip", type: "button", "aria-pressed": String(ick.page === key),
-    onclick: () => { ick.page = key; ickRender(); window.scrollTo(0, 0); } },
+    onclick: (e) => { const nav = e.currentTarget.closest(".ick-strip"); if (nav) ick.stripX = nav.scrollLeft; ick.page = key; ickRender(); window.scrollTo(0, 0); } },
     el("span", { text: label }), sub ? el("small", { text: sub }) : null, warn ? el("span", { class: "ick-dot", title: "ยอดไม่ตรง หรือมีบรรทัดอ่านไม่ชัด" }) : null,
     hrN ? el("span", { class: "ick-hrn", title: `เรื่องพนักงานรอบันทึก ${hrN} รายการ`, text: String(hrN) }) : null);
   const allHr = ickHrItems(ick.f).filter((it) => it.status === "pending").length;
-  return el("nav", { class: "ick-strip", "aria-label": "หน้าในไฟล์" },
+  const nav = el("nav", { class: "ick-strip", "aria-label": "หน้าในไฟล์" },
     ...pages.map((pg) => chip(pg.n, `หน้า ${pg.n}`, pg.kind_th, pg.warn, ickHrPendingOn(ick.f, pg.n))), chip("all", "ทุกหน้า", `${pages.length} หน้า`, false, allHr));
+  // the strip stays where it was slid to when a page is opened (owner, 28 Nov 2026: it went back to หน้า 1 every time): its position is
+  // kept when a chip is pressed and put back by ickStripRestore once the new strip is on the page
+  nav.addEventListener("scroll", () => { ick.stripX = nav.scrollLeft; }, { passive: true });
+  return nav;
+}
+
+// the strip back where it was, and the open page's chip in view if it is off the edge
+function ickStripRestore() {
+  const nav = document.querySelector("#inboxCheckView .ick-strip");
+  if (!nav) return;
+  nav.scrollLeft = ick.stripX || 0;
+  const on = nav.querySelector('[aria-pressed="true"]');
+  if (on) {
+    const a = on.getBoundingClientRect(), b = nav.getBoundingClientRect();
+    if (a.left < b.left) nav.scrollLeft -= b.left - a.left + 24;
+    else if (a.right > b.right) nav.scrollLeft += a.right - b.right + 24;
+  }
+  ick.stripX = nav.scrollLeft;
 }
 
 function ickPageEl(pg) {
@@ -897,7 +918,7 @@ function ickHrRepaint(n) {
   if (ick.page === "all") { ickRender(); return; }
   ickRepaint(n);
   const strip = document.querySelector("#inboxCheckView .ick-strip");
-  if (strip) strip.replaceWith(ickStrip(ickPages(ick.f)));
+  if (strip) { ick.stripX = strip.scrollLeft; strip.replaceWith(ickStrip(ickPages(ick.f))); ickStripRestore(); }
 }
 
 async function ickHrUnlock(pin) {
