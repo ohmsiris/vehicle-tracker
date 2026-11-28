@@ -1704,3 +1704,19 @@ def test_a_kaeng_khoi_truck_waits_for_the_kaeng_khoi_station():
     # ... and for NM / ห้วยบง, where Kaeng Khoi's trucks fill too: with the ห้วยบง file missing the cell waits, never a short "ok"
     c = one(pw.build({**s, "card_fuel": [nm, kk, PT]}, MONTH, TODAY), "D1")["cells"]["fuel"]
     assert c["state"] == "miss" and "ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน บางจาก ห้วยบง" in c["note"]
+
+
+def test_his_own_cash_fill_in_another_truck_counts_to_him():
+    """He fills another truck with cash while selling his own route: it is his fuel ("he's selling for his own sake", owner 28 Nov 2026)
+    -- not on a day he is ticked สำรองขับ."""
+    from datetime import date
+    line = {"batch": 2, "counted": True, "dup_of": None, "page_id": 7, "page": {"confirmed": True}}
+    cash = [{**line, "id": 1, "vehicle_id": "V27", "day": "2026-11-12", "amount": 1000, "driver_name": "มานัส ศรีวิลาส"},
+            {**line, "id": 2, "vehicle_id": "V99", "day": "2026-11-14", "amount": 700, "driver_name": "นายมานัส ศรีวิลาส"},
+            {**line, "id": 3, "vehicle_id": "V99", "day": "2026-11-15", "amount": 400, "driver_name": "มานัส ศรีวิลาส"},
+            {**line, "id": 4, "vehicle_id": "V99", "day": "2026-11-16", "amount": 900, "driver_name": "แจ็ค ทดสอบ"}]
+    s = fuel_src(cash_fuel=cash)
+    p = next(e for e in s["employees"] if e["id"] == "D1")
+    free = pw.stand_in_fuel(p, {"id": "V27"}, {"card": None, "cash": pw.cash_fuel_view(cash),
+                                                "route_own": {"D1": {"spare": [date(2026, 11, 15)]}}})
+    assert free["elsewhere"] == 700 and free["total"] == 0          # 14/11 is his; 15/11 he was off (สำรองขับ); 16/11 someone else's

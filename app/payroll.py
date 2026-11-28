@@ -599,6 +599,17 @@ def stand_in_fuel(p: dict, truck: dict, ctx: dict) -> dict:
         elif _person_key(ln.get("driver_name")) and _person_key(ln.get("driver_name")) != me:
             out["other"] = round(out["other"] + _f(ln.get("amount")), 2)
     out["total"] = round(out["card"] + out["other"] + out["spare"], 2)
+    # his own cash fill in ANOTHER truck counts to him: he is still selling for his own route ("yes of course, he's selling for his own
+    # sake", owner 28 Nov 2026) -- not on a day he is ticked สำรองขับ (he did not drive his route). A ช่าง's fill of his truck stays free
+    # (it falls under "other" above; owner, same day: "usually not done but I think it shouldn't").
+    out["elsewhere"] = 0.0
+    if me:
+        for vid, lns in ((cash or {}).get("lines") or {}).items():
+            if vid == tid:
+                continue
+            for ln in lns:
+                if _person_key(ln.get("driver_name")) == me and ln.get("day") not in spare_days:
+                    out["elsewhere"] = round(out["elsewhere"] + _f(ln.get("amount")), 2)
     return out
 
 
@@ -1511,9 +1522,11 @@ def fuel_cell(p: dict, ctx: dict) -> dict:
     else:
         states = {h: cash["halves"][h]["state"] for h in HALVES}
         lack += [f"น้ำมันเงินสด {labels[h]} " + ("ยังไม่ได้อัปโหลด" if states[h] == "none" else "อัปโหลดแล้ว รอตรวจ") for h in HALVES if states[h] != "ok"]
-        in_cash = round(cash["by_vehicle"].get(truck["id"], 0.0) - free["other"] - free["spare"], 2)
+        in_cash = round(cash["by_vehicle"].get(truck["id"], 0.0) - free["other"] - free["spare"] + free.get("elsewhere", 0.0), 2)
         if in_cash > 0:
             have.append(f"เงินสด {money(in_cash)}")
+        if free.get("elsewhere"):
+            free_words = " · ".join(x for x in [free_words, f"รวมเงินสดที่เขาเบิกเติมรถคันอื่น {money(free['elsewhere'])}"] if x)
     if not lack:
         total = round(on_card + in_cash, 2)
         rough = (card or {}).get("estimated") or []
