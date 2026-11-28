@@ -678,3 +678,21 @@ def test_cardfuel_tail_key():
     assert fuel._swap_kind("สลับรถ (คนขับเดิม)", "a", "b") == "truck" and fuel._swap_kind("สลับคนขับ (รถเดิม)", "a", "a") == "driver"
     assert fuel._swap_kind("สลับทั้งคนขับและรถ", "a", "b") == "both" and fuel._swap_kind("ปกติ", "84-2051", "84-2051") == ""
     assert fuel._swap_kind("ปกติ", "84-2051", "1ฒถ 2090") == "truck"            # the older files: ปกติ, two plates
+
+
+def test_both_swapped_with_no_route_plate_goes_to_the_truck_filled_and_is_flagged(swap_db):
+    """สลับทั้งคนขับและรถ on a row with no ทะเบียนรถประจำเบอร์นี้: whose route it was cannot be told -- the truck filled has it as an
+    ordinary fill (not a stand-in's), the list says so and the owner is asked to check."""
+    def row(n, d, own, filled, status, amt):
+        return [n, d, "งวดที่ 1", "25", own, filled, "x", "แจ็ค ทดสอบ", "x", status, None, 10, 40, amt, None]
+    rows = [row(1, datetime(2026, 11, 1), "84-2051", "84-2051", "ปกติ", 1000),
+            row(2, datetime(2026, 11, 4), None, "1ฒถ 2090", "สลับทั้งคนขับและรถ", 300)]
+    sheets = _nov_sheets("NM", NM_TITLE, [], 1300, bills=2)
+    sheets["NM บันทึกเติมน้ำมัน"] = [NOV_HEAD] + rows + [[None] * 10 + ["รวมทั้งหมด"] + [None] * 4]
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_26ตค-25พย69.xlsx", _xlsx(sheets)))
+    by = {e["source_id"]: round(sum(ln["credit"] for ln in e["lines"]), 2) for e in p["batches"][0]["entries"]}
+    assert by == {"fuel:bangchak:2026-11:NM:842051": 1000, "fuel:bangchak:2026-11:NM:1ฒถ2090": 300}
+    (x,) = p["swaps"]
+    assert (x["booked_plate"], x["stand_in"], x["check"]) == ("1ฒถ 2090", False, True)
+    assert x["where"] == "ลงที่รถที่เติม 1ฒถ 2090 — แถวนี้ไม่มีทะเบียนประจำสาย"
+    assert any("ไม่มีทะเบียนรถประจำเบอร์" in f and "04/11/2026 1ฒถ 2090 300.00" in f for f in p["flags"])

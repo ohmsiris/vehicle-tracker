@@ -590,16 +590,22 @@ def stand_in_fuel(p: dict, truck: dict, ctx: dict) -> dict:
     tid, card, cash = truck["id"], ctx.get("card"), ctx.get("cash")
     rc = ctx["route_own"].get(p["id"]) or {}
     spare_days = {d.isoformat() for d in rc.get("spare") or []}
-    me = _norm(p.get("full_name"))
+    me = _person_key(p.get("full_name"))
     out = {"card": round(_f(((card or {}).get("stand_in") or {}).get(tid)), 2), "other": 0.0, "spare": 0.0,
            "pt": tid in ((card or {}).get("pt_vehicles") or ())}
     for ln in ((cash or {}).get("lines") or {}).get(tid) or []:
         if ln.get("day") in spare_days:
             out["spare"] = round(out["spare"] + _f(ln.get("amount")), 2)
-        elif _norm(ln.get("driver_name")) and _norm(ln.get("driver_name")) != me:
+        elif _person_key(ln.get("driver_name")) and _person_key(ln.get("driver_name")) != me:
             out["other"] = round(out["other"] + _f(ln.get("amount")), 2)
     out["total"] = round(out["card"] + out["other"] + out["spare"], 2)
     return out
+
+
+def _person_key(name) -> str:
+    """Two cash-fuel names are one person when name_key matches with no spaces at all ("นายสมชาย  ใจดี" = "สมชายใจดี"), so a driver's
+    own fill is not taken for a stand-in's (owner, 28 Nov 2026)."""
+    return name_key(name).replace(" ", "")
 
 
 def stand_in_words(free: dict, spare_days: int = 0) -> str:

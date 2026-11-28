@@ -691,12 +691,20 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
     fills = []                                        # (day, plate, baht, a stand-in's fill)
     no_plate: dict = {}                               # fill index -> "#<truck number>" for a row with no plate
     swapped: list = []                                # fills by another driver or in another truck (shown, owner 28 Nov 2026)
-    moved, unsure = [], []
+    moved, unsure, noroute = [], [], []
     for i, x in enumerate(raw):
         own, filled, kind = x["own"], x["filled"], x["kind"]
         plate, stand_in = own or filled, kind in ("driver", "both")
         label = _route_label(x["number"], own)
         where = f"ลงที่สาย {label}"
+        if kind == "both" and not own and filled:
+            # no route plate on the row: whose route it was cannot be told -- the truck filled has it as its own fuel, to check
+            plate, stand_in = filled, False
+            where = f"ลงที่รถที่เติม {filled} — แถวนี้ไม่มีทะเบียนประจำสาย"
+            unsure_plate = True
+            noroute.append(x)
+        else:
+            unsure_plate = False
         if i in both:
             route = _route_key(x["number"], own, station, look) if days is not None else None
             info = (days or {}).get(route) if route else None
@@ -710,7 +718,7 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
         if kind:
             swapped.append({"date": x["day"].isoformat(), "route": x["number"], "route_plate": own, "filled_plate": filled or own,
                             "driver": x["driver"], "status": x["status"], "amount": x["amount"], "booked_plate": plate, "where": where,
-                            "stand_in": stand_in, "check": i in both and (x in moved or x in unsure)})
+                            "stand_in": stand_in, "check": unsure_plate or (i in both and (x in moved or x in unsure))})
         if not str(plate or "").strip() and re.fullmatch(r"\d{1,3}", x["number"]):
             no_plate[len(fills)] = f"#{x['number']}"  # no plate at all: the truck number -- used only where one plant fills (below)
         fills.append((x["day"], str(plate or "ไม่ระบุทะเบียน").strip(), x["amount"], stand_in))
@@ -720,6 +728,11 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
                      + ", ".join(f"{dmy(x['day'])} สาย {_route_label(x['number'], x['own'])} → {x['filled']} {x['amount']:,.2f}" for x in moved[:6])
                      + (f" และอีก {len(moved) - 6} ครั้ง" if len(moved) > 6 else "")
                      + " · ตรวจดู: ถ้ายังไม่ได้ลงยอดขายรายวันของวันนั้น ลงแล้วกดอ่านใหม่ (อ่านใหม่ไม่เสียเงิน) ระบบจะตัดสินใหม่")
+    if noroute:
+        flags.append(f"สลับทั้งคนขับและรถ {len(noroute)} ครั้ง ({sum(x['amount'] for x in noroute):,.2f} บาท) ไม่มีทะเบียนรถประจำเบอร์ — "
+                     "ลงที่รถที่เติมจริง (หักค่าคอมคนขับรถคันนั้น) ตรวจดูว่าเป็นของสายไหน: "
+                     + ", ".join(f"{dmy(x['day'])} {x['filled']} {x['amount']:,.2f}" for x in noroute[:6])
+                     + (f" และอีก {len(noroute) - 6} ครั้ง" if len(noroute) > 6 else ""))
     if unsure:
         flags.append(f"สลับทั้งคนขับและรถ {len(unsure)} ครั้ง ({sum(x['amount'] for x in unsure):,.2f} บาท) ตรวจยอดขายรายวันไม่ได้ "
                      "(อ่านข้อมูลไม่ได้ หรือไม่พบคนขับประจำสายในระบบ) — ลงที่สายไว้ก่อนแบบคนขับแทน ไม่หักค่าคอมใคร: "

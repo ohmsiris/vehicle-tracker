@@ -1013,6 +1013,20 @@ def test_a_stand_ins_fuel_comes_off_nobodys_commission():
                                                        "(บัตรบางจาก 3,000 + เงินสดที่คนอื่นเบิก 300)")
 
 
+def test_a_cash_line_in_his_own_name_with_a_title_or_no_space_stays_his():
+    """A driver's own fill typed "นายมานัส ศรีวิลาส" or "มานัสศรีวิลาส" is still his (charged), not a stand-in's (owner, 28 Nov 2026)."""
+    line = {"batch": 1, "counted": True, "dup_of": None, "vehicle_id": "V27", "page_id": 7, "page": {"confirmed": True}}
+    cash = [{**line, "id": 1, "day": "2026-10-28", "amount": 800, "driver_name": "นายมานัส ศรีวิลาส"},
+            {**line, "id": 2, "batch": 2, "day": "2026-11-12", "amount": 300, "driver_name": "มานัสศรีวิลาส"},
+            {**line, "id": 3, "batch": 2, "day": "2026-11-13", "amount": 200, "driver_name": "แจ็ค ทดสอบ"}]
+    s = fuel_src(cash_fuel=cash)
+    view = pw.cash_fuel_view(cash)
+    p = next(e for e in s["employees"] if e["id"] == "D1")
+    truck = {"id": "V27"}
+    free = pw.stand_in_fuel(p, truck, {"card": None, "cash": view, "route_own": {}})
+    assert (free["other"], free["spare"], free["total"]) == (200, 0, 200)
+
+
 def test_pt_card_fuel_cannot_tell_a_stand_in():
     """PT's file names no driver: his truck's PT fill on a สำรองขับ day stays in, and the note says so (known gap, 28 Nov 2026)."""
     nm = {"id": "e1", "source_id": "fuel:bangchak:2026-11:NM:842682", "lines": [{"vehicle_id": "V27", "credit": 2000}]}
