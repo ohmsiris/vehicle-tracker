@@ -604,13 +604,13 @@ def test_stand_in_fills_by_status(swap_db):
     assert b["rows_total"] == b["file_total"] == 2500 and p["flags"] == [x for x in p["flags"] if "ยอดรวม" not in x]
     sub = next(e for e in b["entries"] if e["source_id"].endswith("842051:sub"))
     assert "คนขับแทน" in sub["description"] and sub["lines"][0]["vehicle_id"] == 2 and sub["branch"] == "สระบุรี"
-    assert next(r for r in b["rows"] if "คนขับแทน" in r["text"])["text"].endswith("· 3 ครั้ง")
+    assert next(r for r in b["rows"] if "คนขับแทน" in r["text"] and "842051" in r["text"].replace("-", ""))["text"].endswith("· 3 ครั้ง")
     # every fill by another driver or in another truck is listed, with where it went and whether it is a stand-in's
     got = [(x["date"][8:], x["status"], x["booked_plate"], x["where"], x["stand_in"], x["check"]) for x in p["swaps"]]
     assert got == [("02", "สลับคนขับ (รถเดิม)", "84-2051", "ลงที่สาย #25", True, False),
                    ("03", "สลับรถ (คนขับเดิม)", "84-2051", "ลงที่สาย #25", False, False),
                    ("04", "สลับทั้งคนขับและรถ", "84-2051", "ลงที่สาย #25", True, False),
-                   ("05", "สลับทั้งคนขับและรถ", "1ฒถ 2090", "ลงที่รถที่เติม 1ฒถ 2090 — ไม่มียอดขายสาย #25 วันนี้", False, True),
+                   ("05", "สลับทั้งคนขับและรถ", "1ฒถ 2090", "ลงที่รถที่เติม 1ฒถ 2090 — ไม่มียอดขายสาย #25 วันนี้", True, True),
                    ("06", "สลับทั้งคนขับและรถ", "84-2051", "ลงที่สาย #25", True, False)]
     assert all(x["station"] == "NM" for x in p["swaps"]) and p["swaps"][0]["filled_plate"] == "84-2051"     # same truck: listed too
     flag = next(x for x in p["flags"] if "ไม่มียอดขายของสายในวันนั้น" in x)
