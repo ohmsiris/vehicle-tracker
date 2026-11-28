@@ -2077,3 +2077,20 @@ def test_a_deduction_row_that_finds_nobody_holds_the_branch():
     out = pw.build(advance_src(None, advance_files=[box(deduct_pages(rows, ROWS10), status="booked")]), MONTH, TODAY)
     c = one(out, "SB-FR001")["cells"]["common"]
     assert c["state"] == "carry" and "มี 1 แถวที่มีส่วนกลาง / ความผิด / อุปกรณ์ แต่จับคู่กับพนักงานไม่ได้" in c["note"]
+
+
+def test_the_handwritten_columns_come_from_the_signed_copy_when_it_is_in():
+    """Owner, 29 Nov 2026: the mid-month list's ส่วนกลาง / ความผิด / อุปกรณ์ are blank; the red figures are written on the SIGNED copy that
+    comes back in the end-of-month file. The advance still comes from the mid-month file."""
+    page = lambda n, rows: {"n": n, "page_kind": "advance", "title": "รายการเบิกกลางเดือน : ช่าง / ออฟฟิศ / ฝ่ายผลิต", "written_total": 3000,
+                            "employee_codes": ["SB-FR001"], "lines": [{"text": "SB-FR001 นายจรูญ มินฉิมพลี", "amount": 3000, "account": "1500"}],
+                            "advance_rows": rows}
+    mid = {"id": "m", "file_name": "mid.pdf", "status": "booked", "uploaded_at": "1", "half": "mid", "branches": ["สระบุรี"],
+           "pages": [page(9, [{"code": "SB-FR001", "name": "นายจรูญ มินฉิมพลี", "amount": "3000", "common": "", "fault": "", "other": "", "unsure": False}])]}
+    end = {"id": "e", "file_name": "end.pdf", "status": "booked", "uploaded_at": "2", "half": "end", "branches": ["สระบุรี"],
+           "pages": [page(11, [{"code": "SB-FR001", "name": "นายจรูญ มินฉิมพลี", "amount": "3000", "common": "350", "fault": "", "other": "", "unsure": False}])]}
+    emp = [{"id": "E1", "code": "SB-FR001", "full_name": "จรูญ มินฉิมพลี", "status": "active", "branch": "สระบุรี"}]
+    with_signed = pw.advance_view([mid, end], emp)
+    assert [r["common"] for r in with_signed["deduct"]["E1"]] == [350] and with_signed["by_person"]["E1"][0]["amount"] == 3000
+    alone = pw.advance_view([mid], emp)                                       # no signed copy yet: the mid-month rows stand
+    assert [r["common"] for r in alone["deduct"]["E1"]] == [0]

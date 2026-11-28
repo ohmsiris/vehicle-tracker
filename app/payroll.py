@@ -816,7 +816,7 @@ def list_check(pages: list[dict], sums: list[float]) -> tuple[bool, Optional[flo
     return False, last, f"อ่านได้ {money(read)} เขียนไว้ {money(last)}{more}"
 
 
-def advance_lists(files: Optional[list[dict]]) -> list[dict]:
+def advance_lists(files: Optional[list[dict]], signed: bool = False) -> list[dict]:
     """The month's mid-month advance lists, from the drop box's rows of the month (inbox_files; the read pages under "pages", or as
     the table has them under preview.ai_pages). Pure. One entry per list -- the pages of one file that share a heading (drivers /
     factory ...): {file, short, file_id, order, status, branch, name, title, pages, lines, total, written, complete, why, named,
@@ -835,7 +835,9 @@ def advance_lists(files: Optional[list[dict]]) -> list[dict]:
     out: list = []
     for order, f in enumerate(ranked):
         preview = f.get("preview") if isinstance(f.get("preview"), dict) else {}
-        if f.get("status") not in ADVANCE_READ or (f.get("half") or preview.get("half")) == "end":
+        # the mid-month file holds the lists the advances are taken from; signed=True: the end-of-month file's SIGNED copies instead,
+        # which alone carry the handwritten ส่วนกลาง / ความผิด / อุปกรณ์ (owner, 29 Nov 2026: the mid-month copy's columns are blank)
+        if f.get("status") not in ADVANCE_READ or ((f.get("half") or preview.get("half")) == "end") != signed:
             continue
         pages = f.get("pages") if f.get("pages") is not None else preview.get("ai_pages")
         pages = sorted((p for p in pages or [] if isinstance(p, dict)), key=lambda p: _f(p.get("n")))
@@ -956,6 +958,7 @@ def advance_view(files: Optional[list[dict]], employees: list[dict]) -> dict:
     if files is None:
         return no_advance(failed=True)
     lists = advance_lists(files)
+    signed_copies = advance_lists(files, signed=True)
     by_code: dict = {}
     names: dict = {}
     for e in sorted(employees, key=lambda e: e.get("status") != "active"):       # a code used twice: the one still working
@@ -985,7 +988,14 @@ def advance_view(files: Optional[list[dict]], employees: list[dict]) -> dict:
         return e
 
     deduct: dict = {}                                                 # employee id -> his rows of the deduction columns
+
+    def signed_of(lst: dict) -> Optional[dict]:
+        """The signed copy of a mid-month list (end-of-month file, same branch, same list) -- where ส่วนกลาง / ความผิด / อุปกรณ์ are
+        written by hand. None: not uploaded yet."""
+        return next((x for x in signed_copies if x["branch"] == lst["branch"] and _same_list(_list_key(x["name"]), _list_key(lst["name"]))), None)
+
     for lst in lists:
+        lst["deduct_src"] = signed_of(lst) or lst
         lst["nobody"] = 0
         for ln in lst["lines"]:
             e = match(ln)
@@ -993,13 +1003,14 @@ def advance_view(files: Optional[list[dict]], employees: list[dict]) -> dict:
                 by_person.setdefault(e["id"], []).append(ln)
             else:
                 lst["nobody"] += 1
-        lst["rows_nobody"] = 0
-        for r in lst["rows"]:
+        src = lst["deduct_src"]
+        src["rows_nobody"] = 0
+        for r in src["rows"]:
             e = match(r, mark=False)
             if e:
                 deduct.setdefault(e["id"], []).append(r)
             elif r["common"] or r["fault"] or r["other"] or r["bad"]:  # a deduction that is nobody's: someone's is not known
-                lst["rows_nobody"] += 1
+                src["rows_nobody"] += 1
     branches: dict = {}
     for lst in lists:
         if not lst["branch"]:
@@ -1022,13 +1033,14 @@ def advance_view(files: Optional[list[dict]], employees: list[dict]) -> dict:
             b["why"].append(f"{lst['name']}: มี {guessed} บรรทัดที่ไม่มีรหัส ใช้รหัสตามลำดับในหน้า")
         if lst["cover_why"] and lst["cover_why"] not in b["why"]:
             b["why"].append(lst["cover_why"])
-        if lst["old_pages"]:                                          # read before the reader took the deduction columns
+        src = lst["deduct_src"]
+        if src["old_pages"]:                                          # read before the reader took the deduction columns
             b["old"] = True
-            b["deduct_why"].append(f"{lst['name']}: หน้า {', '.join(str(n) for n in lst['old_pages'])} {OLD_READ} — {REREAD} ({lst['short']})")
-        if lst["empty_pages"]:
-            b["deduct_why"].append(f"{lst['name']}: หน้า {', '.join(str(n) for n in lst['empty_pages'])} อ่านช่องส่วนกลาง / ความผิดรายคนไม่ได้ — {REREAD}")
-        if lst["rows_nobody"]:
-            b["deduct_why"].append(f"{lst['name']}: มี {lst['rows_nobody']} แถวที่มีส่วนกลาง / ความผิด / อุปกรณ์ แต่จับคู่กับพนักงานไม่ได้")
+            b["deduct_why"].append(f"{lst['name']}: หน้า {', '.join(str(n) for n in src['old_pages'])} {OLD_READ} — {REREAD} ({src['short']})")
+        if src["empty_pages"]:
+            b["deduct_why"].append(f"{lst['name']}: หน้า {', '.join(str(n) for n in src['empty_pages'])} อ่านช่องส่วนกลาง / ความผิดรายคนไม่ได้ — {REREAD} ({src['short']})")
+        if src["rows_nobody"]:
+            b["deduct_why"].append(f"{lst['name']}: มี {src['rows_nobody']} แถวที่มีส่วนกลาง / ความผิด / อุปกรณ์ แต่จับคู่กับพนักงานไม่ได้")
     for b in branches.values():
         seen: dict = {}                                               # a person (else a code that found nobody) -> his lines on the branch's lists
         for lst in b["lists"]:

@@ -272,9 +272,9 @@ def test_the_check_page_reads_the_rows_of_an_advance_page(tmp_path):
     assert got["b"]["old"] is True and got["b"]["rows"] == []
 
 
-def test_the_signed_copies_of_an_end_of_month_file_offer_no_paid_reread(tmp_path):
-    """Owner's review, 28 Nov 2026: the pay page never reads the end-of-month file's advance pages (payroll.advance_lists), so no
-    "อ่านหน้านี้ใหม่" (a paid call) and no "the pay page cannot use these" there -- the mid-month file's page still offers both."""
+def test_the_signed_copies_of_an_end_of_month_file_offer_the_reread_too(tmp_path):
+    """Owner, 29 Nov 2026: the handwritten ส่วนกลาง / ความผิด / อุปกรณ์ are on the SIGNED copies (end-of-month file) -- the pay page reads
+    them there, so those pages offer "อ่านหน้านี้ใหม่" like the mid-month file's."""
     from tests.test_inbox_check_page import NODE, run
     if NODE is None:
         pytest.skip("Node is not installed")
@@ -291,5 +291,5 @@ def test_the_signed_copies_of_an_end_of_month_file_offer_no_paid_reread(tmp_path
       return out;
     })()"""
     got = run(test, {}, tmp_path)
-    assert "อ่านหน้านี้ใหม่" not in got["end"] and "ยังเอายอดเหล่านี้ไปใช้ไม่ได้" not in got["end"] and "ฉบับเซ็นรับ" in got["end"]
+    assert "อ่านหน้านี้ใหม่ (เอาส่วนกลาง / ความผิด)" in got["end"]
     assert "อ่านหน้านี้ใหม่ (เอาส่วนกลาง / ความผิด)" in got["mid"] and "ยังเอายอดเหล่านี้ไปใช้ไม่ได้" in got["mid"]
