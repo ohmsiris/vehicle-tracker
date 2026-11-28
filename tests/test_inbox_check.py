@@ -339,3 +339,15 @@ def test_files_read_before_the_check_page_keep_the_dialog(off_db):
         r.pop("key", None)
         r.pop("dest_kind", None)
     assert not inbox.checkable(old) and not inbox.checkable(ic.empty_preview("cheques", "เช็ค", batches=[]))
+
+
+def test_thuk_laew_takes_the_unsure_mark_off_without_changing_the_line(off_db):
+    """ถูกแล้ว (owner, 28 Nov 2026: "no place for me to confirm that it's already correct"): the line stays as read, the mark goes."""
+    pv = inbox_ai.from_pages(reads(), "x.pdf", {})
+    before = next(ln for ln in lines_of(pv, 2) if ln[5]["key"] == "p2:l3")
+    assert "(อ่านไม่ชัด)" in before[1]
+    got = inbox_ai.clean_line_edits(pv, {"edits": {"p2:l3": {"ok": True}}}, VEH)
+    assert got["edits"]["p2:l3"] == {"ok": True}
+    after = next(ln for ln in lines_of(inbox_ai.from_pages(reads(), "x.pdf", {}, line_edits=got), 2) if ln[5]["key"] == "p2:l3")
+    assert after[1] == before[1].replace(" (อ่านไม่ชัด)", "") and after[2:4] == before[2:4]
+    assert not row_of(inbox_ai.from_pages(reads(), "x.pdf", {}, line_edits=got), "p2:l3")["flag"]

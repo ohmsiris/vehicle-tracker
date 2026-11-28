@@ -709,7 +709,7 @@ TRUCK_ACCOUNTS = ("6100", "6110", "6120", "6130")
 DEST_NAME = {"1500": "เงินเบิกล่วงหน้า", "1510": "เงินกู้พนักงาน"}
 MAX_EDITS = 300
 MAX_AMOUNT = 10_000_000
-_EDIT_FIELDS = {"date", "text", "amount", "account", "vehicle_id", "delete"}
+_EDIT_FIELDS = {"date", "text", "amount", "account", "vehicle_id", "delete", "ok"}   # ok: ถูกแล้ว, read right (owner, 28 Nov 2026)
 _KEY_RE = re.compile(r"^p(\d{1,3}):l(\d{1,4})$")
 _ADDED_ID_RE = re.compile(r"^x[0-9a-z]{1,12}$")
 
@@ -934,6 +934,8 @@ def clean_line_edits(preview: dict, line_edits, vehicles: list[dict]) -> dict:
             out["vehicle_id"] = e["vehicle_id"] or None
         if e.get("delete"):
             out["delete"] = True
+        if e.get("ok"):                                # ถูกแล้ว: checked against the scan, nothing to change -- the (อ่านไม่ชัด) mark goes
+            out["ok"] = True
         return out
 
     added, ids = [], set()

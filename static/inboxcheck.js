@@ -38,7 +38,7 @@ function ickNormVal(f, v) {
   if (f === "amount") { const n = ickNum(v); return Number.isFinite(n) ? Math.round(n * 100) / 100 : String(v ?? "").trim(); }
   if (f === "vehicle_id") return v || null;
   if (f === "page") return Number(v);
-  if (f === "delete") return !!v;
+  if (f === "delete" || f === "ok") return !!v;
   return String(v ?? "").trim();
 }
 
@@ -48,7 +48,7 @@ function ickCanon(le) {
   const e = {};
   for (const k of Object.keys(src.edits || {}).sort()) {
     const x = src.edits[k] || {}, o = {};
-    for (const f of Object.keys(x).sort()) { if (f === "delete" && !x[f]) continue; o[f] = ickNormVal(f, x[f]); }
+    for (const f of Object.keys(x).sort()) { if ((f === "delete" || f === "ok") && !x[f]) continue; o[f] = ickNormVal(f, x[f]); }
     if (Object.keys(o).length) e[k] = o;
   }
   const a = (src.added || []).filter((x) => x && !x._gone).map((x) => {
@@ -74,7 +74,7 @@ function ickPayload(draft) {
   const edits = {};
   for (const [k, v] of Object.entries(draft.edits || {})) {
     const o = {};
-    for (const [f, x] of Object.entries(v || {})) if (!(f === "delete" && !x)) o[f] = f === "vehicle_id" ? (x || null) : x;
+    for (const [f, x] of Object.entries(v || {})) if (!((f === "delete" || f === "ok") && !x)) o[f] = f === "vehicle_id" ? (x || null) : x;
     if (Object.keys(o).length) edits[k] = o;
   }
   return { edits, added: (draft.added || []).filter((a) => !a._gone).map(({ _gone, ...a }) => ({ ...a, vehicle_id: a.vehicle_id || null })) };
@@ -405,6 +405,9 @@ function ickTable(pg) {
   const on = lines.filter((l) => l.state === "book" || l.state === "new" || l.state === "unapplied"), off = lines.filter((l) => l.state === "cashfuel" || l.state === "deleted");
   const total = el("div", { class: "ick-total", "data-total": String(pg.n) });
   const add = pg.canAdd && ick.editable ? el("button", { class: "btn small", type: "button", text: "+ เพิ่มบรรทัด", onclick: () => ickAdd(pg, lines) }) : null;
+  const unsure = lines.filter((l) => l.flag && !l.added && l.state !== "deleted" && !ickChanged(l).size);
+  const allOk = unsure.length && ick.editable ? el("button", { class: "btn small", type: "button", text: `ถูกแล้วทั้งหน้า (${unsure.length} บรรทัดอ่านไม่ชัด)`,
+    title: "ดูกับรูปแล้ว ทุกบรรทัดที่อ่านไม่ชัดในหน้านี้ถูกต้อง", onclick: () => { for (const l of unsure) ickSetOk(l.key, true); ickRepaint(pg.n); } }) : null;
   const byLine = ickHrSplit(ick.f, pg).byLine;
   const withHr = (l) => [ickLineEl(pg, l), ...byLine.filter((it) => it.line_key === l.key).map(ickHrEl)];
   const box = el("div", { class: "ick-lines" },
@@ -413,7 +416,7 @@ function ickTable(pg) {
     !on.length ? el("p", { class: "muted small ick-empty", text: "ไม่มีบรรทัดที่จะลงบัญชีจากหน้านี้" }) : null,
     off.length ? el("div", { class: "ick-divider", text: "ไม่ลงบัญชีจากหน้านี้" }) : null,
     ...off.flatMap(withHr),
-    el("div", { class: "ick-foot" }, total, add));
+    el("div", { class: "ick-foot" }, total, el("span", { class: "ick-footbtns" }, allOk, add)));
   ickPaintTotal(pg, total);
   return box;
 }
@@ -465,7 +468,19 @@ function ickLineEl(pg, l0) {
   for (const x of [date, text, amt, acc, veh]) x.disabled = ro;
   del.disabled = !ick.editable;
   const cell = (cls, ...kids) => el("span", { class: `c-${cls}` }, ...kids);
-  const flag = l.flag ? el("span", { class: "ick-flag warn-text", text: "อ่านไม่ชัด" }) : null;
+  // อ่านไม่ชัด + ถูกแล้ว: the owner checked it against the scan and it is right -- nothing to retype (owner, 28 Nov 2026)
+  const okNow = () => !!((ick.draft.edits || {})[l.key] || {}).ok;
+  const okBtn = l.flag && !ro && !l.added ? el("button", { class: "linkbtn small ick-okbtn", type: "button" }) : null;
+  const flagText = l.flag ? el("span", {}) : null;
+  const flag = l.flag ? el("span", { class: "ick-flag" }, flagText, okBtn) : null;
+  const paintFlag = () => {
+    if (!flag) return;
+    const ok = okNow();
+    flagText.className = ok ? "ok-text" : "warn-text";
+    flagText.textContent = ok ? "ถูกแล้ว (รอบันทึก) " : "อ่านไม่ชัด ";
+    if (okBtn) okBtn.textContent = ok ? "ยกเลิก" : "ถูกแล้ว";
+  };
+  if (okBtn) okBtn.onclick = () => { ickSetOk(l.key, !okNow()); paintFlag(); ickRefresh(); };
   const accNote = el("span", { class: "ick-accnote muted small", hidden: true });
   const cells = { date: cell("date", date), text: cell("text", text, flag), amount: cell("amt", amt), account: cell("acc", acc, accNote), vehicle_id: cell("veh", veh) };
   const row = el("div", { class: `ick-r ${l.state}${l.row && l.row.edited ? " edited" : ""}`, "data-key": l.key },
@@ -483,7 +498,7 @@ function ickLineEl(pg, l0) {
     const [k, t] = ickDest(l, ick.f.accounts, ick.f.vehicles);
     dest.className = `ick-dest ${k}`;
     dest.textContent = t;
-    if (flag) flag.hidden = ch.size > 0;
+    if (flag) { flag.hidden = ch.size > 0; paintFlag(); }
   };
   const on = (f, input, read) => {
     const go = () => {
@@ -520,6 +535,12 @@ function ickLineEl(pg, l0) {
   del.onclick = () => ickToggle(pg, l);
   paint();
   return row;
+}
+
+function ickSetOk(key, on) {
+  const d = ick.draft, e = { ...(d.edits[key] || {}) };
+  if (on) e.ok = true; else delete e.ok;
+  if (Object.keys(e).length) d.edits[key] = e; else delete d.edits[key];
 }
 
 // one field typed: kept as a fix of that line (typed back to what it was, the fix goes away)

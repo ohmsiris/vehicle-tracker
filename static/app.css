@@ -2756,6 +2756,8 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ick-r.deleted input, .ick-r.deleted select { text-decoration: line-through; }
 .ick-flag { display: block; font-size: 12px; margin-top: 1px; }
 .ick-accnote { display: block; font-size: 12px; margin-top: 2px; }
+.ick-okbtn { margin-left: 4px; font-weight: 600; }
+.ick-footbtns { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .ick-dest { display: block; font-size: 12px; font-weight: 600; line-height: 1.35; padding: 4px 9px; border-radius: 6px; border-left: 3px solid; overflow-wrap: anywhere; }
 .ick-dest.book { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .ick-dest.cashfuel { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
