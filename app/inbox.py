@@ -594,7 +594,7 @@ def edits_version(preview: dict) -> str:
     """A fingerprint of the fixes saved on a file (preview["line_edits"]): the check page sends back the one it opened with, so a tab
     opened before someone else saved cannot wipe their fixes (28 Nov 2026)."""
     le = preview.get("line_edits") if isinstance(preview.get("line_edits"), dict) else {}
-    if not le.get("edits") and not le.get("added"):
+    if not le.get("edits") and not le.get("added") and not le.get("rows"):      # rows: the per-person tables (29 Nov 2026)
         le = {}
     return hashlib.sha256(json.dumps(le, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()[:16]
 
@@ -616,6 +616,8 @@ def page_image(file_id: str, page: int, see_pay: bool = True) -> bytes:
 def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Optional[str] = None, hr: str = "none") -> dict:
     """บันทึกการแก้ on ตรวจเอกสารก่อนลงบัญชี (owner, 28 Nov 2026): the owner's fixes to the lines of an AI-read expense paper, checked
     strictly (inbox_ai.clean_line_edits), stored in the preview (line_edits) and the preview rebuilt with them the way อ่านใหม่ does --
+    the per-person tables of the advance pages too (line_edits["rows"], inbox_ai.clean_row_edits; owner, 29 Nov 2026: "and how do I
+    edit the numbers": the fixed rows are the advances and deductions the pay page uses, and the page's booked 1500 line their sum) --
     no AI call. A booked file is booked again at once with the fixes (as a re-read that can book is). version: edits_version of the
     fixes the page opened with (the route always passes it): fixes saved since -- another tab, the bookkeeper -- refuse the save instead
     of being wiped. Returns what get() does."""
@@ -637,7 +639,7 @@ def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Op
         except ValueError as exc:
             raise InboxError(str(exc))
         stored = {**base}
-        if clean["edits"] or clean["added"]:
+        if ai.has_edits(clean):
             stored["line_edits"] = clean
         else:
             stored.pop("line_edits", None)

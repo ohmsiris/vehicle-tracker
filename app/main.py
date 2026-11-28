@@ -1314,8 +1314,9 @@ def api_inbox_page(file_id: str, n: int, x_app_token: str = Header(default=""), 
 @app.post("/api/accounts/inbox/{file_id}/edits")
 def api_inbox_edits(file_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default=""),
                     x_hr_pin: str = Header(default="")) -> dict:
-    """บันทึกการแก้ ({"line_edits": {"edits": {...}, "added": [...]}, "version": <edits_version the page opened with>}): the owner's
-    fixes to the lines before (or after) ลงบัญชี; the preview is rebuilt with them, a booked file is booked again with them. A version
+    """บันทึกการแก้ ({"line_edits": {"edits": {...}, "added": [...], "rows": {...}}, "version": <edits_version the page opened with>}): the
+    owner's fixes to the lines before (or after) ลงบัญชี, and to the per-person tables of the advance pages ("rows": ยอดเบิก / ส่วนกลาง /
+    ความผิด / อุปกรณ์, owner 29 Nov 2026); the preview is rebuilt with them, a booked file is booked again with them. A version
     that no longer matches (fixes saved from another tab meanwhile) is refused, never overwritten."""
     from app import inbox
     _check_token(x_app_token, token)

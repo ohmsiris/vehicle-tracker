@@ -207,7 +207,8 @@ SELECTS = {
     "acc_docs": "batch,feed,branch,kind,page",
     "inbox_files": "id,kind,status,month,branches",
     # the scans that were read: their pages as the AI read them, for the mid-month advance lists (nothing else of the preview)
-    "advance_files": "id,file_name,kind,status,month,branches,uploaded_at,booked_at,half:preview->half,pages:preview->ai_pages",
+    "advance_files": "id,file_name,kind,status,month,branches,uploaded_at,booked_at,half:preview->half,pages:preview->ai_pages,"
+                     "row_edits:preview->line_edits->rows",
     "employee_documents": "id,employee_id,doc_date,status,penalty:content->penalty_amount,offence:content->offence_date",
 }
 
@@ -792,6 +793,132 @@ def page_rows(page: dict) -> Optional[list[dict]]:
     return out
 
 
+# ------------------------------------------------------------------ the owner's fixes of the per-person table (29 Nov 2026)
+# Owner, 29 Nov 2026: "and how do I edit the numbers" -- the per-person table of an advance-list page (advance_rows) is corrected straight
+# on ตรวจเอกสารก่อนลงบัญชี against the scan. The fixes live in preview["line_edits"]["rows"] (app/inbox_ai.clean_row_edits):
+#   {"<page>": {"edits": {"<row index>": {code?, amount?, common?, fault?, other?, ok?, delete?}},
+#               "added": [{"id": "r1", "code", "name", "amount", "common", "fault", "other"}]}}
+# keyed by the row's place in the page read's advance_rows, so they hold while the page read does (a choice, อ่านใหม่) and go when the
+# page is read again by the AI. edit_page lays them over a page read; the books (inbox_ai._batch) and this page (advance_lists) both
+# read the edited page, so the booked sum, the advances and the deduction columns always say the same.
+ROW_FIELDS = ("code", "amount", "common", "fault", "other")
+
+
+def _row_code(r: dict) -> Optional[str]:
+    return read_code(r.get("code"))[0] or read_code(r.get("name"))[0]
+
+
+def _total_row(r: dict) -> bool:
+    """A typed total among the rows ("รวม 19,000"): nobody's."""
+    return not _row_code(r) and not str(r.get("code") or "").strip() and bool(TOTAL_RE.search(read_code(r.get("name"))[1]))
+
+
+def pair_rows(page: dict) -> tuple[list[Optional[int]], list[int]]:
+    """Which booked line of an advance page (page["lines"], an amount above 0 -- what inbox_ai._batch adds up) is each row of its
+    advance_rows: ([line index or None per row index], the indexes of the lines no row is). By the staff code first, then by the full
+    name (a first name and a surname, title dropped); each line is one row's at most; a total row is nobody's. Pure."""
+    rows = page.get("advance_rows") or []
+    lines = page.get("lines") or []
+    live = [j for j, ln in enumerate(lines) if isinstance(ln, dict) and (_amount(ln.get("amount")) or 0) > 0]
+    info = {j: read_code(lines[j].get("text")) for j in live}
+    out: list = [None] * len(rows)
+    used: set = set()
+    for i, r in enumerate(rows):
+        code = _row_code(r) if isinstance(r, dict) else None
+        if not code or _total_row(r):
+            continue
+        j = next((j for j in live if j not in used and info[j][0] == code), None)
+        if j is not None:
+            out[i] = j
+            used.add(j)
+    for i, r in enumerate(rows):
+        if out[i] is not None or not isinstance(r, dict) or _total_row(r):
+            continue
+        key = name_key(read_code(r.get("name"))[1])
+        if " " not in key:
+            continue
+        j = next((j for j in live if j not in used and name_key(info[j][1]) == key), None)
+        if j is not None:
+            out[i] = j
+            used.add(j)
+    return out, [j for j in live if j not in used]
+
+
+def _line_text(code, name) -> str:
+    return " ".join(x for x in (str(code or "").strip(), _norm(name)) if x) or "-"
+
+
+def edit_page(page: dict, pe: Optional[dict]) -> dict:
+    """One advance page read with the owner's fixes of its per-person table laid over it (a new dict; the read itself is untouched).
+    The rows: a fixed row takes the new values (a blank is "") and loses its อ่านไม่ชัด mark (ถูกแล้ว alone does just that), a deleted
+    row leaves, an added row goes to the end. The booked lines follow the fixed rows (owner, 29 Nov 2026: the row he checked against
+    the scan is the person's advance): a fixed row's line (pair_rows) takes the row's code, name and amount -- the amount fixed, else
+    the row's own, else what the line had --, a row fixed to no amount or deleted takes its line away, a fixed or added row with an
+    amount and no line gets one. Rows and lines no fix touches stay exactly as read. Lenient: a row number the read does not have is
+    left out (the endpoint refused it when it was saved). Pure."""
+    if not isinstance(page, dict) or not isinstance(pe, dict) or "advance_rows" not in page:
+        return page
+    edits = pe.get("edits") if isinstance(pe.get("edits"), dict) else {}
+    added = [a for a in pe.get("added") or [] if isinstance(a, dict)]
+    if not edits and not added:
+        return page
+    rows = list(page.get("advance_rows") or [])
+    lines = [dict(ln) if isinstance(ln, dict) else ln for ln in page.get("lines") or []]
+    pairs, _rest = pair_rows(page)
+    drop: set = set()
+    new_rows, new_lines = [], []
+
+    def person_line(r: dict, eff: Optional[float], old: Optional[dict]) -> Optional[dict]:
+        if eff is None or eff <= 0 or _total_row(r):
+            return None
+        name = read_code(r.get("name"))[1] or (read_code(old.get("text"))[1] if old else "")
+        base = old or {"date": None, "plate": None, "truck_number": None}
+        return {**base, "text": _line_text(_row_code(r) or "", name), "amount": round(eff, 2), "account": ADVANCE_ACCOUNT, "unsure": False,
+                "edited": True}
+
+    for i, r in enumerate(rows):
+        e = edits.get(str(i))
+        if not isinstance(r, dict) or not isinstance(e, dict) or not e:
+            new_rows.append(r)
+            continue
+        j = pairs[i] if i < len(pairs) else None
+        if e.get("delete"):
+            if j is not None:
+                drop.add(j)
+            continue
+        fixed = {**r, **{f: e[f] for f in ROW_FIELDS if f in e}, "unsure": False, "edited": True}
+        new_rows.append(fixed)
+        if "amount" in e:
+            eff = _amount(e["amount"])
+        else:
+            eff = _amount(r.get("amount"))
+            if eff is None and j is not None:
+                eff = _amount(lines[j].get("amount"))
+        ln = person_line(fixed, eff, lines[j] if j is not None else None)
+        if j is not None:
+            if ln is None:
+                drop.add(j)
+            else:
+                lines[j] = ln
+        elif ln is not None:
+            new_lines.append(ln)
+    for a in added:
+        row = {"code": str(a.get("code") or ""), "name": _norm(a.get("name")), **{f: a.get(f, "") for f in ROW_FIELDS[1:]},
+               "unsure": False, "added": True, "edited": True}
+        new_rows.append(row)
+        ln = person_line(row, _amount(a.get("amount")), None)
+        if ln is not None:
+            new_lines.append(ln)
+    return {**page, "advance_rows": new_rows, "lines": [ln for j, ln in enumerate(lines) if j not in drop] + new_lines}
+
+
+def edited_pages(pages: Optional[list], rows_edits: Optional[dict]) -> list:
+    """The page reads of a file with the owner's per-person fixes (line_edits["rows"]) laid over its advance pages (edit_page). Pure."""
+    if not isinstance(rows_edits, dict) or not rows_edits:
+        return list(pages or [])
+    return [edit_page(p, rows_edits.get(str(p.get("n")))) if isinstance(p, dict) and p.get("page_kind") == "advance" else p for p in pages or []]
+
+
 def page_blanks(page: dict) -> int:
     """How many advance lines of a page (account 1500) carry no amount that can be used: none, 0, or text that is no number."""
     return sum(1 for ln in page.get("lines") or [] if isinstance(ln, dict) and str(ln.get("account") or "").strip() == ADVANCE_ACCOUNT
@@ -843,7 +970,9 @@ def advance_lists(files: Optional[list[dict]], signed: bool = False) -> list[dic
         if f.get("status") not in ADVANCE_READ or ((f.get("half") or preview.get("half")) == "end") != signed:
             continue
         pages = f.get("pages") if f.get("pages") is not None else preview.get("ai_pages")
-        pages = sorted((p for p in pages or [] if isinstance(p, dict)), key=lambda p: _f(p.get("n")))
+        # the owner's fixes of the per-person tables (edit_page; owner, 29 Nov 2026): the edited rows are the advances and deductions
+        fixes = f.get("row_edits") if "row_edits" in f else (preview.get("line_edits") or {}).get("rows") if isinstance(preview.get("line_edits"), dict) else None
+        pages = sorted((p for p in edited_pages(pages, fixes) if isinstance(p, dict)), key=lambda p: _f(p.get("n")))
         groups: list = []                                             # {key, name, title, pages: [(page, its lines)]}
         for p in pages:
             if p.get("page_kind") != "advance":                       # petty cash, fuel, the cover: not the list, whatever account a line has

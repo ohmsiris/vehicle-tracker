@@ -267,9 +267,13 @@ def test_the_check_page_reads_the_rows_of_an_advance_page(tmp_path):
     if NODE is None:
         pytest.skip("Node is not installed")
     f = {"preview": {"ai_pages": [{"n": 5, **ADVANCE_NEW}, {"n": 6, **ADVANCE_OLD}]}}
-    got = run("(() => ({ a: ickAdvRows(DATA.f, 5), b: ickAdvRows(DATA.f, 6) }))()", {"f": f}, tmp_path)
-    assert got["a"]["old"] is False and len(got["a"]["rows"]) == 2 and got["a"]["sums"] == {"common": 980, "fault": 500, "other": 0}
-    assert got["b"]["old"] is True and got["b"]["rows"] == []
+    got = run("""(() => {
+      const pg = (n) => ({ n, adv: ickAdvOf(DATA.f.preview.ai_pages.find((p) => p.n === n), null) });
+      const a = ickAdvView(pg(5), ickEmpty(), ickEmpty());
+      return { a: { rows: a.length, sums: ickAdvSums(a) }, b: pg(6).adv.rows };
+    })()""", {"f": f}, tmp_path)
+    assert got["a"] == {"rows": 2, "sums": {"people": 2, "amount": 6000, "common": 980, "fault": 500, "other": 0}}
+    assert got["b"] is None                                                           # read before the table existed
 
 
 def test_the_signed_copies_of_an_end_of_month_file_offer_the_reread_too(tmp_path):

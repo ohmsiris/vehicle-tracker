@@ -1441,7 +1441,8 @@ def test_the_loader_reads_the_lists_from_the_drop_box(monkeypatch):
     # only the scans of the month that were read, and of each only the named columns: the pages the AI read, nothing else of the preview
     assert asked == [{"select": pw.SELECTS["advance_files"], "month": "eq.2026-11", "kind": "eq.scan", "status": "in.(read,booked)", "order": "uploaded_at.desc,id.asc"}]
     cols = [c.split(":")[-1] for c in pw.SELECTS["advance_files"].split(",")]
-    assert cols == ["id", "file_name", "kind", "status", "month", "branches", "uploaded_at", "booked_at", "preview->half", "preview->ai_pages"]
+    assert cols == ["id", "file_name", "kind", "status", "month", "branches", "uploaded_at", "booked_at", "preview->half", "preview->ai_pages",
+                    "preview->line_edits->rows"]          # the owner's fixes of the per-person tables (29 Nov 2026)
     assert s["failed"] == [] and one(pw.build(s, MONTH, TODAY), "SB-FR001")["cells"]["advance"]["state"] == "ok"
 
     def down(table, params=None, page=1000):

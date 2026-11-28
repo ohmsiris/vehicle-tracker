@@ -2828,6 +2828,20 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ick-adv .num { text-align: right; font-variant-numeric: tabular-nums; }
 .ick-adv tr.unsure td { background: var(--warn-soft); }
 .ick-adv tfoot td { font-weight: 650; border-top: 2px solid var(--line-strong); border-bottom: 0; }
+/* the per-person table fixed on the page (owner, 29 Nov 2026): inputs like the line table's, a changed cell amber until saved */
+.ick-adv.edit td { padding: 3px 4px; vertical-align: top; }
+.ick-adv.edit input { width: 100%; min-width: 0; font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 6px;
+  background: var(--surface); color: var(--text); }
+.ick-adv.edit input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.ick-adv.edit input.code { width: 92px; text-transform: uppercase; }
+.ick-adv.edit input.num { width: 82px; text-align: right; font-variant-numeric: tabular-nums; }
+.ick-adv.edit td.chg input { border-color: var(--warn); background: var(--warn-soft); }
+.ick-adv.edit tr.edited td:first-child input:not(:focus) { box-shadow: inset 3px 0 0 var(--accent); }
+.ick-adv.edit tr.new input { border-color: var(--accent); }
+.ick-adv.edit tr.deleted { opacity: .6; }
+.ick-adv.edit tr.deleted input, .ick-adv.edit tr.deleted span { text-decoration: line-through; }
+.ick-adv-used { display: block; margin-top: 1px; text-align: right; }
+.ick-adv-card > .ick-footbtns { justify-self: start; }
 /* a narrower column (a laptop with the sidebar open): each line on two rows, and the column names on the same two rows above them */
 @container (max-width: 760px) {
   .ick-r { grid-template-columns: 128px minmax(0, 1fr) minmax(0, 1fr) 96px 44px; grid-template-areas: "date text text amt act" "acc acc veh dest dest"; }

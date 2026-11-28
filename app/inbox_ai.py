@@ -583,14 +583,25 @@ def reread_pages(preview: dict, pages, choices: Optional[dict] = None, fetch: Op
                 keep[k] = v
         if dropped:
             edits = {**edits, "edits": keep}
+    # the per-person fixes (line_edits["rows"], keyed by the row's place in the page read): a page read again is a new table -- they go
+    rows_gone: dict = {}
+    if edits and isinstance(edits.get("rows"), dict) and edits["rows"]:
+        rows_gone = {k: v for k, v in edits["rows"].items() if str(k).isdigit() and int(k) in done}
+        if rows_gone:
+            rest = {k: v for k, v in edits["rows"].items() if k not in rows_gone}
+            edits = {**{k: v for k, v in edits.items() if k != "rows"}, **({"rows": rest} if rest else {})}
     reads = [done.get(r.get("n"), r) for r in reads]
     out = from_pages(reads, preview.get("file_name") or "", dict(choices or {}), usage=usage, images=images,
-                     line_edits=edits if edits and (edits.get("edits") or edits.get("added")) else None)
+                     line_edits=edits if has_edits(edits) else None)
     if "hr_items" in preview:
         out["hr_items"] = preview["hr_items"]
     notes = [f"อ่านหน้า {n} ใหม่ไม่สำเร็จ ({why}) — ยังใช้ที่อ่านไว้เดิม" for n, why in failed]
     for n in sorted(set(dropped)):
         notes.append(f"หน้า {n} อ่านใหม่แล้วบรรทัดไม่ตรงกับเดิม (จำนวนบรรทัดหรือยอดเปลี่ยน) — การแก้บรรทัดของหน้านี้ที่บันทึกไว้ {dropped.count(n)} บรรทัดถูกเอาออก ตรวจหน้านี้อีกครั้ง")
+    for k in sorted(rows_gone, key=int):
+        pe = rows_gone[k] if isinstance(rows_gone[k], dict) else {}
+        n_fix = len(pe.get("edits") or {}) + len(pe.get("added") or [])
+        notes.append(f"หน้า {k} อ่านใหม่ด้วย AI แล้ว — การแก้ตารางรายคนของหน้านี้ที่บันทึกไว้ {n_fix} แถวถูกเอาออก ตรวจกับรูปอีกครั้ง")
     out["flags"] = notes + list(out.get("flags") or [])
     out["reread"] = {"pages": sorted(done), "failed": [n for n, _ in failed]}
     return out
@@ -848,9 +859,12 @@ def _line_day(dm: str, month: str) -> Optional[str]:
 # (owner, 28 Nov 2026: "before I press ลงบัญชี I want one place to see each page beside its lines, fix them straight away, and see
 # where every line will go"). The fixes live in preview["line_edits"]:
 #   {"edits": {"p3:l2": {"date": "2026-11-02", "text": ..., "amount": ..., "account": ..., "vehicle_id": ..., "delete": true}},
-#    "added": [{"id": "x1", "page": 3, "date": ..., "text": ..., "amount": ..., "account": ..., "vehicle_id": ...}]}
+#    "added": [{"id": "x1", "page": 3, "date": ..., "text": ..., "amount": ..., "account": ..., "vehicle_id": ...}],
+#    "rows": {"5": {"edits": {"0": {"amount": 3500, "common": 350, "ok": true}}, "added": [{"id": "r1", "code": "SB-FR009", ...}]}}}
 # keyed by the batch line number (p<page>:l<n>, the number acc_docs.build gives the line), which stays the same while the page reads
-# (ai_pages) do: every rebuild (a choice, อ่านใหม่) applies them again; a fresh paid read starts without them.
+# (ai_pages) do: every rebuild (a choice, อ่านใหม่) applies them again; a fresh paid read starts without them. "rows" (owner, 29 Nov
+# 2026): the per-person tables of the advance pages, by page and row index (app/payroll.py edit_page) -- there only when there is one;
+# อ่านหน้านี้ใหม่ drops those of the pages it reads again.
 TRUCK_ACCOUNTS = ("6100", "6110", "6120", "6130")
 DEST_NAME = {"1500": "เงินเบิกล่วงหน้า", "1510": "เงินกู้พนักงาน"}
 MAX_EDITS = 300
@@ -858,6 +872,19 @@ MAX_AMOUNT = 10_000_000
 _EDIT_FIELDS = {"date", "text", "amount", "account", "vehicle_id", "delete", "ok"}   # ok: ถูกแล้ว, read right (owner, 28 Nov 2026)
 _KEY_RE = re.compile(r"^p(\d{1,3}):l(\d{1,4})$")
 _ADDED_ID_RE = re.compile(r"^x[0-9a-z]{1,12}$")
+# the per-person table of an advance page (owner, 29 Nov 2026: "and how do I edit the numbers"): line_edits["rows"], see
+# app/payroll.py edit_page for the shape and how the books and the pay page use it
+MAX_ROW_AMOUNT = 1_000_000
+_ROW_EDIT_FIELDS = {"code", "amount", "common", "fault", "other", "ok", "delete"}
+_ROW_ADD_FIELDS = {"code", "name", "amount", "common", "fault", "other"}
+_ROW_NUM_TH = {"amount": "ยอดเบิก", "common": "ส่วนกลาง", "fault": "ความผิด", "other": "อุปกรณ์"}
+_ROW_CODE_RE = re.compile(r"^SB-[A-Z]{2}\d{3}$")
+_ROW_ID_RE = re.compile(r"^r[0-9a-z]{1,12}$")
+
+
+def has_edits(le) -> bool:
+    """Does preview["line_edits"] hold any fix (of a line, an added line, or a per-person row)?"""
+    return isinstance(le, dict) and bool(le.get("edits") or le.get("added") or le.get("rows"))
 
 
 def account_name(code: str) -> str:
@@ -1024,7 +1051,9 @@ def clean_line_edits(preview: dict, line_edits, vehicles: list[dict]) -> dict:
     added_in = line_edits.get("added") or []
     if not isinstance(edits_in, dict) or not isinstance(added_in, list):
         raise ValueError("ข้อมูลที่แก้ไม่ถูกต้อง")
-    if len(edits_in) + len(added_in) > MAX_EDITS:
+    rows = clean_row_edits(preview, line_edits.get("rows"))
+    n_rows = sum(len(p["edits"]) + len(p["added"]) for p in rows.values())
+    if len(edits_in) + len(added_in) + n_rows > MAX_EDITS:
         raise ValueError(f"แก้ได้ครั้งละไม่เกิน {MAX_EDITS} บรรทัด")
     batch = preview.get("acc_docs_batch") or {}
     month, half = preview.get("month"), preview.get("half")
@@ -1034,7 +1063,7 @@ def clean_line_edits(preview: dict, line_edits, vehicles: list[dict]) -> dict:
     known = {(ln[5] or {}).get("key") for p in batch.get("pages") or [] for ln in p.get("lines") or []}
     known |= set(((preview.get("line_edits") or {}).get("edits") or {}).keys())       # a line deleted earlier: it can be brought back
     known.discard(None)
-    if not known:
+    if not known and (edits_in or added_in):
         raise ValueError("ไฟล์นี้อ่านไว้ก่อนมีหน้าแก้รายการ — กด อ่านใหม่ (ไม่เสียค่า AI) แล้วแก้ได้")
     money_pages = {r.get("n") for r in preview.get("ai_pages") or [] if r.get("page_kind") in ("expense", "fuel")}
     vids = {v.get("id") for v in vehicles}
@@ -1116,7 +1145,113 @@ def clean_line_edits(preview: dict, line_edits, vehicles: list[dict]) -> dict:
         ch = fields(e, f"หน้า {_KEY_RE.match(key).group(1)} บรรทัด {_KEY_RE.match(key).group(2)}")
         if ch:
             edits[key] = ch
-    return {"edits": edits, "added": added}
+    return {"edits": edits, "added": added, **({"rows": rows} if rows else {})}
+
+
+def _row_num(v, where: str, field: str):
+    """A money cell of the per-person table: "" (blank, a dash too) or 0 <= x < 1,000,000 (ValueError in Thai)."""
+    if isinstance(v, bool):
+        raise ValueError(f"{where}: {_ROW_NUM_TH[field]}ต้องเป็นตัวเลข หรือเว้นว่าง")
+    t = re.sub(r"[,\s]", "", str(v))
+    if t.strip("-–—") == "":
+        return ""
+    try:
+        x = round(float(t), 2)
+    except ValueError:
+        raise ValueError(f"{where}: {_ROW_NUM_TH[field]}ต้องเป็นตัวเลข หรือเว้นว่าง")
+    if x != x or not 0 <= x < MAX_ROW_AMOUNT:
+        raise ValueError(f"{where}: {_ROW_NUM_TH[field]}ต้องไม่ติดลบและน้อยกว่า 1,000,000")
+    return x
+
+
+def _row_fields(e, where: str, allowed: set) -> dict:
+    if not isinstance(e, dict):
+        raise ValueError(f"{where}: ข้อมูลไม่ถูกต้อง")
+    bad = set(e) - allowed
+    if bad:
+        raise ValueError(f"{where}: แก้ช่อง {', '.join(sorted(bad))} ไม่ได้")
+    out: dict = {}
+    if e.get("code") is not None:
+        c = str(e["code"]).strip().upper()
+        if c and not _ROW_CODE_RE.match(c):
+            raise ValueError(f"{where}: รหัสพนักงานต้องเป็นแบบ SB-XX000 (เช่น SB-FR001) หรือเว้นว่าง")
+        out["code"] = c
+    if e.get("name") is not None:
+        t = " ".join(str(e["name"]).split())
+        if len(t) > 100:
+            raise ValueError(f"{where}: ชื่อยาวได้ไม่เกิน 100 ตัวอักษร")
+        out["name"] = t
+    for f in ("amount", "common", "fault", "other"):
+        if e.get(f) is not None:
+            out[f] = _row_num(e[f], where, f)
+    if e.get("ok"):                                    # ถูกแล้ว: checked against the scan -- the อ่านไม่ชัด mark goes
+        out["ok"] = True
+    if e.get("delete"):
+        out["delete"] = True
+    return out
+
+
+def clean_row_edits(preview: dict, rows) -> dict:
+    """The owner's fixes of the per-person tables of the advance pages (line_edits["rows"]; owner, 29 Nov 2026: "and how do I edit
+    the numbers"), checked strictly (ValueError in Thai): only advance pages read with their table (advance_rows), a row number the
+    read has, ยอดเบิก / ส่วนกลาง / ความผิด / อุปกรณ์ a number from 0 to under 1,000,000 or blank, a staff code SB-XX000 or blank, an
+    added row with a code or a name. Returns {"<page>": {"edits": {"<row index>": {...}}, "added": [...]}} -- pages with a fix only."""
+    if rows in (None, {}):
+        return {}
+    if not isinstance(rows, dict):
+        raise ValueError("ข้อมูลที่แก้ในตารางรายคนไม่ถูกต้อง")
+    pages = {r.get("n"): r for r in preview.get("ai_pages") or [] if isinstance(r, dict)}
+    out: dict = {}
+    for k, pe in rows.items():
+        n = int(k) if str(k).isdigit() else None
+        page = pages.get(n)
+        if page is None or page.get("page_kind") != "advance":
+            raise ValueError(f"แก้ตารางรายคนได้เฉพาะหน้าใบเบิกกลางเดือน (หน้า {k})")
+        if "advance_rows" not in page:
+            raise ValueError(f"หน้า {n} อ่านก่อนมีตารางรายคน — กด อ่านหน้านี้ใหม่ ก่อนแก้")
+        if not isinstance(pe, dict) or set(pe) - {"edits", "added"}:
+            raise ValueError(f"หน้า {n}: ข้อมูลที่แก้ในตารางรายคนไม่ถูกต้อง")
+        e_in, a_in = pe.get("edits") or {}, pe.get("added") or []
+        if not isinstance(e_in, dict) or not isinstance(a_in, list):
+            raise ValueError(f"หน้า {n}: ข้อมูลที่แก้ในตารางรายคนไม่ถูกต้อง")
+        have = len(page.get("advance_rows") or [])
+        edits: dict = {}
+        for i, e in e_in.items():
+            if not str(i).isdigit() or int(i) >= have:
+                raise ValueError(f"หน้า {n}: ไม่พบแถวที่ {i} ในตารางรายคน — เปิดหน้าตรวจใหม่")
+            ch = _row_fields(e, f"หน้า {n} แถว {int(i) + 1}", _ROW_EDIT_FIELDS)
+            if ch:
+                edits[str(int(i))] = ch
+        added, ids = [], set()
+        for a in a_in:
+            aid = str(a.get("id") or "") if isinstance(a, dict) else ""
+            if not _ROW_ID_RE.match(aid) or aid in ids:
+                raise ValueError(f"หน้า {n}: แถวที่เพิ่ม รหัสแถวไม่ถูกต้อง")
+            ids.add(aid)
+            ch = _row_fields({k2: v for k2, v in a.items() if k2 != "id"}, f"หน้า {n} แถวที่เพิ่ม", _ROW_ADD_FIELDS)
+            if not ch.get("code") and not ch.get("name"):
+                raise ValueError(f"หน้า {n} แถวที่เพิ่ม: ใส่รหัสพนักงานหรือชื่อ")
+            added.append({"id": aid, "code": ch.get("code", ""), "name": ch.get("name", ""),
+                          **{f: ch.get(f, "") for f in ("amount", "common", "fault", "other")}})
+        if edits or added:
+            out[str(n)] = {"edits": edits, "added": added}
+    return out
+
+
+def advance_pairs(reads: list[dict]) -> dict:
+    """For the check page's live total (static/inboxcheck.js ickAdvSum): per advance page with a per-person table, the booked line
+    amount each row stands for (app/payroll.py pair_rows; None = no line) and the sum of the lines no row is --
+    {"<page>": {"line": [...], "rest": x}}. Of the page as read (the fixes are laid over it on the page, as edit_page does)."""
+    from app import payroll
+    out = {}
+    for r in reads:
+        if r.get("page_kind") != "advance" or "advance_rows" not in r:
+            continue
+        pairs, rest = payroll.pair_rows(r)
+        lines = r.get("lines") or []
+        out[str(r.get("n"))] = {"line": [round(payroll._amount(lines[j].get("amount")), 2) if j is not None else None for j in pairs],
+                                "rest": round(sum(payroll._amount(lines[j].get("amount")) for j in rest), 2)}
+    return out
 
 
 def from_pages(reads: list[dict], name: str, choices: dict, usage: Optional[dict] = None, images: Optional[dict] = None,
@@ -1220,7 +1355,19 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
     key = f"docs:{month}:{branch}:{half}"
     pv["label"] = f"เอกสารเบิก{'กลางเดือน' if half == 'mid' else 'ปลายเดือน'} {branch} {ic.month_label(month)} (อ่านด้วย AI)"
 
-    batch, flags = _batch(reads, name, key, month, branch, half, feed, vehicles)
+    # the owner's fixes of the per-person tables (line_edits["rows"], app/payroll.py edit_page; owner, 29 Nov 2026): the advance pages
+    # are booked from the fixed tables -- the 1500 line of a page is what its lines add up to once the fixed rows are laid over them
+    from app import payroll
+    row_fix = line_edits.get("rows") if isinstance(line_edits, dict) and isinstance(line_edits.get("rows"), dict) else None
+    if row_fix:
+        usable = {str(r.get("n")) for r in reads if r.get("page_kind") == "advance" and "advance_rows" in r}
+        for k in sorted((k for k in row_fix if k not in usable), key=lambda k: int(k) if str(k).isdigit() else 0):
+            pv["flags"].append(f"การแก้ตารางรายคนที่บันทึกไว้ของหน้า {k} ใช้ไม่ได้ (หน้านี้ไม่ใช่ใบเบิกกลางเดือนที่มีตารางรายคนแล้ว) — ไม่ได้ใช้")
+    booked_reads = payroll.edited_pages(reads, row_fix)
+    pairs = advance_pairs(reads)
+    if pairs:
+        pv["advance_pairs"] = pairs
+    batch, flags = _batch(booked_reads, name, key, month, branch, half, feed, vehicles)
     pv["flags"] += flags
     # the owner's fixes (ตรวจเอกสารก่อนลงบัญชี): after the month / half vote (a fixed date never moves the file), before the cash-fuel
     # match and the page totals (a fixed fuel amount is matched again; the totals add up what is left)
@@ -1321,7 +1468,7 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
     worked = sum(len(r.get("work_rows") or []) for r in reads)
     if worked:                                       # the work record's days / OT / ค่าเที่ยว: used by the pay page, not booked here
         pv["note"] = (pv.get("note") or "") + f" · บันทึกการทำงาน {worked} คน (วัน / OT / ค่าเที่ยว) ใช้ในหน้าคำนวณเงินเดือน"
-    listed = sum(len(r.get("advance_rows") or []) for r in reads if r.get("page_kind") == "advance")
+    listed = sum(len(r.get("advance_rows") or []) for r in booked_reads if r.get("page_kind") == "advance")
     if listed:                                       # the advance lists' ส่วนกลาง / ความผิด / อุปกรณ์: used by the pay page, not booked here
         pv["note"] = (pv.get("note") or "") + f" · ใบเบิกกลางเดือน {listed} คน (ส่วนกลาง / ความผิด / อุปกรณ์) ใช้ในหน้าคำนวณเงินเดือน"
     return pv
