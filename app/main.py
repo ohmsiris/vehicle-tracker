@@ -1268,6 +1268,25 @@ def api_inbox_file(file_id: str, x_app_token: str = Header(default=""), token: s
     return Response(content=data, media_type=media, headers=headers)
 
 
+@app.get("/api/accounts/inbox/{file_id}/page/{n}")
+def api_inbox_page(file_id: str, n: int, x_app_token: str = Header(default=""), token: str = Query(default="")) -> Response:
+    """One page of an AI-read file as the AI saw it -- ตรวจเอกสารก่อนลงบัญชี shows it beside the lines read from it, before booking
+    (owner, 28 Nov 2026). Private bucket, served through the app; a payroll file only for whoever may see pay."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    data = _inbox_call(inbox.page_image, file_id, n, _sees_pay(x_app_token or token))
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/api/accounts/inbox/{file_id}/edits")
+def api_inbox_edits(file_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """บันทึกการแก้ ({"line_edits": {"edits": {...}, "added": [...]}}): the owner's fixes to the lines before (or after) ลงบัญชี; the
+    preview is rebuilt with them, a booked file is booked again with them."""
+    from app import inbox
+    _check_token(x_app_token, token)
+    return _inbox_call(inbox.save_edits, file_id, body.get("line_edits"), _sees_pay(x_app_token or token))
+
+
 @app.post("/api/accounts/inbox/{file_id}/choose")
 def api_inbox_choose(file_id: str, body: dict = Body(...), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     """The owner's answer to a conflict ({"choices": {"month": "2026-11"}}): read again with it."""

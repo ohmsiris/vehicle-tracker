@@ -386,6 +386,7 @@ def row_view(row: dict, running: Optional[set] = None) -> dict:
             "pages": p.get("pages"), "needs_ai": bool(p.get("needs_ai")), "store_only": bool(p.get("store_only")),
             "superseded": bool(sup_by) and status == "stored", "superseded_by": sup_by,
             "remove_note": p.get("remove_note") or "",
+            "check": bool(p.get("acc_docs_batch")),        # an AI-read expense paper: opened on ตรวจเอกสารก่อนลงบัญชี (28 Nov 2026)
             "pending": ({"status": pend.get("status"), "status_label": STATUS_LABEL.get(pend.get("status"), pend.get("status")),
                          "message": PENDING_MSG.get(pend.get("status"), ""), "note": (pend["preview"].get("note") or "")} if pend else None),
             "conflicts": ((pend["preview"] if pend else p).get("conflicts") or []),
@@ -560,8 +561,58 @@ def get(file_id: str, see_pay: bool = True) -> dict:
     if not see_pay and _is_payroll(row):
         preview = hide_pay(preview)
     pend = pending_of({"preview": preview})
-    return {**row_view(row, _running_ids()), "preview": base_preview({"preview": preview}),
-            "pending_preview": pend["preview"] if pend else None, "roles": ic.ROLES}
+    out = {**row_view(row, _running_ids()), "preview": base_preview({"preview": preview}),
+           "pending_preview": pend["preview"] if pend else None, "roles": ic.ROLES}
+    if out["preview"].get("acc_docs_batch"):          # ตรวจเอกสารก่อนลงบัญชี: the pick lists of its line editor (28 Nov 2026)
+        ai = _optional("inbox_ai")
+        if ai is not None:
+            out["accounts"] = ai.chart_list()
+            out["truck_accounts"] = list(ai.TRUCK_ACCOUNTS)
+            out["vehicles"] = [{k: v.get(k) for k in ("id", "vehicle_number", "plate_number", "branch")} for v in ai._vehicles()]
+    return out
+
+
+def page_image(file_id: str, page: int, see_pay: bool = True) -> bytes:
+    """One page of an AI-read file as the AI saw it (JPEG, private bucket) -- for ตรวจเอกสารก่อนลงบัญชี, before anything is booked.
+    Only the drop box's own pictures (accdocs/inbox/<file id>/p<n>.jpg); a payroll file only for whoever may see pay."""
+    row = _get(file_id)
+    if not see_pay and _is_payroll(row):
+        raise Forbidden(PAY_HIDDEN)
+    for p in (base_preview(row), (pending_of(row) or {}).get("preview") or {}):
+        imgs = p.get("ai_images") if isinstance(p.get("ai_images"), dict) else {}
+        path = imgs.get(str(page)) or imgs.get(page)
+        if isinstance(path, str) and re.fullmatch(r"accdocs/inbox/[0-9a-f-]{36}/p\d{1,3}\.jpg", path):
+            return supabase.storage_download_private(path)
+    raise NotFound("ไม่มีรูปหน้านี้")
+
+
+def save_edits(file_id: str, line_edits: dict, see_pay: bool = True) -> dict:
+    """บันทึกการแก้ on ตรวจเอกสารก่อนลงบัญชี (owner, 28 Nov 2026): the owner's fixes to the lines of an AI-read expense paper, checked
+    strictly (inbox_ai.clean_line_edits), stored in the preview (line_edits) and the preview rebuilt with them the way อ่านใหม่ does --
+    no AI call. A booked file is booked again at once with the fixes (as a re-read that can book is). Returns what get() does."""
+    ai = _optional("inbox_ai")
+    if ai is None:
+        raise InboxError("ส่วนอ่านด้วย AI ยังไม่พร้อม")
+    with _busy(file_id):
+        row = _get(file_id)
+        _refuse_running(row)
+        if pending_of(row):
+            raise InboxError("อ่านใหม่แล้วยังมีเรื่องต้องเลือก — เลือกก่อน แล้วค่อยแก้รายการ")
+        base = base_preview(row)
+        if not base.get("acc_docs_batch") or not _ai_read(row):
+            raise InboxError("ไฟล์นี้ไม่ใช่เอกสารเบิกที่อ่านด้วย AI — แก้รายการที่นี่ไม่ได้")
+        try:
+            clean = ai.clean_line_edits(base, line_edits, ai._vehicles())
+        except ValueError as exc:
+            raise InboxError(str(exc))
+        stored = {**base}
+        if clean["edits"] or clean["added"]:
+            stored["line_edits"] = clean
+        else:
+            stored.pop("line_edits", None)
+        v, booked = _reprocess({**row, "preview": stored}, row.get("choices") or {}, {row["id"]})
+    out = get(file_id, see_pay)
+    return {**out, "booked_again": booked, "rebook_failed": v.get("rebook_failed") or [], "message": v.get("message") or ""}
 
 
 def download(file_id: str, see_pay: bool = True) -> tuple[bytes, str, str, bool]:

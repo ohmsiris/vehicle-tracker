@@ -238,6 +238,8 @@ function ibxRow(f, month) {
     return b;
   };
   const sup = ibxSuperseded(f);
+  // an AI-read expense paper opens on its own page (inboxcheck.js: each page beside its lines, fixed before ลงบัญชี); others the dialog
+  const look = () => (f.check ? goHash(`#accounts-in/check=${f.id}`) : ibxPreview(f.id));
   const askMonth = f.status === "needs_choice" && (f.conflicts || []).some((c) => c && c.key === "month");
   const monthText = f.month ? ibxMonth(f.month) : askMonth ? "เลือกเดือน" : "ไม่ทราบเดือน";
   const other = f.month && f.month !== month;
@@ -249,7 +251,7 @@ function ibxRow(f, month) {
   const acts = [];
   if (f.status === "needs_choice" || (f.pending && f.pending.status === "needs_choice")) acts.push(btn(ibxChoiceLabel(f), () => ibxPreview(f.id), "btn small primary"));
   if (["read", "booked", "stored", "needs_choice"].includes(f.status) || (f.batches || []).length) {
-    acts.push(btn(f.status === "read" && !sup ? "ดูก่อนลงบัญชี" : "ดูรายการ", () => ibxPreview(f.id)));
+    acts.push(btn(f.status === "read" && !sup ? "ดูก่อนลงบัญชี" : "ดูรายการ", look));
   }
   if (f.status === "read" && !sup) acts.push(btn("ลงบัญชี", () => ibxBook(f), "btn small primary"));
   if (f.needs_ai && f.status !== "ai_running") {
@@ -264,7 +266,7 @@ function ibxRow(f, month) {
   const supNote = sup ? `ไฟล์${sup.by ? ` ${sup.by}` : "ใหม่"} ลงบัญชีแทนไฟล์นี้แล้ว — ไฟล์นี้เก็บไว้ ไม่ได้อยู่ในบัญชี` : "";
   return el("div", { class: `ibx-file ${f.status}${sup ? " ibx-superseded" : ""}${busy ? " ibx-busy" : ""}` },
     el("div", { class: "ibx-main" },
-      el("button", { class: "linkbtn ibx-name", type: "button", text: f.file_name, title: f.file_name, onclick: () => ibxPreview(f.id) }),
+      el("button", { class: "linkbtn ibx-name", type: "button", text: f.file_name, title: f.file_name, onclick: look }),
       el("div", { class: "small muted" },
         el("span", { text: f.label || "" }), " · ",
         el("span", { class: f.status === "needs_choice" ? "warn-text" : other ? "ibx-other" : "", text: other ? `งวด ${monthText}` : monthText }),
@@ -421,7 +423,9 @@ async function ibxPreview(id) {
   const roles = f.roles || {};
   const err = el("p", { class: "error", hidden: true });
   const fileLink = el("a", { class: "btn small", href: `/api/accounts/inbox/${f.id}/file?token=${encodeURIComponent(state.token)}`, target: "_blank", rel: "noopener", text: "เปิดไฟล์" });
-  const head = el("div", { class: "acx-rv-head" }, el("h3", { text: f.file_name }), ibxBadge(f), fileLink,
+  const toCheck = p.acc_docs_batch ? el("button", { class: "btn small primary", type: "button", text: "ตรวจ / แก้รายการ (ทั้งหน้า)",
+    onclick: () => { dlg.close(); goHash(`#accounts-in/check=${f.id}`); } }) : null;
+  const head = el("div", { class: "acx-rv-head" }, el("h3", { text: f.file_name }), ibxBadge(f), toCheck, fileLink,
     el("button", { class: "btn small", type: "button", text: "ปิด", onclick: () => dlg.close() }));
   const sub = el("p", { class: "muted small", text: [f.label, f.month ? `งวด ${ibxMonth(f.month)}` : null, (f.branches || []).join(", ") || null].filter(Boolean).join(" · ") });
 
@@ -514,6 +518,7 @@ function ibxBatch(b, roles, view, fileBooked = false) {
     ...shown.map((r) => el("div", { class: `ibx-r${r.flag ? " flagged" : ""}` },
       el("span", { text: r.date ? beDate(r.date) : "" }),
       el("span", { class: "ibx-text" }, r.text || "", r.party ? el("span", { class: "muted", text: ` · ${r.party}` }) : null,
+        r.dest && r.dest_kind && r.dest_kind !== "book" ? el("div", { class: "small muted", text: `→ ${r.dest}` }) : null,
         r.flag ? el("div", { class: "small warn-text", text: r.flag }) : null),
       ibxRoleBadge(r.role, roles),
       el("span", { class: "muted", text: r.account || "" }),

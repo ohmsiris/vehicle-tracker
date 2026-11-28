@@ -2698,3 +2698,80 @@ button.pw-kind-btn:focus-visible { outline: none; box-shadow: var(--ring); }
 @media (max-width: 380px) {
   .pw-tools .seg { flex-wrap: wrap; border-radius: 16px; }
 }
+
+/* บัญชี › ลงข้อมูล › ตรวจเอกสารก่อนลงบัญชี (inboxcheck.js, 28 Nov 2026): each page's scan beside its lines, fixed before ลงบัญชี */
+main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
+.ick-top { position: sticky; top: var(--topbar-h); z-index: 4; background: var(--bg); padding: 10px 0 8px; margin-bottom: 6px; border-bottom: 1px solid var(--line-strong); display: grid; gap: 6px; }
+.ick-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.ick-bar h2 { margin: 0; font-size: 18px; font-weight: 650; flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.ick-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ick-sub { display: flex; flex-wrap: wrap; gap: 2px 16px; align-items: baseline; }
+.ick-why { color: var(--warn); font-weight: 600; }
+.ick-note { font-size: 13px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--line); }
+.ick-note.warn { background: var(--warn-soft); border-color: var(--warn-line); }
+.ick-flags summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; }
+.ick-flags ul { margin: 4px 0 0; padding: 6px 12px 6px 28px; background: var(--flag-bg); border: 1px solid var(--flag-line); border-radius: var(--radius-sm); max-height: 30vh; overflow: auto; }
+.ick-strip { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0 12px; scrollbar-width: thin; max-width: 100%; }
+.ick-chip { flex: 0 0 auto; position: relative; display: grid; text-align: left; line-height: 1.3; padding: 5px 16px 5px 11px; font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); cursor: pointer; }
+.ick-chip small { font-size: 11px; font-weight: 400; color: var(--muted); }
+.ick-chip:hover { border-color: var(--accent); }
+.ick-chip:focus-visible { outline: none; box-shadow: var(--ring); }
+.ick-chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.ick-chip .ick-dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.ick-page { margin: 0 0 26px; min-width: 0; }
+.ick-page-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 4px 0 8px; }
+.ick-page-head h3 { margin: 0; font-size: 16px; }
+.ick-grid { display: grid; grid-template-columns: minmax(260px, 5fr) minmax(0, 9fr); gap: 16px; align-items: start; }
+.ick-scan { position: sticky; top: calc(var(--topbar-h) + var(--ick-top, 120px) + 8px); max-height: calc(100vh - var(--topbar-h) - var(--ick-top, 120px) - 20px);
+  overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
+.ick-scan img { width: 100%; display: block; cursor: zoom-in; }
+.ick-scan img.zoom { width: 200%; max-width: none; cursor: zoom-out; }
+.ick-hint { margin: 0; padding: 4px 8px; background: var(--surface); }
+.ick-noimg { margin: 0; padding: 40px 12px; text-align: center; color: var(--muted); background: var(--surface-2); }
+.ick-lines { container-type: inline-size; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 12px 10px; }
+.ick-r { display: grid; gap: 6px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line);
+  grid-template-columns: 136px minmax(140px, 1fr) 104px minmax(140px, 180px) minmax(120px, 160px) minmax(150px, 220px) 52px;
+  grid-template-areas: "date text amt acc veh dest act"; }
+.ick-r > .c-date { grid-area: date; } .ick-r > .c-text { grid-area: text; } .ick-r > .c-amt { grid-area: amt; } .ick-r > .c-acc { grid-area: acc; }
+.ick-r > .c-veh { grid-area: veh; } .ick-r > .c-dest { grid-area: dest; } .ick-r > .c-act { grid-area: act; text-align: right; }
+.ick-r > span { min-width: 0; }
+.ick-r.head { font-size: 12px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line-strong); padding: 4px 0; }
+.ick-r.head > .c-dest { color: var(--accent); }
+.ick-r input, .ick-r select { width: 100%; min-width: 0; font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--text); }
+.ick-r input:focus, .ick-r select:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.ick-r .c-amt input { text-align: right; font-variant-numeric: tabular-nums; }
+.ick-r .dtf { min-width: 0; }
+.ick-r .dtf > .dtf-text { min-height: 32px; padding-right: 34px; }
+.ick-r .chg input, .ick-r .chg select { border-color: var(--warn); background: var(--warn-soft); }
+.ick-r.new input, .ick-r.new select { border-color: var(--accent); }
+.ick-r.edited > .c-text input:not(:focus) { box-shadow: inset 3px 0 0 var(--accent); }
+.ick-r.cashfuel, .ick-r.deleted { opacity: .6; }
+.ick-r.cashfuel:focus-within, .ick-r.cashfuel:hover { opacity: 1; }
+.ick-r.cashfuel input, .ick-r.cashfuel select, .ick-r.deleted input, .ick-r.deleted select { background: var(--surface-2); color: var(--text-2); }
+.ick-r.deleted input, .ick-r.deleted select { text-decoration: line-through; }
+.ick-flag { display: block; font-size: 12px; margin-top: 1px; }
+.ick-dest { display: block; font-size: 12px; font-weight: 600; line-height: 1.35; padding: 4px 9px; border-radius: 6px; border-left: 3px solid; overflow-wrap: anywhere; }
+.ick-dest.book { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.ick-dest.cashfuel { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
+.ick-dest.noted { display: inline-block; background: var(--surface-2); color: var(--muted); border-color: var(--line-strong); }
+.ick-dest.deleted { background: transparent; color: var(--muted); border-color: var(--bad); text-decoration: line-through; }
+.ick-divider { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; font-size: 12px; font-weight: 650; color: var(--muted); }
+.ick-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line-strong); }
+.ick-empty { margin: 8px 0; }
+.ick-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; padding-top: 8px; border-top: 2px solid var(--line-strong); font-size: 14px; }
+.ick-card { display: grid; gap: 6px; justify-items: start; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; min-width: 0; overflow-wrap: anywhere; }
+.ick-card p, .ick-parts { margin: 0; }
+.ick-parts { padding-left: 18px; }
+@container (max-width: 900px) {
+  .ick-r { grid-template-columns: 136px minmax(0, 1fr) minmax(0, 1fr) 104px 48px; grid-template-areas: "date text text amt act" "acc acc veh dest dest"; }
+  .ick-r.head { display: none; }
+}
+@container (max-width: 480px) {
+  .ick-r { grid-template-columns: minmax(0, 1fr) 100px 44px; grid-template-areas: "date amt act" "text text text" "acc acc acc" "veh veh veh" "dest dest dest"; }
+}
+@media (max-width: 900px) {
+  .ick-top { position: static; }
+  .ick-grid { grid-template-columns: minmax(0, 1fr); }
+  .ick-scan { position: static; max-height: 60vh; }
+}

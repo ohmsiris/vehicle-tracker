@@ -416,11 +416,13 @@ def run(file_row: dict, data: bytes, on_progress: Optional[Callable] = None) -> 
 
 
 def apply_choices(preview: dict, choices: dict) -> dict:
-    """The owner answered a conflict: rebuild the preview from the stored page reads (no new API call)."""
+    """The owner answered a conflict: rebuild the preview from the stored page reads (no new API call). The owner's line edits made on
+    ตรวจเอกสารก่อนลงบัญชี (preview["line_edits"]) are applied again on the rebuild, so a choice or a re-read never loses them
+    (owner, 28 Nov 2026)."""
     if not preview.get("ai_pages"):
         return preview
     return from_pages(preview["ai_pages"], preview.get("file_name") or "", dict(choices or {}),
-                      usage=preview.get("ai_usage"), images=preview.get("ai_images") or {})
+                      usage=preview.get("ai_usage"), images=preview.get("ai_images") or {}, line_edits=preview.get("line_edits"))
 
 
 # ------------------------------------------------------------------ hints from the file name (a hint, never a decision)
@@ -659,12 +661,282 @@ def _line_day(dm: str, month: str) -> Optional[str]:
         return None
 
 
-def from_pages(reads: list[dict], name: str, choices: dict, usage: Optional[dict] = None, images: Optional[dict] = None) -> dict:
-    """The page reads -> the PREVIEW. Reads the database (vehicles, earlier documents, existing entries), never writes."""
+# ------------------------------------------------------------------ ตรวจเอกสารก่อนลงบัญชี: the owner's own fixes, and where each line goes
+# (owner, 28 Nov 2026: "before I press ลงบัญชี I want one place to see each page beside its lines, fix them straight away, and see
+# where every line will go"). The fixes live in preview["line_edits"]:
+#   {"edits": {"p3:l2": {"date": "2026-11-02", "text": ..., "amount": ..., "account": ..., "vehicle_id": ..., "delete": true}},
+#    "added": [{"id": "x1", "page": 3, "date": ..., "text": ..., "amount": ..., "account": ..., "vehicle_id": ...}]}
+# keyed by the batch line number (p<page>:l<n>, the number acc_docs.build gives the line), which stays the same while the page reads
+# (ai_pages) do: every rebuild (a choice, อ่านใหม่) applies them again; a fresh paid read starts without them.
+TRUCK_ACCOUNTS = ("6100", "6110", "6120", "6130")
+DEST_NAME = {"1500": "เงินเบิกล่วงหน้า", "1510": "เงินกู้พนักงาน"}
+MAX_EDITS = 300
+MAX_AMOUNT = 10_000_000
+_EDIT_FIELDS = {"date", "text", "amount", "account", "vehicle_id", "delete"}
+_KEY_RE = re.compile(r"^p(\d{1,3}):l(\d{1,4})$")
+_ADDED_ID_RE = re.compile(r"^x[0-9a-z]{1,12}$")
+
+
+def account_name(code: str) -> str:
+    if code in DEST_NAME:
+        return DEST_NAME[code]
+    return next((re.sub(r"\s*\(ไม่ใช่ค่าใช้จ่าย\)\s*$", "", n) for c, n, _ in CHART if c == code), "")
+
+
+def chart_list() -> list[list[str]]:
+    """[[code, name], ...] for the account pick list of the check page (the same chart the AI picks from)."""
+    return [[c, n] for c, n, _ in CHART]
+
+
+def _vehicle_of(v, vehicles: list[dict], branch: Optional[str] = None) -> Optional[dict]:
+    """The vehicle a line's opt["v"] names, the way acc_docs.build finds it (plate first, then the number within the branch)."""
+    if not v:
+        return None
+    p = norm_plate(v)
+    hit = next((x for x in vehicles if x.get("plate_number") and norm_plate(x["plate_number"]) == p), None)
+    if hit:
+        return hit
+    nums = [x for x in vehicles if str(x.get("vehicle_number") or "") == str(v)]
+    return next((x for x in nums if x.get("branch") == branch), nums[0] if nums else None)
+
+
+def dest_text(account: str, vehicle: Optional[dict] = None, plate=None) -> str:
+    """ไปที่ of a booked line: 'บัญชี 6130 น้ำมันเงินสด · รถ #5 (1ฒถ 2085)'. A truck is named by its number AND plate (numbers repeat
+    across branches)."""
+    out = f"บัญชี {account} {account_name(account)}".strip()
+    if vehicle:
+        num, pl = vehicle.get("vehicle_number"), vehicle.get("plate_number")
+        out += " · รถ " + (f"#{num} ({pl})" if num and pl and str(num) != str(pl) else str(num or pl))
+    elif plate:
+        out += f" · รถ {plate} (ไม่พบในทะเบียนรถ)"
+    return out
+
+
+def _iso_dm(iso, lo: date, hi: date) -> Optional[str]:
+    """'2026-11-02' -> '2/11' when it is inside [lo, hi], else None."""
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", str(iso or ""))
+    if not m:
+        return None
+    try:
+        d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+    return f"{d.day}/{d.month}" if lo <= d <= hi else None
+
+
+def _plate_for(vid, vehicles: list[dict]) -> Optional[str]:
+    v = next((x for x in vehicles if x.get("id") == vid), None)
+    return (v.get("plate_number") or v.get("vehicle_number")) if v else None
+
+
+def apply_line_edits(batch: dict, line_edits: Optional[dict], vehicles: list[dict], month: str, half: str, reads: list[dict],
+                     feed: str) -> tuple[list[dict], list[str]]:
+    """The owner's fixes applied IN PLACE to the batch _batch built: a fixed line takes the new date / text / amount / account (and its
+    party) / truck and is marked opt["edited"]; a deleted line leaves the batch (returned, so the page shows it struck through with
+    เอาคืน); an added line goes to the end of its page (a page the AI found no money on becomes a money page again). A fixed line loses
+    its (อ่านไม่ชัด) mark: the owner has looked at it. Lenient (the endpoint validated): a fix that no longer fits -- a date outside the
+    half after the owner picked another month -- is left out with a flag, never moved. Returns (deleted lines, flags)."""
+    le = line_edits if isinstance(line_edits, dict) else {}
+    edits = le.get("edits") if isinstance(le.get("edits"), dict) else {}
+    added = [a for a in (le.get("added") or []) if isinstance(a, dict)]
+    if not edits and not added:
+        return [], []
+    lo, hi = half_range(month, half)
+    flags: list[str] = []
+    deleted: list[dict] = []
+
+    def fix(ln, e: dict, key: str):
+        dm, text, amount, acc, party, opt = ln
+        opt = dict(opt or {})
+        if e.get("date"):
+            new = _iso_dm(e["date"], lo, hi)
+            if new:
+                dm = new
+            else:
+                flags.append(f"{key}: วันที่ที่แก้ไว้ ({e['date']}) อยู่นอกงวด — ใช้วันที่ที่อ่านได้")
+        if isinstance(e.get("text"), str) and e["text"].strip():
+            text = e["text"].strip()[:200]
+        try:
+            if e.get("amount") is not None and 0 < float(e["amount"]) < MAX_AMOUNT:
+                amount = round(float(e["amount"]), 2)
+        except (TypeError, ValueError):
+            pass
+        if e.get("account") in PARTY:
+            acc, party = e["account"], PARTY[e["account"]]
+        if "vehicle_id" in e:
+            plate = _plate_for(e["vehicle_id"], vehicles) if e["vehicle_id"] else None
+            if plate:
+                opt["v"] = plate
+            elif not e["vehicle_id"]:
+                opt.pop("v", None)
+        text = text.replace(" (อ่านไม่ชัด)", "").replace("(อ่านไม่ชัด)", "").strip() or text
+        opt["edited"] = True
+        return (dm, text, amount, acc, party, opt)
+
+    for p in batch["pages"]:
+        kept = []
+        for ln in p["lines"]:
+            key = (ln[5] or {}).get("key")
+            e = edits.get(key) if key else None
+            if isinstance(e, dict) and e.get("delete"):
+                deleted.append({"key": key, "page": p["page"], "date": _line_day(ln[0], month), "text": ln[1], "amount": ln[2],
+                                "account": ln[3], "v": (ln[5] or {}).get("v")})
+                continue
+            kept.append(fix(ln, e, key) if isinstance(e, dict) and e else ln)
+        p["lines"] = kept
+
+    kinds = {r.get("n"): r for r in reads}
+    for a in added:
+        try:
+            n = int(a.get("page"))
+        except (TypeError, ValueError):
+            continue
+        r = kinds.get(n)
+        if not r or r.get("page_kind") not in ("expense", "fuel") or not _ADDED_ID_RE.match(str(a.get("id") or "")):
+            flags.append(f"บรรทัดที่เพิ่มเองไว้ในหน้า {n} ใส่ไม่ได้ (หน้านี้ไม่ใช่รายการเบิก) — ไม่ลงบัญชี")
+            continue
+        dm = _iso_dm(a.get("date"), lo, hi)
+        try:
+            amount = round(float(a.get("amount")), 2)
+        except (TypeError, ValueError):
+            amount = 0.0
+        if not dm or not (0 < amount < MAX_AMOUNT):
+            flags.append(f"บรรทัดที่เพิ่มเองไว้ในหน้า {n} ({a.get('text') or '-'}): วันที่อยู่นอกงวดหรือจำนวนเงินไม่ถูก — ไม่ลงบัญชี")
+            continue
+        p = next((x for x in batch["pages"] if x["page"] == n), None)
+        if p is None:                                  # the AI found no money on this page (a memo now): it is a money page again
+            batch["memos"] = [m for m in batch["memos"] if m["page"] != n]
+            p = {"page": n, "file": "f", "file_page": n, "feed": feed, "kind": r["page_kind"], "title": r.get("title") or KIND_TH[r["page_kind"]],
+                 "written_total": r.get("written_total"), "lines": [], "note": "อ่านด้วย AI"}
+            batch["pages"].append(p)
+            batch["pages"].sort(key=lambda x: x["page"])
+        acc = a.get("account") if a.get("account") in PARTY else "7900"
+        opt = {"key": f"p{n}:{a['id']}", "added": True, "edited": True}
+        plate = _plate_for(a.get("vehicle_id"), vehicles) if a.get("vehicle_id") else None
+        if plate:
+            opt["v"] = plate
+        p["lines"].append((dm, (str(a.get("text") or "").strip() or "-")[:200], amount, acc, PARTY[acc], opt))
+
+    for p in [x for x in batch["pages"] if not x["lines"]]:    # every line deleted: the page is filed with no money
+        batch["pages"].remove(p)
+        batch["memos"].append({"page": p["page"], "file": "f", "file_page": p["page"], "kind": "other", "title": p.get("title"),
+                               "summary": "ลบทุกบรรทัดของหน้านี้แล้ว — ไม่ลงบัญชี", "person": None})
+    return deleted, flags
+
+
+def clean_line_edits(preview: dict, line_edits, vehicles: list[dict]) -> dict:
+    """The owner's fixes as the check page sends them, checked strictly (ValueError in Thai): every key a line of this file (or a line
+    the owner added), dates inside the file's half (26-10 / 11-25 of its month), 0 < amount < 10 million, text 1-200 characters, an
+    account of the chart (1500 / 1510 included), a truck that exists, lines added only to the money pages. A fix of an added line
+    (key p<page>:<id>) is folded into that line. Returns {"edits", "added"}."""
+    if not isinstance(line_edits, dict):
+        raise ValueError("ข้อมูลที่แก้ไม่ถูกต้อง")
+    edits_in = line_edits.get("edits") or {}
+    added_in = line_edits.get("added") or []
+    if not isinstance(edits_in, dict) or not isinstance(added_in, list):
+        raise ValueError("ข้อมูลที่แก้ไม่ถูกต้อง")
+    if len(edits_in) + len(added_in) > MAX_EDITS:
+        raise ValueError(f"แก้ได้ครั้งละไม่เกิน {MAX_EDITS} บรรทัด")
+    batch = preview.get("acc_docs_batch") or {}
+    month, half = preview.get("month"), preview.get("half")
+    if not batch or not month or half not in ("mid", "end"):
+        raise ValueError("ไฟล์นี้ไม่ใช่เอกสารเบิกครึ่งเดือนที่อ่านด้วย AI — แก้รายการที่นี่ไม่ได้")
+    lo, hi = half_range(month, half)
+    known = {(ln[5] or {}).get("key") for p in batch.get("pages") or [] for ln in p.get("lines") or []}
+    known |= set(((preview.get("line_edits") or {}).get("edits") or {}).keys())       # a line deleted earlier: it can be brought back
+    known.discard(None)
+    if not known:
+        raise ValueError("ไฟล์นี้อ่านไว้ก่อนมีหน้าแก้รายการ — กด อ่านใหม่ (ไม่เสียค่า AI) แล้วแก้ได้")
+    money_pages = {r.get("n") for r in preview.get("ai_pages") or [] if r.get("page_kind") in ("expense", "fuel")}
+    vids = {v.get("id") for v in vehicles}
+    span = f"{lo.strftime('%d/%m/%Y')} – {hi.strftime('%d/%m/%Y')}"
+
+    def fields(e: dict, where: str, need: bool = False) -> dict:
+        if not isinstance(e, dict):
+            raise ValueError(f"{where}: ข้อมูลไม่ถูกต้อง")
+        bad = set(e) - _EDIT_FIELDS - ({"id", "page"} if need else set())
+        if bad:
+            raise ValueError(f"{where}: แก้ช่อง {', '.join(sorted(bad))} ไม่ได้")
+        out: dict = {}
+        if need:
+            for f in ("date", "text", "amount", "account"):
+                if e.get(f) in (None, ""):
+                    raise ValueError(f"{where}: ใส่วันที่ รายการ จำนวนเงิน และบัญชีให้ครบ")
+        if e.get("date") not in (None, ""):
+            if not _iso_dm(e["date"], date(2000, 1, 1), date(2100, 1, 1)):
+                raise ValueError(f"{where}: วันที่ไม่ถูกต้อง")
+            if not _iso_dm(e["date"], lo, hi):
+                raise ValueError(f"{where}: วันที่ต้องอยู่ในงวดของไฟล์นี้ ({span})")
+            out["date"] = str(e["date"])
+        if e.get("text") is not None:
+            t = str(e["text"]).strip()
+            if not 1 <= len(t) <= 200:
+                raise ValueError(f"{where}: รายการต้องยาว 1–200 ตัวอักษร")
+            out["text"] = t
+        if e.get("amount") not in (None, ""):
+            try:
+                a = round(float(str(e["amount"]).replace(",", "")), 2)
+            except ValueError:
+                raise ValueError(f"{where}: จำนวนเงินไม่ถูกต้อง")
+            if not 0 < a < MAX_AMOUNT:
+                raise ValueError(f"{where}: จำนวนเงินต้องมากกว่า 0 และน้อยกว่า 10 ล้าน")
+            out["amount"] = a
+        if e.get("account") not in (None, ""):
+            if str(e["account"]) not in PARTY:
+                raise ValueError(f"{where}: ไม่มีบัญชี {e['account']} ในผังบัญชี")
+            out["account"] = str(e["account"])
+        if "vehicle_id" in e:
+            if e["vehicle_id"] and e["vehicle_id"] not in vids:
+                raise ValueError(f"{where}: ไม่พบรถคันนี้")
+            out["vehicle_id"] = e["vehicle_id"] or None
+        if e.get("delete"):
+            out["delete"] = True
+        return out
+
+    added, ids = [], set()
+    for a in added_in:
+        if not isinstance(a, dict):
+            raise ValueError("บรรทัดที่เพิ่ม: ข้อมูลไม่ถูกต้อง")
+        aid = str(a.get("id") or "")
+        if not _ADDED_ID_RE.match(aid) or aid in ids:
+            raise ValueError("บรรทัดที่เพิ่ม: รหัสบรรทัดไม่ถูกต้อง")
+        try:
+            n = int(a.get("page"))
+        except (TypeError, ValueError):
+            n = None
+        if n not in money_pages:
+            raise ValueError(f"เพิ่มบรรทัดได้เฉพาะหน้ารายการเบิก / เบิกค่าน้ำมัน (หน้า {a.get('page')})")
+        ids.add(aid)
+        clean = fields({k: v for k, v in a.items() if k not in ("id", "page", "delete")}, f"บรรทัดที่เพิ่มในหน้า {n}", need=True)
+        added.append({"id": aid, "page": n, **clean})
+    edits = {}
+    for key, e in edits_in.items():
+        key = str(key)
+        mine = next((a for a in added if key == f"p{a['page']}:{a['id']}"), None)
+        if mine is not None:                           # a fix of a line the owner added: folded into it
+            ch = fields(e, f"บรรทัดที่เพิ่มในหน้า {mine['page']}")
+            if ch.pop("delete", None):
+                added.remove(mine)
+            else:
+                mine.update(ch)
+            continue
+        if key not in known or not _KEY_RE.match(key):
+            raise ValueError(f"ไม่พบบรรทัด {key} ในไฟล์นี้ — เปิดหน้าตรวจใหม่")
+        ch = fields(e, f"หน้า {_KEY_RE.match(key).group(1)} บรรทัด {_KEY_RE.match(key).group(2)}")
+        if ch:
+            edits[key] = ch
+    return {"edits": edits, "added": added}
+
+
+def from_pages(reads: list[dict], name: str, choices: dict, usage: Optional[dict] = None, images: Optional[dict] = None,
+               line_edits: Optional[dict] = None) -> dict:
+    """The page reads -> the PREVIEW. Reads the database (vehicles, earlier documents, existing entries), never writes.
+    line_edits: the owner's fixes to the lines of an expense document (apply_line_edits); a fresh paid read passes none (its line
+    numbers may differ)."""
     reads = sorted(reads, key=lambda r: r.get("n") or 0)
     vehicles = _vehicles()
     if is_expense_document(reads):
-        out = _expense_preview(reads, name, choices, vehicles)
+        out = _expense_preview(reads, name, choices, vehicles, line_edits)
     elif any(r.get("page_kind") == "bill" and _is_bill(r.get("bill")) for r in reads):
         out = _bill_preview(reads, name, choices, vehicles)
     else:
@@ -709,10 +981,12 @@ def _branch_signals(reads: list[dict], vehicles: list[dict], hints: dict) -> lis
     return sig
 
 
-def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list[dict]) -> dict:
+def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list[dict], line_edits: Optional[dict] = None) -> dict:
     from app import acc_docs
     hints = name_hints(name)
     pv = ic.empty_preview(KIND, "เอกสารเบิกครึ่งเดือน (อ่านด้วย AI)")
+    if line_edits:
+        pv["line_edits"] = line_edits
     covers = [r for r in reads if r.get("page_kind") == "cover"]
     line_days = [d for r in reads if r.get("page_kind") in ("expense", "fuel") for ln in r.get("lines") or [] for d in [_day(ln.get("date"))] if d]
     signals = []
@@ -757,6 +1031,10 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
 
     batch, flags = _batch(reads, name, key, month, branch, half, feed, vehicles)
     pv["flags"] += flags
+    # the owner's fixes (ตรวจเอกสารก่อนลงบัญชี): after the month / half vote (a fixed date never moves the file), before the cash-fuel
+    # match and the page totals (a fixed fuel amount is matched again; the totals add up what is left)
+    deleted, eflags = apply_line_edits(batch, line_edits, vehicles, month, half, reads, feed)
+    pv["flags"] += eflags
     done = _cash_fuel_lines(month, branch, half)
     skipped = skip_cash_fuel(batch, done, vehicles) if done else []
     if skipped:
@@ -771,24 +1049,45 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
         return pv
     pv["flags"] += out["problems"]
     pv["page_checks"] = [{"page": d["page"], "kind": d["kind"], "kind_th": KIND_TH.get(d["kind"], d["kind"]), "title": d.get("title"),
-                          "written_total": d.get("written_total"), "read_total": d.get("read_total"), "status": d.get("status")}
+                          "written_total": d.get("written_total"), "read_total": d.get("read_total"), "status": d.get("status"),
+                          "summary": d.get("summary"), "person": d.get("person")}
                          for d in sorted(out["docs"], key=lambda d: d["page"])]
 
+    # Every row says where it goes (ไปที่, owner 28 Nov 2026): key = the line's stable key (p<page>:l<n>, or p<page>:<id> for a line
+    # the owner added), dest = the Thai text, dest_kind book / cashfuel / noted / deleted. Lines not booked keep their text as read;
+    # the reason is in dest, never glued onto the text.
+    line_at = {(p["page"], i): ln for p in batch["pages"] for i, ln in enumerate(p["lines"], 1)}
     rows = []
     for e in out["entries"]:
         debit = e["lines"][0]
         unsure = "(อ่านไม่ชัด)" in (e.get("description") or "")
+        m = re.search(r":p(\d+):l(\d+)$", e.get("source_id") or "")
+        opt = ((line_at.get((int(m.group(1)), int(m.group(2)))) if m else None) or [None] * 6)[5] or {}
+        veh = _vehicle_of(opt.get("v"), vehicles, branch)
         rows.append({"date": e["entry_date"], "text": e["description"], "party": e["party"], "amount": float(debit["debit"]),
                      "role": role_of(debit["account"], unsure), "account": debit["account"], "flag": "อ่านไม่ชัด" if unsure else None,
-                     "page": e["doc_page"], "branch": e["branch"]})
+                     "page": e["doc_page"], "branch": e["branch"], "key": opt.get("key"), "vehicle_id": debit.get("vehicle_id"),
+                     "dest": dest_text(debit["account"], veh, opt.get("v")), "dest_kind": "book",
+                     "edited": bool(opt.get("edited")), "added": bool(opt.get("added"))})
     for dm, text, amount, account, party, opt in skipped:
-        her = f" (หน้าน้ำมันเงินสด {opt['cf_amount']:,.2f})" if opt.get("cf_amount") not in (None, amount) else ""
-        rows.append({"date": None, "text": f"{text} — อยู่ในน้ำมันเงินสดแล้ว{her} ไม่ลงซ้ำ", "party": party, "amount": 0.0, "role": "info",
-                     "account": account, "flag": None, "page": opt.get("page")})
+        her = f" ({opt['cf_amount']:,.2f})" if opt.get("cf_amount") not in (None, amount) else ""
+        veh = _vehicle_of(opt.get("v"), vehicles, branch)
+        unsure = "(อ่านไม่ชัด)" in (text or "")
+        rows.append({"date": _line_day(dm, month), "text": text, "party": party, "amount": 0.0, "read_amount": float(amount), "role": "info",
+                     "account": account, "flag": "อ่านไม่ชัด" if unsure else None, "page": opt.get("page"), "key": opt.get("key"),
+                     "vehicle_id": (veh or {}).get("id"), "dest": f"มีแล้วในน้ำมันเงินสด{her}", "dest_kind": "cashfuel",
+                     "edited": bool(opt.get("edited")), "added": bool(opt.get("added"))})
+    for x in deleted:
+        veh = _vehicle_of(x.get("v"), vehicles, branch)
+        rows.append({"date": x["date"], "text": x["text"], "party": PARTY.get(x["account"]), "amount": 0.0, "read_amount": float(x["amount"]),
+                     "role": "info", "account": x["account"], "flag": None, "page": x["page"], "key": x["key"],
+                     "vehicle_id": (veh or {}).get("id"), "dest": "ลบแล้ว · ไม่ลง", "dest_kind": "deleted", "edited": True, "added": False})
     for d in out["docs"]:
         if d["kind"] in ("memo", "other") or (d["kind"] == "cover" and d.get("read_total") is None):
             rows.append({"date": d.get("date_from"), "text": f"หน้า {d['page']}: {d.get('title') or ''}" + (f" — {d['summary']}" if d.get("summary") else ""),
-                         "party": d.get("person"), "amount": 0.0, "role": "info", "account": None, "flag": None, "page": d["page"]})
+                         "party": d.get("person"), "amount": 0.0, "role": "info", "account": None, "flag": None, "page": d["page"],
+                         "key": f"p{d['page']}:page", "dest": "ไม่ลงบัญชี · ข้อมูลประกอบ" + (f" · {d['person']}" if d.get("person") else ""),
+                         "dest_kind": "noted"})
     written = [c["written_total"] for c in batch["covers"] if c.get("written_total") is not None]
     if not written:
         written = [p["written_total"] for p in batch["pages"] if p.get("written_total") is not None]
@@ -877,7 +1176,7 @@ def _batch(reads: list[dict], name: str, key: str, month: str, branch: str, half
                 acc = ln.get("account") if ln.get("account") in PARTY else "7900"
                 if k == "fuel":
                     acc = "6130"
-                opt = {}
+                opt = {"key": f"p{n}:l{len(lines) + 1}"}     # the batch line number acc_docs.build gives it (the owner's edits use it)
                 if ln.get("plate") or ln.get("truck_number"):
                     v, _ = match_truck(ln.get("plate"), ln.get("truck_number"), vehicles, branch)
                     opt["v"] = v["plate_number"] if v else (ln.get("plate") or ln.get("truck_number"))
@@ -915,7 +1214,8 @@ def _batch(reads: list[dict], name: str, key: str, month: str, branch: str, half
             who = f" ({len(amounts)} คน)" if len(amounts) > 1 else ""
             batch["pages"].append({"page": n, "file": "f", "file_page": n, "feed": feed, "kind": "advance", "title": r.get("title") or "เบิกกลางเดือน",
                                    "written_total": r.get("written_total"),
-                                   "lines": [(f"{d.day}/{d.month}", f"{r.get('title') or 'เบิกกลางเดือน'}{who}", amount, "1500", PARTY["1500"], {})],
+                                   "lines": [(f"{d.day}/{d.month}", f"{r.get('title') or 'เบิกกลางเดือน'}{who}", amount, "1500", PARTY["1500"],
+                                              {"key": f"p{n}:l1"})],
                                    "note": "อ่านด้วย AI: รวมทุกชื่อในหน้าเป็นบรรทัดเดียว"})
         elif k == "fuel_table":
             by_truck = (ft or {}).get("by_truck", {})

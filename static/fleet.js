@@ -11,11 +11,12 @@
 const fleet = { vehicles: [], loaded: false, event: null };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FLEET_VIEWS = ["users", "customers", "iceOrders", "cashFuel", "licences", "payables", "employees", "employee", "loans", "loan", "attendance", "payroll", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "electricity", "routes", "salesSheets", "driverDays", "taxInvoices", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
+const FLEET_VIEWS = ["users", "customers", "iceOrders", "cashFuel", "licences", "payables", "employees", "employee", "loans", "loan", "attendance", "payroll", "documents", "document", "roster", "truck", "event", "log", "where", "plan", "machinery", "machineParts", "machinePlan", "machine", "machineLog", "mgr", "mgrCal", "mgrRecurring", "mgrSettings", "settings", "tyreStock", "odometers", "accounts", "inboxCheck", "electricity", "routes", "salesSheets", "driverDays", "taxInvoices", "purchases", "purchaseNew", "prices", "priceItem", "stock", "sheet"];
 
 // ------------------------------------------------------------------ routing
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
+  if (typeof ickMayLeave === "function" && !ickMayLeave(h)) return null;            // fixes on ตรวจเอกสารก่อนลงบัญชี not saved: asked first
   if (typeof staffMayOpen === "function" && !staffMayOpen(h)) { if (state.me.home) goHash(state.me.home); return; }   // not one of this person's menus
   if (h === "users") return openUsers();
   if (h === "home") { showView("home"); return loadHome(); }                       // pages without their own hash before (13 Nov 2026: menus for people)
@@ -46,6 +47,8 @@ function route() {
   if (h === "odometers") return openOdometers();
   if (h === "accounts") return openAccounts("out");
   if (h === "accounts-in") return openAccounts("in");
+  const ick_ = /^accounts-in\/check=(.+)$/.exec(h);                                 // ตรวจเอกสารก่อนลงบัญชี (inboxcheck.js)
+  if (ick_ && UUID_RE.test(ick_[1])) return openInboxCheck(ick_[1]);
   if (h === "electricity") return openElectricity();
   if (h === "routes") return openRoutes();
   if (h === "sales-sheets" || h.startsWith("sales-sheets/")) return openSalesSheets(h.slice(13));
