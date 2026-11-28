@@ -96,7 +96,7 @@ def main(paths: list[str], apply: bool) -> None:
                 visit["mileage"] = None
             # a bill photographed by hand is usually dated on the INVOICE day, not the day the truck went in: check both, and the odometer alone
             hit = by_day.get(day, []) + (by_day.get(visit["invoice_date"].isoformat(), []) if visit.get("invoice_date") else [])
-            if (visit["mileage"] and visit["mileage"] in kms) or any(visit["mileage"] and e.get("mileage") == visit["mileage"] for e in hit):
+            if (visit["mileage"] and visit["mileage"] in kms) or any(e.get("mileage") == visit["mileage"] for e in hit):
                 same.append(day)
             elif hit:
                 conflicts.append((day, visit["mileage"], [e.get("mileage") for e in hit]))
@@ -105,7 +105,7 @@ def main(paths: list[str], apply: bool) -> None:
         print(f"{name}: {rep['plate']} -> #{v['vehicle_number']} ({v['branch']}) · {len(rep['visits'])} visits in the report · already there {len(same)} · to add {len(add)} "
               f"({sum(len(x['lines']) for x in add)} lines) · conflicts {len(conflicts)}")
         for day, km, other in conflicts:
-            print(f"    CONFLICT {day}: report says {km:,} km, the site has {other} -- not added")
+            print(f"    CONFLICT {day}: report says {km or 0:,} km, the site has {other} -- not added")
         for x in add:
             print(f"    + {x['date']}  {x['mileage'] or 0:>8,} km  {len(x['lines']):>3} lines")
         plan.append((v, add))
