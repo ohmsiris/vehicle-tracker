@@ -939,6 +939,8 @@ input[type=time], input[type=tel] { width: 100%; padding: 9px 12px; font: inheri
 .sttest input { width: 100%; margin: 8px 0; }
 .sttest-out { min-height: 1.4em; margin-bottom: 6px; }
 .stgps-out { display: grid; gap: 6px; margin-top: 10px; }
+.stgps-table { border-collapse: collapse; margin-top: 6px; }
+.stgps-table td { padding: 3px 12px 3px 0; vertical-align: top; }
 .stgps-pre { max-height: 260px; overflow: auto; font-size: 12px; white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; }
 @media (max-width: 720px) { .strow { grid-template-columns: 1fr auto; } .strow input:first-child { grid-column: 1 / -1; } .strow.head { grid-template-columns: 1fr auto; } }
 #mgrRecList { gap: 8px; }

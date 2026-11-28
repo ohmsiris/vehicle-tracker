@@ -13,6 +13,7 @@ The owner's Cartrack user is an HQ one (owner, 29 Nov 2026): it sees every branc
 So the plate decides: only a vehicle whose plate is a truck in IceBox is ever used; the others are counted and left alone (and a
 new branch later needs only its trucks added here).
 """
+import re
 from typing import Optional
 
 import httpx
@@ -70,27 +71,81 @@ def plate_of(row: dict) -> str:
     return ""
 
 
+# The plate itself inside whatever Cartrack wrote: "1ฒถ-8966 สระบุรี", "สบ 84-4607", "2 ฒข 3727" -> 1ฒถ8966, 844607, 2ฒข3727. A Thai
+# plate is (a digit +) one to three letters + up to four digits, or two/three digits + four digits (a truck's green plate).
+_LETTERS = re.compile(r"(?<!\d)(\d{0,2}\s*[\u0e01-\u0e2e]{1,3})[\s.\-]*(\d{1,4})(?!\d)")
+_NUMBERS = re.compile(r"(?<!\d)(\d{2,3})[\s.\-]*(\d{4})(?!\d)")
+_NAME_KEYS = ("vehicle_name", "name", "description", "vehicle_description", "alias", "display_name")
+
+
+def cores(text) -> list[str]:
+    """Every plate-shaped piece of a text, the green-plate form (84-4607) first: in "สบ 84-4607" the province's "สบ 84" is one too,
+    so a match tries them all."""
+    s = str(text or "")
+    out = [m.group(1) + m.group(2) for m in _NUMBERS.finditer(s)] + [m.group(1) + m.group(2) for m in _LETTERS.finditer(s)]
+    return list(dict.fromkeys(re.sub(r"[\s.\-]", "", c) for c in out))
+
+
+def core_plate(text) -> str:
+    got = cores(text)
+    return max(got, key=lambda c: len(_digits(c))) if got else ""
+
+
+def name_of(row: dict) -> str:
+    """The vehicle's own name in Cartrack (often a number or the driver), to help the owner tell which truck it is."""
+    for key in _NAME_KEYS:
+        if row.get(key) and isinstance(row[key], (str, int)):
+            return str(row[key]).strip()[:60]
+    return ""
+
+
+def _digits(s) -> str:
+    return re.sub(r"\D", "", s or "")
+
+
 def summarize(body, vehicles: list[dict]) -> dict:
-    """What check() shows. Pure: body = the answer to /vehicles/status, vehicles = the trucks here."""
-    from app.acc_docs import norm_plate
+    """What check() shows. Pure: body = the answer to /vehicles/status, vehicles = the trucks here.
+
+    A vehicle is ours only when its plate is a truck's plate here (the owner's login sees every HQ branch). The plate is looked for in
+    the registration first, then in the vehicle's name and other text -- by its core (letters + digits), so a province or spacing
+    does not matter. Never by the number alone: a Cartrack plate whose last four digits are those of exactly one of our trucks
+    without GPS is only a guess for the owner to look at ("อาจเป็น")."""
     rows = rows_of(body)
-    mine = {norm_plate(v.get("plate_number") or ""): v for v in vehicles if v.get("plate_number")}
-    matched, unknown, sample = [], [], {}
+    mine: dict = {}
+    for v in vehicles:
+        k = core_plate(v.get("plate_number"))  # the fullest plate-shaped piece
+        if k:
+            mine.setdefault(k, v)
+    matched, unknown, sample, seen = [], [], {}, set()
     for r in rows:
-        plate = plate_of(r)
-        v = mine.get(norm_plate(plate)) if plate else None
-        (matched if v else unknown).append({"plate": plate, "truck": (v or {}).get("vehicle_number"), "branch": (v or {}).get("branch")})
-        if v and not sample:
-            sample = r
-    seen = {norm_plate(m["plate"]) for m in matched}
+        plate, name = plate_of(r), name_of(r)
+        texts = [plate, name] + [x for x in r.values() if isinstance(x, str)]
+        k = next((c for t in texts for c in cores(t) if c in mine and c not in seen), None)
+        v = mine.get(k) if k else None
+        if v:
+            seen.add(k)
+            matched.append({"plate": plate or name, "name": name, "truck": v.get("vehicle_number"), "branch": v.get("branch")})
+            if not sample:
+                sample = r
+        else:
+            unknown.append({"plate": plate, "name": name, "core": core_plate(plate) or core_plate(name)})
     missing = [{"plate": v.get("plate_number"), "truck": v.get("vehicle_number"), "branch": v.get("branch")}
                for k, v in mine.items() if k not in seen and v.get("active") is not False]
+    last4: dict = {}
+    for m in missing:
+        last4.setdefault(_digits(m["plate"])[-4:], []).append(m)
+    for u in unknown:
+        d = _digits(u["core"])
+        hits = last4.get(d[-4:]) if len(d) >= 4 else None
+        if hits and len(hits) == 1:
+            u["guess"] = hits[0]
+    unknown.sort(key=lambda u: (not u.get("guess"), u["plate"] or u["name"]))
     fields = sorted({k for r in rows for k in r})
     by_branch: dict = {}
     for m in matched:
         by_branch[m["branch"] or "-"] = by_branch.get(m["branch"] or "-", 0) + 1
     return {"ok": True, "vehicles": len(rows), "matched": len(matched), "matched_by_branch": by_branch, "trucks": matched[:200],
-            "not_here_count": len(unknown), "not_here": unknown[:40], "no_gps_count": len(missing), "no_gps": missing[:80],
+            "not_here_count": len(unknown), "not_here": unknown[:150], "no_gps_count": len(missing), "no_gps": missing[:80],
             "fields": fields, "sample": {k: sample[k] for k in list(sample)[:40]},
             "meta": body.get("meta") if isinstance(body, dict) else None}
 

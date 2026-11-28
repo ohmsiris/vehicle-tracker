@@ -48,7 +48,12 @@ function gpsCard() {
       const by = Object.entries(r.matched_by_branch || {}).map(([b, n]) => `${b} ${n} คัน`).join(" · ");
       fill(out,
         el("div", {}, el("strong", { text: "เชื่อมต่อได้" }), ` — Cartrack มีรถ ${r.vehicles} คัน ตรงกับรถในระบบ ${r.matched} คัน`, by ? ` (${by})` : ""),
-        r.not_here_count ? el("div", { class: "muted", text: `รถของสาขาอื่น / ไม่อยู่ในระบบ ${r.not_here_count} คัน — ไม่นำมาใช้` }) : null,
+        r.not_here_count ? el("details", { open: (r.not_here || []).some((x) => x.guess) ? "" : null },
+          el("summary", { text: `รถใน Cartrack ที่ไม่ตรงกับรถในระบบ ${r.not_here_count} คัน — ไม่นำมาใช้` + ((r.not_here || []).some((x) => x.guess) ? " (บางคันอาจเป็นรถเรา)" : "") }),
+          el("div", { class: "muted", text: "ถ้าเป็นรถเรา ให้แก้ทะเบียนใน Cartrack หรือในหน้ารถให้ตรงกัน (ตัวอักษร + เลข) แล้วกดตรวจใหม่" }),
+          el("table", { class: "stgps-table" }, el("tbody", {}, ...(r.not_here || []).map((x) => el("tr", {},
+            el("td", { text: x.plate || "-" }), el("td", { class: "muted", text: x.name || "" }),
+            el("td", {}, x.guess ? el("strong", { text: `อาจเป็น #${x.guess.truck} ${x.guess.plate} (${x.guess.branch || "-"})` }) : "")))))) : null,
         r.no_gps_count ? el("div", {}, `รถในระบบที่ยังไม่เจอใน Cartrack ${r.no_gps_count} คัน: `, el("span", { class: "muted", text: plates(r.no_gps) })) : null,
         el("details", {}, el("summary", { text: "ข้อมูลที่ Cartrack ส่งมา (สำหรับตั้งค่าขั้นต่อไป)" }),
           el("div", { class: "muted", text: (r.fields || []).join(", ") || "-" }),
