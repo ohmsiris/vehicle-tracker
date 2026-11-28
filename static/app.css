@@ -2827,3 +2827,12 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
   .ick-grid { grid-template-columns: minmax(0, 1fr); }
   .ick-scan { position: static; max-height: 60vh; }
 }
+
+/* บางจาก: the fills done in a borrowed truck (inbox.js) */
+.ibx-swaps { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+.ibx-swaps summary { cursor: pointer; font-weight: 600; }
+.ibx-swaps-t { margin-top: 8px; max-height: 340px; overflow: auto; }
+.ibx-sw { display: grid; grid-template-columns: 96px 60px minmax(120px, 1fr) 110px minmax(120px, 1.2fr) 90px; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+.ibx-sw.head { font-weight: 600; color: var(--muted); }
+.ibx-sw .num { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) { .ibx-sw { grid-template-columns: 1fr 1fr; } }

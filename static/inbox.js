@@ -478,6 +478,15 @@ async function ibxPreview(id) {
     if (ran && ok) { await ibxPreview(f.id); loadAccounts(); }
   } }) : null;
   const flags = (p.flags || []).length ? el("ul", { class: "ibx-flags small" }, ...p.flags.map((x) => el("li", { text: x }))) : null;
+  // บางจาก: fills done in another truck than the route's own -- not a mistake, booked to the route's truck; each one listed (28 Nov 2026)
+  const sw = p.swaps || [];
+  const swaps = sw.length ? el("details", { class: "ibx-swaps small" },
+    el("summary", { text: `สลับรถ ${sw.length} ครั้ง — ไม่ใช่ข้อผิดพลาด ลงที่รถประจำเบอร์ของสาย (ค่าน้ำมันตามสาย) · กดดูว่าเป็นครั้งไหน` }),
+    el("div", { class: "ibx-swaps-t" },
+      el("div", { class: "ibx-sw head" }, ...["วันที่", "สถานี", "สาย (รถประจำเบอร์)", "เติมในรถ", "คนขับ", "บาท"].map((t) => el("span", { text: t }))),
+      ...sw.map((x) => el("div", { class: "ibx-sw" }, el("span", { text: beDate(x.date) }), el("span", { text: x.station || "" }),
+        el("span", { text: `#${x.route} ${x.route_plate}` }), el("strong", { text: x.filled_plate }),
+        el("span", { text: x.driver + (x.status ? ` · ${x.status}` : "") }), el("span", { class: "num", text: fmtMoney(x.amount) }))))) : null;
   const usage = p.ai_usage || f.ai_usage;
   const ai = usage ? el("p", { class: "muted small", text: `อ่านด้วย AI${usage.model ? ` (${usage.model})` : ""} · ${ibxInt(usage.calls || 0)} ครั้ง · token เข้า ${ibxInt(usage.input_tokens || 0)} · ออก ${ibxInt(usage.output_tokens || 0)}` }) : null;
   const sup = ibxSuperseded(f);
@@ -490,7 +499,7 @@ async function ibxPreview(id) {
     f.pending ? el("p", { class: "small warn-text", text: `อ่านใหม่แล้ว ${f.pending.message || "ต้องเลือกก่อน"} — รายการเดิมของไฟล์นี้ยังอยู่ในบัญชี` }) : null,
     sup ? el("p", { class: "small warn-text", text: `ไฟล์นี้ถูกแทนที่ด้วย ${sup.by || "ไฟล์ที่ส่งทีหลัง"} — รายการของไฟล์นั้นอยู่ในบัญชีแทน ไฟล์นี้เก็บไว้เฉย ๆ` })
       : f.error ? el("p", { class: "small warn-text", text: f.error }) : null,
-    ...conflicts, chooseBtn, flags, ai,
+    ...conflicts, chooseBtn, flags, swaps, ai,
     ...(p.batches || []).map((b) => ibxBatch(b, roles, (f.batches || []).find((x) => x.key === b.key), f.status === "booked")),
     !(p.batches || []).length && !conflicts.length ? el("p", { class: "muted small", text: p.store_only ? "ไฟล์นี้เก็บไว้กับเดือน ไม่ลงบัญชี" : "ไม่มีรายการที่จะลงบัญชี" }) : null,
     err, el("div", { class: "dialog-actions" }, el("span", { class: "grow" }), el("button", { class: "btn", type: "button", text: "ปิด", onclick: () => dlg.close() }), bookBtn));

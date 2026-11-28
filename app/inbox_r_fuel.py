@@ -478,6 +478,7 @@ def read_bangchak(f: Dropped) -> dict:
         p["conflicts"] += d["conflicts"]
         p["signals"] += d["signals"]
         p["flags"] += [tag + x for x in d["flags"]]
+        p.setdefault("swaps", []).extend({**x, "station": d["station"]} for x in d.get("swaps") or [])
         batch, flags = _batch(d["key"], "bangchak", d["month"], d["per"], d["counts"], vehicles,
                               f"น้ำมันบางจาก {d['station']} {month_label(d['month'])} · {d['n']} บิล ({dmy(d['lo'])}–{dmy(d['hi'])})",
                               f"จากไฟล์บางจาก {d['station']}", d["file_total"], sub=d["station"],
@@ -529,7 +530,8 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
     flags, conflicts = [], []
     fills = []
     no_plate: dict = {}                               # fill index -> "#<truck number>" for a row with no plate
-    swapped = 0
+    swapped: list = []                               # fills done in another truck than the route's own (shown, owner 28 Nov 2026)
+    cell = lambda r, name: r[col[name]] if name in col and col[name] < len(r) else None
     for r in log:
         if not r or not isinstance(r[0], (int, float)) or isinstance(r[0], bool):
             continue                                  # header, the "รวมทั้งหมด" line (no row number) and notes
@@ -545,15 +547,15 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
         filled = r[col["ทะเบียนรถที่เติมจริง"]]
         plate = own or filled
         if own and filled and norm_plate(str(own)) != norm_plate(str(filled)):
-            swapped += 1
+            swapped.append({"date": d.isoformat(), "route": str(cell(r, "รถเบอร์") or "").strip(), "route_plate": str(own).strip(),
+                            "filled_plate": str(filled).strip(), "driver": str(cell(r, "คนขับจริงที่เติมวันนี้") or cell(r, "ชื่อที่บันทึกในต้นฉบับ") or "").strip(),
+                            "status": str(cell(r, "สถานะ") or "").strip(), "amount": amount})
         number = str(r[col["รถเบอร์"]] or "").strip() if "รถเบอร์" in col and col["รถเบอร์"] < len(r) else ""
         if not str(plate or "").strip() and re.fullmatch(r"\d{1,3}", number):
             no_plate[len(fills)] = f"#{number}"       # no plate at all: the truck number -- used only where one plant fills (below)
         fills.append((d, str(plate or "ไม่ระบุทะเบียน").strip(), amount))
     if not fills:
         return None
-    if swapped:
-        flags.append(f"{swapped} ครั้งเติมในรถคันอื่น (สลับรถ) — ลงที่รถประจำเบอร์ของสายนั้น (ค่าน้ำมันตามสาย)")
 
     # station: the sheet prefix ("NM บันทึกเติมน้ำมัน"), the title, the file name; the oldest files name none (then the format)
     tab = _station_of(prefix)
@@ -627,7 +629,8 @@ def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: boo
         per[plate] += amount
         counts[norm_plate(plate)] += 1
     return {"station": station, "month": month, "key": f"fuel:bangchak:{month}:{station}", "per": dict(per), "counts": dict(counts),
-            "n": len(fills), "lo": lo, "hi": hi, "file_total": file_total, "flags": flags, "conflicts": conflicts, "signals": sig + sig_m}
+            "n": len(fills), "lo": lo, "hi": hi, "file_total": file_total, "flags": flags, "conflicts": conflicts, "signals": sig + sig_m,
+            "swaps": swapped}
 
 
 # ------------------------------------------------------------------ the scripts' combined Bangchak entries: deleted, kept, put back

@@ -177,7 +177,7 @@ def test_bangchak_month_from_rows_station_in_key(db):
     assert b["key"] == "fuel:bangchak:2026-10:NM" and b["file_total"] == 6000 and b["rows_total"] == 6000
     # row 3 was filled in 2ฒฉ 3733 for route 25: it is route 25's fuel (84-2051) -- the route, not the truck filled (owner, 28 Nov 2026)
     assert sorted(e["source_id"] for e in b["entries"]) == ["fuel:bangchak:2026-10:NM:842051"]
-    assert any("สลับรถ" in x for x in p["flags"])
+    assert [(x["date"], x["route"], x["filled_plate"], x["amount"]) for x in p["swaps"]] == [("2026-10-25", "25", "2ฒฉ 3733", 3000)]
     assert all(ln["branch"] == "สระบุรี" for e in b["entries"] for ln in e["lines"])        # who paid, not whose truck
     text = " | ".join(p["flags"])
     assert "25/09/2026" in text and "นอกเดือน" in text                                         # the 25 Sep bill stays in October's bill
