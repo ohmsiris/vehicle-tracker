@@ -321,7 +321,7 @@ function cfLineCard(l, d, n, onRemove) {
         el("td", {}, el("input", { type: "date", class: "cf-day", value: l.day, onchange: (e) => e.target.value && save({ day: e.target.value }) })),
         el("td", {}, el("select", { onchange: (e) => save(e.target.value === "none" ? { no_truck: true } : { vehicle_id: e.target.value || null, no_truck: false }) },
           el("option", { value: "", text: "— เลือก —", selected: !l.vehicle_id && !l.no_truck }),
-          el("option", { value: "none", text: "ไม่มีทะเบียนรถ", selected: !!l.no_truck }), ...vopts.map((v) => el("option", { value: v.id, text: cfVehicleLabel(v), selected: v.id === l.vehicle_id })))),
+          el("option", { value: "none", text: "ไม่มีทะเบียนรถ / รถส่วนตัว", selected: !!l.no_truck }), ...vopts.map((v) => el("option", { value: v.id, text: cfVehicleLabel(v), selected: v.id === l.vehicle_id })))),
         el("td", {}, cfPeopleSelect(d, l.driver_name, (v) => save(v === "none" ? { no_name: true } : { driver_name: v, no_name: false }), l.no_name)),
         el("td", { class: "cf-amount" }, el("input", { type: "text", inputmode: "decimal", value: String(Number(l.amount)), onchange: (e) => save({ amount: e.target.value }) })),
         el("td", { class: "cf-acts" },
