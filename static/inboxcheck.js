@@ -241,7 +241,7 @@ function ickMayLeave(h) {
 async function openInboxCheck(id) {
   showView("inboxCheck");
   ickWire();
-  if (ick.id !== id) { ick.page = null; ick.msg = null; ick.saved = ick.draft = null; }
+  if (ick.id !== id) { ick.page = null; ick.msg = null; ick.saved = ick.draft = null; ick.autoAcc = ick.manualAcc = null; }
   ick.id = id;
   const seq = ++ick.seq;
   fill($("ickBody"), el("p", { class: "muted", text: "กำลังโหลด…" }));
@@ -455,7 +455,8 @@ function ickLineEl(pg, l0) {
   del.disabled = !ick.editable;
   const cell = (cls, ...kids) => el("span", { class: `c-${cls}` }, ...kids);
   const flag = l.flag ? el("span", { class: "ick-flag warn-text", text: "อ่านไม่ชัด" }) : null;
-  const cells = { date: cell("date", date), text: cell("text", text, flag), amount: cell("amt", amt), account: cell("acc", acc), vehicle_id: cell("veh", veh) };
+  const accNote = el("span", { class: "ick-accnote muted small", hidden: true });
+  const cells = { date: cell("date", date), text: cell("text", text, flag), amount: cell("amt", amt), account: cell("acc", acc, accNote), vehicle_id: cell("veh", veh) };
   const row = el("div", { class: `ick-r ${l.state}${l.row && l.row.edited ? " edited" : ""}`, "data-key": l.key },
     cells.date, cells.text, cells.amount, cells.account, cells.vehicle_id, cell("dest", dest), cell("act", del));
   const paint = () => {
@@ -489,6 +490,22 @@ function ickLineEl(pg, l0) {
   on("amount", amt, () => amt.value);
   on("account", acc, () => acc.value);
   on("vehicle_id", veh, () => veh.value || null);
+  // retyped รายการ -> its บัญชี re-picked from the new wording, unless the owner picked the บัญชี himself (owner, 28 Nov 2026)
+  const auto = ick.autoAcc || (ick.autoAcc = new Set()), manual = ick.manualAcc || (ick.manualAcc = new Set());
+  acc.addEventListener("change", (e) => { if (e.isTrusted) { auto.delete(l.key); manual.add(l.key); accNote.hidden = true; } });
+  text.addEventListener("change", async () => {
+    const t = text.value.trim();
+    const picked = () => manual.has(l.key) || (l.state !== "new" && ickChanged(l).has("account") && !auto.has(l.key));
+    if (ro || !t || picked() || (l.state !== "new" && !ickChanged(l).has("text"))) return;
+    accNote.hidden = false;
+    accNote.textContent = "กำลังเลือกหมวดจากชื่อ…";
+    let r = null;
+    try { r = await api("/api/accounts/inbox/suggest-account", jsonOpts("POST", { text: t })); } catch (err) { r = null; }
+    if (text.value.trim() !== t || picked() || !r || !r.account) { accNote.hidden = !auto.has(l.key); if (!r || !r.account) accNote.textContent = ""; return; }
+    auto.add(l.key);
+    if (acc.value !== r.account) { acc.value = r.account; acc.dispatchEvent(new Event("change")); }
+    accNote.textContent = r.source === "history" && r.like ? `หมวดตามชื่อใหม่ (เหมือน “${r.like}” ที่เคยลง)` : "หมวดตามชื่อใหม่";
+  });
   del.onclick = () => ickToggle(pg, l);
   paint();
   return row;

@@ -1303,6 +1303,14 @@ def api_inbox_book(file_id: str, x_app_token: str = Header(default=""), token: s
     return _inbox_call(inbox.book, file_id)
 
 
+@app.post("/api/accounts/inbox/suggest-account")
+def api_inbox_suggest_account(body: dict = Body(default={}), x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
+    """The account a line belongs to from its retyped text (check page, owner 28 Nov 2026)."""
+    from app import acc_suggest
+    _check_token(x_app_token, token)
+    return _inbox_call(acc_suggest.suggest, str((body or {}).get("text") or ""))
+
+
 @app.post("/api/accounts/inbox/{file_id}/reread")
 def api_inbox_reread(file_id: str, x_app_token: str = Header(default=""), token: str = Query(default="")) -> dict:
     from app import inbox
