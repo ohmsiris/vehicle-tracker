@@ -2841,6 +2841,10 @@ main:has(#inboxCheckView:not([hidden])) { max-width: 1840px; }
 .ick-adv.edit tr.deleted { opacity: .6; }
 .ick-adv.edit tr.deleted input, .ick-adv.edit tr.deleted span { text-decoration: line-through; }
 .ick-adv-used { display: block; margin-top: 1px; text-align: right; }
+/* a booked line no row is (review, 29 Nov 2026): under the rows, dashed off, amber once ลบ waits to be saved */
+.ick-adv.edit tr.loose td { background: var(--warn-soft); border-top: 1px dashed var(--line-strong); }
+.ick-adv.edit tr.loose.chg td:last-child { box-shadow: inset 3px 0 0 var(--warn); }
+.ick-adv.edit td.num > .linkbtn { display: block; margin-left: auto; }
 .ick-adv-card > .ick-footbtns { justify-self: start; }
 /* a narrower column (a laptop with the sidebar open): each line on two rows, and the column names on the same two rows above them */
 @container (max-width: 760px) {

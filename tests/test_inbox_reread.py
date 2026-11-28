@@ -104,7 +104,10 @@ def test_reread_replaces_only_the_given_pages_and_keeps_the_fixes(engine, db, mo
     assert out["ai_usage"] == {"model": "m", "calls": 6, "input_tokens": 5000 + 1050, "output_tokens": 1200}
     assert out["reread"] == {"pages": [5], "failed": []}
     rows = {r.get("key"): r for r in out["batches"][0]["rows"]}
-    assert rows["p2:l1"]["amount"] == 450 and rows["p5:l1"]["amount"] == 3500          # the same number of lines: the fixes still fit
+    assert rows["p2:l1"]["amount"] == 450                                              # the same number of lines: the fixes still fit
+    # ... but page 5 now has its per-person table: its one line is the table's sum, an amount fix of it is kept and not used (review,
+    # 29 Nov 2026 -- the books and the pay page's advances would disagree)
+    assert rows["p5:l1"]["amount"] == 6000 and any("หน้า 5: ยอดของบรรทัดเบิกกลางเดือนแก้ที่ตารางรายคนแทน" in f for f in out["flags"])
 
 
 def test_a_reread_page_keeps_its_fixes_only_while_its_line_keys_stand(engine, db, monkeypatch, ai_on):

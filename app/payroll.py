@@ -797,10 +797,13 @@ def page_rows(page: dict) -> Optional[list[dict]]:
 # Owner, 29 Nov 2026: "and how do I edit the numbers" -- the per-person table of an advance-list page (advance_rows) is corrected straight
 # on ตรวจเอกสารก่อนลงบัญชี against the scan. The fixes live in preview["line_edits"]["rows"] (app/inbox_ai.clean_row_edits):
 #   {"<page>": {"edits": {"<row index>": {code?, amount?, common?, fault?, other?, ok?, delete?}},
-#               "added": [{"id": "r1", "code", "name", "amount", "common", "fault", "other"}]}}
+#               "added": [{"id": "r1", "code", "name", "amount", "common", "fault", "other"}],
+#               "drop": [<line index>]}}
 # keyed by the row's place in the page read's advance_rows, so they hold while the page read does (a choice, อ่านใหม่) and go when the
 # page is read again by the AI. edit_page lays them over a page read; the books (inbox_ai._batch) and this page (advance_lists) both
-# read the edited page, so the booked sum, the advances and the deduction columns always say the same.
+# read the edited page, so the booked sum, the advances and the deduction columns always say the same. "drop" (review, 29 Nov 2026): a
+# booked line no row is (pair_rows: its code and name match no row -- "สมชาย ใจดี" beside the row "SB-FR001 นายสมชาย ใจดีย์") is shown
+# under the table and can be taken away, so a person typed into his row is never booked twice.
 ROW_FIELDS = ("code", "amount", "common", "fault", "other")
 
 
@@ -853,19 +856,22 @@ def edit_page(page: dict, pe: Optional[dict]) -> dict:
     The rows: a fixed row takes the new values (a blank is "") and loses its อ่านไม่ชัด mark (ถูกแล้ว alone does just that), a deleted
     row leaves, an added row goes to the end. The booked lines follow the fixed rows (owner, 29 Nov 2026: the row he checked against
     the scan is the person's advance): a fixed row's line (pair_rows) takes the row's code, name and amount -- the amount fixed, else
-    the row's own, else what the line had --, a row fixed to no amount or deleted takes its line away, a fixed or added row with an
-    amount and no line gets one. Rows and lines no fix touches stay exactly as read. Lenient: a row number the read does not have is
-    left out (the endpoint refused it when it was saved). Pure."""
+    the row's own, else what the line had --, a row fixed to no amount or deleted takes its line away, an added row with an amount
+    gets a line. A row no line is gets one only when its ยอดเบิก itself was fixed (review, 29 Nov 2026: the person's advance may sit in
+    a line pair_rows could not match -- a ส่วนกลาง fix or ถูกแล้ว must never book him twice); the lines in "drop" that no row is
+    leave. The page comes back with rows_fixed True when its lines changed (inbox_ai._batch: a table fixed to no advance books
+    nothing, never the written total). Rows and lines no fix touches stay exactly as read. Lenient: a row number or a line the read
+    does not have is left out (the endpoint refused it when it was saved). Pure."""
     if not isinstance(page, dict) or not isinstance(pe, dict) or "advance_rows" not in page:
         return page
     edits = pe.get("edits") if isinstance(pe.get("edits"), dict) else {}
     added = [a for a in pe.get("added") or [] if isinstance(a, dict)]
-    if not edits and not added:
+    pairs, rest = pair_rows(page)
+    drop: set = {int(j) for j in pe.get("drop") or [] if isinstance(j, int) and not isinstance(j, bool) and j in rest}
+    if not edits and not added and not drop:
         return page
     rows = list(page.get("advance_rows") or [])
     lines = [dict(ln) if isinstance(ln, dict) else ln for ln in page.get("lines") or []]
-    pairs, _rest = pair_rows(page)
-    drop: set = set()
     new_rows, new_lines = [], []
 
     def person_line(r: dict, eff: Optional[float], old: Optional[dict]) -> Optional[dict]:
@@ -900,7 +906,7 @@ def edit_page(page: dict, pe: Optional[dict]) -> dict:
                 drop.add(j)
             else:
                 lines[j] = ln
-        elif ln is not None:
+        elif ln is not None and "amount" in e:         # no line is this row: booked only when its ยอดเบิก was fixed (review)
             new_lines.append(ln)
     for a in added:
         row = {"code": str(a.get("code") or ""), "name": _norm(a.get("name")), **{f: a.get(f, "") for f in ROW_FIELDS[1:]},
@@ -909,7 +915,8 @@ def edit_page(page: dict, pe: Optional[dict]) -> dict:
         ln = person_line(row, _amount(a.get("amount")), None)
         if ln is not None:
             new_lines.append(ln)
-    return {**page, "advance_rows": new_rows, "lines": [ln for j, ln in enumerate(lines) if j not in drop] + new_lines}
+    out = [ln for j, ln in enumerate(lines) if j not in drop] + new_lines
+    return {**page, "advance_rows": new_rows, "lines": out, **({"rows_fixed": True} if out != list(page.get("lines") or []) else {})}
 
 
 def edited_pages(pages: Optional[list], rows_edits: Optional[dict]) -> list:

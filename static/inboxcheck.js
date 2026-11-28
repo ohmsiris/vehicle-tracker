@@ -38,11 +38,17 @@ function ickCopy(le) {
     const e = {};
     for (const [i, v] of Object.entries(pe.edits || {})) if (v && typeof v === "object") e[i] = { ...v };
     rows[n] = { edits: e, added: (Array.isArray(pe.added) ? pe.added : []).filter((a) => a && typeof a === "object").map((a) => ({ ...a })) };
+    const drop = ickDropOf(pe);
+    if (drop.length) rows[n].drop = drop;
   }
   return { edits, added: (Array.isArray(src.added) ? src.added : []).filter((a) => a && typeof a === "object").map((a) => ({ ...a })), rows };
 }
 
 // ---- the per-person table of an advance page (owner, 29 Nov 2026: "and how do I edit the numbers"; app/payroll.py edit_page)
+// drop: the page's booked lines no row is (advance_pairs rest_lines) taken away by the owner (review, 29 Nov 2026) -- line indexes
+const ickDropOf = (pe) => [...new Set((Array.isArray((pe || {}).drop) ? pe.drop : []).filter((j) => Number.isInteger(j)))].sort((a, b) => a - b);
+// may this viewer fix the table? Its numbers are the pay page's advances and deductions: only who may see pay (inbox.get can_edit_rows)
+const ickRowsEd = () => !!ick.editable && !(ick.f && ick.f.can_edit_rows === false);
 const ICK_ROW_NUMS = ["amount", "common", "fault", "other"];
 const ICK_ROW_FIELDS = ["code", ...ICK_ROW_NUMS];
 const ICK_TOTAL_ROW = /^\s*(?:ยอด)?รวม|^\s*total/i;
@@ -99,6 +105,7 @@ function ickCanon(le) {
       for (const f of Object.keys(x).sort()) if (f !== "_gone" && f !== "id") o[f] = ickRowNorm(f, x[f]);
       r[`${n}:+${x.id}`] = o;
     }
+    for (const j of ickDropOf(pe)) r[`${n}:-${j}`] = { drop: true };
   }
   return JSON.stringify(Object.keys(r).length ? { e, a, r } : { e, a });
 }
@@ -133,7 +140,8 @@ function ickPayload(draft) {
       if (Object.keys(o).length) e[i] = o;
     }
     const added = ((pe || {}).added || []).filter((a) => a && !a._gone).map(({ _gone, ...a }) => a);
-    if (Object.keys(e).length || added.length) rows[n] = { edits: e, added };
+    const drop = ickDropOf(pe);
+    if (Object.keys(e).length || added.length || drop.length) rows[n] = { edits: e, added, ...(drop.length ? { drop } : {}) };
   }
   if (Object.keys(rows).length) out.rows = rows;
   return out;
@@ -199,6 +207,7 @@ function ickAdvRowEff(pg, i, pe) {
   if (e.delete) return 0;
   const code = e.code !== undefined ? e.code : raw.code;
   if (ickTotalRow(code, raw.name)) return 0;
+  if (line == null && e.amount === undefined) return 0;      // no line is this row: booked only when its ยอดเบิก is fixed (review)
   let a = e.amount !== undefined ? ickRowAmt(e.amount) : ickRowAmt(raw.amount);
   if (e.amount === undefined && !Number.isFinite(a)) a = line ?? NaN;
   return Number.isFinite(a) && a > 0 ? a : 0;
@@ -207,7 +216,9 @@ function ickAdvRowEff(pg, i, pe) {
 // the page's booked 1500 line under these fixes (null: no pairing from the server -- nothing to work out)
 function ickAdvSum(pg, pe) {
   if (!pg || !pg.adv || !pg.adv.pair || !pg.adv.rows) return null;
-  let sum = Number(pg.adv.pair.rest) || 0;
+  const drop = new Set(ickDropOf(pe));
+  const loose = Array.isArray(pg.adv.pair.rest_lines) ? pg.adv.pair.rest_lines : null;
+  let sum = loose ? loose.reduce((t, x) => t + (drop.has(x.i) ? 0 : Number(x.amount) || 0), 0) : Number(pg.adv.pair.rest) || 0;
   for (let i = 0; i < pg.adv.rows.length; i++) sum += ickAdvRowEff(pg, i, pe);
   for (const a of (pe || {}).added || []) {
     if (!a || a._gone || ickTotalRow(a.code, a.name)) continue;
@@ -235,9 +246,15 @@ function ickAdvView(pg, draft, saved) {
     const dE = (dp.edits || {})[String(i)], sE = (sp.edits || {})[String(i)];
     const v = { ...base };
     for (const f of ICK_ROW_FIELDS) if (dE && dE[f] !== undefined) v[f] = dE[f];
-    out.push({ key: String(i), i, added: false, base, v, chg: fieldsOf(base, dE, sE), edited: ickLive(sE), ok: !!(dE && dE.ok),
-      unsure: !!r.unsure && !ickLive(sE), state: dE && dE.delete ? "deleted" : "row",
-      line: pg.adv.pair ? (pg.adv.pair.line[i] ?? null) : undefined, total: ickTotalRow(v.code, base.name) });
+    const line = pg.adv.pair ? (pg.adv.pair.line[i] ?? null) : undefined;
+    const chg = fieldsOf(base, dE, sE);
+    // no booked line is this row (its code and name match none): it books only once its ยอดเบิก is fixed -- ลงยอดนี้ (review, 29 Nov 2026)
+    const unpaired = line === null && !ickTotalRow(v.code, base.name);
+    const booked = unpaired && !!dE && dE.amount !== undefined;
+    if (booked && !(sE && sE.amount !== undefined)) chg.add("amount");
+    out.push({ key: String(i), i, added: false, base, v, chg, edited: ickLive(sE), ok: !!(dE && dE.ok),
+      unsure: !!r.unsure && !ickLive(sE), state: dE && dE.delete ? "deleted" : "row", line, unpaired, booked,
+      bookedSaved: unpaired && !!sE && sE.amount !== undefined, total: ickTotalRow(v.code, base.name) });
   });
   const blank = { code: "", name: "", amount: "", common: "", fault: "", other: "" };
   const savedAdded = (sp.added || []).filter((a) => a && typeof a === "object");
@@ -261,6 +278,33 @@ function ickAdvView(pg, draft, saved) {
   return out;
 }
 
+// the page's booked lines no row is (advance_pairs rest_lines): still booked and still an advance on the pay page, shown under the
+// table so a person whose row did not match is never booked twice -- ลบ takes the line away (drop), เอาคืน brings it back
+function ickAdvLoose(pg, draft, saved) {
+  const d = new Set(ickDropOf(((draft || ickEmpty()).rows || {})[pg.n]));
+  const s = new Set(ickDropOf((((saved || ick.saved || ickEmpty()).rows) || {})[pg.n]));
+  const rest = pg.adv && pg.adv.pair && Array.isArray(pg.adv.pair.rest_lines) ? pg.adv.pair.rest_lines : [];
+  return rest.map((x) => ({ key: `-${x.i}`, j: x.i, text: String(x.text || ""), amount: Number(x.amount) || 0,
+    state: d.has(x.i) ? "deleted" : "loose", chg: d.has(x.i) !== s.has(x.i) }));
+}
+
+function ickAdvDrop(n, j, on) {
+  const pe = ickAdvPage(n);
+  const drop = new Set(ickDropOf(pe));
+  if (on) drop.add(j); else drop.delete(j);
+  if (drop.size) pe.drop = [...drop].sort((a, b) => a - b); else delete pe.drop;
+  ickAdvTidy(n);
+}
+
+// ลงยอดนี้ on a row no line is: its ยอดเบิก as shown becomes a fix, so the row books (the same as typing it)
+function ickAdvBook(n, view, on) {
+  const pe = ickAdvPage(n);
+  const e = { ...(pe.edits[view.key] || {}) };
+  if (on) e.amount = view.v.amount; else delete e.amount;
+  if (Object.keys(e).length) pe.edits[view.key] = e; else delete pe.edits[view.key];
+  ickAdvTidy(n);
+}
+
 // the sums under the table: people (total rows and deleted rows left out), ยอดเบิก and the three columns as shown
 function ickAdvSums(view) {
   const live = view.filter((x) => x.state !== "deleted" && !x.total);
@@ -277,7 +321,7 @@ function ickAdvPage(n) {
 
 function ickAdvTidy(n) {
   const pe = (ick.draft.rows || {})[n];
-  if (pe && !Object.keys(pe.edits || {}).length && !(pe.added || []).length) delete ick.draft.rows[n];
+  if (pe && !Object.keys(pe.edits || {}).length && !(pe.added || []).length && !ickDropOf(pe).length) delete ick.draft.rows[n];
 }
 
 // a cell typed in the table: kept as a fix of that row (typed back to what it was, the fix goes away)
@@ -291,8 +335,8 @@ function ickAdvSet(n, view, f, value) {
     const e = { ...(pe.edits[view.key] || {}) };
     const saved = ((((ick.saved.rows || {})[n] || {}).edits || {})[view.key] || {})[f];
     if (saved !== undefined && ickRowEq(f, value, saved)) e[f] = saved;
-    else if (saved === undefined && ickRowEq(f, value, view.base[f])) delete e[f];
-    else e[f] = value;
+    else if (saved === undefined && ickRowEq(f, value, view.base[f]) && !(f === "amount" && view.unpaired && e.amount !== undefined)) delete e[f];
+    else e[f] = value;                            // (a row no line is keeps its ยอดเบิก fix: that is what books it)
     if (Object.keys(e).length) pe.edits[view.key] = e; else delete pe.edits[view.key];
   }
   ickAdvTidy(n);
@@ -332,6 +376,9 @@ function ickAdvAdd(n) {
 // e.g. its date fell outside the half after another month was picked) / cashfuel (already on the cash-fuel page) / deleted.
 // l.chg: the fields changed on the screen and not saved yet (draft against saved); l.unapplied: fields saved but not what the server
 // used (its row still shows the read value) -- both per field, so a fix the server left out is never mistaken for one waiting to save.
+// an advance page's one booked line when the page has its per-person table: the table's sum (app/inbox_ai.table_line_edits)
+const ickTableLine = (pg, key) => !!(pg && pg.adv && pg.adv.rows && key === `p${pg.n}:l1`);
+
 function ickLinesOf(pg, draft, saved) {
   const d = draft || ickEmpty(), s = saved || ick.saved || ickEmpty();
   const out = [], seen = new Set();
@@ -349,9 +396,11 @@ function ickLinesOf(pg, draft, saved) {
       date: r.date || "", text: String(r.text || "").replace(ICK_UNSURE, "").trim(),
       amount: r.dest_kind === "book" ? r.amount : (r.read_amount ?? r.amount), account: r.account || "7900", vehicle_id: r.vehicle_id || "",
     };
-    if (pg.adv && pg.adv.pair && r.key === `p${pg.n}:l1` && r.dest_kind === "book") {     // the list's one line: what the table adds up to now
+    const table = ickTableLine(pg, r.key);
+    if (table && pg.adv.pair && r.dest_kind === "book") {     // the list's one line: what the table adds up to now
       const now = ickAdvSum(pg, (d.rows || {})[pg.n]), was = ickAdvSum(pg, (s.rows || {})[pg.n]);
-      if (now != null && was != null) base.amount = Math.round((Number(base.amount) + now - was) * 100) / 100;
+      // the server books the table's sum; a table that sums to nothing as read books the written total (inbox_ai._batch) until a fix
+      if (now != null && was != null) base.amount = Math.abs(Number(base.amount) - was) < 0.005 || now > 0 ? now : Number(base.amount);
     }
     const m = /^p\d+:(x[0-9a-z]+)$/.exec(r.key);
     if (m) {                                        // a line the owner added earlier (saved)
@@ -362,8 +411,10 @@ function ickLinesOf(pg, draft, saved) {
         state: !a || a._gone ? "deleted" : r.dest_kind === "deleted" ? "book" : r.dest_kind });
       continue;
     }
-    const e = (d.edits || {})[r.key] || {};
-    const [chg, un] = fieldsOf(base, e, (s.edits || {})[r.key]);
+    // the list's one line: its amount is fixed in the table, never here -- a fix saved before that rule is not used (review, 29 Nov 2026)
+    const noAmt = (x) => { if (!table || !x) return x; const { amount, delete: _d, ...rest } = x; return rest; };
+    const e = noAmt((d.edits || {})[r.key] || {});
+    const [chg, un] = fieldsOf(base, e, noAmt((s.edits || {})[r.key]));
     out.push({ key: r.key, row: r, base, v: ickOverlay(base, e), added: false, flag: !!r.flag, chg, unapplied: un,
       state: e.delete ? "deleted" : r.dest_kind === "deleted" ? "book" : r.dest_kind });
   }
@@ -652,27 +703,43 @@ function ickAdvEl(pg0) {
       el("p", { class: "small warn-text", text: "หน้านี้อ่านก่อนมีช่องส่วนกลาง / ความผิด / อุปกรณ์ — หน้าคำนวณเงินเดือนยังเอายอดเหล่านี้ไปใช้ไม่ได้ จนกว่าจะอ่านหน้านี้ใหม่" }), btn);
   }
   const view = ickAdvView(pg, ick.draft);
+  const loose = end ? [] : ickAdvLoose(pg, ick.draft);
   const foot = el("tr", { "data-adv-foot": String(pg.n) });
-  const body = el("tbody", {}, ...view.map((v) => ickAdvRowEl(pg, v, end)));
+  const body = el("tbody", {}, ...view.map((v) => ickAdvRowEl(pg, v, end)), ...loose.map((x) => ickAdvLooseEl(pg, x)));
   const table = el("div", { class: "ick-adv-wrap" }, el("table", { class: "ick-adv edit" },
     el("thead", {}, el("tr", {}, ...["รหัส", "ชื่อ", "ยอดเบิก", ...ICK_ADV_COLS.map((c) => c[1]), ""].map((t) => el("th", { text: t })))),
     body, el("tfoot", {}, foot)));
   ickAdvPaintFoot(pg, foot);
   const unsure = view.filter((v) => v.unsure && !v.ok && v.state !== "deleted" && !v.chg.size);
-  const allOk = ick.editable && unsure.length ? el("button", { class: "btn small", type: "button", text: `ถูกแล้วทั้งตาราง (${unsure.length} แถวอ่านไม่ชัด)`,
+  const allOk = ickRowsEd() && unsure.length ? el("button", { class: "btn small", type: "button", text: `ถูกแล้วทั้งตาราง (${unsure.length} แถวอ่านไม่ชัด)`,
     title: "ดูกับรูปแล้ว ทุกแถวที่อ่านไม่ชัดในตารางนี้ถูกต้อง", onclick: () => { for (const v of unsure) ickAdvFlag(pg.n, v, "ok", true); ickRepaint(pg.n); } }) : null;
-  const add = ick.editable ? el("button", { class: "btn small", type: "button", text: "+ เพิ่มคน", onclick: () => {
+  const add = ickRowsEd() ? el("button", { class: "btn small", type: "button", text: "+ เพิ่มคน", onclick: () => {
     const id = ickAdvAdd(pg.n);
     ickRepaint(pg.n);
     const box = document.querySelector(`#inboxCheckView [data-adv-key="${pg.n}:+${id}"] input`);
     if (box) box.focus();
   } }) : null;
   return el("div", { class: "ick-card ick-adv-card" }, el("strong", { text: ICK_ADV_TITLE }),
-    view.length ? table : el("p", { class: "small muted", text: "AI ไม่ได้อ่านแถวรายคนของหน้านี้ — กด + เพิ่มคน หรือถ้ากระดาษมีช่องส่วนกลาง / ความผิด ให้อ่านหน้านี้ใหม่" }),
+    view.length || loose.length ? table : el("p", { class: "small muted", text: "AI ไม่ได้อ่านแถวรายคนของหน้านี้ — กด + เพิ่มคน หรือถ้ากระดาษมีช่องส่วนกลาง / ความผิด ให้อ่านหน้านี้ใหม่" }),
     el("div", { class: "ick-footbtns" }, allOk, add),
     el("p", { class: "small muted", text: end ? "ยอดเบิกใช้จากไฟล์กลางเดือน"
       : "ส่วนกลาง / ความผิด / อุปกรณ์ ใช้จากฉบับเซ็นรับในเอกสารปลายเดือน ถ้ามี" }),
-    el("p", { class: "small muted", text: "หน้าคำนวณเงินเดือนใช้ตัวเลขในตารางนี้ · แก้แล้วกด บันทึกการแก้ (Ctrl+S)" }), btn);
+    el("p", { class: "small muted", text: ickRowsEd() ? "หน้าคำนวณเงินเดือนใช้ตัวเลขในตารางนี้ · แก้แล้วกด บันทึกการแก้ (Ctrl+S)"
+      : ick.editable ? "หน้าคำนวณเงินเดือนใช้ตัวเลขในตารางนี้ · แก้ตารางนี้ได้เฉพาะผู้มีเมนูรายชื่อพนักงาน (รวมค่าจ้าง)" : "หน้าคำนวณเงินเดือนใช้ตัวเลขในตารางนี้" }), btn);
+}
+
+// a booked line of the page that no row is (ickAdvLoose): its text and amount, ลบ / เอาคืน (review, 29 Nov 2026)
+function ickAdvLooseEl(pg, x) {
+  const del = el("button", { class: "linkbtn small", type: "button", text: x.state === "deleted" ? "เอาคืน" : "ลบ",
+    "aria-label": x.state === "deleted" ? "เอาบรรทัดนี้คืน" : "ลบบรรทัดนี้" });
+  del.disabled = !ickRowsEd();
+  del.onclick = () => { ickAdvDrop(pg.n, x.j, x.state !== "deleted"); ickRepaint(pg.n); };
+  const row = el("tr", { "data-adv-key": `${pg.n}:${x.key}`, class: ["loose", x.state === "deleted" ? "deleted" : "", x.chg ? "chg" : ""].filter(Boolean).join(" "),
+    title: "บรรทัดนี้ลงบัญชีและเป็นยอดเบิกในหน้าคำนวณเงินเดือนอยู่ แต่ไม่ตรงกับแถวใดในตาราง (รหัส / ชื่อไม่ตรง) — ถ้าเป็นคนเดียวกับแถวด้านบน ลบบรรทัดนี้ แล้วกด ลงยอดนี้ ที่แถวนั้น" },
+    el("td", { text: "–" }),
+    el("td", {}, el("span", { text: x.text || "–" }), el("span", { class: "small warn-text", text: x.state === "deleted" ? " (ลบแล้ว รอบันทึก)" : " บรรทัดที่ไม่ตรงกับแถวใด" })),
+    el("td", { class: "num", text: fmtMoney(x.amount) }), ...ICK_ADV_COLS.map(() => el("td", {})), el("td", {}, del));
+  return row;
 }
 
 function ickAdvPaintFoot(pg, box) {
@@ -688,7 +755,7 @@ function ickAdvPaintFoot(pg, box) {
 // use until the row is fixed or marked ถูกแล้ว).
 function ickAdvRowEl(pg, v0, end) {
   let v = v0;
-  const ro = !ick.editable || v.state === "deleted";
+  const ro = !ickRowsEd() || v.state === "deleted";
   const refresh = () => { v = ickAdvView(pg, ick.draft).find((x) => x.key === v.key) || v; };
   const inp = (f, attrs) => {
     const x = el("input", { type: "text", value: String(v.v[f] ?? ""), ...attrs });
@@ -700,14 +767,15 @@ function ickAdvRowEl(pg, v0, end) {
   const nums = {};
   for (const f of ICK_ROW_NUMS) nums[f] = inp(f, { inputmode: "decimal", "aria-label": f === "amount" ? "ยอดเบิก" : ICK_ADV_COLS.find((c) => c[0] === f)[1], class: "num" });
   const used = el("span", { class: "ick-adv-used small", hidden: true });
+  const bookBtn = !ro && !end && v.unpaired ? el("button", { class: "linkbtn small", type: "button" }) : null;
   const flagText = el("span", {});
   const okBtn = !ro && !v.added ? el("button", { class: "linkbtn small ick-okbtn", type: "button" }) : null;
   const flag = !v.added ? el("span", { class: "ick-flag" }, flagText, okBtn) : null;
   const del = el("button", { class: "linkbtn small", type: "button", text: v.state === "deleted" ? "เอาคืน" : "ลบ",
     "aria-label": v.state === "deleted" ? "เอาแถวนี้คืน" : "ลบแถวนี้" });
-  del.disabled = !ick.editable;
+  del.disabled = !ickRowsEd();
   const cells = { code: el("td", {}, code), name: el("td", {}, name || el("span", { text: v.v.name || "–" }), flag),
-    amount: el("td", { class: "num" }, nums.amount, used) };
+    amount: el("td", { class: "num" }, nums.amount, used, bookBtn) };
   for (const [f] of ICK_ADV_COLS) cells[f] = el("td", { class: "num" }, nums[f]);
   const row = el("tr", { "data-adv-key": `${pg.n}:${v.key}` }, cells.code, cells.name, cells.amount, ...ICK_ADV_COLS.map(([f]) => cells[f]), el("td", {}, del));
   const paint = () => {
@@ -722,12 +790,21 @@ function ickAdvRowEl(pg, v0, end) {
     }
     // what the books use for this person while nobody fixed the row: its line as read (mid-month only: the signed copy books nothing)
     const shown = ickRowAmt(v.v.amount);
-    const differs = !end && !v.added && v.state !== "deleted" && v.line !== undefined && !v.edited && !v.chg.size && !v.ok && !v.total
-      && Math.abs((v.line ?? 0) - (Number.isFinite(shown) ? shown : 0)) >= 0.005;
-    used.hidden = !differs;
+    const differs = !end && !v.added && !v.unpaired && v.state !== "deleted" && v.line != null && !v.edited && !v.chg.size && !v.ok && !v.total
+      && Math.abs(v.line - (Number.isFinite(shown) ? shown : 0)) >= 0.005;
+    // a row no booked line is (its code and name match none): nothing of it is booked until ลงยอดนี้ or a typed ยอดเบิก (review)
+    const loose = !end && !v.added && v.unpaired && v.state !== "deleted" && !v.booked;
+    used.hidden = !differs && !loose;
     used.className = "ick-adv-used small warn-text";
-    used.textContent = differs ? `ลงบัญชีอยู่ ${fmtMoney(v.line ?? 0)}` : "";
-    used.title = differs ? "ยอดที่อ่านจากบรรทัดของหน้า (ลงบัญชีและใช้ในหน้าคำนวณเงินเดือนอยู่) ไม่ตรงกับแถวนี้ — แก้ยอด หรือกด ถูกแล้ว ให้ใช้ยอดในแถวนี้" : "";
+    used.textContent = differs ? `ลงบัญชีอยู่ ${fmtMoney(v.line)}` : loose ? "ยังไม่ลงบัญชี " : "";
+    used.title = differs ? "ยอดที่อ่านจากบรรทัดของหน้า (ลงบัญชีและใช้ในหน้าคำนวณเงินเดือนอยู่) ไม่ตรงกับแถวนี้ — แก้ยอด หรือกด ถูกแล้ว ให้ใช้ยอดในแถวนี้"
+      : loose ? "แถวนี้ไม่ตรงกับบรรทัดที่อ่านได้ (รหัส / ชื่อไม่ตรง) — ถ้ายอดของคนนี้อยู่ใน บรรทัดที่ไม่ตรงกับแถวใด ด้านล่าง ลบบรรทัดนั้น แล้วกด ลงยอดนี้" : "";
+    if (bookBtn) {
+      const undo = v.booked && !v.bookedSaved && ickRowEq("amount", v.v.amount, v.base.amount);
+      bookBtn.hidden = v.state === "deleted" || (v.booked && !undo) || (!v.booked && !(Number.isFinite(shown) && shown > 0));
+      bookBtn.textContent = undo ? "ยกเลิกลงยอด" : "ลงยอดนี้";
+      bookBtn.title = undo ? "ไม่ลงบัญชียอดของแถวนี้" : "ลงบัญชียอดเบิกของแถวนี้ (เป็นยอดเบิกของคนนี้ในหน้าคำนวณเงินเดือน)";
+    }
   };
   const on = (f, input) => input && input.addEventListener("input", () => {
     ickAdvSet(pg.n, v, f, input.value);
@@ -739,6 +816,7 @@ function ickAdvRowEl(pg, v0, end) {
   on("name", name);
   for (const f of ICK_ROW_NUMS) on(f, nums[f]);
   if (okBtn) okBtn.onclick = () => { ickAdvFlag(pg.n, v, "ok", !v.ok); refresh(); paint(); ickAdvSync(pg); };
+  if (bookBtn) bookBtn.onclick = () => { ickAdvBook(pg.n, v, !v.booked); refresh(); paint(); ickAdvSync(pg); };
   del.onclick = () => { ickAdvToggle(pg.n, v); ickRepaint(pg.n); };
   paint();
   return row;
@@ -886,6 +964,10 @@ function ickLineEl(pg, l0) {
     "aria-label": l.state === "deleted" ? "เอาบรรทัดนี้คืน" : "ลบบรรทัดนี้" });
   for (const x of [date, text, amt, acc, veh]) x.disabled = ro;
   del.disabled = !ick.editable;
+  if (ickTableLine(pg, l.key)) {                  // the list's one line: its amount is the per-person table's sum (review, 29 Nov 2026)
+    amt.disabled = del.disabled = true;
+    amt.title = del.title = "ยอดนี้คือผลรวมของตารางรายคนด้านล่าง — แก้ยอดเบิกของแต่ละคนในตาราง";
+  }
   const cell = (cls, ...kids) => el("span", { class: `c-${cls}` }, ...kids);
   // อ่านไม่ชัด + ถูกแล้ว: the owner checked it against the scan and it is right -- nothing to retype (owner, 28 Nov 2026)
   const okNow = () => !!((ick.draft.edits || {})[l.key] || {}).ok;

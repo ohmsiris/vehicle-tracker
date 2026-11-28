@@ -584,6 +584,7 @@ def get(file_id: str, see_pay: bool = True, hr: str = "none") -> dict:
             out["truck_accounts"] = list(ai.TRUCK_ACCOUNTS)
             out["vehicles"] = [{k: v.get(k) for k in ("id", "vehicle_number", "plate_number", "branch")} for v in ai._vehicles()]
         out["edits_version"] = edits_version(out["preview"])
+        out["can_edit_rows"] = bool(see_pay)        # the per-person tables are pay data (review, 29 Nov 2026): save_edits refuses them
         hr_mod = _optional("inbox_hr")
         if hr_mod is not None:
             out["hr"] = hr_mod.view(out["preview"], hr, ai_ready())
@@ -620,7 +621,9 @@ def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Op
     edit the numbers": the fixed rows are the advances and deductions the pay page uses, and the page's booked 1500 line their sum) --
     no AI call. A booked file is booked again at once with the fixes (as a re-read that can book is). version: edits_version of the
     fixes the page opened with (the route always passes it): fixes saved since -- another tab, the bookkeeper -- refuse the save instead
-    of being wiped. Returns what get() does."""
+    of being wiped. see_pay False (no employees menu): the per-person tables are the pay page's advances and deductions -- they are
+    kept as saved, and a save that would change them is refused (review, 29 Nov 2026: a bookkeeper with the accounts menu alone could
+    otherwise change what the owner-only pay page uses). Returns what get() does."""
     ai = _optional("inbox_ai")
     if ai is None:
         raise InboxError("ส่วนอ่านด้วย AI ยังไม่พร้อม")
@@ -638,6 +641,8 @@ def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Op
             clean = ai.clean_line_edits(base, line_edits, ai._vehicles())
         except ValueError as exc:
             raise InboxError(str(exc))
+        if not see_pay:
+            _keep_rows(ai, base, line_edits, clean)
         stored = {**base}
         if ai.has_edits(clean):
             stored["line_edits"] = clean
@@ -646,6 +651,26 @@ def save_edits(file_id: str, line_edits: dict, see_pay: bool = True, version: Op
         v, booked = _reprocess({**row, "preview": stored}, row.get("choices") or {}, {row["id"]})
     out = get(file_id, see_pay, hr)
     return {**out, "booked_again": booked, "rebook_failed": v.get("rebook_failed") or [], "message": v.get("message") or ""}
+
+
+ROWS_HIDDEN = "ตารางรายคน (ยอดเบิก / ส่วนกลาง / ความผิด / อุปกรณ์) แก้ได้เฉพาะผู้มีเมนูรายชื่อพนักงาน (รวมค่าจ้าง)"
+
+
+def _keep_rows(ai, base: dict, line_edits, clean: dict) -> None:
+    """For a caller who may not see pay: the per-person table fixes stay exactly as saved (IN PLACE on clean). Sent back unchanged --
+    or not sent at all -- they are kept; anything else is refused (Forbidden)."""
+    le = base.get("line_edits") if isinstance(base.get("line_edits"), dict) else {}
+    saved = le.get("rows") if isinstance(le.get("rows"), dict) else {}
+    try:
+        was = ai.clean_row_edits(base, saved) if saved else {}
+    except ValueError:
+        was = saved
+    sent = line_edits.get("rows") if isinstance(line_edits, dict) else None
+    if sent is not None and (clean.get("rows") or {}) != was:
+        raise Forbidden(ROWS_HIDDEN)
+    clean.pop("rows", None)
+    if saved:
+        clean["rows"] = saved
 
 
 def reread_pages(file_id: str, pages, see_pay: bool = True, hr: str = "none") -> dict:

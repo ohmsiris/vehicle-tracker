@@ -131,7 +131,7 @@ def test_a_code_fix_moves_the_advance_and_ok_alone_only_clears_the_mark():
 def test_the_booked_line_is_the_sum_of_the_fixed_table(off_db):
     plain = pv_of()
     assert adv_line(plain)["amount"] == 9000 and check(plain, 5)["status"] == "ok"
-    assert plain["advance_pairs"] == {"5": {"line": [3000, 3000, 3000, None], "rest": 0}}
+    assert plain["advance_pairs"] == {"5": {"line": [3000, 3000, 3000, None], "rest": 0, "rest_lines": []}}
     pv = pv_of({"edits": {}, "added": [], "rows": FIX})
     assert adv_line(pv)["amount"] == 3000 + 2500 + 3500 and check(pv, 5)["read_total"] == 9000 and check(pv, 5)["status"] == "ok"
     off = pv_of({"edits": {}, "added": [], "rows": {"5": {"edits": {"0": {"amount": 2000}}, "added": []}}})
@@ -322,3 +322,166 @@ def test_the_table_card_says_where_its_columns_are_used(node_data, tmp_path):
     assert "ส่วนกลาง / ความผิด / อุปกรณ์ ใช้จากฉบับเซ็นรับในเอกสารปลายเดือน ถ้ามี" in got["mid"] and "ยอดเบิกใช้จากไฟล์กลางเดือน" not in got["mid"]
     assert "ยอดเบิกใช้จากไฟล์กลางเดือน" in got["end"] and "+ เพิ่มคน" in got["mid"] and "ถูกแล้วทั้งตาราง (1 แถวอ่านไม่ชัด)" in got["mid"]
     assert "รวม 3 คน" in got["mid"]
+
+
+# ------------------------------------------------------------------ review fixes (29 Nov 2026)
+# a row whose code and name match no line: "สมชาย ใจดี" (no code) on the line, "SB-FR001 นายสมชาย ใจดีย์" in the table
+LOOSE = page("advance", title=TITLE, written_total=6000,
+             lines=[line("2026-11-08", "สมชาย ใจดี", 3000, "1500"), line("2026-11-08", "นาย 2 ทดสอบ SB-FR002", 3000, "1500")],
+             advance_rows=[arow("SB-FR001", "3000", name="นายสมชาย ใจดีย์"), arow("SB-FR002", "3000")])
+
+
+def loose_reads():
+    rs = reads()
+    rs[4] = {**json.loads(json.dumps(LOOSE)), "n": 5}
+    return rs
+
+
+def loose_pv(edits=None):
+    return inbox_ai.from_pages(loose_reads(), "กลางเดือน.pdf", {}, line_edits=edits)
+
+
+def test_a_row_no_line_is_never_books_the_person_twice(off_db):
+    p = {**LOOSE, "n": 5}
+    assert pw.pair_rows(p) == ([None, 1], [0])
+    # a ส่วนกลาง fix, a code fix or ถูกแล้ว on that row: the lines stay as read (6,000), the person once
+    for fix in ({"common": 350}, {"code": "SB-FR009"}, {"ok": True}):
+        out = pw.edit_page(p, {"edits": {"0": fix}})
+        assert [ln["amount"] for ln in out["lines"]] == [3000, 3000], fix
+        assert len(pw.page_lines(out)) == 2 and "rows_fixed" not in out
+        assert adv_line(loose_pv({"edits": {}, "added": [], "rows": {"5": {"edits": {"0": fix}}}}))["amount"] == 6000
+    assert {r["code"]: r["common"] for r in pw.page_rows(pw.edit_page(p, {"edits": {"0": {"common": 350}}}))}["SB-FR001"] == 350
+    # the loose line is shown under the table and taken away; the row's ยอดเบิก fixed books it: once, with its code
+    pv = loose_pv()
+    assert pv["advance_pairs"]["5"] == {"line": [None, 3000], "rest": 3000, "rest_lines": [{"i": 0, "text": "สมชาย ใจดี", "amount": 3000}]}
+    fix = {"5": {"edits": {"0": {"amount": 3000}}, "added": [], "drop": [0]}}
+    out = pw.edit_page(p, fix["5"])
+    assert {ln["code"]: ln["amount"] for ln in pw.page_lines(out)} == {"SB-FR001": 3000, "SB-FR002": 3000}
+    booked = loose_pv({"edits": {}, "added": [], "rows": fix})
+    assert adv_line(booked)["amount"] == 6000 and check(booked, 5)["status"] == "ok"
+    # the amount fixed and the loose line kept: both are booked, and the page's written-total check says so
+    both = loose_pv({"edits": {}, "added": [], "rows": {"5": {"edits": {"0": {"amount": 3000}}}}})
+    assert adv_line(both)["amount"] == 9000 and check(both, 5)["status"] == "mismatch"
+
+
+@pytest.mark.parametrize("drop, says", [([1], "ไม่พบบรรทัดที่จะลบ"), ([7], "ไม่พบบรรทัดที่จะลบ"), ([True], "ไม่พบบรรทัดที่จะลบ"),
+                                         (["0"], "ไม่พบบรรทัดที่จะลบ"), ("0", "ข้อมูลที่แก้ในตารางรายคนไม่ถูกต้อง")])
+def test_only_a_line_no_row_is_can_be_dropped(off_db, drop, says):
+    with pytest.raises(ValueError, match=says):
+        inbox_ai.clean_line_edits(loose_pv(), {"rows": {"5": {"drop": drop}}}, VEH)
+
+
+def test_a_dropped_line_is_checked_and_kept_in_order(off_db):
+    got = inbox_ai.clean_line_edits(loose_pv(), {"rows": {"5": {"drop": [0, 0]}}}, VEH)
+    assert got["rows"] == {"5": {"edits": {}, "added": [], "drop": [0]}}
+    end = {**loose_pv(), "half": "end"}
+    with pytest.raises(ValueError, match="ฉบับเซ็นรับ"):
+        inbox_ai.clean_line_edits(end, {"rows": {"5": {"drop": [0]}}}, VEH)
+
+
+def test_the_lists_one_line_is_fixed_in_the_table_never_on_the_line(off_db):
+    pv = pv_of()
+    for e in ({"amount": 5000}, {"delete": True}):
+        with pytest.raises(ValueError, match="แก้ที่ตารางรายคน"):
+            inbox_ai.clean_line_edits(pv, {"edits": {"p5:l1": e}}, VEH)
+    assert inbox_ai.clean_line_edits(pv, {"edits": {"p5:l1": {"text": "เบิกกลางเดือน ช่าง"}}}, VEH)["edits"] == {"p5:l1": {"text": "เบิกกลางเดือน ช่าง"}}
+    # page 6 has no table (read before it): its line is fixed as before
+    assert inbox_ai.clean_line_edits(pv, {"edits": {"p6:l1": {"amount": 1500}}}, VEH)["edits"] == {"p6:l1": {"amount": 1500.0}}
+    # an amount fix saved before this rule: not used, with a flag; sent back unchanged it goes quietly
+    old = pv_of({"edits": {"p5:l1": {"amount": 5000, "text": "เบิก"}}, "added": []})
+    assert adv_line(old)["amount"] == 9000 and adv_line(old)["text"] == "เบิก"
+    assert any("หน้า 5: ยอดของบรรทัดเบิกกลางเดือนแก้ที่ตารางรายคนแทน" in f for f in old["flags"])
+    assert inbox_ai.clean_line_edits(old, {"edits": {"p5:l1": {"amount": "5,000", "text": "เบิก"}}}, VEH)["edits"] == {"p5:l1": {"text": "เบิก"}}
+    # the pay page reads the same table: its advances are the booked sum
+    assert sum(ln["amount"] for ln in pw.page_lines(next(r for r in old["ai_pages"] if r["n"] == 5))) == 9000
+
+
+def test_a_table_fixed_to_nobody_books_nothing_never_the_written_total(off_db):
+    gone = {"5": {"edits": {str(i): {"delete": True} for i in range(3)}, "added": []}}
+    pv = pv_of({"edits": {}, "added": [], "rows": gone})
+    assert not any(r.get("key") == "p5:l1" for r in pv["batches"][0]["rows"])
+    assert any("หน้า 5 (เบิกกลางเดือน): ตารางรายคนที่แก้แล้วไม่มียอดเบิก — ไม่ลงบัญชี" in f for f in pv["flags"])
+    assert pw.page_lines(pw.edit_page({**ADV, "n": 5}, gone["5"])) == []
+    blank = {"5": {"edits": {str(i): {"amount": ""} for i in range(3)}}}
+    assert not any(r.get("key") == "p5:l1" for r in pv_of({"edits": {}, "added": [], "rows": blank})["batches"][0]["rows"])
+    # a page whose lines the AI could not read at all still books its written total: a fix that changes no line keeps that
+    rs = reads()
+    rs[4] = {**rs[4], "lines": []}
+    kept = inbox_ai.from_pages(rs, "x.pdf", {}, line_edits={"edits": {}, "added": [], "rows": {"5": {"edits": {"1": {"ok": True}}}}})
+    assert adv_line(kept)["amount"] == 9000
+
+
+def test_who_may_not_see_pay_cannot_change_the_table(db, engine):
+    scan_row(db, edits={"edits": {}, "added": [], "rows": FIX})
+    got = inbox.get(FID, see_pay=False)
+    assert got["can_edit_rows"] is False and inbox.get(FID)["can_edit_rows"] is True
+    v0 = got["edits_version"]
+    with pytest.raises(inbox.Forbidden, match="เฉพาะผู้มีเมนูรายชื่อพนักงาน"):
+        inbox.save_edits(FID, {"edits": {}, "added": [], "rows": {"5": {"edits": {"0": {"common": 999}}}}}, see_pay=False, version=v0)
+    with pytest.raises(inbox.Forbidden):
+        inbox.save_edits(FID, {"edits": {}, "added": [], "rows": {}}, see_pay=False, version=v0)
+    assert db.rows[FID]["preview"]["line_edits"]["rows"] == FIX
+    # the line fixes are saved; the table sent back unchanged, or not at all, stays as it was
+    out = inbox.save_edits(FID, {"edits": {"p2:l1": {"amount": 450}}, "added": [], "rows": FIX}, see_pay=False, version=v0)
+    assert db.rows[FID]["preview"]["line_edits"] == {"edits": {"p2:l1": {"amount": 450.0}}, "added": [], "rows": FIX}
+    inbox.save_edits(FID, {"edits": {}, "added": []}, see_pay=False, version=out["edits_version"])
+    assert db.rows[FID]["preview"]["line_edits"] == {"edits": {}, "added": [], "rows": FIX} and adv_line(db.rows[FID]["preview"])["amount"] == 9000
+
+
+@pytest.fixture
+def loose_data(off_db):
+    if NODE is None:
+        pytest.skip("Node is not installed")
+    return {"preview": json.loads(json.dumps(loose_pv())), "accounts": inbox_ai.chart_list(), "vehicles": VEH}
+
+
+def test_the_page_books_a_row_no_line_is_only_when_asked_and_drops_the_loose_line(loose_data, tmp_path):
+    got = run("""(() => {
+      const saved = ickCopy(DATA.preview.line_edits);
+      ick.f = DATA; ick.saved = saved; ick.draft = ickCopy(saved); ick.editable = true;
+      const pg = ickPages(DATA).find((p) => p.n === 5);
+      const view = () => ickAdvView(pg, ick.draft);
+      const out = { start: ickAdvSum(pg, ick.draft.rows[5]), unpaired: view().map((v) => v.unpaired) };
+      ickAdvSet(5, view()[0], "common", "350");
+      ickAdvFlag(5, view()[0], "ok", true);
+      out.ok = ickAdvSum(pg, ick.draft.rows[5]);                  // the person still once: his loose line
+      out.loose = ickAdvLoose(pg, ick.draft).map((x) => [x.key, x.state, x.amount]);
+      ickAdvBook(5, view()[0], true);
+      out.booked = [view()[0].booked, [...view()[0].chg].sort(), ickAdvSum(pg, ick.draft.rows[5])];
+      ickAdvSet(5, view()[0], "amount", "3000");                  // typed back to what was read: still booked
+      out.kept = view()[0].booked;
+      ickAdvDrop(5, 0, true);
+      out.dropped = [ickAdvSum(pg, ick.draft.rows[5]), ickAdvLoose(pg, ick.draft).map((x) => [x.state, x.chg])];
+      out.payload = ickPayload(ick.draft);
+      out.n = ickCount(saved, ick.draft);
+      out.line = ickLinesOf(pg, ick.draft).find((l) => l.key === "p5:l1").v.amount;
+      ickAdvDrop(5, 0, false); ickAdvBook(5, view()[0], false);
+      out.back = [ickAdvSum(pg, ick.draft.rows[5]), JSON.stringify(ick.draft.rows[5].drop || null)];
+      return out;
+    })()""", loose_data, tmp_path)
+    assert got["start"] == 6000 and got["unpaired"] == [True, False]
+    assert got["ok"] == 6000 and got["loose"] == [["-0", "loose", 3000]]
+    assert got["booked"] == [True, ["amount", "common"], 9000] and got["kept"] is True
+    assert got["dropped"] == [6000, [["deleted", True]]]
+    assert got["payload"] == {"edits": {}, "added": [], "rows": {"5": {"edits": {"0": {"common": "350", "ok": True, "amount": "3000"}}, "added": [], "drop": [0]}}}
+    assert got["n"] == 2 and got["line"] == 6000
+    assert got["back"] == [6000, "null"]
+
+
+def test_the_lists_line_shows_the_table_not_an_old_amount_fix_and_who_cannot_see_pay_reads_only(node_data, tmp_path):
+    test = """(() => {
+      globalThis.el = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter((k) => k), classList: { toggle() {} },
+        addEventListener() {}, set textContent(t) { this.attrs.text = t; } });
+      globalThis.fill = (n, ...kids) => { n.kids = kids.filter((k) => k); };
+      globalThis.fmtMoney = (n) => String(n);
+      const words = (n) => [n.attrs.text || ""].concat(...(n.kids || []).map(words));
+      const le = { ...DATA.preview.line_edits, edits: { "p5:l1": { amount: 5000 } } };
+      ick.f = { ...DATA, can_edit_rows: false }; ick.saved = ickCopy(le); ick.draft = ickCopy(le); ick.editable = true;
+      const pg = ickPages(ick.f).find((p) => p.n === 5);
+      const l = ickLinesOf(pg, ick.draft).find((x) => x.key === "p5:l1");
+      const card = words(ickAdvEl(pg)).join(" | ");
+      return { amount: l.v.amount, chg: [...l.chg], ed: ickRowsEd(), card, ed2: (ick.f.can_edit_rows = true, ickRowsEd()) };
+    })()"""
+    got = run(test, node_data, tmp_path)
+    assert got["amount"] == 9000 and got["chg"] == [] and got["ed"] is False and got["ed2"] is True
+    assert "แก้ตารางนี้ได้เฉพาะผู้มีเมนูรายชื่อพนักงาน" in got["card"] and "+ เพิ่มคน" not in got["card"]

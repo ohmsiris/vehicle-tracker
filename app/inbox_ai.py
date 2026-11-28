@@ -882,6 +882,35 @@ _ROW_CODE_RE = re.compile(r"^SB-[A-Z]{2}\d{3}$")
 _ROW_ID_RE = re.compile(r"^r[0-9a-z]{1,12}$")
 
 
+def table_pages(reads) -> set:
+    """The advance pages read with their per-person table (advance_rows): their one booked 1500 line is what the table adds up to
+    (app/payroll.py edit_page), so its amount is fixed in the table, never on the line (review, 29 Nov 2026)."""
+    return {r.get("n") for r in reads or [] if isinstance(r, dict) and r.get("page_kind") == "advance" and "advance_rows" in r}
+
+
+def _table_line(key: str, tables: set) -> bool:
+    m = _KEY_RE.match(str(key or ""))
+    return bool(m) and int(m.group(1)) in tables
+
+
+def table_line_edits(line_edits: Optional[dict], reads: list[dict]) -> tuple[Optional[dict], list[str]]:
+    """The line fixes the books may use: an amount fix or a delete of an advance page's 1500 line whose page has a per-person table is
+    left out with a flag (review, 29 Nov 2026: the books would say one sum and the pay page's advances, read from the table, another).
+    Its date and text fixes stay. Pure."""
+    le = line_edits if isinstance(line_edits, dict) else None
+    tables = table_pages(reads)
+    if not le or not tables or not isinstance(le.get("edits"), dict):
+        return le, []
+    edits, flags = {}, []
+    for k, e in le["edits"].items():
+        if isinstance(e, dict) and _table_line(k, tables) and ("amount" in e or e.get("delete")):
+            flags.append(f"หน้า {_KEY_RE.match(k).group(1)}: ยอดของบรรทัดเบิกกลางเดือนแก้ที่ตารางรายคนแทน — การแก้ยอด / ลบบรรทัดนี้ที่บันทึกไว้ไม่ได้ใช้")
+            e = {f: v for f, v in e.items() if f not in ("amount", "delete")}
+        if e:
+            edits[k] = e
+    return {**le, "edits": edits}, flags
+
+
 def has_edits(le) -> bool:
     """Does preview["line_edits"] hold any fix (of a line, an added line, or a per-person row)?"""
     return isinstance(le, dict) and bool(le.get("edits") or le.get("added") or le.get("rows"))
@@ -1052,7 +1081,7 @@ def clean_line_edits(preview: dict, line_edits, vehicles: list[dict]) -> dict:
     if not isinstance(edits_in, dict) or not isinstance(added_in, list):
         raise ValueError("ข้อมูลที่แก้ไม่ถูกต้อง")
     rows = clean_row_edits(preview, line_edits.get("rows"))
-    n_rows = sum(len(p["edits"]) + len(p["added"]) for p in rows.values())
+    n_rows = sum(len(p["edits"]) + len(p["added"]) + len(p.get("drop") or []) for p in rows.values())
     if len(edits_in) + len(added_in) + n_rows > MAX_EDITS:
         raise ValueError(f"แก้ได้ครั้งละไม่เกิน {MAX_EDITS} บรรทัด")
     batch = preview.get("acc_docs_batch") or {}
@@ -1066,6 +1095,8 @@ def clean_line_edits(preview: dict, line_edits, vehicles: list[dict]) -> dict:
     if not known and (edits_in or added_in):
         raise ValueError("ไฟล์นี้อ่านไว้ก่อนมีหน้าแก้รายการ — กด อ่านใหม่ (ไม่เสียค่า AI) แล้วแก้ได้")
     money_pages = {r.get("n") for r in preview.get("ai_pages") or [] if r.get("page_kind") in ("expense", "fuel")}
+    tables = table_pages(preview.get("ai_pages"))
+    stored = ((preview.get("line_edits") or {}).get("edits") or {}) if isinstance(preview.get("line_edits"), dict) else {}
     vids = {v.get("id") for v in vehicles}
     span = f"{lo.strftime('%d/%m/%Y')} – {hi.strftime('%d/%m/%Y')}"
 
@@ -1143,9 +1174,26 @@ def clean_line_edits(preview: dict, line_edits, vehicles: list[dict]) -> dict:
         if key not in known or not _KEY_RE.match(key):
             raise ValueError(f"ไม่พบบรรทัด {key} ในไฟล์นี้ — เปิดหน้าตรวจใหม่")
         ch = fields(e, f"หน้า {_KEY_RE.match(key).group(1)} บรรทัด {_KEY_RE.match(key).group(2)}")
+        if _table_line(key, tables):                   # an advance list's one line: its amount is the per-person table's sum (review)
+            was = stored.get(key) if isinstance(stored.get(key), dict) else {}
+            for f in ("amount", "delete"):
+                if f not in ch:
+                    continue
+                if f == "amount" and _amount_eq(was.get("amount"), ch["amount"]) or f == "delete" and was.get("delete"):
+                    ch.pop(f)                          # saved before this rule: sent back unchanged, it goes (the books use the table)
+                else:
+                    raise ValueError(f"หน้า {_KEY_RE.match(key).group(1)}: ยอดเบิกกลางเดือนของหน้านี้แก้ที่ตารางรายคน (ยอดเบิกของแต่ละคน) — "
+                                     "แก้ยอดหรือลบบรรทัดรวมนี้ไม่ได้")
         if ch:
             edits[key] = ch
     return {"edits": edits, "added": added, **({"rows": rows} if rows else {})}
+
+
+def _amount_eq(a, b) -> bool:
+    try:
+        return a is not None and abs(float(a) - float(b)) < 0.005
+    except (TypeError, ValueError):
+        return False
 
 
 def _row_num(v, where: str, field: str):
@@ -1195,7 +1243,9 @@ def clean_row_edits(preview: dict, rows) -> dict:
     """The owner's fixes of the per-person tables of the advance pages (line_edits["rows"]; owner, 29 Nov 2026: "and how do I edit
     the numbers"), checked strictly (ValueError in Thai): only advance pages read with their table (advance_rows), a row number the
     read has, ยอดเบิก / ส่วนกลาง / ความผิด / อุปกรณ์ a number from 0 to under 1,000,000 or blank, a staff code SB-XX000 or blank, an
-    added row with a code or a name. Returns {"<page>": {"edits": {"<row index>": {...}}, "added": [...]}} -- pages with a fix only."""
+    added row with a code or a name, a line to drop one of the page's booked lines no row is (app/payroll.py pair_rows; review,
+    29 Nov 2026). Returns {"<page>": {"edits": {"<row index>": {...}}, "added": [...], "drop": [...]?}} -- pages with a fix only."""
+    from app import payroll
     if rows in (None, {}):
         return {}
     if not isinstance(rows, dict):
@@ -1209,10 +1259,10 @@ def clean_row_edits(preview: dict, rows) -> dict:
             raise ValueError(f"แก้ตารางรายคนได้เฉพาะหน้าใบเบิกกลางเดือน (หน้า {k})")
         if "advance_rows" not in page:
             raise ValueError(f"หน้า {n} อ่านก่อนมีตารางรายคน — กด อ่านหน้านี้ใหม่ ก่อนแก้")
-        if not isinstance(pe, dict) or set(pe) - {"edits", "added"}:
+        if not isinstance(pe, dict) or set(pe) - {"edits", "added", "drop"}:
             raise ValueError(f"หน้า {n}: ข้อมูลที่แก้ในตารางรายคนไม่ถูกต้อง")
-        e_in, a_in = pe.get("edits") or {}, pe.get("added") or []
-        if not isinstance(e_in, dict) or not isinstance(a_in, list):
+        e_in, a_in, d_in = pe.get("edits") or {}, pe.get("added") or [], pe.get("drop") or []
+        if not isinstance(e_in, dict) or not isinstance(a_in, list) or not isinstance(d_in, list):
             raise ValueError(f"หน้า {n}: ข้อมูลที่แก้ในตารางรายคนไม่ถูกต้อง")
         have = len(page.get("advance_rows") or [])
         edits: dict = {}
@@ -1233,15 +1283,24 @@ def clean_row_edits(preview: dict, rows) -> dict:
                 raise ValueError(f"หน้า {n} แถวที่เพิ่ม: ใส่รหัสพนักงานหรือชื่อ")
             added.append({"id": aid, "code": ch.get("code", ""), "name": ch.get("name", ""),
                           **{f: ch.get(f, "") for f in ("amount", "common", "fault", "other")}})
-        if edits or added:
-            out[str(n)] = {"edits": edits, "added": added}
+        if d_in and preview.get("half") == "end":
+            raise ValueError(f"หน้า {n} เป็นฉบับเซ็นรับ — ยอดเบิกใช้จากไฟล์กลางเดือน ลบบรรทัดที่นี่ไม่ได้")
+        loose = set(payroll.pair_rows(page)[1])
+        drop = set()
+        for j in d_in:
+            if isinstance(j, bool) or not isinstance(j, int) or j not in loose:
+                raise ValueError(f"หน้า {n}: ไม่พบบรรทัดที่จะลบ (บรรทัดที่ไม่ตรงกับแถวใด) — เปิดหน้าตรวจใหม่")
+            drop.add(j)
+        if edits or added or drop:
+            out[str(n)] = {"edits": edits, "added": added, **({"drop": sorted(drop)} if drop else {})}
     return out
 
 
 def advance_pairs(reads: list[dict]) -> dict:
     """For the check page's live total (static/inboxcheck.js ickAdvSum): per advance page with a per-person table, the booked line
-    amount each row stands for (app/payroll.py pair_rows; None = no line) and the sum of the lines no row is --
-    {"<page>": {"line": [...], "rest": x}}. Of the page as read (the fixes are laid over it on the page, as edit_page does)."""
+    amount each row stands for (app/payroll.py pair_rows; None = no line), the sum of the lines no row is, and those lines themselves
+    (shown under the table, where they can be taken away -- review, 29 Nov 2026) -- {"<page>": {"line": [...], "rest": x, "rest_lines":
+    [{"i": <line index>, "text", "amount"}]}}. Of the page as read (the fixes are laid over it on the page, as edit_page does)."""
     from app import payroll
     out = {}
     for r in reads:
@@ -1250,7 +1309,9 @@ def advance_pairs(reads: list[dict]) -> dict:
         pairs, rest = payroll.pair_rows(r)
         lines = r.get("lines") or []
         out[str(r.get("n"))] = {"line": [round(payroll._amount(lines[j].get("amount")), 2) if j is not None else None for j in pairs],
-                                "rest": round(sum(payroll._amount(lines[j].get("amount")) for j in rest), 2)}
+                                "rest": round(sum(payroll._amount(lines[j].get("amount")) for j in rest), 2),
+                                "rest_lines": [{"i": j, "text": str(lines[j].get("text") or ""), "amount": round(payroll._amount(lines[j].get("amount")), 2)}
+                                               for j in rest]}
     return out
 
 
@@ -1371,8 +1432,9 @@ def _expense_preview(reads: list[dict], name: str, choices: dict, vehicles: list
     pv["flags"] += flags
     # the owner's fixes (ตรวจเอกสารก่อนลงบัญชี): after the month / half vote (a fixed date never moves the file), before the cash-fuel
     # match and the page totals (a fixed fuel amount is matched again; the totals add up what is left)
-    deleted, eflags = apply_line_edits(batch, line_edits, vehicles, month, half, reads, feed)
-    pv["flags"] += eflags
+    book_edits, tflags = table_line_edits(line_edits, reads)
+    deleted, eflags = apply_line_edits(batch, book_edits, vehicles, month, half, reads, feed)
+    pv["flags"] += tflags + eflags
     done = _cash_fuel_lines(month, branch, half)
     skipped = skip_cash_fuel(batch, done, vehicles) if done else []
     if skipped:
@@ -1548,6 +1610,10 @@ def _batch(reads: list[dict], name: str, key: str, month: str, branch: str, half
             amounts = [float(ln["amount"]) for ln in r.get("lines") or [] if ln.get("amount") and float(ln["amount"]) > 0]
             amount = round(sum(amounts), 2)
             if amount <= 0:
+                if r.get("rows_fixed"):           # the owner's table left nobody with an advance (review, 29 Nov 2026): never the written total
+                    memo(r, "other", (r.get("title") or "เบิกกลางเดือน"), "ตารางรายคนที่แก้แล้วไม่มียอดเบิก — ไม่ลงบัญชี")
+                    flags.append(f"หน้า {n} (เบิกกลางเดือน): ตารางรายคนที่แก้แล้วไม่มียอดเบิก — ไม่ลงบัญชี")
+                    continue
                 if not r.get("written_total"):
                     memo(r, "other")
                     flags.append(f"หน้า {n} (เบิกกลางเดือน): อ่านยอดไม่ได้ — ไม่ลงบัญชี")
