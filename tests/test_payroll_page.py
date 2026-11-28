@@ -93,7 +93,7 @@ def test_the_servers_refs_round_trip_to_links(tmp_path):
 def test_the_pay_page_hash_and_the_way_back(tmp_path):
     got = run("""(() => {
       const before = pwBackMarker();
-      pwRemember("2026-11", { id: DATA.e, code: "SB-FR001", name: "คน ทดสอบ", nickname: "" });
+      pwRemember("2026-11", { id: DATA.e, code: "SB-FR001", name: "คน ทดสอบ", nickname: "" }, `#loans/emp=${DATA.e}`);
       const back = pwBackMarker();
       const later = pwBackMarker(Date.now() + 9 * 3600e3);
       pwForget();
@@ -104,7 +104,7 @@ def test_the_pay_page_hash_and_the_way_back(tmp_path):
     assert got["parse"] == [{"month": "", "emp": None}, {"month": "2026-11", "emp": None}, {"month": "2026-11", "emp": EMP},
                             {"month": "", "emp": None}, {"month": "2026-11", "emp": None}]
     assert got["hash"] == [f"#payroll/2026-11/emp={EMP}", "#payroll/2026-11", "#payroll", "#payroll/2026-11"]
-    assert got["before"] is None and got["back"] == {"month": "2026-11", "emp": EMP, "who": "SB-FR001 คน ทดสอบ"}
+    assert got["before"] is None and got["back"] == {"month": "2026-11", "emp": EMP, "who": "SB-FR001 คน ทดสอบ", "views": ["loans", "loan"]}
     assert got["later"] is None and got["gone"] is None and got["say"] == "พ.ย. 2026"
 
 
@@ -146,3 +146,59 @@ def test_the_router_and_the_bar_are_wired():
     assert "pwBackBar(name)" in (STATIC / "app.js").read_text(encoding="utf-8")
     js = (STATIC / "payroll.js").read_text(encoding="utf-8")
     assert "/api/payroll/rules/" in js and "bank" not in js
+
+
+def test_the_way_back_shows_only_on_the_page_the_link_opened(tmp_path):
+    # review, 29 Nov 2026: after one link the bar must not follow him to #roster or #machinery from the sidebar
+    got = run("""(() => {
+      const bar = { hidden: true, kids: 0, replaceChildren() { this.kids = 0; } };
+      globalThis.document = { getElementById: (id) => (id === "pwBack" ? bar : null) };
+      globalThis.el = () => ({});
+      globalThis.fill = (b, ...k) => { b.kids = k.filter(Boolean).length; };
+      const p = { id: DATA.e, code: "SB-FR001", name: "คน ทดสอบ", nickname: "" };
+      const views = [`#employee=${DATA.e}/rates`, `#driver-days/${DATA.e}/2026-11`, `#attendance/2026-11/emp=${DATA.e}`, `#accounts-in/check=${DATA.f}/page=9`,
+                     `#loan=${DATA.e}`, `#loans/emp=${DATA.e}`, `#document=${DATA.e}`, `#documents/emp=${DATA.e}`, "#cash-fuel/2026-11", "#accounts-in",
+                     "#roster", "#loansx", ""].map(pwBackViews);
+      const seen = [];
+      pwRemember("2026-11", p, `#loans/emp=${DATA.e}`);
+      for (const v of ["loans", "loan", "loans", "payroll", "loans", "roster", "loans"]) { pwBackBar(v); seen.push([v, !bar.hidden]); }
+      pwRemember("2026-11", p, "#roster");                // not a page of the links: nothing remembered
+      const none = pwBackMarker();
+      sessionStorage.setItem("vt_pw_back", JSON.stringify({ month: "2026-11", emp: DATA.e, who: "x", at: Date.now() }));   // an older marker, no views
+      const old = pwBackMarker();
+      return { views, seen, none, old };
+    })()""", {"e": EMP, "f": FILE}, tmp_path)
+    assert got["views"] == [["employee", "employees"], ["driverDays"], ["attendance"], ["inboxCheck", "accounts"], ["loans", "loan"], ["loans", "loan"],
+                            ["documents", "document"], ["documents", "document"], ["cashFuel"], ["inboxCheck", "accounts"], [], [], []]
+    # shown on the loan list and a loan under it, hidden on the pay page; another page forgets it for good
+    assert got["seen"] == [["loans", True], ["loan", True], ["loans", True], ["payroll", False], ["loans", True], ["roster", False], ["loans", False]]
+    assert got["none"] is None and got["old"] is None
+
+
+def test_attendance_puts_its_filters_back_after_one_person(tmp_path):
+    got = run("""(() => {
+      const box = {};
+      for (const id of ["atShow", "atKind", "atBranch", "atPosition", "atSearch", "atError", "atMonth", "atKpis", "atList", "atSuggest", "atHistory"])
+        box[id] = { value: "", hidden: false, replaceChildren() {} };
+      Object.assign(box.atShow, { value: "open" }); Object.assign(box.atKind, { value: "short" }); Object.assign(box.atSearch, { value: "สม" });
+      globalThis.$ = (id) => box[id];
+      globalThis.showView = () => {}; globalThis.showErr = () => {};
+      atLoad = () => new Promise(() => {});            // the part before the first await is what is tested
+      const vals = () => ["atShow", "atKind", "atBranch", "atPosition", "atSearch"].map((id) => box[id].value);
+      at.open.add(DATA.f);                              // a card he had opened himself stays open
+      openAttendance(`2026-11/emp=${DATA.e}`);
+      const solo = [vals(), at.open.has(DATA.e)];
+      openAttendance(`2026-11/emp=${DATA.f}`);          // a second person straight after: still put back to the first filters
+      openAttendance("2026-11");
+      const plain = [vals(), at.open.has(DATA.e), at.open.has(DATA.f), at.solo];
+      openAttendance("2026-11");                        // and a plain visit with nothing to put back changes nothing
+      return { solo, plain, again: vals() };
+    })()""", {"e": EMP, "f": FILE}, tmp_path)
+    assert got["solo"] == [["all", "", "", "", ""], True]
+    assert got["plain"] == [["open", "short", "", "", "สม"], False, True, None]
+    assert got["again"] == ["open", "short", "", "", "สม"]
+
+
+def test_a_cancelled_leave_keeps_the_page_in_the_hash(tmp_path):
+    got = run("[ickHash(DATA.f, 9), ickHash(DATA.f, null), ickHash(DATA.f, 'all'), ickHash(DATA.f, 0)]", {"f": FILE}, tmp_path)
+    assert got == [f"#accounts-in/check={FILE}/page=9"] + [f"#accounts-in/check={FILE}"] * 3

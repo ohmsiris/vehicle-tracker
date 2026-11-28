@@ -147,17 +147,29 @@ function pwRuleChanges(rule, v) {
   return out;
 }
 
-// the way back, remembered for this tab only: { month, emp, who, at }
-function pwRemember(month, p) {
-  try { sessionStorage.setItem(PW_BACK_KEY, JSON.stringify({ month, emp: p && p.id, who: p ? pwWho(p) : "", at: Date.now() })); } catch (e) { /* storage blocked: no bar */ }
+// the views a link of this page opens, and the pages under them (a loan from the loan list, the inbox from a check page): the bar shows
+// on these only; any other page reached later (the sidebar) forgets the way back (review, 29 Nov 2026)
+const PW_BACK_VIEWS = [[/^#employee=/, ["employee", "employees"]], [/^#driver-days(\/|$)/, ["driverDays"]], [/^#attendance(\/|$)/, ["attendance"]],
+  [/^#accounts-in(\/|$)/, ["inboxCheck", "accounts"]], [/^#loans?(=|\/|$)/, ["loans", "loan"]], [/^#documents?(=|\/|$)/, ["documents", "document"]],
+  [/^#cash-fuel(\/|$)/, ["cashFuel"]]];
+const pwBackViews = (href) => { const hit = PW_BACK_VIEWS.find(([re]) => re.test(String(href || ""))); return hit ? hit[1].slice() : []; };
+
+// the way back, remembered for this tab only: { month, emp, who, views, at }
+function pwRemember(month, p, href) {
+  const views = pwBackViews(href);
+  if (!views.length) return;
+  try { sessionStorage.setItem(PW_BACK_KEY, JSON.stringify({ month, emp: p && p.id, who: p ? pwWho(p) : "", views, at: Date.now() })); } catch (e) { /* storage blocked: no bar */ }
 }
 function pwForget() { try { sessionStorage.removeItem(PW_BACK_KEY); } catch (e) { /* blocked */ } }
+const PW_VIEW_OK = /^[A-Za-z]{1,40}$/;
 function pwBackMarker(now) {
   let b = null;
   try { b = JSON.parse(sessionStorage.getItem(PW_BACK_KEY) || "null"); } catch (e) { return null; }
   if (!b || typeof b !== "object" || !PW_MONTH_RE.test(b.month || "") || !(Number(b.at) > 0)) return null;
   if ((now || Date.now()) - Number(b.at) > PW_BACK_HOURS * 3600e3) return null;
-  return { month: b.month, emp: pwIsId(b.emp) ? b.emp : null, who: typeof b.who === "string" ? b.who.slice(0, 80) : "" };
+  const views = Array.isArray(b.views) ? b.views.filter((v) => typeof v === "string" && PW_VIEW_OK.test(v)) : [];
+  if (!views.length) return null;
+  return { month: b.month, emp: pwIsId(b.emp) ? b.emp : null, who: typeof b.who === "string" ? b.who.slice(0, 80) : "", views };
 }
 const pwMonthShort = (key) => { const [y, m] = String(key).split("-").map(Number); return `${TH_MONTHS[m - 1]} ${y}`; };
 
@@ -165,7 +177,8 @@ const pwMonthShort = (key) => { const [y, m] = String(key).split("-").map(Number
 function pwBackBar(view) {
   const bar = typeof document !== "undefined" ? document.getElementById("pwBack") : null;
   if (!bar) return;
-  const back = view === "payroll" ? null : pwBackMarker();
+  let back = view === "payroll" ? null : pwBackMarker();
+  if (back && !back.views.includes(view)) { pwForget(); back = null; }   // a page the link did not open: the way back is over
   bar.hidden = !back;
   if (!back) { bar.replaceChildren(); return; }
   fill(bar, el("a", { class: "pw-back-a", href: pwBackHash(back.month, back.emp), text: `← กลับไปคำนวณเงินเดือน ${pwMonthShort(back.month)}` }),
@@ -607,7 +620,7 @@ function pwGoEl(p, key) {
   return el("div", { class: "pw-go small" }, el("span", { class: "muted", text: "แก้ที่ " }),
     ...links.flatMap((g, i) => [i ? el("span", { class: "muted", "aria-hidden": "true", text: " · " }) : null, g.edit
       ? el("button", { class: "pw-inline pw-go-a", type: "button", text: `${g.label} →`, onclick: () => pwOpenRule(p, key) })
-      : el("a", { class: "pw-go-a", href: g.href, text: `${g.label} →`, onclick: () => pwRemember(month, p) })]));
+      : el("a", { class: "pw-go-a", href: g.href, text: `${g.label} →`, onclick: () => pwRemember(month, p, g.href) })]));
 }
 
 // which box of the pay rule form a cell's "แก้ในหน้านี้" puts the cursor in

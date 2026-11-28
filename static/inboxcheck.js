@@ -238,11 +238,14 @@ function ickParseHash(h) {
   return m ? { id: m[1], page: m[2] ? Number(m[2]) : null } : null;
 }
 
+// the hash of a list on one page (page 1..999; "all" or none = the list's own hash). Pure.
+const ickHash = (id, page) => `#accounts-in/check=${id}${Number.isInteger(page) && page > 0 && page < 1000 ? `/page=${page}` : ""}`;
+
 // fleet.js route() and app.js showView(): leaving with fixes not saved asks first (the sidebar, its hashless items, the browser's Back)
 function ickMayLeave(h) {
   if (!ick.id || $("inboxCheckView").hidden || (ickParseHash(h) || {}).id === ick.id || !ickDirty()) return true;
   if (confirm(ICK_LEAVE)) { ick.draft = ickCopy(ick.saved); return true; }
-  history.replaceState(null, "", `#accounts-in/check=${ick.id}`);
+  history.replaceState(null, "", ickHash(ick.id, ick.page));     // the page shown kept in the hash, so a reload opens it (review, 29 Nov 2026)
   return false;
 }
 

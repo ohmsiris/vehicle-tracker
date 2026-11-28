@@ -8,7 +8,7 @@
 // Data: /api/attendance (same PIN lock as พนักงาน). Loaded BEFORE app.js: nothing runs at load time; helpers from app.js / board.js / dashboard.js /
 // employees.js are used at call time.
 
-const at = { data: null, open: new Set(), allDays: new Set(), pending: {} };
+const at = { data: null, open: new Set(), allDays: new Set(), pending: {}, solo: null };   // solo: the filters before a one-person visit (#attendance/<month>/emp=<id>)
 
 const AT_DECISIONS = [["approve", "อนุมัติ"], ["half", "ครึ่งวัน"], ["full_penalty", "เต็ม + ใบเตือน + หักเงิน"], ["unpaid", "ไม่จ่าย"]];
 const AT_DOW = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
@@ -46,9 +46,15 @@ async function openAttendance(sub = "") {
   showView("attendance");
   showErr("atError", "");
   const want = atParseSub(sub);
+  const ids = ["atShow", "atKind", "atBranch", "atPosition", "atSearch"];
   if (want.emp) {                                 // one person: his card open, every filter off so it shows
-    at.open.add(want.emp);
+    if (!at.solo) at.solo = { was: Object.fromEntries(ids.map((id) => [id, $(id).value])), opened: [] };   // what the page showed before, put back later
+    if (!at.open.has(want.emp)) { at.open.add(want.emp); at.solo.opened.push(want.emp); }
     for (const [id, v] of [["atShow", "all"], ["atKind", ""], ["atBranch", ""], ["atPosition", ""], ["atSearch", ""]]) $(id).value = v;
+  } else if (at.solo) {                           // a plain visit after one person's: his card closed again, the filters as they were (review, 29 Nov 2026)
+    for (const e of at.solo.opened) at.open.delete(e);
+    for (const id of ids) $(id).value = at.solo.was[id];
+    at.solo = null;
   }
   if (!(await atLoad(want.month || $("atMonth").value || ""))) { $("atKpis").replaceChildren(); $("atList").replaceChildren(); $("atSuggest").hidden = true; $("atHistory").hidden = true; return; }
   atFillFilters();
