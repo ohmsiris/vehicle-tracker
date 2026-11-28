@@ -17,10 +17,12 @@ build is pure and unit-tested.
 Keys: source_id "fuel:<station>:<month>:<plate>" -- the scripts and the Drivers sheet booked Bangchak's two stations (NM, ห้วยบง) as ONE
 entry per plate per month. The drop box (app/inbox_r_fuel.py, 24 Nov 2026) reads each station's file on its own, so it passes sub=<station>
 and the key becomes "fuel:bangchak:<month>:<station>:<plate>": dropping one station's file replaces that station only. PT keeps the old
-key (one file has every PT fill).
+key (one file has every PT fill). Since Nov 2026 Kaeng Khoi's trucks fill at a third Bangchak station (แก่งคอย): its file passes
+prefer="แก่งคอย", so a truck number (or a 4-digit plate tail) that both plants have resolves to Kaeng Khoi's truck, and its own payer.
 """
 import re
 from datetime import date
+from typing import Optional
 
 from app.acc_docs import norm_plate
 
@@ -28,13 +30,15 @@ STATIONS = {"bangchak": "บางจาก", "pt": "PT"}
 PAYER = "สระบุรี"                 # the sheet the card fuel is on, and who pays it
 
 
-def find_vehicle(key: str, by: dict, vehicles: list[dict]):
+def find_vehicle(key: str, by: dict, vehicles: list[dict], prefer: Optional[str] = None):
     """A plate as written; "#12" = truck number 12 (a driver row with no plate); a plate the sheet turned into a number ("-1025" for
-    บพ-1025, "6159" for บฉ 6159) matches the one vehicle whose plate ends in those digits."""
+    บพ-1025, "6159" for บฉ 6159) matches the one vehicle whose plate ends in those digits. Truck numbers repeat between branches:
+    prefer = the branch whose truck it is when both have one (the route trucks are Saraburi's unless the station says otherwise, e.g.
+    บางจาก แก่งคอย); a 4-digit tail two trucks share is resolved by prefer only when the caller gave one."""
     key = str(key).strip()
-    if key.startswith("#"):      # truck numbers repeat between branches: the route trucks are Saraburi's
+    if key.startswith("#"):
         hits = [v for v in vehicles if str(v.get("vehicle_number")) == key[1:]]
-        return next((v for v in hits if v.get("branch") == "สระบุรี"), hits[0] if hits else None)
+        return next((v for v in hits if v.get("branch") == (prefer or "สระบุรี")), hits[0] if hits else None)
     v = by.get(norm_plate(key))
     if v:
         return v
@@ -43,19 +47,27 @@ def find_vehicle(key: str, by: dict, vehicles: list[dict]):
         hits = [x for x in vehicles if re.sub(r"\D", "", x.get("plate_number") or "").endswith(digits)]
         if len(hits) == 1:
             return hits[0]
+        mine = [x for x in hits if prefer and x.get("branch") == prefer]
+        if len(mine) == 1:
+            return mine[0]
     return None
 
 
-def build(month: str, station: str, by_plate: dict, vehicles: list[dict], source_note: str = "", payer: str = PAYER, sub: str = "") -> dict:
-    """sub: an extra key segment after the month (the Bangchak station, from the drop box); "" keeps the scripts' keys."""
-    by = {norm_plate(v["plate_number"]): v for v in vehicles if v.get("plate_number")}
+def build(month: str, station: str, by_plate: dict, vehicles: list[dict], source_note: str = "", payer: str = PAYER, sub: str = "",
+          prefer: Optional[str] = None) -> dict:
+    """sub: an extra key segment after the month (the Bangchak station, from the drop box); "" keeps the scripts' keys.
+    prefer: the branch whose trucks fill at this station (find_vehicle); None keeps the scripts' lookup."""
+    by: dict = {}
+    for v in vehicles:
+        if v.get("plate_number") and (norm_plate(v["plate_number"]) not in by or (prefer and v.get("branch") == prefer)):
+            by[norm_plate(v["plate_number"])] = v
     y, m = (int(x) for x in month.split("-"))
     entries, flags = [], []
     for plate, amount in sorted(by_plate.items()):
         amount = round(float(amount), 2)
         if amount <= 0:
             continue
-        v = find_vehicle(plate, by, vehicles)
+        v = find_vehicle(plate, by, vehicles, prefer)
         if not v:
             flags.append(f"{STATIONS[station]}{(' ' + sub) if sub else ''} {month}: ไม่พบรถทะเบียน {plate} ({amount:,.2f}) — ลงไว้ไม่ผูกกับรถ")
         branch = payer

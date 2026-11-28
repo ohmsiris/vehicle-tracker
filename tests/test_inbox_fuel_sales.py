@@ -306,6 +306,156 @@ def test_bangchak_pdf_is_store_only():
     assert fuel.sniff(old) >= 0.9 and p["store_only"] and p["month"] == "2026-09"
 
 
+# ------------------------------------------------------------------ November 2026: station-prefixed sheets, several stations per workbook, แก่งคอย
+NOV_HEAD = LOG_HEAD[:6] + ["ชื่อที่บันทึกในต้นฉบับ", "คนขับจริงที่เติมวันนี้", "ชื่อเล่น", "สถานะ", "หมายเหตุ", "ลิตร", "ราคา/ลิตร (บาท)", "จำนวนเงิน (บาท)", "อ้างอิง"]
+
+
+def _nov_sheets(prefix: str, title: str, fills: list, stated: float, bills=None) -> dict:
+    """One station's six sheets as the Reader writes them since November: every name starts with the station."""
+    def row(n, d, number, plate, amt):
+        return [n, d, "งวดที่ 1", number, plate, plate, "x", "x", "x", "ปกติ", None, 10, 40, amt, None]
+    log = [NOV_HEAD] + [row(i + 1, *x) for i, x in enumerate(fills)] + [[None] * 10 + ["รวมทั้งหมด"] + [None] * 4]
+    check = [["รายการ", "อ้างอิงแถว", "ยอดที่คำนวณจากรายการทีละบรรทัด", "ยอดที่ระบุในต้นฉบับ", "ตรงกันหรือไม่", "หมายเหตุ"],
+             ["งวดที่ 1 (26/10–10/11/69): ยอดเงินรวม (บาท)", "2-9", None, 1.0, None, None],          # a half's total is not the period's
+             ["รวมทั้งงวด: จำนวนบิล", "2-9", None, len(fills) if bills is None else bills, None, None],
+             ["รวมทั้งงวด: ยอดลิตรรวม", "2-9", None, 99.5, None, None],
+             ["รวมทั้งงวด: ยอดเงินรวม (บาท)", "2-9", None, stated, None, None]]
+    return {f"{prefix} คำอธิบาย": [[title]], f"{prefix} บันทึกเติมน้ำมัน": log, f"{prefix} ตารางแม่รายวัน": [["วันที่"]],
+            f"{prefix} สรุปรายเบอร์รถ": [["เบอร์"]], f"{prefix} ตรวจสอบยอดรวม": check, f"{prefix} สรุปรายคนขับ": [["ชื่อจริง"]]}
+
+
+NM_TITLE = "บันทึกการเติมน้ำมัน (ใบวางบิล/ใบกำกับภาษี) บจ.สระบุรีวารีเทพ — สาขา NM — งวด 26/10/69 – 25/11/69"
+HB_TITLE = "บันทึกการเติมน้ำมัน (ใบวางบิล/ใบกำกับภาษี) บจ.สระบุรีวารีเทพ — สาขาห้วยบง — งวด 26/10/69 – 25/11/69"
+KK_TITLE = "บันทึกการเติมน้ำมัน (ใบกำกับภาษี) บจ.สระบุรีวารีเทพ — สาขาแก่งคอย — 30/10/69 – 24/11/69"
+
+
+def _two_stations(nm_stated=3000, hb_title=HB_TITLE, hb_fills=None):
+    nm = _nov_sheets("NM", NM_TITLE, [(datetime(2026, 10, 26), "25", "84-2051", 1000), (datetime(2026, 11, 20), "12", "1ฒถ 2090", 2000)], nm_stated)
+    hb = _nov_sheets("ห้วยบง", hb_title, hb_fills or [(datetime(2026, 11, 2), "25", "84-2051", 700)], 700)
+    return _xlsx({**nm, **hb})
+
+
+def test_one_workbook_two_stations_two_batches(db):
+    db.tables["acc_entries"] = [{"id": "a1", "source_id": "fuel:bangchak:2026-11:842051"}]        # the scripts' combined entry of the month
+    f = sniff_file("เติมน้ำมัน_NM_ห้วยบง_26ตค-25พย69.xlsx", _two_stations())
+    assert fuel.sniff(f) > 0.9
+    p = fuel.read(f)
+    assert p["conflicts"] == [] and p["month"] == "2026-11" and p["months"] == ["2026-11"]
+    nm, hb = p["batches"]
+    assert (nm["key"], nm["file_total"], nm["rows_total"], nm["branch"]) == ("fuel:bangchak:2026-11:NM", 3000, 3000, "สระบุรี")
+    assert (hb["key"], hb["file_total"], hb["rows_total"], hb["branch"]) == ("fuel:bangchak:2026-11:ห้วยบง", 700, 700, "สระบุรี")
+    assert sorted(e["source_id"] for e in nm["entries"]) == ["fuel:bangchak:2026-11:NM:1ฒถ2090", "fuel:bangchak:2026-11:NM:842051"]
+    assert [e["source_id"] for e in hb["entries"]] == ["fuel:bangchak:2026-11:ห้วยบง:842051"]
+    assert {ln["vehicle_id"] for e in nm["entries"] for ln in e["lines"]} == {1, 2}
+    assert "2 สถานี (NM, ห้วยบง)" in p["note"]
+    text = " | ".join(p["flags"])
+    assert "แบบเก่า 1 รายการ" in text and "ครบทั้ง 2 สถานี" in text and p["legacy"] == ["fuel:bangchak:2026-11:842051"]
+    assert "กลับมา" in p["remove_note"] and "ห้วยบง" in p["remove_note"]
+    assert not any("ตรวจไฟล์ก่อนลงบัญชี" in x or "จำนวนบิล" in x for x in p["flags"])           # each station's own total, not the half's
+    # booking books both stations and takes the old combined entries once (one copy)
+    out = fuel.book(p, "file-1")
+    assert out["batches"] == ["fuel:bangchak:2026-11:NM", "fuel:bangchak:2026-11:ห้วยบง"] and out["booked"] == 3700
+    assert out["legacy_removed"] == 1 and db.uploads == ["inbox/legacy/fuel-bangchak-2026-11.json"]
+    assert ("acc_entries", {"source_id": "like.fuel:bangchak:2026-11:NM:*"}) in db.deleted
+    assert ("acc_entries", {"source_id": "like.fuel:bangchak:2026-11:ห้วยบง:*"}) in db.deleted
+    assert len(db.entries) == 3
+
+
+def test_two_station_workbook_checks_each_station_on_its_own(db):
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_ห้วยบง_26ตค-25พย69.xlsx", _two_stations(nm_stated=3500)))
+    text = " | ".join(p["flags"])
+    assert "NM: ยอดรวมที่สถานีเขียนไว้ 3,500.00 บาท แต่รายการรวมได้ 3,000.00 บาท" in text
+    assert "ห้วยบง: ยอดรวม" not in text
+    # one station's period in another month: its own question, keyed by the station; the other station is not asked
+    late = [(datetime(2026, 11, 28), "25", "84-2051", 700)]
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_ห้วยบง_26ตค-25พย69.xlsx", _two_stations(hb_fills=late)))
+    assert [c["key"] for c in p["conflicts"]] == ["month:ห้วยบง"] and p["conflicts"][0]["message"].startswith("ห้วยบง: เดือนไม่ตรงกัน")
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_ห้วยบง_26ตค-25พย69.xlsx", _two_stations(hb_fills=late), {"month:ห้วยบง": "2026-12"}))
+    assert p["conflicts"] == [] and [b["key"] for b in p["batches"]] == ["fuel:bangchak:2026-11:NM", "fuel:bangchak:2026-12:ห้วยบง"]
+    assert p["months"] == ["2026-11", "2026-12"]
+    # the title of a station's sheets naming another station: the sheet name decides, the owner is told
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_ห้วยบง_26ตค-25พย69.xlsx", _two_stations(hb_title=NM_TITLE)))
+    assert [b["key"] for b in p["batches"]] == ["fuel:bangchak:2026-11:NM", "fuel:bangchak:2026-11:ห้วยบง"] and p["conflicts"] == []
+    assert any(x.startswith("ห้วยบง: หัวไฟล์ของแท็บ") for x in p["flags"])
+
+
+def test_a_later_single_station_file_supersedes_only_its_station():
+    """The engine supersedes by key: an NM-only file of the month takes NM from the two-station workbook, ห้วยบง stays with it."""
+    from app import inbox
+    rows = [{"id": "both", "status": "booked", "batches": ["fuel:bangchak:2026-11:NM", "fuel:bangchak:2026-11:ห้วยบง"]}]
+    assert inbox.superseded(rows, ["fuel:bangchak:2026-11:NM"], "nm-only") == [("both", ["fuel:bangchak:2026-11:ห้วยบง"])]
+
+
+def test_removing_the_two_station_workbook_puts_the_old_entries_back(db):
+    _legacy_db(db)
+    for r in db.tables["acc_entries"]:
+        r["source_id"] = r["source_id"].replace("2026-10", "2026-11")
+    p = fuel.read(sniff_file("เติมน้ำมัน_NM_ห้วยบง_26ตค-25พย69.xlsx", _two_stations()))
+    assert fuel.book(p, "file-1")["legacy_removed"] == 2
+    db.entries.clear()
+    fuel.unbook(p)
+    assert sorted(e["source_id"] for e in db.entries) == ["fuel:bangchak:2026-11:842051", "fuel:bangchak:2026-11:est-25"]
+
+
+KK_VEHICLES = [{"id": 31, "plate_number": "86-8971", "vehicle_number": 5, "branch": "แก่งคอย"},
+               {"id": 32, "plate_number": "87-2063", "vehicle_number": 3, "branch": "แก่งคอย"},
+               {"id": 41, "plate_number": "3ฒฆ 1111", "vehicle_number": 5, "branch": "สระบุรี"},      # Saraburi has a #5 and a #3 too
+               {"id": 42, "plate_number": "3ฒฆ 2222", "vehicle_number": 3, "branch": "สระบุรี"}]
+
+
+def test_kaeng_khoi_station_its_trucks_and_its_payer(db):
+    db.tables["vehicles"] = VEHICLES + KK_VEHICLES
+    db.tables["acc_entries"] = [{"id": "a1", "source_id": "fuel:bangchak:2026-11:842051"}]        # Saraburi's old combined entry: not KK's
+    fills = [(datetime(2026, 10, 30), "5", "86-8971", 6000), (datetime(2026, 10, 30), "3", "87-2063", 5000),
+             (datetime(2026, 11, 3), "3", None, 4000)]                                               # no plate written: truck number 3
+    f = sniff_file("เติมน้ำมัน_แก่งคอย_30ตค-24พย69.xlsx", _xlsx(_nov_sheets("แก่งคอย", KK_TITLE, fills, 15000)))
+    p = fuel.read(f)
+    assert p["conflicts"] == [] and p["month"] == "2026-11" and "months" not in p
+    (b,) = p["batches"]
+    assert (b["key"], b["branch"], b["file_total"], b["rows_total"]) == ("fuel:bangchak:2026-11:แก่งคอย", "แก่งคอย", 15000, 15000)
+    by = {e["source_id"]: e for e in b["entries"]}
+    assert set(by) == {"fuel:bangchak:2026-11:แก่งคอย:868971", "fuel:bangchak:2026-11:แก่งคอย:872063", "fuel:bangchak:2026-11:แก่งคอย:#3"}
+    assert {k: e["lines"][0]["vehicle_id"] for k, e in by.items()} == {"fuel:bangchak:2026-11:แก่งคอย:868971": 31,
+                                                                       "fuel:bangchak:2026-11:แก่งคอย:872063": 32,
+                                                                       "fuel:bangchak:2026-11:แก่งคอย:#3": 32}     # KK's #3, not Saraburi's
+    assert {ln["branch"] for e in b["entries"] for ln in e["lines"]} == {"แก่งคอย"} and {e["branch"] for e in b["entries"]} == {"แก่งคอย"}
+    assert {"what": "branch", "source": "ผู้จ่ายบัตรน้ำมัน", "value": "แก่งคอย"} in p["signals"]
+    assert {"what": "station", "source": "ชื่อแท็บ", "value": "แก่งคอย", "weight": 2} in p["signals"]
+    # แก่งคอย never stood in the old combined entries: they are neither listed nor taken
+    assert p["legacy"] == [] and "remove_note" not in p and not any("แบบเก่า" in x for x in p["flags"])
+    out = fuel.book(p, "file-kk")
+    assert out["legacy_removed"] == 0 and db.uploads == [] and [r["id"] for r in db.tables["acc_entries"]] == ["a1"]
+    fuel.unbook(p)
+    assert db.files == {}
+
+
+def test_the_same_truck_number_at_nm_is_saraburis():
+    """acc_cardfuel: "#5" is Saraburi's #5 unless the station says the trucks are Kaeng Khoi's."""
+    vs = VEHICLES + KK_VEHICLES
+    nm = acc_cardfuel.build("2026-11", "bangchak", {"#5": 100.0}, vs, sub="NM")["entries"][0]
+    kk = acc_cardfuel.build("2026-11", "bangchak", {"#5": 100.0}, vs, sub="แก่งคอย", payer="แก่งคอย", prefer="แก่งคอย")["entries"][0]
+    assert (nm["lines"][0]["vehicle_id"], nm["branch"]) == (41, "สระบุรี") and (kk["lines"][0]["vehicle_id"], kk["branch"]) == (31, "แก่งคอย")
+    # a 4-digit plate tail both plants share: unresolved for the scripts, the station's branch for the drop box
+    two = [{"id": 1, "plate_number": "1ฒบ 6248", "vehicle_number": 14, "branch": "แก่งคอย"},
+           {"id": 2, "plate_number": "2ฒฉ 6248", "vehicle_number": 9, "branch": "สระบุรี"}]
+    assert acc_cardfuel.build("2026-11", "bangchak", {"6248": 10.0}, two)["entries"][0]["lines"][0]["vehicle_id"] is None
+    assert acc_cardfuel.build("2026-11", "bangchak", {"6248": 10.0}, two, prefer="แก่งคอย")["entries"][0]["lines"][0]["vehicle_id"] == 1
+
+
+def test_kaeng_khoi_pdf_is_recognised_with_its_station():
+    f = Dropped(name="เติมน้ำมัน_แก่งคอย_30ตค-24พย69_สรุปรายคนขับ_แนวนอน.pdf", data=b"%PDF-", ext=".pdf", pages=1,
+                text="สรุปรายคนขับ — สาขาแก่งคอย — 30/10/69 – 24/11/69\nชื่อจริง\nชื่อเล่น\nจำนวนครั้งที่เติม\nรวมลิตร\n"
+                     "รวมจำนวนเงิน (บาท)\nจำเริญ เพ็ชรมาลี\nจำเริญ\n7\n890.510\n36,760.00\nรวมทั้งหมด\n20\n2656.350\n109,977.60\n")
+    assert fuel.sniff(f) >= 0.9
+    p = fuel.read(f)
+    assert p["store_only"] and p["batches"] == [] and p["month"] == "2026-11" and p["file_total"] == 109977.6
+    assert "สถานี แก่งคอย" in p["note"] and {"what": "station", "source": "หัวไฟล์", "value": "แก่งคอย"} in p["signals"]
+    daily = Dropped(name="เติมน้ำมัน_NM_26ตค-25พย69_ตารางรายวัน.pdf", data=b"%PDF-", ext=".pdf", pages=1,
+                    text="ตารางรายวันตามรถเบอร์ — สาขา NM — 26/10/69 – 25/11/69\nวันที่\n259,950.00\n")
+    p = fuel.read(daily)
+    assert p["store_only"] and "ตารางรายวัน สถานี NM" in p["note"] and p["month"] == "2026-11"
+
+
 # ------------------------------------------------------------------ the ice program report
 def _day(d: date, sales_: list) -> str:
     out = [d.strftime("%d/%m/%Y")]

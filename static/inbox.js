@@ -56,10 +56,13 @@ function ibxSuperseded(f) {
   return m && f.status !== "booked" ? { by: m[1] || "" } : null;
 }
 
+// a question asked per part of the file ("month:NM": the NM sheets of a Bangchak workbook of several stations) reads as its kind
+const ibxConflictWord = (k) => IBX_CONFLICT[k] || IBX_CONFLICT[String(k || "").split(":")[0]] || "ต้องเลือก";
+
 function ibxChoiceLabel(f) {
   const keys = [...new Set((f.conflicts || []).map((c) => c && c.key).filter(Boolean))];
   if (!keys.length) return "ต้องเลือก";
-  return [...new Set(keys.map((k) => IBX_CONFLICT[k] || "ต้องเลือก"))].join(" · ");
+  return [...new Set(keys.map(ibxConflictWord))].join(" · ");
 }
 
 function ibxStatusText(f) {
@@ -240,7 +243,7 @@ function ibxRow(f, month) {
   const sup = ibxSuperseded(f);
   // an AI-read expense paper opens on its own page (inboxcheck.js: each page beside its lines, fixed before ลงบัญชี); others the dialog
   const look = () => (f.check ? goHash(`#accounts-in/check=${f.id}`) : ibxPreview(f.id));
-  const askMonth = f.status === "needs_choice" && (f.conflicts || []).some((c) => c && c.key === "month");
+  const askMonth = f.status === "needs_choice" && (f.conflicts || []).some((c) => c && String(c.key || "").split(":")[0] === "month");
   const monthText = f.month ? ibxMonth(f.month) : askMonth ? "เลือกเดือน" : "ไม่ทราบเดือน";
   const other = f.month && f.month !== month;
   const sums = f.file_total != null || f.rows_total != null
@@ -450,7 +453,7 @@ async function ibxPreview(id) {
         return o;
       })) : null;
     return el("fieldset", { class: "ibx-conflict", "data-key": c.key },
-      el("legend", { class: "warn-text", text: c.message || `ข้อมูลในไฟล์ไม่ตรงกัน — ${IBX_CONFLICT[c.key] || "ต้องเลือก"}` }),
+      el("legend", { class: "warn-text", text: c.message || `ข้อมูลในไฟล์ไม่ตรงกัน — ${ibxConflictWord(c.key)}` }),
       ...opts.map((o) => {
         const r = el("input", { type: "radio", name, value: o.value });
         r.checked = String(o.value) === String(chosen);

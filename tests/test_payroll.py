@@ -547,6 +547,7 @@ def fuel_src(**kw):
 
 
 USED = "\nใช้คิดเงินของรถสาย 1 คัน (กลุ่ม A, B, C หักจากยอดขาย · ทวาย หักจากซอง)"
+KK = " · แก่งคอยพักไว้ก่อน: ยังไม่มี บางจาก แก่งคอย"           # the third station's file, waited for only by Kaeng Khoi's trucks (on hold)
 
 
 def test_the_sack_drivers_fuel():
@@ -563,7 +564,8 @@ def test_the_sack_drivers_fuel():
     out = pw.build(fuel_src(cash_fuel=[line, {**line, "id": 2, "batch": 2, "amount": 200}], card_fuel=card), MONTH, TODAY)
     c = one(out, "D1")["cells"]["fuel"]
     assert c == {"state": "ok", "value": 30740, "text": "30,740", "note": "รถ #27 84-2682 รถใหญ่ สระบุรี · บัตร 29,740 + เงินสด 1,000"}
-    assert (file(out, "card_fuel")["state"], file(out, "card_fuel")["summary"]) == ("ok", "บางจาก 1 คัน 29,740 บาท · PT 1 คัน 1,000 บาท" + USED)
+    # บางจาก แก่งคอย (from Nov 2026) is Kaeng Khoi's trucks' station: named for the branch set aside, never chased, never in this truck's cell
+    assert (file(out, "card_fuel")["state"], file(out, "card_fuel")["summary"]) == ("ok", "บางจาก 1 คัน 29,740 บาท · PT 1 คัน 1,000 บาท" + KK + USED)
     assert file(out, "cash_fuel")["state"] == "ok"
     assert kind(out, "fuel")["need"] == 1 and kind(out, "fuel")["source"].endswith("กลุ่ม A, B, C และทวาย (1 คัน)")
     assert one(out, "D1")["cells"]["sales"]["note"] == ""                                     # ทวาย's fuel comes off his ซอง, never off his sales
@@ -927,13 +929,14 @@ def test_bangchak_needs_both_of_its_station_files():
     assert (c["state"], c["value"], c["text"]) == ("miss", None, "")
     assert c["note"] == "รถ #27 84-2682 รถใหญ่ สระบุรี · ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน บางจาก ห้วยบง · มีแล้ว: บัตร 12,000 + เงินสด 1,000"
     f = file(out, "card_fuel")
-    assert (f["state"], f["summary"]) == ("warn", "บางจาก 1 คัน 12,000 บาท · PT 1 คัน 1,000 บาท · ยังไม่มี: บางจาก ห้วยบง" + USED)
+    assert (f["state"], f["summary"]) == ("warn", "บางจาก 1 คัน 12,000 บาท · PT 1 คัน 1,000 บาท · ยังไม่มี: บางจาก ห้วยบง" + KK + USED)
     assert (kind(out, "fuel")["miss"], kind(out, "fuel")["ok"]) == (1, 0)
     # both station files in: complete -- and a truck that fills at both is one truck
     out = pw.build(fuel_src(cash_fuel=CASH, card_fuel=[nm, hb, PT]), MONTH, TODAY)
     assert one(out, "D1")["cells"]["fuel"] == {"state": "ok", "value": 18000, "text": "18,000", "note": "รถ #27 84-2682 รถใหญ่ สระบุรี · บัตร 17,000 + เงินสด 1,000"}
-    assert (file(out, "card_fuel")["state"], file(out, "card_fuel")["summary"]) == ("ok", "บางจาก 1 คัน 17,000 บาท · PT 1 คัน 1,000 บาท" + USED)
-    assert pw.card_fuel_view([hb, PT])["lack"] == ["บางจาก NM"] and pw.card_fuel_view([nm, hb])["lack"] == ["PT"]
+    assert (file(out, "card_fuel")["state"], file(out, "card_fuel")["summary"]) == ("ok", "บางจาก 1 คัน 17,000 บาท · PT 1 คัน 1,000 บาท" + KK + USED)
+    assert pw.card_fuel_view([hb, PT])["lack"] == ["บางจาก NM", "บางจาก แก่งคอย"]
+    assert pw.card_fuel_view([nm, hb])["lack"] == ["บางจาก แก่งคอย", "PT"]
     assert pw.card_fuel_view([])["lack"] == ["บางจาก", "PT"] and pw.card_fuel_view(None)["stations"] == {}
     # one of the older entries (both stations in one, no station in its key) is complete by itself
     old = pw.card_fuel_view([{"source_id": "fuel:bangchak:2026-10:842682", "lines": [{"vehicle_id": "V27", "credit": 29740}]}, PT])
@@ -1597,3 +1600,45 @@ def test_a_code_read_twice_in_one_file_and_a_name_that_is_not_his():
     f["pages"][0]["work_rows"][0]["name"] = "นายอาซู(MR.SOE MYAT OO)"
     ok = pw.build(src(employees=people, rules=[rule("SB-KK013", "KK-PROD")], rates=[rate("SB-KK013")], advance_files=[f]), MONTH, TODAY)
     assert one(ok, "SB-KK013")["cells"]["days"]["state"] == "ok"
+
+
+# --------------------------------------------------------------------------------------------- บางจาก แก่งคอย (28 Nov 2026)
+def test_card_fuel_counts_every_bangchak_station_per_truck():
+    """Nov 2026: NM + ห้วยบง come in one Reader workbook (still one key per station) and Kaeng Khoi's trucks fill at a third station,
+    แก่งคอย. by_vehicle adds up every station's entries per truck; a station's file is waited for by its own branch's trucks only."""
+    from app import inbox_r_fuel
+    assert pw.BANGCHAK_STATIONS == inbox_r_fuel.BC_STATIONS and pw.BANGCHAK_BRANCH == inbox_r_fuel.BC_TRUCKS
+    assert pw.BANGCHAK_LEGACY == inbox_r_fuel.LEGACY_STATIONS
+    nm = {"source_id": "fuel:bangchak:2026-11:NM:842682", "lines": [{"vehicle_id": "V27", "credit": 12000}]}
+    hb = {"source_id": "fuel:bangchak:2026-11:ห้วยบง:842682", "lines": [{"vehicle_id": "V27", "credit": 5000}]}
+    hb14 = {"source_id": "fuel:bangchak:2026-11:ห้วยบง:1ฒบ6248", "lines": [{"vehicle_id": "K14", "credit": 1740}]}     # a KK truck at ห้วยบง
+    kk = {"source_id": "fuel:bangchak:2026-11:แก่งคอย:868971", "lines": [{"vehicle_id": "K5", "credit": 36760}]}
+    kk14 = {"source_id": "fuel:bangchak:2026-11:แก่งคอย:1ฒบ6248", "lines": [{"vehicle_id": "K14", "credit": 2000}]}
+    pt = {"source_id": "fuel:pt:2026-11:868971", "lines": [{"vehicle_id": "K5", "credit": 500}]}
+    v = pw.card_fuel_view([nm, hb, hb14, kk, kk14, pt])
+    assert v["by_vehicle"] == {"V27": 17000, "K14": 3740, "K5": 37260}
+    assert v["stations"]["bangchak"] == {"trucks": 3, "total": 57500} and v["lack"] == []
+    # without the แก่งคอย file: only Kaeng Khoi's trucks wait for it
+    v = pw.card_fuel_view([nm, hb, pt])
+    assert v["lack"] == ["บางจาก แก่งคอย"] and v["lack_by_branch"] == {"สระบุรี": [], "แก่งคอย": ["บางจาก แก่งคอย"]}
+    # only the แก่งคอย file: Saraburi's trucks wait for NM and ห้วยบง, Kaeng Khoi's for nothing more
+    v = pw.card_fuel_view([kk, pt])
+    assert v["lack_by_branch"] == {"สระบุรี": ["บางจาก NM", "บางจาก ห้วยบง"], "แก่งคอย": []}
+    # before November nobody waits for แก่งคอย; nothing of PT booked is everyone's
+    old = pw.card_fuel_view([{"source_id": "fuel:bangchak:2026-10:NM:842682", "lines": [{"vehicle_id": "V27", "credit": 1}]},
+                             {"source_id": "fuel:bangchak:2026-10:ห้วยบง:842682", "lines": [{"vehicle_id": "V27", "credit": 1}]}])
+    assert old["lack"] == ["PT"] and old["lack_by_branch"] == {"สระบุรี": ["PT"], "แก่งคอย": ["PT"]}
+
+
+def test_a_kaeng_khoi_truck_waits_for_the_kaeng_khoi_station():
+    """A Kaeng Khoi route truck's fuel is complete only with the แก่งคอย statement (its numbers are right even while KK is on hold)."""
+    s = fuel_src(cash_fuel=CASH)
+    s["vehicles"][0]["branch"] = "แก่งคอย"
+    s["employees"][0]["branch"] = "แก่งคอย"
+    nm = {"id": "e1", "source_id": "fuel:bangchak:2026-11:NM:842682", "lines": [{"vehicle_id": "V27", "credit": 300}]}
+    hb = {"id": "e3", "source_id": "fuel:bangchak:2026-11:ห้วยบง:842682", "lines": [{"vehicle_id": "V27", "credit": 200}]}
+    kk = {"id": "e5", "source_id": "fuel:bangchak:2026-11:แก่งคอย:842682", "lines": [{"vehicle_id": "V27", "credit": 6000}]}
+    c = one(pw.build({**s, "card_fuel": [nm, hb, PT]}, MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert c["state"] == "miss" and "ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน บางจาก แก่งคอย" in c["note"] and "บัตร 500" in c["note"]
+    c = one(pw.build({**s, "card_fuel": [nm, hb, kk, PT]}, MONTH, TODAY), "D1")["cells"]["fuel"]
+    assert (c["state"], c["value"]) == ("ok", 7500) and c["note"].endswith("บัตร 6,500 + เงินสด 1,000")

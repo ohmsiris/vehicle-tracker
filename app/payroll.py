@@ -148,7 +148,12 @@ SCAN_GROUPS = [("scan_sb_pd", "SB-PD", "ไฟล์สแกนนิ้ว ส
 STATIONS = {"bangchak": "บางจาก", "pt": "PT"}
 # บางจาก comes through the drop box as one file per station (app/inbox_r_fuel.py BC_STATIONS), booked "fuel:bangchak:<month>:<station>:<plate>";
 # the older scripts booked both stations as one entry per plate, "fuel:bangchak:<month>:<plate>". An estimate is "...:est-<plate>".
-BANGCHAK_STATIONS = ("NM", "ห้วยบง")
+# A Reader workbook may hold several stations (Nov 2026: NM + ห้วยบง in one file): still one key per station, so nothing changes here.
+BANGCHAK_STATIONS = ("NM", "ห้วยบง", "แก่งคอย")
+BANGCHAK_LEGACY = ("NM", "ห้วยบง")                # what one of the older combined entries stands for
+# whose trucks fill at each station (inbox_r_fuel.BC_TRUCKS): a station's statement is waited for by that branch's trucks only
+BANGCHAK_BRANCH = {"NM": "สระบุรี", "ห้วยบง": "สระบุรี", "แก่งคอย": "แก่งคอย"}
+BANGCHAK_FROM = {"แก่งคอย": "2026-11"}            # the first month a station has a statement (Kaeng Khoi's trucks moved to บางจาก then)
 ESTIMATE = "est-"
 HALVES = (1, 2)                                   # cash fuel comes in two halves of the pay month: 26th - 10th, 11th - 25th
 WAITING = ("read", "needs_choice", "needs_ai", "ai_running")          # a drop-box file nobody has finished yet (schema_v92.sql)
@@ -479,20 +484,26 @@ def truck_of(p: dict, ctx: dict) -> Optional[dict]:
 
 
 def card_fuel_view(entries: Optional[list[dict]]) -> dict:
-    """Card fuel booked for a month: {by_vehicle: {vehicle id: baht}, stations: {station: {trucks, total}}, lack, estimated}.
-    lack = the statements still absent, by name: "บางจาก" / "PT" when nothing of the station is booked, "บางจาก ห้วยบง" when only the
-    other one of บางจาก's two station files is in (a truck that fills there would otherwise read as a false 0). One of the older
-    combined entries ("fuel:bangchak:<month>:<plate>") covers both stations. estimated = stations with an estimate among their
-    entries: a figure to go on, not a statement. trucks = different trucks, however many entries each has."""
+    """Card fuel booked for a month: {by_vehicle: {vehicle id: baht}, stations: {station: {trucks, total}}, lack, lack_by_branch,
+    estimated}. by_vehicle counts every station's entries (NM, ห้วยบง, แก่งคอย, PT, the older combined ones) by the truck on the line.
+    lack = the statements still absent, by name: "บางจาก" / "PT" when nothing of the station is booked, "บางจาก ห้วยบง" when another
+    of บางจาก's station files is in but not this one (a truck that fills there would otherwise read as a false 0). One of the older
+    combined entries ("fuel:bangchak:<month>:<plate>") covers NM and ห้วยบง. แก่งคอย is waited for from BANGCHAK_FROM on.
+    lack_by_branch = lack as one branch's trucks see it: a station's file is waited for by its own branch's trucks (BANGCHAK_BRANCH);
+    "บางจาก" / "PT" by everyone. estimated = stations with an estimate among their entries: a figure to go on, not a statement.
+    trucks = different trucks, however many entries each has."""
     by_vehicle: dict = {}
     stations: dict = {}
     seen: dict = {}                                           # station -> the trucks (vehicle id, else the plate in the key) with an entry
     subs: set = set()                                         # บางจาก's station files that are in
     whole = False                                             # ... or one of the older entries for both stations
     estimated: list = []
+    months: set = set()
     for e in entries or []:
         parts = str(e.get("source_id") or "").split(":")
         station = parts[1] if len(parts) > 1 else "?"
+        if station == "bangchak" and len(parts) > 2 and re.fullmatch(r"\d{4}-\d{2}", parts[2]):
+            months.add(parts[2])                              # the month of บางจาก's entries: which of its stations to wait for
         amount = round(sum(_f(x.get("credit")) for x in e.get("lines") or []), 2)
         vid = next((x.get("vehicle_id") for x in e.get("lines") or [] if x.get("vehicle_id")), None)
         s = stations.setdefault(station, {"trucks": 0, "total": 0.0})
@@ -509,13 +520,17 @@ def card_fuel_view(entries: Optional[list[dict]]) -> dict:
                 whole = True
         if vid:
             by_vehicle[vid] = round(by_vehicle.get(vid, 0.0) + amount, 2)
-    lack = []
+    month = max(months) if months else ""
+    lack: list = []                                           # (name, the branch that waits for it; None = everyone)
     for key, name in STATIONS.items():
         if key not in stations:
-            lack.append(name)
-        elif key == "bangchak" and not whole and subs:        # only estimates: nothing to name, the cell says "ประมาณ"
-            lack += [f"{name} {st}" for st in BANGCHAK_STATIONS if st not in subs]
-    return {"by_vehicle": by_vehicle, "stations": stations, "lack": lack, "estimated": [STATIONS.get(k, k) for k in estimated]}
+            lack.append((name, None))
+        elif key == "bangchak" and (whole or subs):          # only estimates: nothing to name, the cell says "ประมาณ"
+            lack += [(f"{name} {st}", BANGCHAK_BRANCH.get(st)) for st in BANGCHAK_STATIONS
+                     if st not in subs and not (whole and st in BANGCHAK_LEGACY) and month >= BANGCHAK_FROM.get(st, "")]
+    return {"by_vehicle": by_vehicle, "stations": stations, "lack": [n for n, _b in lack],
+            "lack_by_branch": {b: [n for n, w in lack if w in (None, b)] for b in BRANCHES},
+            "estimated": [STATIONS.get(k, k) for k in estimated]}
 
 
 def cash_fuel_view(lines: Optional[list[dict]]) -> dict:
@@ -1424,8 +1439,10 @@ def fuel_cell(p: dict, ctx: dict) -> dict:
         on_card = card["by_vehicle"].get(truck["id"], 0.0)
         if not card["stations"]:
             lack.append("ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน")
-        elif card["lack"]:                                   # "บางจาก ห้วยบง": one of บางจาก's two station files is in, the other is not
-            lack.append("ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน " + ", ".join(card["lack"]))
+        else:                                                # "บางจาก ห้วยบง": another of บางจาก's station files is in, not this one
+            mine = (card.get("lack_by_branch") or {}).get(truck.get("branch") or BRANCHES[0], card["lack"])
+            if mine:
+                lack.append("ยังไม่มีใบแจ้งหนี้บัตรน้ำมัน " + ", ".join(mine))
         if on_card > 0:
             have.append(f"บัตร {money(on_card)}")
     if cash is None:
@@ -1630,9 +1647,14 @@ def build_files(people: list[dict], src: dict, ctx: dict, month: str) -> list[di
         out.append(_file("card_fuel", "ใบแจ้งหนี้บัตรน้ำมัน", "bad", "ยังไม่มีใบแจ้งหนี้บัตรน้ำมันงวดนี้ (บางจาก / PT)" + used, "#accounts-in", "ลงข้อมูล / แนบไฟล์"))
     else:
         words = " · ".join(f"{STATIONS.get(k, k)} {v['trucks']} คัน {money(v['total'])} บาท" for k, v in sorted(card["stations"].items()))
-        lack, rough = card["lack"], card["estimated"]        # a station (or one of บางจาก's two) not in yet; a figure that is only an estimate
+        rough = card["estimated"]                            # a figure that is only an estimate
+        # a station (or one of บางจาก's) not in yet; one only a branch set aside waits for (บางจาก แก่งคอย) is named, never chased
+        by_branch = card.get("lack_by_branch") or {}
+        lack = [n for n in card["lack"] if any(n in by_branch.get(b, card["lack"]) for b in BRANCHES if not held(b))]
+        later = [n for n in card["lack"] if n not in lack]
         out.append(_file("card_fuel", "ใบแจ้งหนี้บัตรน้ำมัน", "warn" if lack or rough else "ok",
-                         words + (" · ยังไม่มี: " + ", ".join(lack) if lack else "") + (" · ยอดประมาณ: " + ", ".join(rough) if rough else "") + used,
+                         words + (" · ยังไม่มี: " + ", ".join(lack) if lack else "") + (" · ยอดประมาณ: " + ", ".join(rough) if rough else "")
+                         + (f" · {aside}: ยังไม่มี " + ", ".join(later) if later else "") + used,
                          "#accounts-in", "ลงข้อมูล / แนบไฟล์"))
     cash = ctx["cash"]
     if cash is None:

@@ -13,8 +13,16 @@ Three kinds of file land here:
      ("fuel:pt:<month>:est-...") of scripts/fill_fuel_estimates.py: dropping a PT export replaces them, never adds to them.
 
   2. The Bangchak Reader workbook "เติมน้ำมัน_<station>_<range>.xlsx" (sheets: คำอธิบาย, บันทึกเติมน้ำมัน = one row per fill,
-     ตรวจสอบยอดรวม = the totals written on the station's bill / notebook ...). One file = one station (NM or ห้วยบง) and one billing
-     period. The Reader's periods run 25th-25th (October's file starts on 25 Sep), so the month is the company month most of the
+     ตรวจสอบยอดรวม = the totals written on the station's bill / notebook ...). Up to October 2026 one file = one station (NM or ห้วยบง)
+     and one billing period, with those sheet names as they are. From November (owner, 28 Nov 2026) the Reader prefixes every sheet
+     with its station ("NM บันทึกเติมน้ำมัน", "ห้วยบง ตรวจสอบยอดรวม" ...) and may put SEVERAL stations in one workbook
+     ("เติมน้ำมัน_NM_ห้วยบง_26ตค-25พย69.xlsx"): each station's sheets are then read on their own -- one batch per station in the one
+     preview, each with its own key, its own total check (its own "<station> ตรวจสอบยอดรวม"), its own month vote (a month question is
+     "month:<station>") and its own flags (prefixed "<station>: "). Booking books them all; a later file of one station and month
+     supersedes only that station's key (app/inbox.py, by key). The sheet prefix is the station: the title only cross-checks it.
+     A third station, แก่งคอย (Kaeng Khoi's trucks fill at Bangchak from Nov 2026), comes as "แก่งคอย ..." sheets, title "สาขาแก่งคอย";
+     its trucks resolve to Kaeng Khoi's vehicles (truck numbers repeat between the plants) and its payer is BC_PAYER["แก่งคอย"].
+     The billing period: The Reader's periods run 25th-25th (October's file starts on 25 Sep), so the month is the company month most of the
      ROW DATES (by baht) fall in, cross-checked with the period in the title and in the file name; any disagreement is a conflict for
      the owner. Rows outside that month stay in the batch (they are on the same station bill) and are listed. The station comes from
      the title ("สาขา NM" / "(สาขาห้วยบง)") and the file name; the oldest files name no station, then the format decides (NM's file is
@@ -34,7 +42,7 @@ Three kinds of file land here:
      recognised and kept with the month, never booked: reading the PDF as well as the workbook is how card fuel got counted twice.
 
 Every booked row is a cost: Dr 6120 fuel (net of VAT) + 1400 input VAT, Cr 2100 owed to the station (app/acc_cardfuel.build); the
-branch is who pays the card = สระบุรี, even for a truck filed under แก่งคอย (owner, 9 Nov 2026). Cash fuel is NOT here: that comes from the
+branch is who pays the card = สระบุรี, even for a truck filed under แก่งคอย (owner, 9 Nov 2026) -- except บางจาก แก่งคอย (BC_PAYER). Cash fuel is NOT here: that comes from the
 petty-cash papers (app/cash_fuel.py) and must never be booked from these files.
 """
 from __future__ import annotations
@@ -54,9 +62,18 @@ LABEL = "น้ำมันบัตร (PT / บางจาก)"
 FEEDS = ("fuel_card",)
 
 PAYER = acc_cardfuel.PAYER
-BC_STATIONS = ("NM", "ห้วยบง")
+BC_STATIONS = ("NM", "ห้วยบง", "แก่งคอย")
+# the stations the scripts' old combined entries ("fuel:bangchak:<month>:<plate>") stood for: Saraburi's two. แก่งคอย came in Nov 2026
+# and was never in them, so its file neither removes nor waits for them.
+LEGACY_STATIONS = ("NM", "ห้วยบง")
+# who pays each station's card (the batch's branch) -- owner to confirm (28 Nov 2026): NM and ห้วยบง are on Saraburi's card (owner,
+# 9 Nov 2026); แก่งคอย's statement is a tax invoice of its own for Kaeng Khoi's trucks, booked to แก่งคอย until the owner says otherwise.
+BC_PAYER = {"NM": "สระบุรี", "ห้วยบง": "สระบุรี", "แก่งคอย": "แก่งคอย"}
+# whose trucks fill at each station: a truck number / plate tail both plants have resolves to this branch's truck (acc_cardfuel)
+BC_TRUCKS = {"NM": "สระบุรี", "ห้วยบง": "สระบุรี", "แก่งคอย": "แก่งคอย"}
 BC_SHEET = "บันทึกเติมน้ำมัน"
 BC_CHECK = "ตรวจสอบยอดรวม"
+BC_ABOUT = "คำอธิบาย"
 PT_OK = ("สำเร็จ", "success", "successful", "approved", "")
 TH_ABBR = {"มค": 1, "กพ": 2, "มีค": 3, "เมย": 4, "พค": 5, "มิย": 6, "กค": 7, "สค": 8, "กย": 9, "ตค": 10, "พย": 11, "ธค": 12}
 _ABBR = "|".join(sorted(TH_ABBR, key=len, reverse=True))
@@ -188,8 +205,8 @@ def read(f: Dropped) -> dict:
 
 # ------------------------------------------------------------------ rows / batches from per-plate totals
 def _batch(key: str, station: str, month: str, by_plate: dict, counts: dict, vehicles: list[dict], title: str, note: str,
-           file_total: Optional[float], sub: str = "") -> tuple[dict, list[str]]:
-    out = acc_cardfuel.build(month, station, by_plate, vehicles, note, sub=sub)
+           file_total: Optional[float], sub: str = "", payer: str = PAYER, prefer: Optional[str] = None) -> tuple[dict, list[str]]:
+    out = acc_cardfuel.build(month, station, by_plate, vehicles, note, payer=payer, sub=sub, prefer=prefer)
     rows = []
     for e in out["entries"]:
         plate_key = e["source_id"].rsplit(":", 1)[-1]
@@ -200,7 +217,7 @@ def _batch(key: str, station: str, month: str, by_plate: dict, counts: dict, veh
                      "amount": gross, "role": "cost", "account": "6120",
                      "flag": "ไม่พบรถทะเบียนนี้ในระบบ — ลงไว้ไม่ผูกกับรถ" if no_truck else None})
     rows_total = round(sum(r["amount"] for r in rows), 2)
-    return ({"key": key, "feed": "fuel_card", "source": "card_fuel", "branch": PAYER, "month": month, "title": title, "rows": rows,
+    return ({"key": key, "feed": "fuel_card", "source": "card_fuel", "branch": payer, "month": month, "title": title, "rows": rows,
              "file_total": file_total, "rows_total": rows_total, "entries": out["entries"]}, out["flags"])
 
 
@@ -365,9 +382,9 @@ def _title_end(title: str) -> Optional[date]:
 
 def _station_signals(title: str, name: str) -> list[dict]:
     sig = []
-    m = re.search(r"สาขา\s*(NM|ห้วยบง)", title or "", re.I)
+    m = re.search(r"สาขา\s*(" + "|".join(BC_STATIONS) + ")", title or "", re.I)
     if m:
-        sig.append({"what": "station", "source": "หัวไฟล์", "value": "NM" if m.group(1).upper() == "NM" else "ห้วยบง"})
+        sig.append({"what": "station", "source": "หัวไฟล์", "value": _station_of(m.group(1))})
     for st in BC_STATIONS:
         if re.search(rf"(^|[_\s]){st}([_\s.]|$)", name or "", re.I):
             sig.append({"what": "station", "source": "ชื่อไฟล์", "value": st, "weight": 0.5})
@@ -378,6 +395,34 @@ def _station_signals(title: str, name: str) -> list[dict]:
         elif "รถสาย" in title:
             sig.append({"what": "station", "source": "รูปแบบไฟล์ (สมุดรถสาย = ห้วยบง)", "value": "ห้วยบง", "weight": 0.5})
     return sig
+
+
+def _station_of(text: str) -> Optional[str]:
+    """'nm' -> 'NM', 'แก่งคอย' -> 'แก่งคอย'; None when it is not one of BC_STATIONS."""
+    return next((st for st in BC_STATIONS if st.lower() == str(text or "").strip().lower()), None)
+
+
+def _bc_groups(book: dict) -> list[tuple[str, str]]:
+    """The station sheet sets of a Reader workbook: [(fill-log sheet name, prefix)] in sheet order. "" = the older unprefixed
+    sheets ("บันทึกเติมน้ำมัน", "คำอธิบาย" ...); "NM" for "NM บันทึกเติมน้ำมัน" and the "NM ..." sheets beside it."""
+    out = []
+    for name, rows in book.items():
+        if _bc_head(rows) is None:
+            continue
+        name_s = str(name).strip()
+        out.append((name, name_s[:-len(BC_SHEET)].strip() if name_s.endswith(BC_SHEET) else ""))
+    return out
+
+
+def _sheet(book: dict, prefix: str, what: str):
+    """A sheet of one station set: "<prefix> <what>" (any spacing); the unprefixed one for the older files."""
+    if prefix:
+        for name, rows in book.items():
+            n = str(name).strip()
+            if n.endswith(what) and n[:-len(what)].strip() == prefix:
+                return rows
+        return None
+    return book.get(what)
 
 
 def _bc_file_total(rows: list) -> tuple[Optional[float], Optional[float]]:
@@ -408,12 +453,78 @@ def _legacy_bangchak(month: str) -> list[dict]:
 
 
 def read_bangchak(f: Dropped) -> dict:
+    """One batch per station sheet set (one for the older files; NM + ห้วยบง from the November workbook): see the module docstring."""
     p = empty_preview(KIND, "น้ำมันบัตรบางจาก (ไฟล์ Bangchak Reader)", subkind="bangchak")
     book = workbook(f.data, f.name)
-    log_name = next((n for n, r in book.items() if _bc_head(r) is not None), None)
+    groups = _bc_groups(book)
+    multi = len(groups) > 1
+    done: list[dict] = []
+    for log_name, prefix in groups:
+        got = _read_station(f, book, log_name, prefix, multi)
+        if got is None:
+            continue
+        if any(d["station"] == got["station"] for d in done):
+            p["flags"].append(f"มีแท็บของสถานี {got['station']} มากกว่าหนึ่งชุด (แท็บ {log_name}) — ใช้ชุดแรก ไม่นับชุดนี้")
+            continue
+        done.append(got)
+    if not done:
+        p.update(store_only=True, note="ไฟล์บางจากนี้ไม่มีรายการเติมน้ำมัน")
+        return p
+    vehicles = _vehicles()
+    for d in done:
+        tag = f"{d['station']}: " if multi else ""
+        p["conflicts"] += d["conflicts"]
+        p["signals"] += d["signals"]
+        p["flags"] += [tag + x for x in d["flags"]]
+        batch, flags = _batch(d["key"], "bangchak", d["month"], d["per"], d["counts"], vehicles,
+                              f"น้ำมันบางจาก {d['station']} {month_label(d['month'])} · {d['n']} บิล ({dmy(d['lo'])}–{dmy(d['hi'])})",
+                              f"จากไฟล์บางจาก {d['station']}", d["file_total"], sub=d["station"],
+                              payer=BC_PAYER.get(d["station"], PAYER), prefer=BC_TRUCKS.get(d["station"]))
+        p["batches"].append(batch)
+        p["flags"] += flags
+    for payer in dict.fromkeys(BC_PAYER.get(d["station"], PAYER) for d in done):
+        p["signals"].append({"what": "branch", "source": "ผู้จ่ายบัตรน้ำมัน", "value": payer})
+    months = [d["month"] for d in done]
+    p["month"] = max(set(months), key=lambda m: (months.count(m), m))
+    if multi:
+        p["months"] = sorted(set(months))
+
+    # the scripts' combined entries (NM + ห้วยบง in one per plate): the first of those stations' files of the month takes them
+    legacy_all, notes = [], []
+    for month in sorted(set(months)):
+        mine = [d["station"] for d in done if d["month"] == month and d["station"] in LEGACY_STATIONS]
+        if not mine:
+            continue
+        others = [x for x in LEGACY_STATIONS if x not in mine]
+        legacy = _legacy_bangchak(month)
+        if legacy:
+            then = (f"ต้องลงไฟล์ของสถานี {others[0]} เดือนเดียวกันด้วย (ระบบเก็บสำเนาไว้: ถ้าลบไฟล์นี้ออกก่อนลงไฟล์ของ {others[0]} "
+                    "รายการเดิมจะกลับมา)") if others else "ไฟล์นี้มีครบทั้ง 2 สถานีแล้ว (ระบบเก็บสำเนาไว้: ถ้าลบไฟล์นี้ออก รายการเดิมจะกลับมา)"
+            p["flags"].append(f"{month_label(month)} มีรายการบางจากแบบเก่า {len(legacy)} รายการ (รวม 2 สถานีต่อทะเบียน แยกสถานีไม่ได้) — "
+                              "จะถูกลบเมื่อลงบัญชีไฟล์นี้ " + then)
+            notes.append(legacy_remove_note(month, mine))
+        elif _has_copy(month):
+            p["flags"].append(f"รายการบางจากแบบเก่าของ {month_label(month)} ถูกลบไปตอนลงไฟล์บางจากก่อนหน้า (เก็บสำเนาไว้) — "
+                              "จะกลับมาเมื่อไม่มีไฟล์บางจากของเดือนนี้ลงบัญชีอยู่เลย")
+            notes.append(legacy_remove_note(month, mine))
+        legacy_all += [r["source_id"] for r in legacy]
+    if notes:
+        p["remove_note"] = " · ".join(notes)
+    p["legacy"] = legacy_all
+    p["note"] = " · ".join(f"บางจาก {d['station']} งวด {dmy(d['lo'])}–{dmy(d['hi'])} → {month_label(d['month'])}" for d in done)
+    if multi:
+        p["note"] = f"ไฟล์เดียว {len(done)} สถานี ({', '.join(d['station'] for d in done)}) ลงบัญชีแยกทีละสถานี: " + p["note"]
+    return p
+
+
+def _read_station(f: Dropped, book: dict, log_name: str, prefix: str, multi: bool) -> Optional[dict]:
+    """One station's sheets of a Reader workbook: its fills by plate, station, month, file total and what to tell the owner -- or None
+    when its log has no fill. multi: the workbook holds several stations, so the sheet prefix decides the station (the title only
+    cross-checks it) and a month question is asked per station ("month:<station>")."""
     log = book[log_name]
     col = _bc_head(log)
-    title = str(((book.get("คำอธิบาย") or [[None]])[0] or [None])[0] or "")
+    title = str(((_sheet(book, prefix, BC_ABOUT) or [[None]])[0] or [None])[0] or "")
+    flags, conflicts = [], []
     fills = []
     for r in log:
         if not r or not isinstance(r[0], (int, float)) or isinstance(r[0], bool):
@@ -421,24 +532,39 @@ def read_bangchak(f: Dropped) -> dict:
         amount = _num(r[col["จำนวนเงิน (บาท)"]]) if col["จำนวนเงิน (บาท)"] < len(r) else None
         d = _day(r[col["วันที่"]])
         if amount is None or d is None:
-            p["flags"].append(f"แถวลำดับ {r[0]:g}: ไม่มีวันที่หรือยอดเงิน — ไม่นับ")
+            flags.append(f"แถวลำดับ {r[0]:g}: ไม่มีวันที่หรือยอดเงิน — ไม่นับ")
             continue
         plate = r[col["ทะเบียนรถที่เติมจริง"]] or (r[col["ทะเบียนรถประจำเบอร์นี้"]] if "ทะเบียนรถประจำเบอร์นี้" in col else None)
+        number = str(r[col["รถเบอร์"]] or "").strip() if "รถเบอร์" in col and col["รถเบอร์"] < len(r) else ""
+        if not str(plate or "").strip() and re.fullmatch(r"\d{1,3}", number):
+            plate = f"#{number}"                      # no plate at all: the truck number, of the station's own branch (BC_TRUCKS)
         fills.append((d, str(plate or "ไม่ระบุทะเบียน").strip(), amount))
     if not fills:
-        p.update(store_only=True, note="ไฟล์บางจากนี้ไม่มีรายการเติมน้ำมัน")
-        return p
+        return None
 
-    # station
+    # station: the sheet prefix ("NM บันทึกเติมน้ำมัน"), the title, the file name; the oldest files name none (then the format)
+    tab = _station_of(prefix)
     sig = _station_signals(title, f.name)
-    station, conflicts = value_conflict(sig, "station", f.choices, title="สถานีบางจาก")
-    if not station:
-        station = BC_STATIONS[0]
-        conflicts = [{"key": "station", "message": "ไม่รู้ว่าเป็นไฟล์ของสถานีไหน (ไม่มีชื่อสถานีในไฟล์)",
-                      "options": [{"value": s, "label": s} for s in BC_STATIONS], "default": None}]
-    elif any(s["source"].startswith("รูปแบบไฟล์") for s in sig) and not f.choices.get("station"):
-        p["flags"].append(f"ไฟล์ไม่ได้เขียนชื่อสถานี — ถือเป็น {station} จากรูปแบบไฟล์")
-    p["conflicts"] += conflicts
+    if multi:
+        sig = [x for x in sig if x["source"] != "ชื่อไฟล์" or x["value"] == tab]          # the name lists every station of the file
+    if tab:
+        sig.insert(0, {"what": "station", "source": "ชื่อแท็บ", "value": tab, "weight": 2})
+    if multi and tab:
+        station = tab
+        said = [x for x in sig if x["source"] == "หัวไฟล์" and x["value"] != tab]
+        if said:
+            flags.append(f"หัวไฟล์ของแท็บ {log_name} เขียนสาขา {said[0]['value']} — ใช้ชื่อแท็บ ({tab})")
+    else:
+        key = "station" if not multi else f"station:{prefix or log_name}"
+        picked = f.choices.get(key)
+        station, conflicts = value_conflict(sig, "station", {"station": picked} if picked else {}, title="สถานีบางจาก")
+        conflicts = [{**c, "key": key} for c in conflicts]
+        if not station:
+            station = BC_STATIONS[0]
+            conflicts = [{"key": key, "message": "ไม่รู้ว่าเป็นไฟล์ของสถานีไหน (ไม่มีชื่อสถานีในไฟล์)",
+                          "options": [{"value": x, "label": x} for x in BC_STATIONS], "default": None}]
+        elif any(x["source"].startswith("รูปแบบไฟล์") for x in sig) and not picked:
+            flags.append(f"ไฟล์ไม่ได้เขียนชื่อสถานี — ถือเป็น {station} จากรูปแบบไฟล์")
 
     # month: the company month most of the baht falls in, the period in the title, the period in the file name
     by_month: dict = defaultdict(float)
@@ -450,67 +576,57 @@ def read_bangchak(f: Dropped) -> dict:
         sig_m.append({"what": "month", "source": "งวดในหัวไฟล์", "value": company_month(_title_end(title))})
     if _name_end(f.name):
         sig_m.append({"what": "month", "source": "ชื่อไฟล์", "value": company_month(_name_end(f.name)), "weight": 0.5})
-    month, mc = month_conflict(sig_m, f.choices)
-    p["conflicts"] += mc
+    if multi:
+        mkey = f"month:{station}"
+        chosen = f.choices.get(mkey) or f.choices.get("month")
+        month, mc = month_conflict(sig_m, {"month": chosen} if chosen else {})
+        mc = [{**c, "key": mkey, "message": f"{station}: {c['message']}"} for c in mc]
+    else:
+        month, mc = month_conflict(sig_m, f.choices)
+    conflicts += mc
     month = month or rows_month
-    p["signals"] = sig + sig_m
-    p["signals"].append({"what": "branch", "source": "ผู้จ่ายบัตรน้ำมัน", "value": PAYER})
-    p["month"] = month
 
     lo, hi = min(x[0] for x in fills), max(x[0] for x in fills)
     a, b = month_bounds(month)
     outside = [x for x in fills if not (a <= x[0] <= b)]
     if outside:
         days = sorted({x[0] for x in outside})
-        p["flags"].append(f"มี {len(outside)} บิล ({sum(x[2] for x in outside):,.2f} บาท) วันที่ {', '.join(dmy(d) for d in days[:6])} "
-                          f"อยู่นอกเดือน {month_label(month)} ({dmy(a)}–{dmy(b)}) — รวมไว้ในงวดนี้ตามบิลของสถานี")
+        flags.append(f"มี {len(outside)} บิล ({sum(x[2] for x in outside):,.2f} บาท) วันที่ {', '.join(dmy(d) for d in days[:6])} "
+                     f"อยู่นอกเดือน {month_label(month)} ({dmy(a)}–{dmy(b)}) — รวมไว้ในงวดนี้ตามบิลของสถานี")
 
-    file_total, bills = _bc_file_total(book.get(BC_CHECK))
+    file_total, bills = _bc_file_total(_sheet(book, prefix, BC_CHECK))
     rows_sum = round(sum(x[2] for x in fills), 2)
     if file_total is None:
-        p["flags"].append("ไม่พบยอดรวมทั้งงวดในแท็บ ตรวจสอบยอดรวม — เทียบยอดไม่ได้")
+        flags.append("ไม่พบยอดรวมทั้งงวดในแท็บ ตรวจสอบยอดรวม — เทียบยอดไม่ได้")
     elif abs(file_total - rows_sum) > 1:
-        p["flags"].append(f"ยอดรวมที่สถานีเขียนไว้ {file_total:,.2f} บาท แต่รายการรวมได้ {rows_sum:,.2f} บาท — ตรวจไฟล์ก่อนลงบัญชี")
+        flags.append(f"ยอดรวมที่สถานีเขียนไว้ {file_total:,.2f} บาท แต่รายการรวมได้ {rows_sum:,.2f} บาท — ตรวจไฟล์ก่อนลงบัญชี")
     if bills is not None and int(bills) != len(fills):
-        p["flags"].append(f"จำนวนบิลที่สถานีเขียนไว้ {bills:g} แต่ในรายการมี {len(fills)} บิล")
+        flags.append(f"จำนวนบิลที่สถานีเขียนไว้ {bills:g} แต่ในรายการมี {len(fills)} บิล")
 
-    vehicles = _vehicles()
     per: dict = defaultdict(float)
     counts: dict = defaultdict(int)
     for _, plate, amount in fills:
         per[plate] += amount
         counts[norm_plate(plate)] += 1
-    key = f"fuel:bangchak:{month}:{station}"
-    batch, flags = _batch(key, "bangchak", month, dict(per), dict(counts), vehicles,
-                          f"น้ำมันบางจาก {station} {month_label(month)} · {len(fills)} บิล ({dmy(lo)}–{dmy(hi)})",
-                          f"จากไฟล์บางจาก {station}", file_total, sub=station)
-    p["batches"].append(batch)
-    p["flags"] += flags
-    legacy = _legacy_bangchak(month)
-    if legacy:
-        other = [s for s in BC_STATIONS if s != station][0]
-        p["flags"].append(f"{month_label(month)} มีรายการบางจากแบบเก่า {len(legacy)} รายการ (รวม 2 สถานีต่อทะเบียน แยกสถานีไม่ได้) — "
-                          f"จะถูกลบเมื่อลงบัญชีไฟล์นี้ ต้องลงไฟล์ของสถานี {other} เดือนเดียวกันด้วย (ระบบเก็บสำเนาไว้: ถ้าลบไฟล์นี้ออก"
-                          f"ก่อนลงไฟล์ของ {other} รายการเดิมจะกลับมา)")
-        p["remove_note"] = legacy_remove_note(month, station)
-    elif _has_copy(month):
-        p["flags"].append(f"รายการบางจากแบบเก่าของ {month_label(month)} ถูกลบไปตอนลงไฟล์บางจากก่อนหน้า (เก็บสำเนาไว้) — "
-                          "จะกลับมาเมื่อไม่มีไฟล์บางจากของเดือนนี้ลงบัญชีอยู่เลย")
-        p["remove_note"] = legacy_remove_note(month, station)
-    p["legacy"] = [r["source_id"] for r in legacy]
-    p["note"] = f"บางจาก {station} งวด {dmy(lo)}–{dmy(hi)} → {month_label(month)}"
-    return p
+    return {"station": station, "month": month, "key": f"fuel:bangchak:{month}:{station}", "per": dict(per), "counts": dict(counts),
+            "n": len(fills), "lo": lo, "hi": hi, "file_total": file_total, "flags": flags, "conflicts": conflicts, "signals": sig + sig_m}
 
 
 # ------------------------------------------------------------------ the scripts' combined Bangchak entries: deleted, kept, put back
 COPY_DIR = "inbox/legacy"              # in the PRIVATE accounting bucket: one JSON copy per month, fuel-bangchak-<month>.json
 
 
-def legacy_remove_note(month: str, station: str) -> str:
-    """What the page can say before the owner removes a Bangchak station file that took the month's old combined entries."""
-    other = [s for s in BC_STATIONS if s != station][0]
+def legacy_remove_note(month: str, stations) -> str:
+    """What the page can say before the owner removes a Bangchak station file that took the month's old combined entries. stations:
+    the station of that month in this file (a list for a workbook of several)."""
+    mine = [stations] if isinstance(stations, str) else list(stations)
+    others = [s for s in LEGACY_STATIONS if s not in mine]
+    if not others:                                    # one workbook with both of the old entries' stations: removing it takes both
+        return (f"ไฟล์นี้ลบรายการบางจากแบบเก่าของ {month_label(month)} (รวม 2 สถานี) — ลบไฟล์นี้แล้วรายการเดิมจะกลับมา "
+                f"ถ้าไม่มีไฟล์บางจาก {' / '.join(LEGACY_STATIONS)} อื่นของเดือนนี้ลงบัญชีอยู่")
+    station = " / ".join(mine)
     return (f"ไฟล์นี้ลบรายการบางจากแบบเก่าของ {month_label(month)} (รวม 2 สถานี) — ลบไฟล์นี้แล้วรายการเดิมจะกลับมา "
-            f"ถ้ายังไม่ได้ลงไฟล์ของสถานี {other} เดือนเดียวกัน ถ้าลงแล้ว ค่าน้ำมันบางจาก {station} เดือนนี้จะหายไปจนกว่าจะลงไฟล์ใหม่")
+            f"ถ้ายังไม่ได้ลงไฟล์ของสถานี {others[0]} เดือนเดียวกัน ถ้าลงแล้ว ค่าน้ำมันบางจาก {station} เดือนนี้จะหายไปจนกว่าจะลงไฟล์ใหม่")
 
 
 def _bc_parts(key: str) -> Optional[tuple[str, str]]:
@@ -573,11 +689,12 @@ def _has_copy(month: str) -> bool:
 
 
 def _station_entries(month: str) -> bool:
-    """Is any station file's Bangchak fuel of this month in the books ("fuel:bangchak:<month>:<station>:<plate>")?"""
+    """Is any NM / ห้วยบง station file's Bangchak fuel of this month in the books ("fuel:bangchak:<month>:<station>:<plate>")? (แก่งคอย's
+    never stood in the old combined entries: it neither keeps them away nor is counted twice with them.)"""
     from app import supabase
     pre = f"fuel:bangchak:{month}:"
     rows = supabase.select_all("acc_entries", {"select": "id,source_id", "source_id": f"like.{pre}*", "order": "id.asc"})
-    return any((r.get("source_id") or "")[len(pre):].split(":", 1)[0] in BC_STATIONS
+    return any((r.get("source_id") or "")[len(pre):].split(":", 1)[0] in LEGACY_STATIONS
                and ":" in (r.get("source_id") or "")[len(pre):] for r in rows)
 
 
@@ -590,7 +707,7 @@ def book(preview: dict, file_id: str) -> dict:
     removed = 0
     for b in preview.get("batches") or []:
         got = _bc_parts(b["key"])
-        if not got:
+        if not got or got[1] not in LEGACY_STATIONS:
             continue
         legacy = _legacy_bangchak(got[0])
         if not legacy:
@@ -614,7 +731,7 @@ def unbook(preview: dict) -> None:
     unbook_batches(preview)
     for b in preview.get("batches") or []:
         got = _bc_parts(b["key"])
-        if not got:
+        if not got or got[1] not in LEGACY_STATIONS:
             continue
         month = got[0]
         if _station_entries(month) or _legacy_bangchak(month):
