@@ -107,13 +107,21 @@ def test_reread_replaces_only_the_given_pages_and_keeps_the_fixes(engine, db, mo
     assert rows["p2:l1"]["amount"] == 450 and rows["p5:l1"]["amount"] == 3500          # the same number of lines: the fixes still fit
 
 
-def test_a_reread_page_with_other_lines_drops_only_its_own_fixes(engine, db, monkeypatch, ai_on):
+def test_a_reread_page_keeps_its_fixes_only_while_its_line_keys_stand(engine, db, monkeypatch, ai_on):
+    """Owner's review, 28 Nov 2026: the fixes are keyed by the batch lines a page builds, so that is what is compared. An advance page is
+    always its one line p5:l1 -- a third person on it keeps the fix. An expense page numbers only its lines with an amount: the same
+    number of raw lines with an unreadable one in front moves every key -- its fixes go, and a flag says so."""
     row = scan_row(db)
     three = {**ADVANCE_NEW, "written_total": 9000, "lines": ADVANCE_OLD["lines"] + [line("2026-11-08", "นาย ค SB-FR003", 3000, "1500")]}
     client_for(monkeypatch, answer=three)
     out = inbox_ai.reread_pages(row["preview"], [5], {})
-    assert out["line_edits"] == {"edits": {"p2:l1": {"amount": 450}}, "added": []}
-    assert any("หน้า 5 อ่านใหม่แล้วจำนวนบรรทัดไม่เท่าเดิม" in f and "1 บรรทัด" in f for f in out["flags"])
+    assert out["line_edits"] == EDITS and not any("บรรทัดไม่ตรงกับเดิม" in f for f in out["flags"])
+    old2 = next(p for p in row["preview"]["ai_pages"] if p["n"] == 2)
+    shifted = {**{k: v for k, v in old2.items() if k != "n"}, "lines": [line("2026-10-26", "อ่านไม่ออก", None)] + old2["lines"][:2]}
+    use_client(monkeypatch, FakeClient([{}, shifted, {}, {}, {}]))
+    out = inbox_ai.reread_pages(row["preview"], [2], {})
+    assert out["line_edits"] == {"edits": {"p5:l1": {"amount": 3500}}, "added": []}
+    assert any("หน้า 2 อ่านใหม่แล้วบรรทัดไม่ตรงกับเดิม" in f and "1 บรรทัด" in f for f in out["flags"])
 
 
 def test_reread_refuses_what_it_cannot_read_and_counts_a_failed_call(engine, db, monkeypatch, ai_on):
@@ -153,6 +161,46 @@ def test_the_engine_saves_the_reread_and_books_a_booked_file_again(engine, db, m
     assert saved["ai_usage"]["calls"] == 6 and saved["preview"]["ai_usage"]["calls"] == 6 and "reread" not in saved["preview"]
     assert saved["preview"]["line_edits"] == EDITS and saved["preview"]["hr_items"] == HR
     assert out["reread"] == {"pages": [5], "failed": []} and out["preview"]["ai_pages"][4]["advance_rows"]
+
+
+def test_a_booked_files_reread_that_cannot_book_keeps_its_pages_and_tokens(engine, db, monkeypatch, ai_on, readers):
+    """Owner's review, 28 Nov 2026: the paid re-read is never thrown away. Its booking refused by the reader: the booking stays, the new
+    pages wait beside it with their tokens, and อ่านใหม่ books them once the cause is fixed. A re-read parked with a question: its
+    tokens are saved, and the answer is applied to ITS pages, not the booked ones."""
+    scan_row(db, status="booked", batches=["docs:2026-11:สระบุรี:mid"], booked_total=10500)
+    client_for(monkeypatch)
+    real = readers[-1].book
+
+    def refuse(p, fid):
+        raise ValueError("ยอดไม่ตรง")
+    monkeypatch.setattr(readers[-1], "book", refuse)
+    with pytest.raises(inbox.InboxError, match="ลงบัญชีไม่สำเร็จ"):
+        inbox.reread_pages(FID, [5])
+    saved = db.rows[FID]
+    assert saved["status"] == "booked" and saved["ai_usage"]["calls"] == 6 and saved["preview"]["ai_usage"]["calls"] == 6
+    pend = saved["preview"]["pending"]
+    assert pend["status"] == "read" and next(p for p in pend["preview"]["ai_pages"] if p["n"] == 5)["advance_rows"] == ADVANCE_NEW["advance_rows"]
+    assert "advance_rows" not in next(p for p in saved["preview"]["ai_pages"] if p["n"] == 5)          # the booked read is untouched
+    with pytest.raises(inbox.InboxError, match="ลงบัญชีใหม่ไม่สำเร็จ"):
+        inbox.reread_pages(FID, [5])                                                                     # no second paid call on top
+    monkeypatch.setattr(readers[-1], "book", real)
+    inbox.reread(FID)
+    saved = db.rows[FID]
+    assert saved["status"] == "booked" and "pending" not in saved["preview"] and saved["ai_usage"]["calls"] == 6
+    assert next(p for p in saved["preview"]["ai_pages"] if p["n"] == 5)["advance_rows"] == ADVANCE_NEW["advance_rows"]
+    # parked with a question: the tokens are saved with it, and choose() rebuilds from the parked pages
+    scan_row(db, status="booked", batches=["docs:2026-11:สระบุรี:mid"], booked_total=10500)
+    row = db.rows[FID]
+    new = inbox_ai.reread_pages({**row["preview"], "ai_usage": row["ai_usage"]}, [5], {})
+    new.pop("reread")
+    new["conflicts"] = [{"what": "month", "message": "เดือนไหน", "options": []}]
+    inbox._reprocess({**row, "ai_usage": new["ai_usage"]}, {}, {FID}, fresh=new)
+    saved = db.rows[FID]
+    assert saved["preview"]["pending"]["status"] == "needs_choice" and saved["ai_usage"]["calls"] == 6 and saved["preview"]["ai_usage"]["calls"] == 6
+    inbox._reprocess(saved, {}, {FID})
+    saved = db.rows[FID]
+    assert saved["status"] == "booked" and "pending" not in saved["preview"]
+    assert next(p for p in saved["preview"]["ai_pages"] if p["n"] == 5)["advance_rows"] == ADVANCE_NEW["advance_rows"]
 
 
 def test_the_engine_refuses_in_thai_and_keeps_a_failed_calls_tokens(engine, db, monkeypatch, ai_on):
@@ -222,3 +270,26 @@ def test_the_check_page_reads_the_rows_of_an_advance_page(tmp_path):
     got = run("(() => ({ a: ickAdvRows(DATA.f, 5), b: ickAdvRows(DATA.f, 6) }))()", {"f": f}, tmp_path)
     assert got["a"]["old"] is False and len(got["a"]["rows"]) == 2 and got["a"]["sums"] == {"common": 980, "fault": 500, "other": 0}
     assert got["b"]["old"] is True and got["b"]["rows"] == []
+
+
+def test_the_signed_copies_of_an_end_of_month_file_offer_no_paid_reread(tmp_path):
+    """Owner's review, 28 Nov 2026: the pay page never reads the end-of-month file's advance pages (payroll.advance_lists), so no
+    "อ่านหน้านี้ใหม่" (a paid call) and no "the pay page cannot use these" there -- the mid-month file's page still offers both."""
+    from tests.test_inbox_check_page import NODE, run
+    if NODE is None:
+        pytest.skip("Node is not installed")
+    test = """(() => {
+      globalThis.el = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter((k) => k) });
+      globalThis.fmtMoney = (n) => String(n);
+      const words = (n) => [n.attrs.text || ""].concat(...(n.kids || []).map(words));
+      const out = {};
+      for (const half of ["end", "mid"]) {
+        ick.f = { id: "f", preview: { half, ai_pages: [{ n: 6, page_kind: "advance" }] } };
+        ick.editable = true;
+        out[half] = words(ickAdvEl({ n: 6, image: "x.jpg" })).join(" | ");
+      }
+      return out;
+    })()"""
+    got = run(test, {}, tmp_path)
+    assert "อ่านหน้านี้ใหม่" not in got["end"] and "ยังเอายอดเหล่านี้ไปใช้ไม่ได้" not in got["end"] and "ฉบับเซ็นรับ" in got["end"]
+    assert "อ่านหน้านี้ใหม่ (เอาส่วนกลาง / ความผิด)" in got["mid"] and "ยังเอายอดเหล่านี้ไปใช้ไม่ได้" in got["mid"]

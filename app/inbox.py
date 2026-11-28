@@ -73,7 +73,9 @@ _AI_STALE = "AI หยุดกลางคัน (เซิร์ฟเวอ�
 # A booked file read again whose new read cannot book: the booking stays, the new read waits (preview["pending"]).
 PENDING_MSG = {"needs_choice": "อ่านใหม่แล้วมีเรื่องต้องเลือก — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิมจนกว่าจะเลือก",
                "stored": "อ่านใหม่แล้วเป็นไฟล์เก็บไว้ ไม่ลงบัญชี — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิม (ลบไฟล์ถ้าไม่ต้องการ)",
-               "needs_ai": "อ่านใหม่แล้วต้องให้ AI อ่าน — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิม"}
+               "needs_ai": "อ่านใหม่แล้วต้องให้ AI อ่าน — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิม",
+               # อ่านหน้านี้ใหม่ of a booked file whose booking was refused: the new pages are kept (owner's review, 28 Nov 2026)
+               "read": "อ่านหน้าใหม่แล้ว แต่ลงบัญชีใหม่ไม่สำเร็จ — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิม แก้ต้นเหตุแล้วกดอ่านใหม่เพื่อลงบัญชีอีกครั้ง"}
 
 
 class InboxError(ValueError):
@@ -663,7 +665,10 @@ def reread_pages(file_id: str, pages, see_pay: bool = True, hr: str = "none") ->
         if not see_pay and _is_payroll(row):
             raise Forbidden(PAY_HIDDEN)
         _refuse_running(row)
-        if pending_of(row):
+        pend = pending_of(row)
+        if pend and pend.get("status") == "read":          # an earlier page re-read whose booking was refused waits (_reprocess)
+            raise InboxError(PENDING_MSG["read"])
+        if pend:
             raise InboxError("อ่านใหม่แล้วยังมีเรื่องต้องเลือก — เลือกก่อน แล้วค่อยอ่านหน้าใหม่")
         base = base_preview(row)
         if not _ai_read(row) or not base.get("ai_pages"):
@@ -735,7 +740,10 @@ def _reprocess(row: dict, choices: dict, visited: set, fresh: Optional[dict] = N
     Not booked: the new read replaces the old one. Booked: READ FIRST. Only a read that can book replaces the booking (the new booking
     is written, then whatever the old one held and the new one does not is taken back). A read with a question, a store-only read or a
     failed read leaves the booking exactly as it is; the question waits in preview["pending"] for the owner.
-    fresh: a new read made already (reread_pages: some pages read again by the AI) -- used as it is, never rebuilt a second time."""
+    fresh: a new read made already (reread_pages: some pages read again by the AI) -- used as it is, never rebuilt a second time.
+    A paid re-read is never thrown away (owner's review, 28 Nov 2026): parked, it saves its tokens (ai_usage) with it; a later choose /
+    reread of the file rebuilds from the page reads waiting in pending (the newest), not the booked ones; and when booking it is refused,
+    the new read and its tokens are parked beside the booking (pending status "read") before the refusal is raised."""
     was_booked = row.get("status") == "booked"
     base = base_preview(row)
     if fresh is not None:
@@ -744,7 +752,13 @@ def _reprocess(row: dict, choices: dict, visited: set, fresh: Optional[dict] = N
     elif _ai_read(row):
         ai = _optional("inbox_ai")
         fn = getattr(ai, "apply_choices", None) if ai else None
-        preview = _normal(fn(base, choices) if fn else apply_choices(base, choices), None)
+        pend = pending_of(row)
+        newest = (pend or {}).get("preview") or {}
+        # a re-read waiting beside the booking (reread_pages) holds the newer page reads: those are what the answer applies to
+        # (with its fixes: the re-read dropped those of a page whose lines moved -- the booked ones must not come back onto other lines)
+        src = ({**base, "ai_pages": newest["ai_pages"], "ai_usage": newest.get("ai_usage") or base.get("ai_usage"), "line_edits": newest.get("line_edits")}
+               if newest.get("ai_pages") else base)
+        preview = _normal(fn(src, choices) if fn else apply_choices(src, choices), None)
         kind, error = row.get("kind") or preview.get("kind"), None
     else:
         kind, preview, error = read_file(row["file_name"], _download(row), choices)
@@ -754,12 +768,30 @@ def _reprocess(row: dict, choices: dict, visited: set, fresh: Optional[dict] = N
         return row_view(_save(row["id"], values), _running_ids()), False
     if error:                                              # keep what is booked rather than lose it to a failed read
         raise InboxError(f"{error} — ของที่ลงบัญชีไว้ยังอยู่เหมือนเดิม")
+    spent = {"ai_usage": values["ai_usage"]} if fresh is not None else {}           # the tokens of a paid re-read are saved with it
     if values["status"] != "read":
-        parked = {**base, "pending": {"kind": kind, "status": values["status"], "preview": preview, "choices": choices}}
-        saved = _save(row["id"], {"preview": parked})
+        parked = {**base, **spent, "pending": {"kind": kind, "status": values["status"], "preview": preview, "choices": choices}}
+        saved = _save(row["id"], {"preview": parked, **spent})
         return {**row_view(saved, _running_ids()), "message": PENDING_MSG.get(values["status"], "")}, False
     new_row = {**row, "kind": kind, "preview": preview, "choices": choices}
-    return _book(new_row, visited, old=row, extra=values), True
+    if fresh is None:
+        return _book(new_row, visited, old=row, extra=values), True
+    try:
+        return _book(new_row, visited, old=row, extra=values), True
+    except InboxError:                                     # the reader refused it: the booking stays, the paid read waits beside it
+        _park_quietly(row["id"], {"preview": {**base, **spent, "pending": {"kind": kind, "status": "read", "preview": preview, "choices": choices}}, **spent})
+        raise
+    except Exception:                                      # anything else: at least the tokens are counted
+        _park_quietly(row["id"], {"preview": {**base, **spent}, **spent})
+        raise
+
+
+def _park_quietly(file_id: str, values: dict) -> None:
+    """Save what a failed re-booking must not lose; a failure here is logged, never hides the first error."""
+    try:
+        _save(file_id, values)
+    except Exception:                                      # noqa: BLE001
+        logger.exception("inbox: keeping the re-read of %s failed", file_id)
 
 
 def _unbook_preview(kind: Optional[str], preview: dict) -> dict:

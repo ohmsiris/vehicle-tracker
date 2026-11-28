@@ -25,13 +25,15 @@ returned as "advance_unmatched".
 
 ส่วนกลาง, ความผิด and อุปกรณ์ / อื่นๆ (owner, 28 Nov 2026) come from the same lists' own columns (advance_rows of the page read, app/inbox_ai.py):
 ส่วนกลาง and อุปกรณ์ are the sums of the person's rows; ความผิด joins the ใบเตือน and attendance fines in the penalty cell (the same amount as
-one of his ใบเตือน of the period is one fine, counted once). Green only when his branch's lists are complete, booked and every page was
+one of his ใบเตือน or attendance fines of the period is one fine, counted once). Green only when his branch's lists are complete, booked and every page was
 read with these columns; a list read before them must be read again (inbox_ai.reread_pages, อ่านหน้านี้ใหม่ on the check page).
 
 วันทำงาน (28 Nov 2026): สระบุรี's staff who are not route drivers take their days from the attendance page (app/attendance.py build_month over
 the same scans, with the owner's decision on every flagged day -- count_attendance has the owner's rule); a เด็กรถ keeps his driver's days
 until his own flagged days are decided; someone with a second rate who rides with one driver gets his days split into plant and truck days
-(truck_days). Route drivers take theirs from ยอดขายรายวัน, แก่งคอย from its work record.
+(truck_days). Route drivers take theirs from ยอดขายรายวัน, แก่งคอย from its work record. The attendance page's ค่าแรงเต็ม + หักเงิน fines
+are deducted for everyone it lists, whatever his days come from; a ไม่จ่าย / ครึ่งวัน there for someone whose days come from elsewhere is
+said on his days cell (amber), not taken off (owner's review, 28 Nov 2026).
 
 Who is on the list: company-paid people (employees.pay_group <> 'hq') who worked any day of the period, plus people who left earlier
 and still have savings to get back. Rules per person: employee_pay_rules (schema_v93.sql); the daily rate: employee_rates (app/rates.py).
@@ -206,7 +208,7 @@ SELECTS = {
     "inbox_files": "id,kind,status,month,branches",
     # the scans that were read: their pages as the AI read them, for the mid-month advance lists (nothing else of the preview)
     "advance_files": "id,file_name,kind,status,month,branches,uploaded_at,booked_at,half:preview->half,pages:preview->ai_pages",
-    "employee_documents": "id,employee_id,doc_date,status,penalty:content->penalty_amount",
+    "employee_documents": "id,employee_id,doc_date,status,penalty:content->penalty_amount,offence:content->offence_date",
 }
 
 
@@ -1136,6 +1138,8 @@ def deduct_view(p: dict, ctx: dict) -> Optional[dict]:
     if any(r.get("clash") for r in rows):
         doubt.append("รหัสในใบเป็นของคนอื่น จับคู่จากชื่อ ต้องตรวจ")
     on_list = bool(rows) or bool(adv["by_person"].get(p["id"])) or code in b["named"]
+    if on_list and not rows and not b["deduct_why"]:         # the lists were read with the columns, yet no row of his came back
+        doubt.append("มีชื่อในใบเบิกกลางเดือน แต่อ่านแถวส่วนกลาง / ความผิด / อุปกรณ์ของคนนี้ไม่ได้ ต้องตรวจกับใบเบิก")
     return {"rows": rows, "sums": {k: round(sum(r[k] for r in rows), 2) for k, _ in DEDUCT_COLS}, "doubt": doubt, "known": bool(rows),
             "on_list": on_list, "files": list(dict.fromkeys(r["short"] for r in rows)) or list(b["files"])}
 
@@ -1172,17 +1176,38 @@ def deduct_cell(key: str, label: str, dv: dict, before: float, prev_month: Optio
     return None
 
 
-def penalty_cell(fines: list[dict], att_fines: list[dict], dv: Optional[dict]) -> Optional[dict]:
-    """เงินขาด / ความผิด: the ใบเตือน fines dated in the period, the attendance page's ค่าแรงเต็ม + หักเงิน fines, and the ความผิด column of
-    the mid-month list (owner, 28 Nov 2026) -- the note says which is which. A list's ความผิด of the same amount as one of HIS ใบเตือน
-    fines of the period is the same fine written twice (nothing on the list says which letter it is): counted once, and the note
-    says so. ok unless the list's figure is not settled (carry, with the reason); no fine anywhere while his row could not be read
-    with the column: miss. None = nothing to show."""
+ATT_FINE = "เวลาทำงาน (ค่าแรงเต็ม + หักเงิน)"
+
+
+def letter_of(att_fines: list[dict], fines: list[dict]) -> tuple[list[dict], list[tuple[dict, dict]]]:
+    """(left, same): the attendance page's ค่าแรงเต็ม + หักเงิน fines that are not one of his ใบเตือน of the period, and the pairs
+    (attendance fine, letter) that are. The decision is "ค่าแรงเต็ม + ใบเตือน + หักเงิน": the letter follows, often issued a day or more
+    later, so its doc_date says nothing -- the same fine is a letter whose own offence date is that day with the same amount, or, a
+    letter with no offence date written, the same amount (owner's review, 28 Nov 2026). One letter is one fine."""
+    pool, left, same = list(fines), [], []
+    for f in att_fines:
+        hit = next((x for x in pool if x.get("offence") == f["day"] and abs(x["amount"] - f["amount"]) < 0.01), None)
+        hit = hit or next((x for x in pool if not x.get("offence") and abs(x["amount"] - f["amount"]) < 0.01), None)
+        if hit:
+            pool.remove(hit)
+            same.append((f, hit))
+        else:
+            left.append(f)
+    return left, same
+
+
+def penalty_cell(fines: list[dict], att_fines: list[dict], dv: Optional[dict], att_same: Optional[list] = None) -> Optional[dict]:
+    """เงินขาด / ความผิด: the ใบเตือน fines dated in the period, the attendance page's ค่าแรงเต็ม + หักเงิน fines (att_fines: those no
+    letter holds; att_same: the (fine, letter) pairs letter_of found, said once), and the ความผิด column of the mid-month list (owner,
+    28 Nov 2026) -- the note says which is which. A list's ความผิด of the same amount as one of HIS ใบเตือน or attendance fines of the
+    period is the same fine written twice (nothing on the list says which one it is): counted once, and the note says so. ok unless
+    the list's figure is not settled (carry, with the reason); no fine anywhere while his row could not be read with the column: miss.
+    None = nothing to show."""
     faults = [r["fault"] for r in (dv or {}).get("rows", []) if r["fault"] > 0]
-    left = list(fines)
+    left = [("ใบเตือน", f) for f in fines] + [(ATT_FINE, f) for f in att_fines]
     same, extra = [], []
     for amount in faults:
-        hit = next((f for f in left if abs(f["amount"] - amount) < 0.01), None)
+        hit = next((x for x in left if abs(x[1]["amount"] - amount) < 0.01), None)
         if hit:
             left.remove(hit)
             same.append((amount, hit))
@@ -1194,11 +1219,13 @@ def penalty_cell(fines: list[dict], att_fines: list[dict], dv: Optional[dict]) -
         return None
     total = round(sum(f["amount"] for f in fines + att_fines) + sum(extra), 2)
     words = [f"{label} " + ", ".join(f"{dmy(f['day'])} {money(f['amount'])}" for f in got)
-             for label, got in (("ใบเตือน", fines), ("เวลาทำงาน (ค่าแรงเต็ม + หักเงิน)", att_fines)) if got]
+             for label, got in (("ใบเตือน", fines), (ATT_FINE, att_fines)) if got]
+    for f, letter in att_same or []:
+        words.append(f"{ATT_FINE} {dmy(f['day'])} {money(f['amount'])} = ใบเตือน {dmy(letter['day'])} {money(letter['amount'])} (นับครั้งเดียว)")
     if extra:
         words.append("ความผิดในใบเบิกกลางเดือน " + ", ".join(money(a) for a in extra))
-    for amount, f in same:
-        words.append(f"ความผิดในใบเบิกกลางเดือน {money(amount)} = ใบเตือน {dmy(f['day'])} {money(f['amount'])} (ยอดและคนตรงกัน นับครั้งเดียว)")
+    for amount, (label, f) in same:
+        words.append(f"ความผิดในใบเบิกกลางเดือน {money(amount)} = {label} {dmy(f['day'])} {money(f['amount'])} (ยอดและคนตรงกัน นับครั้งเดียว)")
     state = "ok"
     if dv and dv["doubt"] and (faults or unknown(dv, "fault")):
         state = "carry"
@@ -1440,9 +1467,13 @@ def attendance_month(month: str, employees: list[dict], punches: list[dict], rev
 def count_attendance(person: dict, first: date, last: date) -> Optional[dict]:
     """One person's working days from his attendance month, his own days of the period only (first..last); None when he has none
     there. {total, counts {kind: days}, double (ควบกะ days counted), open [flagged dates not decided], fines [{day, amount}],
-    days [{day, worth, double, minutes}] (the days that count), expected (his shift in minutes)}. Owner, 28 Nov 2026: the decision wins,
-    on a complete day too (a day "came, scanned, did not work" is ไม่จ่าย)."""
+    days [{day, worth, double, minutes, flag, kind}] (the days that count), expected (his shift in minutes), not_double (days the page
+    marks ควบกะ that are not two shifts: counted once)}. Owner, 28 Nov 2026: the decision wins, on a complete day too (a day "came,
+    scanned, did not work" is ไม่จ่าย). A ควบกะ day counts 2 only when it really covers about two shifts (two_shifts): the attendance
+    page marks any day with two complete scan pairs, a lunch break re-scan among them."""
     total, counts, double, open_days, fines, counted, seen = 0.0, {k: 0 for k, _ in ATT_KINDS}, 0, [], [], [], False
+    expected = int(person.get("expected") or att_rules.DEFAULT_SHIFT)
+    not_double = 0
     for d in person.get("days") or []:
         day = _d(d.get("date"))
         if not day or not first <= day <= last:
@@ -1461,15 +1492,25 @@ def count_attendance(person: dict, first: date, last: date) -> Optional[dict]:
             open_days.append(day)
             continue
         counts[kind] += 1
-        if d.get("double"):                                  # ควบกะ: two days' wage at สระบุรี (owner, 27 Nov 2026)
+        two = two_shifts(d, expected)
+        if two:                                              # ควบกะ: two days' wage at สระบุรี (owner, 27 Nov 2026)
             worth *= 2
             double += 1 if worth else 0
+        elif d.get("double") and worth:
+            not_double += 1
         total += worth
-        counted.append({"day": day, "worth": worth, "double": bool(d.get("double")), "minutes": int(d.get("minutes") or 0)})
+        counted.append({"day": day, "worth": worth, "double": two, "minutes": int(d.get("minutes") or 0), "flag": d.get("flag"), "kind": kind})
     if not seen:
         return None
     return {"total": round(total, 2), "counts": counts, "double": double, "open": open_days, "fines": fines, "days": counted,
-            "expected": int(person.get("expected") or att_rules.DEFAULT_SHIFT)}
+            "expected": expected, "not_double": not_double}
+
+
+def two_shifts(d: dict, expected: int) -> bool:
+    """Is this attendance day a real ควบกะ (two days' wage)? The page marks it double (two complete scan pairs, or one long day), it is
+    not flagged short or a single scan or added by hand, and it is at least one and a half of his shifts long -- attendance's own
+    long-day measure (owner, 28 Nov 2026: a normal day with a break scan, 07:00-12:00 / 12:45-19:00, is one day, never two)."""
+    return bool(d.get("double")) and d.get("flag") not in ("short", "single", "manual") and int(d.get("minutes") or 0) >= expected * 3 // 2
 
 
 def attendance_days(p: dict, ctx: dict) -> Optional[dict]:
@@ -1487,6 +1528,8 @@ def attendance_words(att: dict) -> str:
     parts = [f"{label} {n[k]}" + (f" (นับ {num(n[k] * 0.5)})" if k == "half" else " (นับ 0)" if k == "unpaid" else "") for k, label in ATT_KINDS if n[k]]
     if att["double"]:
         parts.append(f"ควบกะ {att['double']} วัน (นับวันละ 2)")
+    if att.get("not_double"):
+        parts.append(f"สแกน 2 รอบแต่ไม่ถึง 2 กะ {att['not_double']} วัน (นับวันละ 1)")
     return f"{ATT_SOURCE}: " + (" · ".join(parts) if parts else "ไม่มีวันที่นับ")
 
 
@@ -1494,10 +1537,20 @@ def truck_days(att: dict, driver: dict, first: date, last: date) -> float:
     """The days a production worker with two rates rode the truck only (owner, 26 Nov 2026: out and back, under 12 hours, 344): his
     working days on which the driver he rides with drove his route himself, that are not a full plant shift of his (worked less than
     his shift less the grace -- attendance's own "short" measure) and not ควบกะ. The rest of his days are plant days (390), the day he
-    went out on the truck and came back to keep working among them."""
+    went out on the truck and came back to keep working among them. Only a day with complete scans says how long he worked: a single
+    scan the owner approved, or a day added by hand, is a plant day (owner's review, 28 Nov 2026 -- approved = a full day)."""
     drove = {d for d in driver["own"] if first <= d <= last}
     full = att["expected"] - att_rules.LATE_GRACE
-    return round(sum(x["worth"] for x in att["days"] if x["worth"] > 0 and x["day"] in drove and not x["double"] and x["minutes"] < full), 2)
+    return round(sum(x["worth"] for x in att["days"] if x["worth"] > 0 and x["day"] in drove and not x["double"]
+                     and x.get("flag") not in ("single", "manual") and 0 < x["minutes"] < full), 2)
+
+
+def unknown_length(att: dict, driver: dict, first: date, last: date) -> list[date]:
+    """His counted days on which his driver drove whose length the scans do not say (a single scan approved, a day added by hand):
+    counted as plant days by truck_days, named in the note."""
+    drove = {d for d in driver["own"] if first <= d <= last}
+    return sorted(x["day"] for x in att["days"] if x["worth"] > 0 and x["day"] in drove and not x["double"]
+                  and (x.get("flag") in ("single", "manual") or not x["minutes"]))
 
 
 def attendance_cell(att: dict, driver: Optional[dict], first: date, last: date, rate2: Optional[float]) -> dict:
@@ -1516,6 +1569,9 @@ def attendance_cell(att: dict, driver: Optional[dict], first: date, last: date, 
             truck = truck_days(att, driver, first, last)
             extra = {"split": {"plant": round(att["total"] - truck, 2), "truck": truck}}
             notes.insert(0, f"โรงงาน {num(extra['split']['plant'])} วัน · ออกรถ {num(truck)} วัน ({money(rate2)})")
+            blind = unknown_length(att, driver, first, last)
+            if blind:
+                notes.append(f"{runs(blind)} ไม่รู้ชั่วโมง (สแกนขาเดียว / เพิ่มเอง) นับเป็นวันโรงงาน")
             gaps = [d for d in driver["missing"] if first <= d <= last]
             if gaps:                                         # the truck days may not all be known yet
                 state = "carry"
@@ -1668,11 +1724,23 @@ def build_person(p: dict, ctx: dict) -> dict:
     if work:
         apply_work(cells, work, first, last, ctx, p)
 
+    # ---- the attendance page's decisions for someone whose days come from another source (a route driver's sales days, แก่งคอย's
+    # work record, ...): its fines are still his (below); a ไม่จ่าย / ครึ่งวัน there is not taken off those days -- said, amber
+    seen_att = att if att is not None else attendance_days(p, ctx)
+    if att is None and seen_att and cells["days"]["state"] != "na":
+        skipped = [(label, [x["day"] for x in seen_att["days"] if x["kind"] == k]) for k, label in (("unpaid", "ไม่จ่าย"), ("half", "ครึ่งวัน"))]
+        skipped = [(label, ds) for label, ds in skipped if ds]
+        if skipped:
+            c = cells["days"]
+            said = " · ".join(f"{label} {len(ds)} วัน ({runs(ds)})" for label, ds in skipped)
+            cells["days"] = {**c, "state": "carry" if c["state"] == "ok" else c["state"],
+                             "note": " · ".join(x for x in (c["note"], f"หน้าเวลาทำงานตัดสิน {said} — วันทำงานของคนนี้ไม่ได้มาจากหน้านั้น ยังไม่ได้หัก ต้องตรวจ") if x)}
+
     # ---- deductions: HQ's own sheet of the month when there is one, else the latest sheet before it as the stand-in
     fines = ctx["fines"].get(p["id"], [])
-    # a ค่าแรงเต็ม + หักเงิน day on the attendance page: the day is paid in full, the amount is a fine (owner, 28 Nov 2026). The same day
-    # and amount on a ใบเตือน is the same fine, counted once.
-    att_fines = [f for f in (att or {}).get("fines", []) if not any(x["day"] == f["day"] and abs(x["amount"] - f["amount"]) < 0.01 for x in fines)]
+    # a ค่าแรงเต็ม + หักเงิน day on the attendance page: the day is paid in full, the amount is a fine (owner, 28 Nov 2026) -- for everyone
+    # the page has, whatever his days come from. The fine on its ใบเตือน (the letter's offence date) is the same fine, counted once.
+    att_fines, att_same = letter_of((seen_att or {}).get("fines", []), fines)
     # เบิกล่วงหน้า from the month's own lists (never for a month HQ already worked out): the cell, or why the lists cannot settle him
     drawn, doubt = (None, "") if own else advance_cell(p, ctx, prev)
     if own:
@@ -1680,7 +1748,7 @@ def build_person(p: dict, ctx: dict) -> dict:
         for key in ("savings", "advance", "common", "other", "sso"):
             if _f(deds.get(key)) > 0:
                 cells[key] = cell("ok", _f(deds[key]), money(deds[key]), said)
-        if not fines and not att_fines and _f(deds.get("shortage")) > 0:
+        if not fines and not att_fines and not att_same and _f(deds.get("shortage")) > 0:
             cells["penalty"] = cell("ok", _f(deds["shortage"]), money(deds["shortage"]), "เงินขาด " + said)
     elif ctx["prev_failed"]:
         cells["advance"] = cells["savings"] = cells["sso"] = cell("miss", note="โหลดใบสรุปเงินเดือน HQ ไม่สำเร็จ")
@@ -1726,7 +1794,7 @@ def build_person(p: dict, ctx: dict) -> dict:
             got = deduct_cell(key, label, dv, before, (prev or {}).get("month"))
             if got is not None:
                 cells[key] = got
-    pen = penalty_cell(fines, att_fines, dv)
+    pen = penalty_cell(fines, att_fines, dv, att_same)
     if pen is not None:
         cells["penalty"] = pen
     status = status_of(p, start, end, rate)
@@ -2286,7 +2354,8 @@ def build(src: dict, month: str, today: date) -> dict:
     for doc in src.get("penalties") or []:
         day = _d(doc.get("doc_date"))
         if day and start <= day <= end and _f(doc.get("penalty")) > 0 and doc.get("status") not in ("draft", "cancelled"):
-            fines.setdefault(doc["employee_id"], []).append({"day": day, "amount": _f(doc["penalty"])})
+            # offence: the day of the offence written on the letter (its doc_date is the day it was issued, often later)
+            fines.setdefault(doc["employee_id"], []).append({"day": day, "amount": _f(doc["penalty"]), "offence": _d(doc.get("offence"))})
     # HQ's sheets: this month's own rows (HQ already worked the month out), and per person the LATEST row before it -- the stand-in.
     # HQ's sheet of the month before may never come (IceBox is taking the calculation over), so an older one is used and named.
     sheets = src.get("pay_prev")

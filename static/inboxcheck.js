@@ -409,8 +409,14 @@ function ickAdvRows(f, n) {
   return { old: false, rows, sums };
 }
 
+// The end-of-month file's advance pages are the SIGNED copies: the pay page reads only the mid-month file (app/payroll.py advance_lists),
+// so no paid re-read and no "the pay page cannot use these" is offered there (owner's review, 28 Nov 2026) -- the rows are only shown.
 function ickAdvEl(pg) {
   const got = ickAdvRows(ick.f, pg.n);
+  if ((((ick.f && ick.f.preview) || {}).half) === "end") {
+    return el("div", { class: "ick-card ick-adv-card" }, el("strong", { text: "ใบเบิกกลางเดือน (ฉบับเซ็นรับ)" }),
+      el("p", { class: "small muted", text: "หน้าคำนวณเงินเดือนใช้ส่วนกลาง / ความผิด / อุปกรณ์ จากไฟล์กลางเดือน ไม่ใช่จากฉบับเซ็นรับในไฟล์ปลายเดือน" }));
+  }
   const busy = ick.rereading === pg.n;
   const btn = ick.editable && pg.image ? el("button", { class: "btn small", type: "button", "data-ibx-file": ick.f.id, disabled: !!ick.rereading,
     text: busy ? "กำลังอ่านใหม่…" : "อ่านหน้านี้ใหม่ (เอาส่วนกลาง / ความผิด)", onclick: () => ickReread(pg) }) : null;

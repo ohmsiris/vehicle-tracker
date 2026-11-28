@@ -1805,25 +1805,54 @@ def test_days_after_the_scan_file_are_not_known_yet():
 
 def test_a_double_shift_day_counts_two_and_half_of_it_one():
     """count_attendance on its own: a ควบกะ day is worth 2, so a ครึ่งวัน decision on one is worth 1; days outside his own dates of the
-    period are not his."""
+    period are not his. Only a day that covers about two shifts (1.5 x his shift, not short, single or added by hand) is ควบกะ: the
+    page marks any day with two complete scan pairs (owner's review, 28 Nov 2026)."""
     person = {"expected": 720, "days": [
         {"date": "2026-11-01", "flag": "ok", "minutes": 1300, "double": True, "review": None},
-        {"date": "2026-11-02", "flag": "single", "minutes": 0, "double": True, "review": {"decision": "half", "deduct_amount": 0, "manual": False}},
+        {"date": "2026-11-02", "flag": "ok", "minutes": 1200, "double": True, "review": {"decision": "half", "deduct_amount": 0, "manual": False}},
         {"date": "2026-11-03", "flag": "short", "minutes": 400, "double": False, "review": None},
+        {"date": "2026-11-04", "flag": "single", "minutes": 0, "double": True, "review": {"decision": "approve", "deduct_amount": 0, "manual": False}},
+        {"date": "2026-11-05", "flag": "ok", "minutes": 720, "double": True, "review": None},          # 06-12 / 12:40-18:40: a lunch re-scan
+        {"date": "2026-11-06", "flag": "short", "minutes": 675, "double": True, "review": {"decision": "approve", "deduct_amount": 0, "manual": False}},
         {"date": "2026-10-20", "flag": "ok", "minutes": 720, "double": False, "review": None}]}
     a = pw.count_attendance(person, START, END)
-    assert (a["total"], a["double"], a["open"], a["fines"]) == (3.0, 2, [N(11, 3)], [])
-    assert pw.count_attendance(person, N(11, 4), END) is None                    # nothing of his inside his dates: not from here
+    assert (a["total"], a["double"], a["open"], a["fines"], a["not_double"]) == (6.0, 2, [N(11, 3)], [], 3)
+    assert "สแกน 2 รอบแต่ไม่ถึง 2 กะ 3 วัน (นับวันละ 1)" in pw.attendance_words(a)
+    assert pw.count_attendance(person, N(11, 7), END) is None                    # nothing of his inside his dates: not from here
+
+
+def test_a_break_scan_is_one_day_whatever_the_decision():
+    """07:00, 12:00, 12:45, 19:00 (11h15, short): the page pairs it as two shifts, but it is one day -- approved 1, ครึ่งวัน 0.5."""
+    for dec, total in (("approve", 31), ("half", 30.5)):
+        s = src(employees=[emp("F3")], rules=[rule("F3")], rates=[rate("F3")], punches=scans_of("F3"), attendance_reviews=[decided("F3", N(11, 12), dec)])
+        s["punches"] += [{"employee_id": "F3", "punched_at": "2026-11-12T12:00:00"}, {"employee_id": "F3", "punched_at": "2026-11-12T12:45:00"}]
+        c = one(pw.build(s, MONTH, TODAY), "F3")["cells"]["days"]
+        assert (c["state"], c["value"]) == ("ok", total) and "นับวันละ 2" not in c["note"]
 
 
 def test_a_fine_on_a_warning_letter_of_the_same_day_is_counted_once():
     reviews = [decided("F1", d, "approve") for d in (N(10, 28), N(10, 31), N(11, 3), N(11, 10))] + [decided("F1", N(11, 6), "full_penalty", 200)]
     letters = [{"id": 1, "employee_id": "F1", "doc_date": "2026-11-06", "status": "signed", "penalty": 200}]
+    once = "ใบเตือน 06/11/2026 200 · เวลาทำงาน (ค่าแรงเต็ม + หักเงิน) 06/11/2026 200 = ใบเตือน 06/11/2026 200 (นับครั้งเดียว)"
     c = one(pw.build(f1_src(reviews, penalties=letters), MONTH, TODAY), "F1")["cells"]["penalty"]
-    assert (c["value"], c["note"]) == (200, "ใบเตือน 06/11/2026 200")
+    assert (c["value"], c["note"]) == (200, once)
     letters[0]["penalty"] = 300                                                  # another amount: another fine
     c = one(pw.build(f1_src(reviews, penalties=letters), MONTH, TODAY), "F1")["cells"]["penalty"]
     assert (c["value"], c["note"]) == (500, "ใบเตือน 06/11/2026 300 · เวลาทำงาน (ค่าแรงเต็ม + หักเงิน) 06/11/2026 200")
+
+
+def test_the_letter_of_an_attendance_fine_is_matched_by_its_offence_date():
+    """ค่าแรงเต็ม + ใบเตือน + หักเงิน: the letter is issued later (doc_date 08/11) for the offence of 06/11 -- one fine, not two. A letter
+    for another day's offence is another fine; a letter with no offence date written is the same one when the amount is."""
+    reviews = [decided("F1", d, "approve") for d in (N(10, 28), N(10, 31), N(11, 3), N(11, 10))] + [decided("F1", N(11, 6), "full_penalty", 200)]
+    letter = {"id": 1, "employee_id": "F1", "doc_date": "2026-11-08", "status": "signed", "penalty": 200, "offence": "2026-11-06"}
+    c = one(pw.build(f1_src(reviews, penalties=[letter]), MONTH, TODAY), "F1")["cells"]["penalty"]
+    assert (c["value"], c["note"]) == (200, "ใบเตือน 08/11/2026 200 · เวลาทำงาน (ค่าแรงเต็ม + หักเงิน) 06/11/2026 200 = ใบเตือน 08/11/2026 200 (นับครั้งเดียว)")
+    c = one(pw.build(f1_src(reviews, penalties=[{**letter, "offence": "2026-11-02"}]), MONTH, TODAY), "F1")["cells"]["penalty"]
+    assert c["value"] == 400
+    c = one(pw.build(f1_src(reviews, penalties=[{**letter, "offence": ""}]), MONTH, TODAY), "F1")["cells"]["penalty"]
+    assert c["value"] == 200
+    assert "offence:content->offence_date" in pw.SELECTS["employee_documents"]
 
 
 def test_without_the_decisions_the_scans_stay_a_stand_in():
@@ -1883,6 +1912,32 @@ def test_two_rates_split_by_the_days_his_driver_drove():
     c = one(out, "W1")["cells"]["days"]
     assert (c["state"], c["value"]) == ("carry", 31) and "split" not in c and c["note"].endswith("ต้องแยกวันออกรถ (344)")
     assert any(d["title"].startswith("พนักงานผลิตที่ออกรถด้วย") and "W1 เชน ทดสอบ (390 / 344)" in d["detail"] for d in out["decisions"])
+
+
+def test_a_two_rate_worker_s_single_scan_day_stays_a_plant_day():
+    """W1 forgets to scan out on 02/11 and the owner approves it: how long he worked is not known -- a plant day (390), said, never a
+    truck day because his driver drove."""
+    s = route_src(drove("D1", START, END), punches=scans_of("W1", {N(11, 2): ("07:00",), N(11, 1): None, N(11, 3): None}),
+                  attendance_reviews=[decided("W1", N(11, 2), "approve")])
+    s["employees"].append(emp("W1", "เชน ทดสอบ"))
+    s["rules"].append(rule("W1", rate2=344, rides_with="D1"))
+    s["rates"].append(rate("W1"))
+    c = one(pw.build(s, MONTH, TODAY), "W1")["cells"]["days"]
+    assert (c["state"], c["split"]) == ("ok", {"plant": 29, "truck": 0})
+    assert "02/11 ไม่รู้ชั่วโมง (สแกนขาเดียว / เพิ่มเอง) นับเป็นวันโรงงาน" in c["note"]
+
+
+def test_attendance_fines_and_unpaid_days_of_a_route_driver_are_not_lost():
+    """The attendance page lists route drivers too, and the owner can decide ค่าแรงเต็ม + หักเงิน or ไม่จ่าย for them: the fine is
+    deducted; his days come from his sales, so the ไม่จ่าย is said (amber), not silently dropped."""
+    special = {N(11, 4): ("12:00",), N(11, 3): None, N(11, 5): None, N(11, 8): ("12:00",), N(11, 7): None, N(11, 9): None}
+    s = route_src(drove("D1", START, END), punches=scans_of("D1", special),
+                  attendance_reviews=[decided("D1", N(11, 4), "full_penalty", 150), decided("D1", N(11, 8), "unpaid")])
+    p = one(pw.build(s, MONTH, TODAY), "D1")
+    assert p["cells"]["penalty"] == {"state": "ok", "value": 150, "text": "150", "note": "เวลาทำงาน (ค่าแรงเต็ม + หักเงิน) 04/11/2026 150"}
+    c = p["cells"]["days"]
+    assert (c["state"], c["value"]) == ("carry", 31)
+    assert c["note"].endswith("หน้าเวลาทำงานตัดสิน ไม่จ่าย 1 วัน (08/11) — วันทำงานของคนนี้ไม่ได้มาจากหน้านั้น ยังไม่ได้หัก ต้องตรวจ")
 
 
 def test_the_loader_reads_the_decisions_and_the_attendance_window(monkeypatch):
@@ -1945,6 +2000,28 @@ def test_common_other_and_fault_come_from_the_booked_list():
     assert c["1"]["penalty"]["state"] == "na"
     assert kind(out, "common")["note"] == "" and (kind(out, "common")["need"], kind(out, "common")["ok"]) == (5, 5)
     assert kind(out, "common")["link"] == "#accounts-in" and not kind(out, "common")["later"] and "ช่องความผิด" in kind(out, "penalty")["source"]
+
+
+def test_a_paper_fault_equal_to_an_attendance_fine_is_counted_once():
+    """The list's ความผิด 500 and the attendance page's ค่าแรงเต็ม + หักเงิน 500 of the same person are one fine."""
+    people = [emp(f"SB-FR{i:03d}") for i in range(1, 10)]
+    punches = scans_of("SB-FR002", {N(11, 4): ("12:00",), N(11, 3): None, N(11, 5): None})
+    s = advance_src(None, people=people, advance_files=[box(deduct_pages(ROWS9, ROWS10), status="booked")], punches=punches,
+                    attendance_reviews=[decided("SB-FR002", N(11, 4), "full_penalty", 500)])
+    c = one(pw.build(s, MONTH, TODAY), "SB-FR002")["cells"]["penalty"]
+    assert c == {"state": "ok", "value": 500, "text": "500", "note": "เวลาทำงาน (ค่าแรงเต็ม + หักเงิน) 04/11/2026 500 · ความผิดในใบเบิกกลางเดือน 500"
+                 " = เวลาทำงาน (ค่าแรงเต็ม + หักเงิน) 04/11/2026 500 (ยอดและคนตรงกัน นับครั้งเดียว)"}
+
+
+def test_a_person_on_the_list_whose_row_was_not_read_is_never_green():
+    """SB-FR002 has his 5,000 advance line on the booked list, but the reader returned no row for him: his ส่วนกลาง, อุปกรณ์ and ความผิด
+    are not known -- asked, never a green 0."""
+    rows = [r for r in ROWS9 if r["code"] != "SB-FR002"]
+    prevs = [prev("SB-FR002", {"advance": 3000, "common": 400})]
+    c = one(pw.build(advance_src(None, prevs=prevs, advance_files=[box(deduct_pages(rows, ROWS10), status="booked")]), MONTH, TODAY), "SB-FR002")["cells"]
+    why = "มีชื่อในใบเบิกกลางเดือน แต่อ่านแถวส่วนกลาง / ความผิด / อุปกรณ์ของคนนี้ไม่ได้ ต้องตรวจกับใบเบิก"
+    assert c["common"]["state"] == "miss" and why in c["common"]["note"]
+    assert c["other"]["state"] == "miss" and c["penalty"]["state"] == "miss" and why in c["penalty"]["note"]
 
 
 def test_a_paper_fault_of_another_person_or_amount_is_not_his_letter():

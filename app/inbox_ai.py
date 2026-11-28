@@ -495,13 +495,34 @@ def _page_image(path: str) -> bytes:
     return supabase.storage_download_private(path)
 
 
+def _amount(v) -> Optional[float]:
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _line_keys(read: dict) -> list:
+    """The batch line keys a page read builds, as the owner's fixes are keyed (_expense_preview), with what each one stands for: an
+    expense / fuel page numbers only its lines with an amount (p{n}:l1 ...) -- the key and its amount; an advance page is always the one
+    batch line p{n}:l1, whatever the number of people (its amount may change on a re-read, the line is still the same one); any
+    other page builds no line a fix can be on. Owner's review, 28 Nov 2026: a re-read page keeps its fixes when these are the same."""
+    n, kind = read.get("n"), read.get("page_kind")
+    amounts = [a for ln in read.get("lines") or [] for a in [_amount(ln.get("amount"))] if a is not None and a > 0]
+    if kind in ("expense", "fuel"):
+        return [(f"p{n}:l{i}", round(a, 2)) for i, a in enumerate(amounts, 1)]
+    if kind == "advance":
+        return [(f"p{n}:l1", None)] if amounts or read.get("written_total") else []
+    return []
+
+
 def reread_pages(preview: dict, pages, choices: Optional[dict] = None, fetch: Optional[Callable[[str], bytes]] = None) -> dict:
     """อ่านหน้านี้ใหม่ (owner, 28 Nov 2026): read only these pages again, from the page images stored at the first read
     (preview["ai_images"]), with the CURRENT schema and prompt -- one AI call per page, its tokens added to ai_usage. Made for a
     mid-month advance list read before the reader returned advance_rows (ส่วนกลาง / ความผิด / อุปกรณ์): the rest of the file is not
     paid for again. Those pages are replaced in ai_pages and the preview is rebuilt (from_pages) keeping the owner's line fixes and
-    บันทึกในพนักงาน as apply_choices does -- except the fixes of a re-read page whose number of lines changed: they are keyed by line
-    number, so they would land on other lines; they are dropped, and a flag says so. A page that fails keeps its earlier read (a flag
+    บันทึกในพนักงาน as apply_choices does -- except the fixes of a re-read page whose built line keys changed (_line_keys): they are
+    keyed by line number, so they would land on other lines; they are dropped, and a flag says so. A page that fails keeps its earlier read (a flag
     says so); every page failing raises InboxAIError with the usage spent. Never writes: the engine (app/inbox.py) saves the result.
     fetch(path) -> the image bytes (the private bucket by default)."""
     _check_enabled()
@@ -552,7 +573,7 @@ def reread_pages(preview: dict, pages, choices: Optional[dict] = None, fetch: Op
     edits = preview.get("line_edits") if isinstance(preview.get("line_edits"), dict) else None
     dropped: list = []
     if edits and edits.get("edits"):
-        moved = {n for n, new in done.items() if len(new.get("lines") or []) != len(have[n].get("lines") or [])}
+        moved = {n for n, new in done.items() if _line_keys(new) != _line_keys(have[n])}
         keep = {}
         for k, v in edits["edits"].items():
             m = _LINE_KEY_RE.match(str(k))
@@ -569,7 +590,7 @@ def reread_pages(preview: dict, pages, choices: Optional[dict] = None, fetch: Op
         out["hr_items"] = preview["hr_items"]
     notes = [f"อ่านหน้า {n} ใหม่ไม่สำเร็จ ({why}) — ยังใช้ที่อ่านไว้เดิม" for n, why in failed]
     for n in sorted(set(dropped)):
-        notes.append(f"หน้า {n} อ่านใหม่แล้วจำนวนบรรทัดไม่เท่าเดิม — การแก้บรรทัดของหน้านี้ที่บันทึกไว้ {dropped.count(n)} บรรทัดถูกเอาออก ตรวจหน้านี้อีกครั้ง")
+        notes.append(f"หน้า {n} อ่านใหม่แล้วบรรทัดไม่ตรงกับเดิม (จำนวนบรรทัดหรือยอดเปลี่ยน) — การแก้บรรทัดของหน้านี้ที่บันทึกไว้ {dropped.count(n)} บรรทัดถูกเอาออก ตรวจหน้านี้อีกครั้ง")
     out["flags"] = notes + list(out.get("flags") or [])
     out["reread"] = {"pages": sorted(done), "failed": [n for n, _ in failed]}
     return out
